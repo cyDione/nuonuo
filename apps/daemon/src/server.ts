@@ -20,6 +20,7 @@ export async function startDaemon(config: DaemonConfig): Promise<Started> {
   const token = loadToken(config.home)
   const app = createApp(runtime, token, findWebRoot())
   runtime.effects.start()
+  runtime.startAgents()
   const server = await new Promise<ServerType>((resolve, reject) => {
     const s = serve({ fetch: app.fetch, hostname: config.host, port: config.port }, () => resolve(s))
     s.once('error', reject)

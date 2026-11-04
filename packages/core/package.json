@@ -1,0 +1,18 @@
+{
+  "name": "@super-agent/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@ai-sdk/provider": "^4.0.35",
+    "@super-agent/agent-runtime": "workspace:*",
+    "@super-agent/db": "workspace:*",
+    "@super-agent/models": "workspace:*",
+    "ai": "^7.0.162",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.6.7"
+  }
+}

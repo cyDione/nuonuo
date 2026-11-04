@@ -69,4 +69,120 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX messages_conversation ON messages(conversation_id, created_at);
   `,
+  /* 2: M1 domain (threads, triggers, tickets, subscriptions, assignments, reports) and agent runtime (sessions, inbox, jobs, blobs) */ `
+  CREATE TABLE threads (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    ref TEXT NOT NULL,
+    meta TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE triggers (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES threads(id),
+    source TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    human INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    meta TEXT NOT NULL DEFAULT '{}',
+    disposition TEXT NOT NULL DEFAULT '{}',
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX triggers_thread ON triggers(thread_id, at);
+  CREATE TABLE tickets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    note TEXT,
+    thread_id TEXT NOT NULL REFERENCES threads(id),
+    origin TEXT NOT NULL,
+    mandate TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    latest_report TEXT,
+    attention TEXT,
+    ended TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX tickets_thread ON tickets(thread_id);
+  CREATE TABLE subscriptions (
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES threads(id),
+    kind TEXT NOT NULL DEFAULT 'own',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (ticket_id, thread_id)
+  );
+  CREATE INDEX subscriptions_thread ON subscriptions(thread_id);
+  CREATE TABLE assignments (
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    end_reason TEXT
+  );
+  CREATE INDEX assignments_ticket ON assignments(ticket_id, started_at);
+  CREATE TABLE reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    assignment_id TEXT,
+    status TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    human_action TEXT,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX reports_ticket ON reports(ticket_id, at);
+  CREATE TABLE sessions (
+    id TEXT PRIMARY KEY,
+    role TEXT NOT NULL,
+    model_role TEXT NOT NULL,
+    ticket_id TEXT,
+    state TEXT NOT NULL DEFAULT 'idle',
+    meta TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE session_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX session_events_session ON session_events(session_id, id);
+  CREATE TABLE session_inbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    payload TEXT NOT NULL,
+    human INTEGER NOT NULL DEFAULT 0,
+    wake INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    taken_at INTEGER
+  );
+  CREATE INDEX session_inbox_pending ON session_inbox(session_id, taken_at);
+  CREATE TABLE jobs (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    command TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    status TEXT NOT NULL,
+    background INTEGER NOT NULL DEFAULT 0,
+    exit_code INTEGER,
+    output TEXT NOT NULL DEFAULT '',
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER
+  );
+  CREATE INDEX jobs_session ON jobs(session_id, started_at);
+  CREATE TABLE blobs (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    content TEXT NOT NULL,
+    meta TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+  );
+  ALTER TABLE messages ADD COLUMN ticket_id TEXT;
+  ALTER TABLE messages ADD COLUMN trigger_id TEXT;
+  `,
 ]

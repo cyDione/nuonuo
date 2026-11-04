@@ -2,8 +2,14 @@
 
 一个**完全运行在你自己电脑上**的个人 Super-agent。设计依据见 [docs/00-research.md](docs/00-research.md)，参照的是 DeepSeek《Super-agent 设计探索》和 `dsh-superagent-prototype`；交互方式对标 Grok Bot / Muse。
 
-> 当前进度：**M0 骨架**。已可用的功能：本机服务、BYOK、分层模型配置、用量统计，以及「直连预览」对话（直接和主 Agent 层的模型聊天）。
-> 任务执行（Router / Worker）、GitHub、后台推进会在 M1–M3 陆续加入。
+> 当前进度：**M1**。
+> - **双层架构**：主 Agent 负责路由和对话；Worker 在本机执行任务，多个任务并行。
+> - **执行中途可以插话**：对话里只有一个进行中的任务时，你的消息直接交给它。
+> - **后台运行**：耗时命令自动转到后台，跑完后再继续处理。
+> - **界面**：任务卡片、任务执行过程面板、「待你处理」列表、重启后自动恢复。
+> - **其他**：BYOK、分层模型配置、用量统计。
+>
+> 设计和实现细节见 [docs/01-m1-implementation.md](docs/01-m1-implementation.md)。GitHub、定时任务、审核与记忆会在 M2–M3 加入。
 
 ## 快速开始
 
@@ -15,11 +21,24 @@ pnpm build
 pnpm start            # 等同于 superagent start：只监听 127.0.0.1:7420，并自动打开登录链接
 ```
 
-首次使用的步骤：
+最快的方式是用环境变量提供 key：
+
+```bash
+export DEEPSEEK_API_KEY=sk-...      # 也支持 ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY 等
+pnpm start
+```
+
+启动时会自动登记供应商；如果检测到 DeepSeek，会套用推荐的分层配置：
+- 主 Agent：`deepseek-flash`，思考强度 high
+- 执行层：`deepseek-v4-pro`，high
+- 其他层：见 设置 → 分层模型
+
+也可以手动配置：
 
 1. **设置 → 模型供应商**：添加 API key。支持 Anthropic、OpenAI、Gemini、DeepSeek，以及 OpenRouter / 通义 / Kimi / 智谱 / SiliconFlow / Ollama / LM Studio / 任意 OpenAI 兼容接口。
 2. **设置 → 分层模型**：给「主 Agent」选择模型。其余层不配置时，会沿用上一层的模型。
-3. 回到对话页开始聊天。
+3. 回到对话页开始使用。简单的问题，主 Agent 直接回答；需要动手的事，它会开成任务（每个任务在 `~/.superagent/work/` 下有独立的工作目录），完成时、或需要你决定时再回来找你。
+4. **设置 → 执行**：可以调整同时执行的任务数，以及允许任务直接使用的已有目录（例如 `~/code`）。
 
 ## 命令行
 
@@ -53,6 +72,8 @@ pnpm check   # 类型检查 + 测试 + 构建
 ```
 apps/daemon     本机服务：Hono API、SSE、CLI、组合根
 apps/web        React 19 + Vite + Tailwind 4 前端（构建后由 daemon 托管）
+packages/core   领域层：Trigger / Thread / Ticket / 订阅 / 汇报，主 Agent 与 Worker 的工具和提示词
+packages/agent-runtime  Agent 运行时：事件日志、收件箱步间注入、后台命令、文件/Shell/网页工具、recall、压缩
 packages/db     SQLite + Drizzle、迁移、持久化副作用队列 Effects
 packages/models 供应商、BYOK 密钥存储、分层模型解析（继承 / 备用链 / 预算）、用量账本
 docs/           调研与设计文档
@@ -60,7 +81,7 @@ docs/           调研与设计文档
 
 ## 路线图
 
-- **M1**：主 Agent + Worker 双层架构、异步 job、任务卡片、「待你处理」
+- ~~M1~~：主 Agent + Worker 双层架构、异步 job、任务卡片、「待你处理」（已完成）
 - **M2**：GitHub 插件、定时任务（Routine）、Agent 主动发起对话
 - **M3**：Reviewer 审核与规则、三层记忆、Watchdog、浏览器接管、Docker 沙箱
 - **M4**：插件 SDK、MCP、Gmail / Telegram、Electron

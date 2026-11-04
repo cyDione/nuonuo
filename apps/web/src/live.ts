@@ -1,0 +1,109 @@
+/** One EventSource per tab: keeps react-query caches fresh and holds the transient state (streaming replies, live worker text). */
+import { useQueryClient } from '@tanstack/react-query'
+import { useEffect, useSyncExternalStore } from 'react'
+import type { ServerEvent } from './api'
+
+interface LiveState {
+  connected: boolean
+  routerState: string
+  /** Streaming router replies by conversation. */
+  drafts: Record<string, { callId: string; text: string }>
+  /** Text the worker is writing in its current step, by ticket. */
+  workerText: Record<string, string>
+  workerState: Record<string, string>
+}
+
+let state: LiveState = { connected: false, routerState: 'idle', drafts: {}, workerText: {}, workerState: {} }
+const listeners = new Set<() => void>()
+const set = (patch: Partial<LiveState> | ((s: LiveState) => Partial<LiveState>)) => {
+  state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) }
+  for (const l of listeners) l()
+}
+const subscribe = (l: () => void) => { listeners.add(l); return () => listeners.delete(l) }
+
+export function useLive<T>(select: (s: LiveState) => T): T {
+  return useSyncExternalStore(subscribe, () => select(state))
+}
+
+export function clearDraft(conversationId: string, callId?: string) {
+  if (!state.drafts[conversationId] || (callId && state.drafts[conversationId]!.callId !== callId)) return
+  set(s => { const drafts = { ...s.drafts }; delete drafts[conversationId]; return { drafts } })
+}
+
+export function useLiveEvents() {
+  const qc = useQueryClient()
+  useEffect(() => {
+    let source: EventSource | undefined
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const timers = new Map<string, ReturnType<typeof setTimeout>>()
+    const soon = (key: string, fn: () => void, ms = 300) => {
+      if (timers.has(key)) return
+      timers.set(key, setTimeout(() => { timers.delete(key); fn() }, ms))
+    }
+    const connect = () => {
+      source = new EventSource('/api/events')
+      source.addEventListener('ready', () => {
+        set({ connected: true })
+        // Anything may have changed while disconnected.
+        qc.invalidateQueries()
+      })
+      source.addEventListener('message', ev => handle(JSON.parse((ev as MessageEvent).data) as ServerEvent))
+      source.onerror = () => {
+        set({ connected: false })
+        source?.close()
+        retry = setTimeout(connect, 2_000)
+      }
+    }
+    const handle = (e: ServerEvent) => {
+      switch (e.type) {
+        case 'message.created':
+          void qc.invalidateQueries({ queryKey: ['messages', e.conversationId] }).then(() => clearDraftAfterMessage(e.conversationId))
+          soon('conversations', () => qc.invalidateQueries({ queryKey: ['conversations'] }))
+          break
+        case 'conversation.updated':
+          qc.invalidateQueries({ queryKey: ['conversations'] })
+          break
+        case 'reply.delta':
+          set(s => ({ drafts: { ...s.drafts, [e.conversationId]: { callId: e.callId, text: e.text } } }))
+          break
+        case 'ticket.updated':
+          soon(`ticket:${e.ticketId}`, () => {
+            qc.invalidateQueries({ queryKey: ['tickets'] })
+            qc.invalidateQueries({ queryKey: ['ticket', e.ticketId] })
+            qc.invalidateQueries({ queryKey: ['inbox'] })
+          }, 150)
+          break
+        case 'session.state':
+          if (e.role === 'router') set({ routerState: e.state })
+          else if (e.ticketId) {
+            set(s => ({ workerState: { ...s.workerState, [e.ticketId!]: e.state }, ...(e.state !== 'running' ? { workerText: { ...s.workerText, [e.ticketId!]: '' } } : {}) }))
+            soon(`ticket:${e.ticketId}`, () => { qc.invalidateQueries({ queryKey: ['tickets'] }); qc.invalidateQueries({ queryKey: ['ticket', e.ticketId] }) }, 150)
+          }
+          break
+        case 'worker.part': {
+          const { part, ticketId } = e
+          if (part.kind === 'text' || part.kind === 'reasoning') set(s => ({ workerText: { ...s.workerText, [ticketId]: (s.workerText[ticketId] ?? '') + (part.delta ?? '') } }))
+          if (part.kind === 'step-start') set(s => ({ workerText: { ...s.workerText, [ticketId]: '' } }))
+          if (part.kind === 'tool-call' || part.kind === 'tool-result' || part.kind === 'step-start') soon(`transcript:${ticketId}`, () => qc.invalidateQueries({ queryKey: ['ticket', ticketId] }), 400)
+          break
+        }
+      }
+    }
+    const clearDraftAfterMessage = (conversationId: string) => {
+      const draft = state.drafts[conversationId]
+      if (!draft) return
+      const data = qc.getQueryData<{ messages: { meta: Record<string, any> }[] }>(['messages', conversationId])
+      if (data?.messages.some(m => m.meta?.callId === draft.callId)) clearDraft(conversationId)
+    }
+    connect()
+    return () => { source?.close(); clearTimeout(retry); for (const t of timers.values()) clearTimeout(t) }
+  }, [qc])
+}
+
+// ── UI state shared across components ──────────────────────────────────────
+let openTaskId: string | null = null
+const uiListeners = new Set<() => void>()
+export function openTask(id: string | null) { openTaskId = id; for (const l of uiListeners) l() }
+export function useOpenTask(): string | null {
+  return useSyncExternalStore(l => { uiListeners.add(l); return () => uiListeners.delete(l) }, () => openTaskId)
+}

@@ -44,6 +44,12 @@ importers:
       '@napi-rs/keyring':
         specifier: ^2.1.2
         version: 2.1.2
+      '@super-agent/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
+      '@super-agent/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@super-agent/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -118,6 +124,51 @@ importers:
       vite:
         specifier: ^8.3.5
         version: 8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)
+
+  packages/agent-runtime:
+    dependencies:
+      '@ai-sdk/provider':
+        specifier: ^4.0.35
+        version: 4.0.35
+      '@super-agent/db':
+        specifier: workspace:*
+        version: link:../db
+      '@super-agent/models':
+        specifier: workspace:*
+        version: link:../models
+      ai:
+        specifier: ^7.0.162
+        version: 7.0.162(zod@4.6.7)
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+
+  packages/core:
+    dependencies:
+      '@ai-sdk/provider':
+        specifier: ^4.0.35
+        version: 4.0.35
+      '@super-agent/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
+      '@super-agent/db':
+        specifier: workspace:*
+        version: link:../db
+      '@super-agent/models':
+        specifier: workspace:*
+        version: link:../models
+      ai:
+        specifier: ^7.0.162
+        version: 7.0.162(zod@4.6.7)
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
   packages/db:
     dependencies:

@@ -73,5 +73,123 @@ export const messages = sqliteTable('messages', {
   role: text('role', { enum: ['user', 'assistant', 'system', 'event'] }).notNull(),
   content: text('content').notNull(),
   meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+  ticketId: text('ticket_id'),
+  triggerId: text('trigger_id'),
   createdAt: integer('created_at').notNull().default(now),
+})
+
+const json = <T>(name: string) => text(name, { mode: 'json' }).$type<T>()
+
+export const threads = sqliteTable('threads', {
+  id: text('id').primaryKey(),
+  source: text('source').notNull(),
+  ref: text('ref').notNull(),
+  meta: json<Record<string, unknown>>('meta').notNull().default({}),
+  createdAt: integer('created_at').notNull(),
+})
+
+export const triggers = sqliteTable('triggers', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id').notNull(),
+  source: text('source').notNull(),
+  actor: text('actor').notNull(),
+  human: integer('human', { mode: 'boolean' }).notNull(),
+  text: text('text').notNull(),
+  meta: json<Record<string, unknown>>('meta').notNull().default({}),
+  disposition: json<Record<string, unknown>>('disposition').notNull().default({}),
+  at: integer('at').notNull(),
+})
+
+export const tickets = sqliteTable('tickets', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  title: text('title').notNull(),
+  note: text('note'),
+  threadId: text('thread_id').notNull(),
+  origin: json<{ triggerIds: string[] }>('origin').notNull(),
+  mandate: json<Record<string, unknown>>('mandate').notNull(),
+  directory: text('directory').notNull(),
+  sessionId: text('session_id').notNull(),
+  latestReport: json<Record<string, unknown> | null>('latest_report'),
+  attention: json<Record<string, unknown> | null>('attention'),
+  ended: json<Record<string, unknown> | null>('ended'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+export const subscriptions = sqliteTable('subscriptions', {
+  ticketId: text('ticket_id').notNull(),
+  threadId: text('thread_id').notNull(),
+  kind: text('kind').notNull().default('own'),
+  createdAt: integer('created_at').notNull(),
+})
+
+export const assignments = sqliteTable('assignments', {
+  id: text('id').primaryKey(),
+  ticketId: text('ticket_id').notNull(),
+  status: text('status').notNull(),
+  reason: text('reason').notNull(),
+  startedAt: integer('started_at').notNull(),
+  endedAt: integer('ended_at'),
+  endReason: text('end_reason'),
+})
+
+export const reports = sqliteTable('reports', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  ticketId: text('ticket_id').notNull(),
+  assignmentId: text('assignment_id'),
+  status: text('status').notNull(),
+  summary: text('summary').notNull(),
+  humanAction: json<Record<string, unknown> | null>('human_action'),
+  at: integer('at').notNull(),
+})
+
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  role: text('role').notNull(),
+  modelRole: text('model_role').notNull(),
+  ticketId: text('ticket_id'),
+  state: text('state').notNull().default('idle'),
+  meta: json<Record<string, unknown>>('meta').notNull().default({}),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+export const sessionEvents = sqliteTable('session_events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sessionId: text('session_id').notNull(),
+  kind: text('kind').notNull(),
+  payload: json<any>('payload').notNull(),
+  at: integer('at').notNull(),
+})
+
+export const sessionInbox = sqliteTable('session_inbox', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sessionId: text('session_id').notNull(),
+  payload: json<any>('payload').notNull(),
+  human: integer('human', { mode: 'boolean' }).notNull().default(false),
+  wake: integer('wake', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at').notNull(),
+  takenAt: integer('taken_at'),
+})
+
+export const jobs = sqliteTable('jobs', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  command: text('command').notNull(),
+  cwd: text('cwd').notNull(),
+  status: text('status').notNull(),
+  background: integer('background', { mode: 'boolean' }).notNull().default(false),
+  exitCode: integer('exit_code'),
+  output: text('output').notNull().default(''),
+  startedAt: integer('started_at').notNull(),
+  endedAt: integer('ended_at'),
+})
+
+export const blobs = sqliteTable('blobs', {
+  id: text('id').primaryKey(),
+  kind: text('kind').notNull(),
+  content: text('content').notNull(),
+  meta: json<Record<string, unknown>>('meta').notNull().default({}),
+  createdAt: integer('created_at').notNull(),
 })

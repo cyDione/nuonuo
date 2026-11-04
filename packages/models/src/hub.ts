@@ -10,6 +10,8 @@ import { generateText } from 'ai'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import type { ProviderKind } from './catalog'
 import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOptions, type ProviderRecord } from './factory'
+import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
+import { LAYER_PRESETS } from './presets'
 import { resolveRole, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId } from './roles'
 import type { SecretStore } from './secrets'
 
@@ -26,7 +28,7 @@ export interface ProviderInput {
   options?: ProviderOptions
 }
 
-export interface ProviderView extends Omit<ProviderRecord, 'secretRef'> { hasKey: boolean; keyHint?: string }
+export interface ProviderView extends Omit<ProviderRecord, 'secretRef'> { hasKey: boolean; keyHint?: string; keyEnv?: string }
 
 export interface UsageSummaryRow { role: string; providerId: string; model: string; calls: number; failures: number
   inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number; costUsd: number | null }
@@ -71,6 +73,7 @@ export class ModelHub {
   updateProvider(id: string, input: Partial<ProviderInput>): ProviderView {
     const current = this.getProvider(id)
     let secretRef = current.secretRef
+    if (input.apiKey !== undefined && secretRef?.startsWith(ENV_REF)) throw new ModelError('invalid', `这个供应商的密钥来自环境变量 ${secretRef.slice(ENV_REF.length)}，请修改环境变量`)
     if (input.apiKey !== undefined) {
       if (input.apiKey) { secretRef = `provider:${id}`; this.secrets.set(secretRef, input.apiKey) }
       else { if (secretRef) this.secrets.delete(secretRef); secretRef = null }
@@ -94,6 +97,44 @@ export class ModelHub {
       this.store.db.delete(schema.providers).where(eq(schema.providers.id, id)).run()
     })
     if (current.secretRef) this.secrets.delete(current.secretRef)
+  }
+
+  /**
+   * Registers a provider for each known `*_API_KEY` variable that is set and not yet registered. Returns the ids created.
+   * A provider whose variable was later unset stays, showing no key, so layer configuration survives a shell without it.
+   */
+  syncEnvProviders(env: NodeJS.ProcessEnv = process.env): string[] {
+    const existing = new Set(this.store.db.select({ ref: schema.providers.secretRef }).from(schema.providers).all().map(r => r.ref))
+    const created: string[] = []
+    for (const spec of ENV_PROVIDERS) {
+      const name = envVarOf(spec, env)
+      if (!name || spec.env.some(n => existing.has(`${ENV_REF}${n}`))) continue
+      const id = newId('prv')
+      const baseUrl = (spec.baseUrlEnv && env[spec.baseUrlEnv]?.trim()) || spec.baseUrl || null
+      this.store.db.insert(schema.providers).values({ id, kind: spec.kind, name: spec.name, baseUrl,
+        secretRef: `${ENV_REF}${name}`, options: {} }).run()
+      created.push(id)
+    }
+    return created
+  }
+
+  /** Applies a recommended layer preset to a provider; with `onlyIfEmpty`, does nothing once any layer is configured. */
+  applyPreset(presetId: string, providerId: string, options: { onlyIfEmpty?: boolean } = {}): boolean {
+    const preset = LAYER_PRESETS.find(p => p.id === presetId)
+    if (!preset) throw new ModelError('invalid', `unknown preset ${presetId}`)
+    const provider = this.getProvider(providerId)
+    if (provider.kind !== preset.kind) throw new ModelError('invalid', `preset ${presetId} needs a ${preset.kind} provider`)
+    if (options.onlyIfEmpty && Object.values(this.roleConfigs()).some(c => c.chain.length > 0)) return false
+    this.store.atomic(() => {
+      for (const [role, { model, enabled, ...rest }] of Object.entries(preset.layers) as [RoleId, any][]) {
+        this.saveRole(role, { ...rest, enabled: enabled ?? true, chain: [{ providerId, model }] })
+      }
+      if (preset.prices) {
+        this.store.db.update(schema.providers).set({ options: { ...provider.options, prices: { ...preset.prices, ...provider.options.prices } } })
+          .where(eq(schema.providers.id, providerId)).run()
+      }
+    })
+    return true
   }
 
   async listModels(id: string): Promise<string[]> {
@@ -258,7 +299,8 @@ export class ModelHub {
   private view(p: ProviderRecord): ProviderView {
     const { secretRef, ...rest } = p
     const key = secretRef ? this.secrets.get(secretRef) : undefined
-    return { ...rest, hasKey: Boolean(key), ...(key ? { keyHint: `…${key.slice(-4)}` } : {}) }
+    return { ...rest, hasKey: Boolean(key), ...(key ? { keyHint: `…${key.slice(-4)}` } : {}),
+      ...(secretRef?.startsWith(ENV_REF) ? { keyEnv: secretRef.slice(ENV_REF.length) } : {}) }
   }
 }
 

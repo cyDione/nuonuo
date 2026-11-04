@@ -1,7 +1,9 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
+import { MockLanguageModelV4 } from 'ai/test'
+import { generateOf, lastUserText, streamOf, systemText } from '@super-agent/agent-runtime/src/testing'
+import { EventMapper, partialString } from './events'
 import { ModelHub } from '@super-agent/models'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from './app'
@@ -19,18 +21,17 @@ beforeEach(async () => {
   process.env.SUPERAGENT_HOME = mkdtempSync(join(tmpdir(), 'sa-home-'))
   process.env.SUPERAGENT_SECRETS = 'file'
   rt = await createRuntime(resolveConfig({ port: 7420 }), { lock: false })
-  // Swap in a hub whose models are mocks, keeping the runtime's store and secrets.
-  const streaming = () => new MockLanguageModelV4({
-    doStream: async () => ({ stream: convertArrayToReadableStream([
-      { type: 'text-start', id: '1' }, { type: 'text-delta', id: '1', delta: '你好，' }, { type: 'text-delta', id: '1', delta: '我在。' },
-      { type: 'text-end', id: '1' },
-      { type: 'finish', finishReason: { unified: 'stop', raw: 'stop' },
-        usage: { inputTokens: { total: 12, noCache: 12, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } } },
-    ]) }),
-    doGenerate: { content: [{ type: 'text', text: '问候' }], finishReason: { unified: 'stop', raw: 'stop' }, warnings: [],
-      usage: { inputTokens: { total: 5, noCache: 5, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } } },
-  })
-  rt.hub = new ModelHub(rt.store, rt.secrets, { language: () => streaming(), embedding: () => { throw new Error('unused') } })
+  // Swap in a hub whose models are scripted mocks, keeping the runtime's store and secrets.
+  const script = (opts: any) => {
+    if (!systemText(opts).includes('router')) return { text: '问候' }
+    if (opts.prompt.at(-1).role === 'tool') return { text: 'done' }
+    const cnv = /conversation_id="([a-z]+_[a-z0-9]+)"/.exec(lastUserText(opts))?.[1]
+    return { calls: [{ name: 'reply', input: { conversation_id: cnv, text: '你好，我在。' } }] }
+  }
+  const model = new MockLanguageModelV4({ doStream: async o => streamOf(script(o)), doGenerate: async o => generateOf(script(o)) })
+  rt.hub = new ModelHub(rt.store, rt.secrets, { language: () => model, embedding: () => { throw new Error('unused') } })
+  ;(rt.agents as any).hub = rt.hub
+  ;(rt.engine as any).runtime = rt.agents
   app = createApp(rt, TOKEN)
 })
 afterEach(async () => { await rt.close() })
@@ -75,21 +76,36 @@ describe('conversations', () => {
     expect(((await res.json()) as any).error.code).toBe('no_model')
   })
 
-  it('streams a reply over SSE, stores both messages, records usage and names the conversation', async () => {
+  it('stores the message as a trigger, lets the router answer it, names the conversation and serves tasks', async () => {
     const { provider } = await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
     await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
     const { conversation } = await (await call('/api/conversations', { method: 'POST', body: '{}' })).json() as any
     const res = await call(`/api/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '在吗' }) })
-    const text = await res.text()
-    expect(text).toContain('event: message')
-    expect(text).toContain('event: delta')
-    expect(text).toContain('event: done')
+    expect(res.status).toBe(201)
+    for (let i = 0; i < 5; i++) { await new Promise(r => setTimeout(r, 40)); await rt.agents.idle() }
     const { messages } = await (await call(`/api/conversations/${conversation.id}/messages`)).json() as any
     expect(messages.map((m: any) => [m.role, m.content])).toEqual([['user', '在吗'], ['assistant', '你好，我在。']])
     const usage = await (await call('/api/usage?days=1')).json() as any
-    expect(usage.rows[0]).toMatchObject({ role: 'router', inputTokens: 12, outputTokens: 4 })
-    await new Promise(r => setTimeout(r, 50))
+    expect(usage.rows[0]).toMatchObject({ role: 'router' })
     const list = await (await call('/api/conversations')).json() as any
-    expect(list.conversations[0]).toMatchObject({ title: '问候', lastMessage: '你好，我在。' })
+    expect(list.conversations[0]).toMatchObject({ title: '问候' })
+    expect((await (await call('/api/tickets')).json() as any).tickets).toEqual([])
+    expect((await call('/api/tickets/tkt_nope')).status).toBe(404)
+  })
+})
+
+describe('reply streaming', () => {
+  it('reads partial JSON strings', () => {
+    expect(partialString('{"conversation_id":"cnv_1","text":"你好\\n世', 'text')).toBe('你好\n世')
+    expect(partialString('{"conversation_id":"cnv_1","text":"a\\u4e16b"}', 'text')).toBe('a世b')
+    expect(partialString('{"conversation_id":"cn', 'text')).toBeUndefined()
+  })
+  it('turns the router reply tool input into reply.delta events', () => {
+    const mapper = new EventMapper()
+    const part = (p: any) => mapper.map({ type: 'session.part', role: 'router', sessionId: 's', part: p } as any)
+    expect(part({ kind: 'tool-input-start', id: 'c1', tool: 'reply' })).toEqual([])
+    expect(part({ kind: 'tool-input-delta', id: 'c1', delta: '{"conversation_id":"cnv_a' })).toEqual([])
+    expect(part({ kind: 'tool-input-delta', id: 'c1', delta: '","text":"Hel' })).toEqual([{ type: 'reply.delta', conversationId: 'cnv_a', callId: 'c1', text: 'Hel' }])
+    expect(part({ kind: 'tool-input-delta', id: 'c1', delta: 'lo"}' })[0]).toMatchObject({ text: 'Hello' })
   })
 })

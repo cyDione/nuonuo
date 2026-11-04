@@ -1,20 +1,13 @@
-/**
- * Conversations of the M0 direct-chat preview: the person talks to the router layer directly. In M1 each conversation
- * becomes a WebChat Thread and its messages Triggers; the tables are kept so that migration can carry history over.
- */
+/** Conversations: the web chat's list of topics. Each is a WebChat thread; its messages are triggers and the agent's replies. */
 import { newId, schema, type Store } from '@super-agent/db'
 import type { ModelHub } from '@super-agent/models'
-import { generateText, streamText, type ModelMessage } from 'ai'
-import { asc, desc, eq } from 'drizzle-orm'
+import { generateText } from 'ai'
+import { asc, eq } from 'drizzle-orm'
 
 export type Conversation = typeof schema.conversations.$inferSelect
 export type Message = typeof schema.messages.$inferSelect
 
-const SYSTEM = `你是用户的个人 Super-agent，运行在用户自己的电脑上。
-当前处于 M0「直连预览」阶段：你只能对话，还不能执行任务、读写文件或访问外部服务；如果用户要求执行，坦诚说明这项能力会在后续版本提供。
-回答简洁、直接；默认使用用户的语言。`
-
-const HISTORY_LIMIT = 40
+export const DEFAULT_TITLE = '新对话'
 
 export class Conversations {
   constructor(private store: Store, private hub: ModelHub) {}
@@ -31,7 +24,7 @@ export class Conversations {
     return this.store.db.select().from(schema.conversations).where(eq(schema.conversations.id, id)).get()
   }
 
-  create(title = '新对话'): Conversation {
+  create(title = DEFAULT_TITLE): Conversation {
     const id = newId('cnv')
     const at = Date.now()
     this.store.db.insert(schema.conversations).values({ id, title, createdAt: at, updatedAt: at }).run()
@@ -52,32 +45,16 @@ export class Conversations {
       .orderBy(asc(schema.messages.createdAt), asc(schema.messages.id)).all()
   }
 
-  addMessage(conversationId: string, role: Message['role'], content: string, meta: Record<string, unknown> = {}): Message {
-    const id = newId('msg')
-    const at = Date.now()
-    this.store.atomic(() => {
-      this.store.db.insert(schema.messages).values({ id, conversationId, role, content, meta, createdAt: at }).run()
-      this.store.db.update(schema.conversations).set({ updatedAt: at }).where(eq(schema.conversations.id, conversationId)).run()
-    })
-    return this.store.db.select().from(schema.messages).where(eq(schema.messages.id, id)).get()!
+  message(id: string): Message | undefined {
+    return this.store.db.select().from(schema.messages).where(eq(schema.messages.id, id)).get()
   }
 
-  /** Streams the router layer's reply to the latest user message; persists the reply (or the failure) when it ends. */
-  reply(conversationId: string, signal: AbortSignal) {
-    const history = this.store.db.select().from(schema.messages).where(eq(schema.messages.conversationId, conversationId))
-      .orderBy(desc(schema.messages.createdAt)).limit(HISTORY_LIMIT).all().reverse()
-      .filter(m => m.role === 'user' || (m.role === 'assistant' && !m.meta.error))
-    const messages: ModelMessage[] = history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
-    const model = this.hub.model('router', { ref: conversationId })
-    return streamText({ model, system: SYSTEM, messages, abortSignal: signal, maxRetries: 1 })
-  }
-
-  /** Names a conversation after its first exchange with the summarizer layer; falls back to the first line of the request. */
-  async autoTitle(conversationId: string): Promise<void> {
+  /** Names a conversation after its first message with the summarizer layer; falls back to the first line. */
+  async autoTitle(conversationId: string): Promise<boolean> {
     const conversation = this.get(conversationId)
-    if (!conversation || conversation.title !== '新对话') return
+    if (!conversation || conversation.title !== DEFAULT_TITLE) return false
     const [first] = this.messages(conversationId).filter(m => m.role === 'user')
-    if (!first) return
+    if (!first) return false
     let title = first.content.split('\n')[0]!.slice(0, 24)
     try {
       const result = await generateText({ model: this.hub.model('summarizer', { ref: conversationId }), maxOutputTokens: 400,
@@ -85,6 +62,8 @@ export class Conversations {
       const named = result.text.trim().replace(/^["'“”「」《》]+|["'“”「」《》。.]+$/g, '').split('\n')[0]!.slice(0, 30)
       if (named) title = named
     } catch { /* keep the fallback title */ }
-    if (this.get(conversationId)?.title === '新对话') this.update(conversationId, { title })
+    if (this.get(conversationId)?.title !== DEFAULT_TITLE) return false
+    this.update(conversationId, { title })
+    return true
   }
 }

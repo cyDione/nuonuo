@@ -5,21 +5,31 @@ import { Chat } from './Chat'
 import { useRoute } from './route'
 import { Settings } from './settings/Settings'
 import { Sidebar } from './Sidebar'
+import { useLiveEvents } from './live'
+import { TaskDrawer } from './tasks'
 
 export function App() {
   const route = useRoute()
   const health = useQuery({ queryKey: ['health'], queryFn: () => api.get<Health>('/health'), refetchInterval: 30_000 })
 
+  const authed = health.isSuccess
   if (health.error instanceof ApiError && health.error.status === 401) return <Login />
   if (health.isPending) return <div className="flex h-full items-center justify-center text-sm text-faint">连接本机服务…</div>
   if (health.error) return <Offline message={health.error.message} />
 
-  return <div className="flex h-full">
+  return <Shell authed={authed}><div className="flex h-full">
     <Sidebar route={route} />
     <main className="min-w-0 flex-1">
       {route.page === 'chat' ? <Chat key={route.id ?? 'new'} id={route.id} /> : <Settings tab={route.tab} />}
     </main>
-  </div>
+    <TaskDrawer />
+  </div></Shell>
+}
+
+/** Mounted only once logged in, so the event stream never opens without the session cookie. */
+function Shell({ authed, children }: { authed: boolean; children: React.ReactNode }) {
+  useLiveEvents()
+  return <>{authed && children}</>
 }
 
 function Login() {

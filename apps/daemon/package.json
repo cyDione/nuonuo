@@ -21,6 +21,8 @@
     "@ai-sdk/provider": "^4.0.35",
     "@hono/node-server": "^2.1.6",
     "@napi-rs/keyring": "^2.1.2",
+    "@super-agent/agent-runtime": "workspace:*",
+    "@super-agent/core": "workspace:*",
     "@super-agent/db": "workspace:*",
     "@super-agent/models": "workspace:*",
     "ai": "^7.0.162",

@@ -30,12 +30,13 @@ function ProviderCard({ p }: { p: Provider }) {
         <div className="flex items-center gap-2"><span className="font-medium">{p.name}</span><Badge>{KIND_LABEL[p.kind]}</Badge></div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
           {p.baseUrl && <span className="font-mono">{p.baseUrl}</span>}
-          <span>{p.hasKey ? <>密钥 <span className="font-mono">{p.keyHint}</span></> : '未设置密钥'}</span>
+          <span>{p.keyEnv ? <>环境变量 <span className="font-mono">{p.keyEnv}</span>{p.hasKey ? <> · <span className="font-mono">{p.keyHint}</span></> : ' · 当前未设置'}</>
+            : p.hasKey ? <>密钥 <span className="font-mono">{p.keyHint}</span></> : '未设置密钥'}</span>
           {p.options.prices && Object.keys(p.options.prices).length > 0 && <span>已填 {Object.keys(p.options.prices).length} 个模型价格</span>}
         </div>
       </div>
       <div className="flex gap-1.5">
-        <Button size="sm" onClick={() => setModal('key')}>更换密钥</Button>
+        {!p.keyEnv && <Button size="sm" onClick={() => setModal('key')}>更换密钥</Button>}
         <Button size="sm" onClick={() => setModal('prices')}>价格</Button>
         <Button size="sm" variant="danger" onClick={() => { if (confirm(`删除「${p.name}」？使用它的分层配置会一并移除该模型，密钥也会从钥匙串删除。`)) remove.mutate() }}><Trash2 size={13} /></Button>
       </div>

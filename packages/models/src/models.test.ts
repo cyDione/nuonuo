@@ -129,3 +129,30 @@ describe('FileSecrets', () => {
     expect(new FileSecrets(dir).get('provider:x')).toBeUndefined()
   })
 })
+
+describe('environment providers and presets', () => {
+  it('registers env keys as read-only providers without copying them, and applies the DeepSeek preset once', async () => {
+    store = openStore(':memory:')
+    const { EnvAwareSecrets } = await import('./env')
+    const env = { DEEPSEEK_API_KEY: 'sk-env-deepseek-5678' }
+    const inner = new MemorySecrets()
+    const seen: (string | undefined)[] = []
+    const hub = new ModelHub(store, new EnvAwareSecrets(inner, env), {
+      language: (_p, key) => { seen.push(key); return new MockLanguageModelV4({ doGenerate: textResult('ok') }) },
+      embedding: () => { throw new Error('unused') },
+    })
+    const [id] = hub.syncEnvProviders(env)
+    expect(hub.syncEnvProviders(env)).toEqual([])
+    expect(hub.listProviders()[0]).toMatchObject({ kind: 'deepseek', hasKey: true, keyHint: '…5678', keyEnv: 'DEEPSEEK_API_KEY' })
+    expect(JSON.stringify(store.sqlite.prepare('select * from providers').all())).not.toContain('sk-env')
+    expect(() => hub.updateProvider(id!, { apiKey: 'other' })).toThrow(/环境变量/)
+    expect(hub.applyPreset('deepseek', id!, { onlyIfEmpty: true })).toBe(true)
+    expect(hub.roleConfigs().router).toMatchObject({ chain: [{ model: 'deepseek-flash' }], reasoning: 'high' })
+    expect(hub.resolve('subagent')).toMatchObject({ source: 'worker', config: { chain: [{ model: 'deepseek-v4-pro' }] } })
+    expect(hub.resolve('filter')).toBeUndefined()
+    expect(hub.applyPreset('deepseek', id!, { onlyIfEmpty: true })).toBe(false)
+    await generateText({ model: hub.model('router'), prompt: 'x' })
+    expect(seen).toEqual(['sk-env-deepseek-5678'])
+    expect(hub.getProvider(id!).options.prices?.['deepseek-flash']?.output).toBe(1.2)
+  })
+})

@@ -1,6 +1,6 @@
 /** HTTP surface of the daemon: the JSON API under /api, the login link under /auth, and the web UI's static files. */
 import { serveStatic } from '@hono/node-server/serve-static'
-import { describeError, ModelError, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type ProviderKind, type RoleId } from '@super-agent/models'
+import { describeError, LAYER_PRESETS, ModelError, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type ProviderKind, type RoleId } from '@super-agent/models'
 import { Hono, type Context } from 'hono'
 import { setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
@@ -10,6 +10,10 @@ import { z } from 'zod'
 import { COOKIE, hostGuard, requireToken } from './auth'
 import { VERSION } from './config'
 import { Conversations } from './conversations'
+import { EventMapper } from './events'
+import { reportsOf, ticketView, transcript } from './views'
+import { DomainError, DEFAULT_EXECUTION, ROUTER_SESSION } from '@super-agent/core'
+import { kvSet } from '@super-agent/db'
 import { runDoctor } from './doctor'
 import type { Runtime } from './runtime'
 
@@ -40,6 +44,9 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
 
   app.onError((error, c) => {
     if (error instanceof HttpError) return c.json({ error: { code: error.code, message: error.message } }, error.status)
+    if (error instanceof DomainError) {
+      return c.json({ error: { code: error.code, message: error.message } }, error.code === 'missing' ? 404 : error.code === 'conflict' ? 409 : 400)
+    }
     if (error instanceof ModelError) {
       return c.json({ error: { code: error.code, message: error.message } }, error.code === 'unknown_provider' ? 404 : 400)
     }
@@ -62,7 +69,8 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     secrets: rt.secrets.backend, effects: rt.effects.health(),
   }))
   api.get('/doctor', c => c.json({ checks: runDoctor(rt) }))
-  api.get('/catalog', c => c.json({ presets: PROVIDER_PRESETS, roles: ROLES, reasoningLevels: REASONING_LEVELS }))
+  api.get('/catalog', c => c.json({ presets: PROVIDER_PRESETS, roles: ROLES, reasoningLevels: REASONING_LEVELS,
+    layerPresets: LAYER_PRESETS.map(p => ({ id: p.id, label: p.label, kind: p.kind, layers: p.layers })) }))
 
   // Providers
   api.get('/providers', c => c.json({ providers: rt.hub.listProviders() }))
@@ -82,6 +90,11 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
       if (error instanceof ModelError) throw error
       return c.json({ models: [], error: describeError(error) })
     }
+  })
+  api.post('/presets/:id/apply', async c => {
+    const { providerId } = await body(c, z.object({ providerId: z.string() }))
+    rt.hub.applyPreset(c.req.param('id'), providerId)
+    return c.json({ ok: true })
   })
   api.post('/models/test', async c => {
     const ref = await body(c, z.object({ providerId: z.string(), model: z.string().trim().min(1) }))
@@ -124,42 +137,87 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     if (!updated) throw new HttpError(404, 'missing', 'no such conversation')
     return c.json({ conversation: updated })
   })
-  api.delete('/conversations/:id', c => { conversations.delete(c.req.param('id')); return c.body(null, 204) })
+  api.delete('/conversations/:id', c => {
+    const id = c.req.param('id')
+    for (const t of rt.engine.tickets({ threadId: `webchat:${id}`, open: true })) rt.engine.stopTask(t.id, 'person', '对话已删除')
+    conversations.delete(id)
+    return c.body(null, 204)
+  })
   api.get('/conversations/:id/messages', c => {
     const conversation = conversations.get(c.req.param('id'))
     if (!conversation) throw new HttpError(404, 'missing', 'no such conversation')
     return c.json({ conversation, messages: conversations.messages(conversation.id) })
   })
-  /** Stores the person's message and streams the reply as SSE: `message` (stored user message), `delta`, then `done` or `error`. */
+  /** The owner's message becomes a trigger; the router or the task's worker picks it up and answers over /api/events. */
   api.post('/conversations/:id/messages', async c => {
     const id = c.req.param('id')
     if (!conversations.get(id)) throw new HttpError(404, 'missing', 'no such conversation')
-    const { content } = await body(c, z.object({ content: z.string().trim().min(1).max(100_000) }))
+    const { content, replyTo } = await body(c, z.object({ content: z.string().trim().min(1).max(100_000), replyTo: z.string().optional() }))
     if (!rt.hub.resolve('router')) throw new ModelError('no_model', '主 Agent 还没有配置模型：请到 设置 → 分层模型 选择')
-    const userMessage = conversations.addMessage(id, 'user', content)
-    return streamSSE(c, async sse => {
-      await sse.writeSSE({ event: 'message', data: JSON.stringify(userMessage) })
-      const abort = new AbortController()
-      c.req.raw.signal.addEventListener('abort', () => abort.abort())
-      let text = ''
-      try {
-        const result = conversations.reply(id, abort.signal)
-        for await (const delta of result.textStream) {
-          text += delta
-          await sse.writeSSE({ event: 'delta', data: JSON.stringify({ text: delta }) })
-        }
-        const usage = await result.totalUsage
-        const saved = conversations.addMessage(id, 'assistant', text, { model: (await result.response).modelId,
-          usage: { input: usage.inputTokens, output: usage.outputTokens } })
-        await sse.writeSSE({ event: 'done', data: JSON.stringify(saved) })
-        void conversations.autoTitle(id)
-      } catch (error) {
-        const message = describeError(error)
-        const saved = conversations.addMessage(id, 'assistant', text || '（回复失败）', { error: message, partial: Boolean(text) })
-        await sse.writeSSE({ event: 'error', data: JSON.stringify({ message, saved }) })
-      }
-    })
+    const result = rt.engine.receiveMessage(id, content, replyTo ? { replyTo } : {})
+    void conversations.autoTitle(id).then(named => { if (named) rt.bus.emit({ type: 'conversation.updated', conversationId: id }) })
+    return c.json({ message: conversations.message(result.messageId), deliveredTo: result.deliveredTo }, 201)
   })
+  api.get('/messages/:id', c => {
+    const message = conversations.message(c.req.param('id'))
+    if (!message) throw new HttpError(404, 'missing', 'no such message')
+    return c.json({ message })
+  })
+
+  // Tasks
+  api.get('/tickets', c => {
+    const conversationId = c.req.query('conversation')
+    const list = rt.engine.tickets(conversationId ? { threadId: `webchat:${conversationId}` } : {}).slice(0, 200)
+    return c.json({ tickets: list.map(t => ticketView(rt.engine, t)) })
+  })
+  api.get('/tickets/:id', c => {
+    const ticket = rt.engine.ticket(c.req.param('id'))
+    return c.json({ ticket: ticketView(rt.engine, ticket), reports: reportsOf(rt.store, ticket.id), transcript: transcript(rt.agents, ticket.sessionId),
+      running: rt.agents.isRunning(ticket.sessionId), jobs: rt.agents.jobs.running(ticket.sessionId) })
+  })
+  api.post('/tickets/:id/stop', c => { rt.engine.stopTask(c.req.param('id'), 'person', '主人在界面上停止'); return c.json({ ok: true }) })
+  api.post('/tickets/:id/retry', c => { rt.engine.retry(c.req.param('id')); return c.json({ ok: true }) })
+  api.get('/inbox', c => {
+    const items = rt.engine.tickets({ open: true }).map(t => ticketView(rt.engine, t)).filter(t => t.stage.startsWith('person/'))
+    return c.json({ items })
+  })
+  api.get('/router', c => c.json({ state: rt.agents.session(ROUTER_SESSION)?.state ?? 'idle', transcript: transcript(rt.agents, ROUTER_SESSION).slice(-200) }))
+
+  // Execution settings
+  const ExecutionBody = z.object({
+    maxWorkers: z.number().int().min(1).max(16), foregroundSeconds: z.number().min(1).max(600), timeoutMinutes: z.number().int().min(1).max(24 * 60),
+    blockedCommands: z.array(z.string().trim().min(1).max(64)).max(100), workspaceRoots: z.array(z.string().trim().min(1).max(500)).max(50),
+  }).strict()
+  api.get('/settings/execution', c => c.json({ settings: rt.engine.execution(), defaults: DEFAULT_EXECUTION }))
+  api.put('/settings/execution', async c => {
+    const settings = await body(c, ExecutionBody)
+    kvSet(rt.store, 'settings:execution', settings)
+    rt.agents.options.maxWorkers = settings.maxWorkers
+    return c.json({ settings: rt.engine.execution() })
+  })
+
+  /** One SSE stream per browser tab: messages, streaming replies, task and session state. */
+  api.get('/events', c => streamSSE(c, async sse => {
+    const mapper = new EventMapper()
+    const queue: string[] = []
+    let wake: (() => void) | undefined
+    const off = rt.bus.on(event => {
+      for (const e of mapper.map(event)) queue.push(JSON.stringify(e))
+      wake?.()
+    })
+    const closed = new Promise<void>(resolve => c.req.raw.signal.addEventListener('abort', () => resolve()))
+    try {
+      await sse.writeSSE({ event: 'ready', data: '{}' })
+      for (;;) {
+        while (queue.length) await sse.writeSSE({ event: 'message', data: queue.shift()! })
+        const ping = new Promise<'ping'>(r => setTimeout(() => r('ping'), 20_000))
+        const next = await Promise.race([new Promise<'event'>(r => { wake = () => r('event') }), ping, closed.then(() => 'closed' as const)])
+        wake = undefined
+        if (next === 'closed') break
+        if (next === 'ping') await sse.writeSSE({ event: 'ping', data: '{}' })
+      }
+    } finally { off() }
+  }))
 
   app.route('/api', api)
 

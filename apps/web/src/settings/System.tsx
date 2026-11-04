@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { CheckCircle2, AlertTriangle, XCircle, RefreshCw } from 'lucide-react'
-import { api, type Check, type Health } from '../api'
+import { useState } from 'react'
+import { api, type Check, type Health, type TranscriptItem } from '../api'
 import { Button, Card } from '../ui'
 
 export function System() {
@@ -27,7 +28,27 @@ export function System() {
         </div>
       </div>)}
     </Card>
+    <RouterLog />
   </>
+}
+
+function RouterLog() {
+  const [open, setOpen] = useState(false)
+  const log = useQuery({ queryKey: ['router-log'], enabled: open, refetchInterval: open ? 3000 : false,
+    queryFn: () => api.get<{ state: string; transcript: TranscriptItem[] }>('/router') })
+  return <Card className="p-4">
+    <button onClick={() => setOpen(v => !v)} className="text-sm font-medium">{open ? '▾' : '▸'} 主 Agent 日志 <span className="font-normal text-faint">（路由决策与工具调用，用于排查）</span></button>
+    {open && <div className="mt-3 max-h-[480px] space-y-1.5 overflow-y-auto font-mono text-[11px]">
+      {log.data?.transcript.map(item => <div key={item.id} className="whitespace-pre-wrap text-muted">
+        {item.kind === 'input' ? <span className="text-fg">▶ {item.text.slice(0, 1500)}</span>
+          : item.kind === 'tool-call' ? <span className="text-accent">⚙ {item.tool} {JSON.stringify(item.input).slice(0, 400)}</span>
+          : item.kind === 'tool-result' ? <span>  ↳ {item.output.slice(0, 300)}</span>
+          : item.kind === 'text' || item.kind === 'reasoning' ? <span className="text-faint">{item.kind === 'reasoning' ? '💭 ' : ''}{item.text.slice(0, 600)}</span>
+          : <span className="text-danger">{JSON.stringify(item)}</span>}
+      </div>)}
+      {log.data && !log.data.transcript.length && <div className="text-faint">还没有记录</div>}
+    </div>}
+  </Card>
 }
 
 function Info({ label, value, mono }: { label: string; value: string; mono?: boolean }) {

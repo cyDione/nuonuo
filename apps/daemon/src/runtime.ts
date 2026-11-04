@@ -1,6 +1,8 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
+import { AgentRuntime, Bus } from '@super-agent/agent-runtime'
+import { Engine, registerAgents } from '@super-agent/core'
 import { Effects, openStore, type Store } from '@super-agent/db'
-import { ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
+import { EnvAwareSecrets, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DaemonConfig } from './config'
@@ -12,6 +14,11 @@ export interface Runtime {
   secretsNote?: string
   hub: ModelHub
   effects: Effects
+  bus: Bus
+  agents: AgentRuntime
+  engine: Engine
+  /** Starts agent turns: recovery of interrupted sessions and anything queued. */
+  startAgents(): void
   startedAt: number
   close(): Promise<void>
 }
@@ -41,12 +48,21 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
   }
   const store = openStore(join(config.home, 'state.db'))
   try {
-    const { store: secrets, note } = await openSecretStore(config.home)
+    const { store: base, note } = await openSecretStore(config.home)
+    const secrets = new EnvAwareSecrets(base)
     const hub = new ModelHub(store, secrets)
+    bootstrapModels(hub)
     const effects = new Effects(store)
+    const bus = new Bus()
+    const agents = new AgentRuntime(store, hub, bus)
+    const engine = new Engine(store, agents, bus, { home: config.home })
+    agents.options.maxWorkers = engine.execution().maxWorkers
+    registerAgents(store, agents, engine)
     return {
-      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, startedAt: Date.now(),
+      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, startedAt: Date.now(),
+      startAgents() { agents.recover(session => engine.recoveryNote(session.id, session.role)) },
       async close() {
+        await agents.shutdown()
         await effects.drain()
         store.close()
         if (options.lock !== false && readLock(config.home)?.pid === process.pid) rmSync(lockFile, { force: true })
@@ -56,5 +72,14 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     store.close()
     if (options.lock !== false) rmSync(lockFile, { force: true })
     throw error
+  }
+}
+
+/** Registers providers for `*_API_KEY` variables and, while no layer is configured, applies the DeepSeek preset. */
+export function bootstrapModels(hub: ModelHub): void {
+  hub.syncEnvProviders()
+  const deepseek = hub.listProviders().find(p => p.kind === 'deepseek' && p.hasKey)
+  if (deepseek && hub.applyPreset('deepseek', deepseek.id, { onlyIfEmpty: true })) {
+    console.log(`已为 ${deepseek.name}${deepseek.keyEnv ? `（${deepseek.keyEnv}）` : ''} 应用 DeepSeek 推荐分层配置`)
   }
 }

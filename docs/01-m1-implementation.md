@@ -1,0 +1,59 @@
+# M1 实现说明：主 Agent + Worker 双层架构
+
+本文对照 [00-research.md](00-research.md) 和 DS 原型（dsh-superagent-prototype），说明 M1 实际做了什么、和原型有哪些不同、为什么这样改。
+
+## 一条消息的去向
+
+```
+网页消息 ──► Engine.receiveMessage ──► 存成 Trigger（来源 webchat，属于该对话的 Thread）
+                │
+                ├─ 消息指定了回复哪个任务（在任务卡上回答问题），
+                │  或者对话里正好只有 1 个进行中的任务
+                │      ──► 直通该任务的 Worker（订阅直通，Fast Path）
+                │          同时给主 Agent 发一条 followup 通知，wake=false，不唤醒它
+                │
+                └─ 其他情况 ──► 主 Agent（Router）的收件箱，唤醒它
+                       主 Agent 对每条消息只做一件事：
+                         reply       直接回答
+                         start_task  开任务：新 Worker Session + 独立工作目录，订阅该对话的 Thread
+                         attach      把消息交给它明确指向的已有任务
+                         stop_task   停止任务
+```
+
+Worker 每一轮结束时必须调用 `report` 汇报状态：
+
+- `ready / blocked / failed` 或带问题的汇报：转给主 Agent，并唤醒它，由它在对话里告诉你。
+- `progress`：只更新任务卡，不转给主 Agent。
+- `waiting`：作为背景信息转给主 Agent，不唤醒它。
+
+## 运行时（`packages/agent-runtime`）
+
+- **事件日志**：每个 Session 的历史是 SQLite 中一张只追加的事件表。计算本身不保存状态，进程重启后从这张表恢复。
+- **步间注入**：一轮对话里，模型每次只走一步。两步之间，运行时会取出收件箱里新到的内容（新消息、汇报、后台命令的结果），作为一条新的用户消息追加进去。主 Agent 的批处理、Worker 在执行中途听到你的话，都靠这个机制。
+- **全双工**：命令在前台运行超过 N 秒（默认 5 秒）就转到后台，工具调用立即返回，命令跑完后结果作为新事件送回。你发消息时，正在前台运行的命令会被立刻转到后台，这样 Worker 能马上处理你的消息。
+- **执行名额**：主 Agent 有独立的执行名额。Worker 共用 `maxWorkers` 个名额，另外为你的消息额外保留 1 个，所以新任务再多也不会挡住你继续推进已有任务。
+- **长输出分页（Inline & Spill）**：超长的工具输出存成 blob，上下文里只保留开头、结尾和一个 `blob_…` 引用，需要时用 `recall` 分页读取。`recall` 也能读 `tkt_ / trg_ / cnv_` 这些对象，结果里会附带相关对象的 ID，模型可以顺着引用继续读下去（链式召回）。
+- **压缩**：一步的输入超过阈值时，用摘要层模型压缩较早的历史。切分点总是落在用户消息上，避免把工具调用和它的结果拆开。
+- **重启恢复**：被打断的 Session 会收到一条恢复说明。启动时还在运行的后台命令会被标记为已终止，并通知对应的 Session。
+
+## 和 DS 原型的主要差异
+
+| 原型 | M1 | 原因 |
+|---|---|---|
+| Thread 上的人类消息会直通给所有订阅了它的 Ticket | 只有消息指定了任务，或对话里正好只有 1 个进行中的任务时才直通；其余都交给主 Agent | 对话往往同时承载多个任务，全部直通会让每个 Worker 都去处理再交回来，又慢又费 token |
+| 已结束的 Ticket 收到人类消息就自动恢复 | 只有消息指定了该任务，或主 Agent 用 `attach` 交给它时才恢复 | 避免一句「谢谢」就把已完成的任务重新唤醒 |
+| 团队白名单、admission 表、observe/auto 模式 | 只有一个主人，主人的消息都是明确请求（explicit） | 个人使用；外部来源和主动接单在 M2/M3 加入 |
+| 任务跟随 PR，PR 合并或关闭后才结束 | 收到 `ready` 汇报即结束；之后可以在对话里继续，让它恢复 | M2 接入 GitHub 后再加入跟随 PR 的逻辑 |
+| 依托 DSH 的会话和后台任务 | 自研运行时，支持多家模型供应商 | 满足 BYOK 和分层模型配置的需求 |
+
+## DeepSeek 适配
+
+- **用环境变量配置**：启动时如果设置了 `DEEPSEEK_API_KEY`（以及可选的 `DEEPSEEK_BASE_URL`），会自动登记为只读供应商。密钥不会复制到其他地方，也会从 Worker 的命令行环境中剔除。
+- **自动套用推荐配置**：在还没有任何分层配置时，自动套用推荐配置：
+  - 主 Agent：`deepseek-flash`（V4.1 Flash），思考强度 high
+  - Worker / Reviewer：`deepseek-v4-pro`，high
+  - Watchdog：flash，high
+  - Summarizer：flash，low
+  - Vision：flash，high
+  - Filter：默认关闭
+- **思考模式下的工具调用**：每一轮都必须回传之前的 `reasoning_content`，否则 API 返回 400。运行时会把推理内容存进事件日志，由 `@ai-sdk/deepseek` 自动回传。端到端测试中用模拟服务强制执行这条规则，结果是 0 个 400。
