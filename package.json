@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.0",
-  "engines": { "node": ">=22.12" },
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
     "dev": "pnpm --parallel --filter @super-agent/daemon --filter @super-agent/web dev",
     "start": "pnpm --filter @super-agent/daemon start",
@@ -18,6 +20,11 @@
     "vitest": "^5.1.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3", "esbuild", "@napi-rs/keyring"]
+    "onlyBuiltDependencies": [
+      "@napi-rs/keyring",
+      "better-sqlite3",
+      "electron",
+      "esbuild"
+    ]
   }
 }

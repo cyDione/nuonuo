@@ -1,5 +1,5 @@
 /** The router and worker agent definitions: tool sets (enforced by code, not prompt) and how their inbox items read. */
-import { fsTools, recallTool, shellTools, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type BrowserManager, type InboxItem, type TurnContext } from '@super-agent/agent-runtime'
+import { fsTools, recallTool, shellTools, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type BrowserManager, type InboxItem, type McpManager, type TurnContext } from '@super-agent/agent-runtime'
 import { schema, type Store } from '@super-agent/db'
 import { tool, type ToolSet } from 'ai'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
@@ -9,6 +9,7 @@ import { sourceOfThread, STAGE_LABEL, type Ticket } from './model'
 import { ROUTER_PROMPT, WORKER_PROMPT } from './prompts'
 import type { Memory } from './memory'
 import { sandboxApplies, sandboxCommand } from './sandbox'
+import type { Reviewer } from './review'
 
 const CONTEXT_MESSAGES = 6
 
@@ -271,8 +272,9 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         return `<owner_message trigger_id="${p.triggerId}"${p.note ? ` routing_note="${String(p.note).replace(/"/g, "'")}"` : ''}>\n${trigger?.text ?? ''}\n</owner_message>`
       }
       case 'note': return `<note from="${p.from ?? 'main agent'}">${p.text}</note>`
+      case 'approval-result': return `<approval_result approval_id="${p.approvalId}">${p.error ? `批准后执行失败：${p.error}` : `批准后已执行 ${p.command}，结果：\n${p.output}`}</approval_result>`
       case 'approval': return p.status === 'approved'
-        ? `<approval approval_id="${p.approvalId}" status="approved">主人批准了：${p.command}${p.note ? `（备注：${p.note}）` : ''}。命令已在后台开始运行，结果会以 job_finished 送达。</approval>`
+        ? `<approval approval_id="${p.approvalId}" status="approved">主人批准了：${p.command}${p.note ? `（备注：${p.note}）` : ''}。已开始执行，结果会作为新消息送达。</approval>`
         : `<approval approval_id="${p.approvalId}" status="denied">主人拒绝了：${p.command}${p.note ? `（理由：${p.note}）` : ''}。不要再尝试这条命令或它的变体；调整方案，或用 report 说明。</approval>`
       case 'job': return `<job_finished job_id="${p.jobId}" status="${p.status}"${p.exitCode !== undefined ? ` exit_code="${p.exitCode}"` : ''} command="${String(p.command).replace(/"/g, "'").slice(0, 200)}">\n${p.output ?? ''}\n</job_finished>`
       default: return `<event>${JSON.stringify(p)}</event>`
@@ -333,5 +335,21 @@ export function browserExtension(browser: BrowserManager, engine: Engine, runtim
       reason => engine.report(ticket.id, { status: 'waiting', summary: `需要主人接管浏览器：${reason}`, humanAction: { question: reason, kind: 'handoff' } })),
     workerPrompt: () => `## Browser
 You have a real browser (browser_open / browser_snapshot / browser_click / browser_type / browser_screenshot) with the owner's persistent profile, so sites they logged into stay logged in. Use it for pages that need JavaScript or a login; plain pages are cheaper with web_fetch. When a page needs the owner — logging in, 2FA, a captcha, a payment — call request_handoff with what they should do, then end your turn; never type passwords or payment details yourself.`,
+  }
+}
+
+/** MCP tools for both agents; worker calls to servers marked for review pass the review layer. */
+export function mcpExtension(mcp: McpManager, engine: Engine, reviewer?: Reviewer): AgentExtensions {
+  reviewer?.registerExecutor('mcp', input => mcp.call(String(input.server), String(input.tool), (input.args ?? {}) as Record<string, unknown>))
+  return {
+    // The router must know what workers can reach, or it answers "no such tool" instead of starting a task.
+    routerPrompt: () => {
+      const servers = mcp.status().filter(s => s.state === 'connected' && s.tools.length)
+      return servers.length ? `## MCP tools available to workers\n${servers.map(s => `- ${s.name}: ${s.tools.map(t => t.name).join(', ')}`).join('\n')}\nA request that needs one of these tools (or names the server) is a task: start_task.` : ''
+    },
+    routerTools: () => mcp.tools('router'),
+    workerTools: (ticket, ctx) => mcp.tools('worker', reviewer
+      ? (server, tool, args) => reviewer.gateTool(ticket, ctx.session.id, 'mcp', `${server.name}.${tool} ${JSON.stringify(args)}`, { server: server.name, tool, args })
+      : undefined),
   }
 }

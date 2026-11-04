@@ -10,7 +10,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     // Keep the browser's Host (localhost:5173) so the daemon's host guard sees an allowed dev origin.
-    proxy: { '/api': { target: daemon, changeOrigin: false }, '/auth': { target: daemon, changeOrigin: false } },
+    proxy: { '/api': { target: daemon, changeOrigin: false }, '/auth': { target: daemon, changeOrigin: false }, '/plugin': { target: daemon, changeOrigin: false } },
   },
   build: { outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 1500 },
 })

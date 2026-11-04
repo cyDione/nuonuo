@@ -13,7 +13,7 @@ import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { reportsOf, ticketView, transcript } from './views'
 import { DomainError, DEFAULT_EXECUTION, DEFAULT_REVIEW, ROUTER_SESSION, WATCHDOG_SESSION } from '@super-agent/core'
-import { kvSet } from '@super-agent/db'
+import { kvGet, kvSet } from '@super-agent/db'
 import { fireRoutine } from '@super-agent/sources'
 import { runDoctor } from './doctor'
 import type { Runtime } from './runtime'
@@ -278,6 +278,36 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     return c.json({ ok: true })
   })
 
+  // Plugins
+  api.get('/plugins', c => c.json({ plugins: rt.plugins.list(), dir: `${rt.config.home}/plugins` }))
+  api.post('/plugins/:id', async c => {
+    const { enabled } = await body(c, z.object({ enabled: z.boolean() }))
+    try { return c.json({ plugin: await rt.plugins.setEnabled(c.req.param('id'), enabled) }) } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) }
+  })
+  /** A source's own endpoints (owner only). */
+  api.all('/sources/:id/http/*', async c => {
+    const path = c.req.path.split('/http/').slice(1).join('/http/')
+    const res = await rt.sources.http(c.req.param('id'), c.req.raw, path, { public: false, origin: new URL(c.req.url).origin })
+    if (!res) throw new HttpError(404, 'missing', 'no such endpoint')
+    return res
+  })
+
+  // MCP servers
+  const McpBody = z.array(z.object({
+    name: z.string().regex(/^[a-z0-9_-]{1,24}$/, '名称只能用小写字母、数字、- 和 _'), enabled: z.boolean(), transport: z.enum(['stdio', 'http']),
+    command: z.string().max(500).optional(), args: z.array(z.string().max(1000)).max(50).optional(), env: z.record(z.string(), z.string().max(2000)).optional(),
+    url: z.string().url().optional(), headers: z.record(z.string(), z.string().max(2000)).optional(),
+    roles: z.array(z.enum(['worker', 'router'])).min(1), review: z.boolean(),
+  }).strict()).max(30)
+  api.get('/settings/mcp', c => c.json({ servers: kvGet(rt.store, 'settings:mcp') ?? [], status: rt.mcp.status() }))
+  api.put('/settings/mcp', async c => {
+    const servers = await body(c, McpBody)
+    if (new Set(servers.map(s => s.name)).size !== servers.length) throw new HttpError(400, 'invalid', '名称不能重复')
+    kvSet(rt.store, 'settings:mcp', servers)
+    return c.json({ servers, status: await rt.mcp.sync() })
+  })
+  api.post('/mcp/sync', async c => c.json({ status: await rt.mcp.sync() }))
+
   // Execution settings
   const ExecutionBody = z.object({
     maxWorkers: z.number().int().min(1).max(16), foregroundSeconds: z.number().min(1).max(600), timeoutMinutes: z.number().int().min(1).max(24 * 60),
@@ -316,6 +346,13 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
   }))
 
   app.route('/api', api)
+
+  /** Public endpoints of sources (OAuth callbacks): no owner token, so each source checks its own state parameter. */
+  app.all('/plugin/:id/*', async c => {
+    const path = c.req.path.replace(new RegExp(`^/plugin/${c.req.param('id')}/`), '')
+    const res = await rt.sources.http(c.req.param('id'), c.req.raw, path, { public: true, origin: new URL(c.req.url).origin })
+    return res ?? c.text('not found', 404)
+  })
 
   if (webRoot && existsSync(webRoot)) {
     const root = relative(process.cwd(), webRoot) || '.'

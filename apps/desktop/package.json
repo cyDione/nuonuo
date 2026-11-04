@@ -1,0 +1,25 @@
+{
+  "name": "@super-agent/desktop",
+  "productName": "Super-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Super-agent desktop client: window, tray, notifications, global shortcut",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "45.2.2",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "dev.superagent.desktop",
+    "productName": "Super-agent",
+    "files": ["main.cjs", "preload.cjs", "lib/**"],
+    "extraResources": [{ "from": "../daemon/dist", "to": "daemon" }],
+    "mac": { "category": "public.app-category.productivity", "target": ["dmg", "zip"] },
+    "linux": { "target": ["AppImage"], "category": "Utility" }
+  }
+}

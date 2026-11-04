@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@ai-sdk/provider": "^4.0.35",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@super-agent/db": "workspace:*",
     "@super-agent/models": "workspace:*",
     "ai": "^7.0.162",

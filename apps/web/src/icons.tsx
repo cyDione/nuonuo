@@ -1,4 +1,4 @@
-import { AlarmClock, MessageSquare, Shield } from 'lucide-react'
+import { AlarmClock, Mail, MessageSquare, Rss, Send, Shield } from 'lucide-react'
 
 /** The GitHub mark (lucide no longer ships brand icons). */
 export function GithubIcon({ size = 14, className }: { size?: number; className?: string }) {
@@ -10,8 +10,11 @@ export function GithubIcon({ size = 14, className }: { size?: number; className?
 export function SourceIcon({ source, size = 14, className }: { source: string; size?: number; className?: string }) {
   if (source === 'github') return <GithubIcon size={size} {...(className ? { className } : {})} />
   if (source === 'cron') return <AlarmClock size={size} {...(className ? { className } : {})} />
+  if (source === 'telegram') return <Send size={size} {...(className ? { className } : {})} />
+  if (source === 'gmail') return <Mail size={size} {...(className ? { className } : {})} />
+  if (source === 'rss') return <Rss size={size} {...(className ? { className } : {})} />
   if (source === 'watchdog') return <Shield size={size} {...(className ? { className } : {})} />
   return <MessageSquare size={size} {...(className ? { className } : {})} />
 }
 
-export const SOURCE_LABEL: Record<string, string> = { github: 'GitHub', cron: '定时任务', webchat: '对话', watchdog: 'Watchdog' }
+export const SOURCE_LABEL: Record<string, string> = { github: 'GitHub', cron: '定时任务', webchat: '对话', watchdog: 'Watchdog', telegram: 'Telegram', gmail: 'Gmail', rss: 'RSS' }

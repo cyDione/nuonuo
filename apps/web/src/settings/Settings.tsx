@@ -1,4 +1,4 @@
-import { Activity, AlarmClock, Brain, Cpu, KeyRound, Play, Plug, ShieldCheck, Stethoscope } from 'lucide-react'
+import { Activity, AlarmClock, Brain, Cpu, KeyRound, Play, Plug, Puzzle, Server, ShieldCheck, Stethoscope } from 'lucide-react'
 import type { SettingsTab } from '../route'
 import { cx } from '../ui'
 import { Providers } from './Providers'
@@ -9,12 +9,16 @@ import { Execution } from './Execution'
 import { Routines } from './Routines'
 import { Review } from './Review'
 import { MemoryPage } from './MemoryPage'
+import { Plugins } from './Plugins'
+import { Mcp } from './Mcp'
 import { Sources } from './Sources'
 
 const TABS: { id: SettingsTab; label: string; icon: React.ReactNode; intro: string }[] = [
   { id: 'providers', label: '模型供应商', icon: <KeyRound size={15} />, intro: 'API key 存放在系统钥匙串（或加密文件）中；也可以用环境变量（如 DEEPSEEK_API_KEY），启动时自动识别。密钥不进数据库、不进模型上下文，也不会传给任务的命令行环境。' },
   { id: 'roles', label: '分层模型', icon: <Cpu size={15} />, intro: '为每一层分别选择模型。没有配置的层沿用上一层；可设置备用模型与每日预算。' },
   { id: 'sources', label: '来源', icon: <Plug size={15} />, intro: '智能体从这些地方接收事件、在原处回复。在 GitHub 上用唤起词（默认 @agent）叫它，它以你的账号回复并带上机器人标记。' },
+  { id: 'plugins', label: '插件', icon: <Puzzle size={15} />, intro: '插件为智能体增加新的来源（事件与回复渠道）和工具。内置 Telegram 与 Gmail；第三方插件放进数据目录的 plugins/ 下，启用后才会运行。' },
+  { id: 'mcp', label: 'MCP 工具', icon: <Server size={15} />, intro: '接入 MCP（Model Context Protocol）服务，它们的工具会交给任务使用。会对外产生影响的服务建议保留「先经过审核」。' },
   { id: 'routines', label: '定时任务', icon: <AlarmClock size={15} />, intro: '按计划自动交给主 Agent 的任务。每个定时任务有自己的对话，结果出现在那里，左侧会显示未读。' },
   { id: 'review', label: '规则与审核', icon: <ShieldCheck size={15} />, intro: '任务要做有后果的事（推送、发布、发评论、删除、向外发数据）时，先经过规则和审核模型；拿不准的交给你批准，命令在你批准后才执行。每一次决定都记录在下面。' },
   { id: 'memory', label: '记忆', icon: <Brain size={15} />, intro: '长期记忆分三层，以 Markdown 文件存放在数据目录的 memory/ 下，可以直接编辑。对智能体说「记住…」「忘掉…」也可以。' },
@@ -39,6 +43,8 @@ export function Settings({ tab }: { tab: SettingsTab }) {
         {tab === 'providers' && <Providers />}
         {tab === 'roles' && <Roles />}
         {tab === 'sources' && <Sources />}
+        {tab === 'plugins' && <Plugins />}
+        {tab === 'mcp' && <Mcp />}
         {tab === 'routines' && <Routines />}
         {tab === 'review' && <Review />}
         {tab === 'memory' && <MemoryPage />}

@@ -120,6 +120,8 @@ export async function setNotifications(on: boolean): Promise<boolean> {
 }
 const notified = new Set<string>()
 async function maybeNotify(conversationId: string, messageId: string) {
+  // Inside the desktop app, the app shows native notifications itself.
+  if ((window as { superagentDesktop?: unknown }).superagentDesktop) return
   if (!notificationsEnabled() || document.visibilityState === 'visible' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
   if (notified.has(messageId)) return
   notified.add(messageId)

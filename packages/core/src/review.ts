@@ -174,9 +174,16 @@ export class Reviewer {
       this.audit({ ticketId: ticket.id, actor: 'owner', action: 'approval', tool: approval.tool, input: command, risk: approval.risk, decision: approve ? 'allow' : 'block', reason: note ?? null })
       this.runtime.push(approval.sessionId, { type: 'approval', approvalId: id, status: approve ? 'approved' : 'denied', command, note }, { human: true, wake: !approve })
     })
-    if (approve && !ticket.ended) {
+    if (approve && !ticket.ended && approval.tool === 'shell') {
       void this.runtime.jobs.run({ sessionId: approval.sessionId, command, cwd: String(approval.input.cwd ?? ticket.directory),
         env: approval.input.env as Record<string, string>, foregroundMs: 0, timeoutMs: 30 * 60_000 })
+    } else if (approve && !ticket.ended) {
+      const run = this.executors.get(approval.tool)
+      void (async () => {
+        let result: { output?: string; error?: string }
+        try { result = run ? { output: await run(approval.input) } : { error: `没有 ${approval.tool} 的执行器` } } catch (error) { result = { error: error instanceof Error ? error.message : String(error) } }
+        this.store.atomic(() => this.runtime.push(approval.sessionId, { type: 'approval-result', approvalId: id, command, ...result }))
+      })()
     }
     this.engine.changed(ticket.id)
     this.bus.emit({ type: 'approval.updated', approvalId: id, ticketId: ticket.id })
@@ -196,25 +203,71 @@ export class Reviewer {
   envFor?: (ticket: Ticket) => Record<string, string>
 
   private escalate(ticket: Ticket, sessionId: string, command: string, cwd: string, risk: Risk, reason: string): GateDecision {
+    return this.escalateAction(ticket, sessionId, 'shell', command, { command, cwd, env: this.envFor?.(ticket) ?? {} }, risk, reason)
+  }
+
+  /** Stores an approval; the router tells the owner, and the task waits only for this one action. */
+  private escalateAction(ticket: Ticket, sessionId: string, tool: string, display: string, input: Record<string, unknown>, risk: Risk, reason: string): GateDecision {
     const id = newId('apv')
     const at = this.now()
     this.store.atomic(() => {
-      this.store.db.insert(schema.approvals).values({ id, ticketId: ticket.id, sessionId, tool: 'shell', risk, reason, createdAt: at,
-        input: { command, cwd, env: this.envFor?.(ticket) ?? {} } }).run()
-      this.audit({ ticketId: ticket.id, actor: 'reviewer', action: 'review', tool: 'shell', input: command, risk, decision: 'escalate', reason })
-      this.runtime.push(ROUTER_SESSION, { type: 'approval', approvalId: id, ticketId: ticket.id, command, reason }, { wake: true })
+      this.store.db.insert(schema.approvals).values({ id, ticketId: ticket.id, sessionId, tool, risk, reason, createdAt: at, input: { ...input, command: display } }).run()
+      this.audit({ ticketId: ticket.id, actor: 'reviewer', action: 'review', tool, input: display, risk, decision: 'escalate', reason })
+      this.runtime.push(ROUTER_SESSION, { type: 'approval', approvalId: id, ticketId: ticket.id, command: display, reason }, { wake: true })
     })
     this.engine.changed(ticket.id)
     this.bus.emit({ type: 'approval.updated', approvalId: id, ticketId: ticket.id })
     return { action: 'escalate', approvalId: id, reason }
   }
 
-  private reviewPrompt(ticket: Ticket, command: string, cwd: string, risk: Risk, heuristics: string, settings: ReviewSettings): string {
+  private executors = new Map<string, (input: Record<string, unknown>) => Promise<string>>()
+
+  /** How an approved action of a non-shell tool (an MCP call) is carried out. */
+  registerExecutor(tool: string, run: (input: Record<string, unknown>) => Promise<string>): void {
+    this.executors.set(tool, run)
+  }
+
+  /**
+   * Reviews a call to an external tool (an MCP server marked for review). Such calls are treated as external actions:
+   * the same lists, threshold, mode and reviewer model apply as for shell commands.
+   */
+  async gateTool(ticket: Ticket, sessionId: string, tool: string, display: string, input: Record<string, unknown>): Promise<GateDecision> {
+    const settings = this.settings()
+    const risk: Risk = 'external'
+    const matches = (patterns: string[]) => patterns.find(p => { try { return new RegExp(p).test(display) } catch { return false } })
+    const denied = matches(settings.deny)
+    if (denied) {
+      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool, input: display, risk, decision: 'block', reason: `命中禁止规则 /${denied}/` })
+      return { action: 'block', by: 'rule', reason: `命中禁止规则 /${denied}/` }
+    }
+    const allowed = matches(settings.allow)
+    if (allowed || settings.threshold === 'off') {
+      this.audit({ ticketId: ticket.id, actor: allowed ? 'rule' : 'system', action: 'review', tool, input: display, risk, decision: 'allow', reason: allowed ? `命中放行规则 /${allowed}/` : '审核已关闭' })
+      return { action: 'allow', by: allowed ? 'rule' : 'threshold' }
+    }
+    if (settings.threshold === 'destructive') return { action: 'allow', by: 'threshold' }
+    if (settings.mode === 'ask') return this.escalateAction(ticket, sessionId, tool, display, input, risk, '调用外部工具，按设置需要你批准')
+    let verdict: z.infer<typeof VerdictSchema>
+    try {
+      const { output } = await generateText({
+        model: this.hub.model('reviewer', { ref: ticket.id }), system: REVIEWER_PROMPT, maxRetries: 1, output: Output.object({ schema: VerdictSchema }),
+        prompt: this.reviewPrompt(ticket, display, '', risk, '调用外部工具（MCP）', settings, 'External tool call (MCP)'),
+      })
+      verdict = output
+    } catch (error) {
+      return this.escalateAction(ticket, sessionId, tool, display, input, risk, `审核模型不可用（${error instanceof Error ? error.message.slice(0, 120) : String(error)}），转给你决定`)
+    }
+    if (verdict.decision === 'ask_owner') return this.escalateAction(ticket, sessionId, tool, display, input, risk, verdict.reason)
+    this.audit({ ticketId: ticket.id, actor: 'reviewer', action: 'review', tool, input: display, risk, decision: verdict.decision, reason: verdict.reason })
+    return verdict.decision === 'allow' ? { action: 'allow', by: 'reviewer' } : { action: 'block', by: 'reviewer', reason: verdict.reason }
+  }
+
+  private reviewPrompt(ticket: Ticket, command: string, cwd: string, risk: Risk, heuristics: string, settings: ReviewSettings, kind = `shell, in ${cwd}`): string {
     const origin = this.store.db.select().from(schema.triggers).all().filter(t => ticket.origin.triggerIds.includes(t.id))
     return [
       `## Owner's rules\n${settings.rules.map(r => `- ${r}`).join('\n') || '- (none)'}`,
       `## Task\n${ticket.title}${ticket.note ? ` — ${ticket.note}` : ''}\nOriginal request from the owner:\n${origin.map(t => `> ${t.text.slice(0, 1_500)}`).join('\n')}`,
-      `## Action\nshell, in ${cwd}:\n\`\`\`\n${command.slice(0, 4_000)}\n\`\`\`\nFlagged as ${risk}: ${heuristics}`,
+      `## Action\n${kind}:\n\`\`\`\n${command.slice(0, 4_000)}\n\`\`\`\nFlagged as ${risk}: ${heuristics}`,
       'Decide.',
     ].join('\n\n')
   }

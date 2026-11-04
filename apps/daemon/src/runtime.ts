@@ -1,8 +1,9 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
-import { AgentRuntime, BrowserManager, Bus, findBrowser, workerEnv } from '@super-agent/agent-runtime'
-import { browserExtension, combineExtensions, Engine, Memory, memoryExtension, registerAgents, Reviewer, sandboxExtension, Watchdog } from '@super-agent/core'
-import { Effects, openStore, type Store } from '@super-agent/db'
-import { githubKind, Routines, routinesKind, SourceRegistry } from '@super-agent/sources'
+import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-agent/agent-runtime'
+import { browserExtension, combineExtensions, Engine, mcpExtension, Memory, memoryExtension, registerAgents, Reviewer, sandboxExtension, Watchdog } from '@super-agent/core'
+import { Effects, kvGet, openStore, type Store } from '@super-agent/db'
+import { gmailPlugin, telegramPlugin } from '@super-agent/plugins'
+import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-agent/sources'
 import { EnvAwareSecrets, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -25,6 +26,8 @@ export interface Runtime {
   watchdog: Watchdog
   browser: BrowserManager
   browserPath?: string
+  plugins: PluginManager
+  mcp: McpManager
   /** Starts agent turns: recovery of interrupted sessions and anything queued. */
   startAgents(): void
   startedAt: number
@@ -63,10 +66,14 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const effects = new Effects(store)
     const bus = new Bus()
     const agents = new AgentRuntime(store, hub, bus)
-    const sources = new SourceRegistry(store, effects)
+    const sources = new SourceRegistry(store, effects, secrets)
     const routines = new Routines(store)
     sources.register(githubKind())
     sources.register(routinesKind(routines))
+    const plugins = new PluginManager(join(config.home, 'plugins'), sources, store)
+    plugins.registerBuiltIn(telegramPlugin)
+    plugins.registerBuiltIn(gmailPlugin)
+    const mcp = new McpManager(() => kvGet<McpServerConfig[]>(store, 'settings:mcp') ?? [], agents.blobs)
     const engine = new Engine(store, agents, bus, { home: config.home, sources })
     sources.engine = engine
     agents.options.maxWorkers = engine.execution().maxWorkers
@@ -85,6 +92,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       memoryExtension(memory, engine),
       browserExtension(browser, engine, agents),
       sandboxExtension(engine),
+      mcpExtension(mcp, engine, reviewer),
       { gateShell: (ticket, sessionId, command, cwd) => reviewer.gateShell(ticket, sessionId, command, cwd) },
     ))
     watchdog.register()
@@ -97,14 +105,16 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, watchdog, browser, startedAt: Date.now(),
+      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, watchdog, browser, plugins, mcp, startedAt: Date.now(),
       startAgents() {
         agents.recover(session => engine.recoveryNote(session.id, session.role))
-        sources.startAll()
+        void plugins.loadEnabled().finally(() => sources.startAll())
+        void mcp.sync()
         watchdogTimer = setInterval(() => { try { if (hub.resolve('watchdog')) watchdog.tick() } catch (e) { console.error('[watchdog]', e) } }, 60_000)
       },
       async close() {
         clearInterval(watchdogTimer)
+        await mcp.close()
         await browser.close()
         await sources.stopAll()
         await agents.shutdown()

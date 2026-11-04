@@ -22,7 +22,14 @@
 >   - **浏览器**：智能体用持久化配置的浏览器；遇到需要登录的网页，你在网页里的远程画面上接管，完成后交还。
 >   - **Docker 沙箱**：可选，开启后任务命令在容器里执行。
 >
-> 设计和实现细节见 [docs/01-m1](docs/01-m1-implementation.md)、[docs/02-m2](docs/02-m2-implementation.md)、[docs/03-m3](docs/03-m3-implementation.md)。
+> - **M4 新增**：
+>   - **插件 SDK**：第三方插件放进 `~/.superagent/plugins/`，你启用后才运行。
+>   - **MCP 工具**：可以选择让调用先经过审核。
+>   - **Telegram**：在手机上远程指挥家里的电脑。
+>   - **Gmail**：智能体读邮件、写草稿，发送由你决定。
+>   - **Electron 桌面端**：托盘、系统通知、全局快捷键、开机启动。
+>
+> 设计和实现细节见 docs/ 下的 [01-m1](docs/01-m1-implementation.md)、[02-m2](docs/02-m2-implementation.md)、[03-m3](docs/03-m3-implementation.md)、[04-plugin-sdk](docs/04-plugin-sdk.md)、[05-m4](docs/05-m4-implementation.md)。
 
 ## 快速开始
 
@@ -56,6 +63,17 @@ pnpm start
    - 在「设置 → 来源 → GitHub」填写要监听的仓库并启用。
    - 之后在 Issue 或 PR 评论里写 `@agent …` 就能派活。
 5. **设置 → 执行**：可以调整同时执行的任务数，以及允许任务直接使用的已有目录（例如 `~/code`）。
+
+## 桌面端
+
+```bash
+pnpm build                      # 先构建服务和网页
+cd apps/desktop && pnpm start   # 已有服务时直接连接；没有的话用系统 Node 启动它
+```
+
+- 关闭窗口时，应用会留在托盘里。
+- 按 `Cmd/Ctrl+Shift+Space` 随时呼出窗口或打开新对话。
+- 打包：`pnpm dist:mac` 或 `pnpm dist:linux`（需要本机安装 Node 22 及以上版本）。
 
 ## 命令行
 
@@ -91,7 +109,11 @@ apps/daemon     本机服务：Hono API、SSE、CLI、组合根
 apps/web        React 19 + Vite + Tailwind 4 前端（构建后由 daemon 托管）
 packages/core   领域层：Trigger / Thread / Ticket / 订阅 / 汇报，主 Agent 与 Worker 的工具和提示词
 packages/agent-runtime  Agent 运行时：事件日志、收件箱步间注入、后台命令、文件/Shell/网页工具、recall、压缩
-packages/sources 来源插件协议与注册表、GitHub 来源、定时任务（cron）
+packages/sources 来源插件协议与注册表、插件加载器、GitHub 来源、定时任务（cron）
+packages/plugin-sdk 写插件用的类型与工具
+packages/plugins 内置插件：Telegram、Gmail（以及测试用的模拟 API）
+apps/desktop    Electron 桌面端
+examples/plugins 第三方插件示例（RSS 订阅）
 packages/db     SQLite + Drizzle、迁移、持久化副作用队列 Effects
 packages/models 供应商、BYOK 密钥存储、分层模型解析（继承 / 备用链 / 预算）、用量账本
 docs/           调研与设计文档
@@ -102,7 +124,7 @@ docs/           调研与设计文档
 - ~~M1~~：主 Agent + Worker 双层架构、异步 job、任务卡片、「待你处理」（已完成）
 - ~~M2~~：GitHub 插件、定时任务（Routine）、Agent 主动发起对话（已完成）
 - ~~M3~~：Reviewer 审核与规则、三层记忆、Watchdog、浏览器接管、Docker 沙箱（已完成）
-- **M4**：插件 SDK、MCP、Gmail / Telegram、Electron
+- ~~M4~~：插件 SDK、MCP、Gmail / Telegram、Electron（已完成）
 
 ## 许可
 

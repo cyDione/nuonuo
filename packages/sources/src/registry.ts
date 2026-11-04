@@ -9,6 +9,11 @@ import type { Health, OutgoingMessage, SourceContext, SourceKind } from './kind'
 
 export interface SourceSettings { enabled: boolean; config: unknown }
 
+export interface SecretPort { get(ref: string): string | undefined; set(ref: string, value: string): void; delete(ref: string): void }
+
+/** What the settings form receives for a secret field. */
+export const SECRET_SET = '••••••'
+
 interface Instance { kind: SourceKind; ctx: SourceContext<any>; stop?: () => void | Promise<void>; abort: AbortController }
 
 export class SourceRegistry implements SourcePort {
@@ -18,7 +23,7 @@ export class SourceRegistry implements SourcePort {
   private factsBy = new Map<string, Record<string, string>>()
   engine!: Engine
 
-  constructor(private store: Store, private effects: Effects) {
+  constructor(private store: Store, private effects: Effects, private secrets?: SecretPort) {
     effects.handle<OutgoingMessage & { source: string }>('reply', async payload => this.deliver(payload), { concurrency: 2, baseDelayMs: 5_000, maxDelayMs: 300_000 })
   }
 
@@ -27,10 +32,31 @@ export class SourceRegistry implements SourcePort {
     this.kinds.set(kind.id, kind)
   }
 
+  has(id: string): boolean { return this.kinds.has(id) }
+
+  /** Removes a kind (a plugin being disabled), stopping it first. */
+  async unregister(id: string): Promise<void> {
+    await this.stop(id)
+    this.kinds.delete(id)
+  }
+
+  private secretKeys(kind: SourceKind | undefined): string[] {
+    return kind?.fields.filter(f => f.type === 'secret').map(f => f.key) ?? []
+  }
+
+  /** Settings with secret values read back from the secret store (what the source itself sees). */
+  private withSecrets(kind: SourceKind, config: Record<string, unknown>): Record<string, unknown> {
+    const out = { ...config }
+    for (const key of this.secretKeys(kind)) out[key] = this.secrets?.get(`source:${kind.id}:${key}`) ?? ''
+    return out
+  }
+
   list() {
     return [...this.kinds.values()].map(kind => {
       const saved = this.settings(kind.id)
-      return { id: kind.id, title: kind.title, description: kind.description, fields: kind.fields, enabled: saved.enabled, config: saved.config,
+      const config = { ...(saved.config as Record<string, unknown>) }
+      for (const key of this.secretKeys(kind)) config[key] = this.secrets?.get(`source:${kind.id}:${key}`) ? SECRET_SET : ''
+      return { id: kind.id, title: kind.title, description: kind.description, fields: kind.fields, actions: kind.actions ?? [], enabled: saved.enabled, config,
         health: this.healths.get(kind.id) ?? { status: 'off', at: Date.now() }, facts: this.factsBy.get(kind.id) ?? {} }
     })
   }
@@ -38,7 +64,7 @@ export class SourceRegistry implements SourcePort {
   settings(id: string): SourceSettings {
     const kind = this.kinds.get(id)
     const saved = kvGet<SourceSettings>(this.store, `source:${id}`)
-    const parsed = kind?.schema.safeParse(saved?.config ?? {})
+    const parsed = kind?.schema.safeParse(kind ? this.withSecrets(kind, (saved?.config ?? {}) as Record<string, unknown>) : {})
     return { enabled: saved?.enabled ?? kind?.defaultEnabled ?? false, config: parsed?.success ? parsed.data : kind?.schema.safeParse({}).data ?? {} }
   }
 
@@ -46,12 +72,31 @@ export class SourceRegistry implements SourcePort {
   async save(id: string, input: SourceSettings): Promise<SourceSettings> {
     const kind = this.kinds.get(id)
     if (!kind) throw new Error(`没有来源 ${id}`)
-    const parsed = kind.schema.safeParse(input.config ?? {})
+    const config = { ...((input.config ?? {}) as Record<string, unknown>) }
+    // Secret fields: a new value goes to the secret store; the masked placeholder keeps the stored one; empty clears it.
+    for (const key of this.secretKeys(kind)) {
+      const value = config[key]
+      const ref = `source:${id}:${key}`
+      if (typeof value === 'string' && value && value !== SECRET_SET) this.secrets?.set(ref, value)
+      else if (value === '' || value === undefined) this.secrets?.delete(ref)
+      config[key] = this.secrets?.get(ref) ?? ''
+    }
+    const parsed = kind.schema.safeParse(config)
     if (!parsed.success) throw new Error(parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '))
-    kvSet(this.store, `source:${id}`, { enabled: input.enabled, config: parsed.data })
+    const stored = { ...(parsed.data as Record<string, unknown>) }
+    for (const key of this.secretKeys(kind)) delete stored[key]
+    kvSet(this.store, `source:${id}`, { enabled: input.enabled, config: stored })
     await this.stop(id)
     if (input.enabled) this.start(id)
     return this.settings(id)
+  }
+
+  /** Routes an HTTP request to a source's endpoint; undefined when it has none for this path. */
+  async http(id: string, request: Request, path: string, info: { public: boolean; origin: string }): Promise<Response | undefined> {
+    const kind = this.kinds.get(id)
+    if (!kind?.http) return undefined
+    const instance = this.instances.get(id) ?? this.makeInstance(kind)
+    return kind.http(instance.ctx, request, path, info)
   }
 
   async pollNow(id: string): Promise<void> {
@@ -144,6 +189,15 @@ export class SourceRegistry implements SourcePort {
       facts: facts => { registry.factsBy.set(kind.id, { ...(registry.factsBy.get(kind.id) ?? {}), ...facts }) },
       health: (status, detail) => { registry.healths.set(kind.id, { status, ...(detail ? { detail } : {}), at: Date.now() }) },
       log: (...args) => console.log(`[${kind.id}]`, ...args),
+      secret: {
+        get: name => registry.secrets?.get(`source:${kind.id}:runtime:${name}`),
+        set: (name, value) => { if (!registry.secrets) throw new Error('没有可用的密钥存储'); registry.secrets.set(`source:${kind.id}:runtime:${name}`, value) },
+        delete: name => registry.secrets?.delete(`source:${kind.id}:runtime:${name}`),
+      },
+      notify: (text, opts) => {
+        const conversationId = registry.engine.mirrorConversation(`${kind.id}:notices`, { title: opts?.title ?? `🔔 ${kind.title}` })
+        registry.engine.reply({ conversationId, text })
+      },
     }
     return { kind, ctx, abort }
   }

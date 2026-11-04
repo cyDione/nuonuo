@@ -49,6 +49,12 @@ function SourceCard({ s }: { s: SourceInfo }) {
     </>}
     <div className="mt-3 flex items-center justify-end gap-2 border-t border-line pt-3">
       {(save.error || poll.error) && <span className="mr-auto text-xs text-danger">{((save.error ?? poll.error) as Error).message}</span>}
+      {!dirty && s.actions.map(a => <Button key={a.id} size="sm" onClick={async () => {
+        const res = await fetch(`/api/sources/${s.id}/http/${a.path}`, { credentials: 'same-origin' })
+        const data = await res.json().catch(async () => ({ error: await res.text() }))
+        if (data.url) location.href = data.url
+        else alert(data.error?.message ?? data.error ?? `${res.status}`)
+      }}>{a.label}</Button>)}
       {s.enabled && s.fields.length > 0 && !dirty && <Button size="sm" variant="ghost" onClick={() => poll.mutate()} disabled={poll.isPending}>
         <RefreshCw size={13} className={poll.isPending ? 'animate-spin' : ''} />立即同步</Button>}
       {dirty && <>
@@ -64,6 +70,9 @@ function FieldInput({ f, value, onChange }: { f: FieldSpec; value: any; onChange
     case 'list': return <Field label={f.label} {...(f.hint ? { hint: f.hint } : {})}>
       <textarea className="min-h-20 w-full rounded-lg border border-line bg-panel px-3 py-2 font-mono text-sm outline-none focus:border-accent" placeholder={f.placeholder}
         value={(value ?? []).join('\n')} onChange={e => onChange(e.target.value.split('\n').map(s => s.trim()).filter(Boolean))} />
+    </Field>
+    case 'secret': return <Field label={f.label} hint={value === '••••••' ? '已保存在钥匙串里；留空保存会清除' : f.hint ?? '保存在系统钥匙串里，不写入数据库'}>
+      <Input type="password" autoComplete="off" value={value ?? ''} placeholder={f.placeholder} onChange={e => onChange(e.target.value)} onFocus={e => { if (value === '••••••') e.target.select() }} />
     </Field>
     case 'number': return <Field label={f.label} {...(f.hint ? { hint: f.hint } : {})}><Input type="number" min={f.min} max={f.max} value={value ?? ''} onChange={e => onChange(Number(e.target.value))} /></Field>
     case 'switch': return <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(value)} onChange={e => onChange(e.target.checked)} />{f.label}</label>

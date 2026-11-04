@@ -124,3 +124,21 @@ describe('destructive actions', () => {
     expect(calls).toBe(before)
   })
 })
+
+describe('external tool calls', () => {
+  it('escalate under "ask" and run through the registered executor once approved', async () => {
+    const { engine, reviewer, start } = setup(() => ({ text: '{}' }))
+    const ticket = start()
+    await settle()
+    kvSet(store, 'settings:review', { mode: 'ask' })
+    const calls: unknown[] = []
+    reviewer.registerExecutor('mcp', async input => { calls.push(input); return 'sent' })
+    const decision = await reviewer.gateTool(engine.ticket(ticket.id), ticket.sessionId, 'mcp', 'mail.send {"to":"a@b.c"}', { server: 'mail', tool: 'send', args: { to: 'a@b.c' } })
+    expect(decision).toMatchObject({ action: 'escalate' })
+    reviewer.decide((decision as { approvalId: string }).approvalId, true)
+    await new Promise(r => setTimeout(r, 50))
+    await settle()
+    expect(calls).toEqual([expect.objectContaining({ server: 'mail', tool: 'send', args: { to: 'a@b.c' } })])
+    expect(JSON.stringify(runtime.history(ticket.sessionId))).toContain('批准后已执行 mail.send')
+  })
+})

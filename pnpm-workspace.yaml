@@ -2,6 +2,7 @@ packages:
   - apps/*
   - packages/*
 onlyBuiltDependencies:
+  - electron
   - better-sqlite3
   - esbuild
   - '@napi-rs/keyring'
