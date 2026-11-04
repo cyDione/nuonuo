@@ -43,6 +43,7 @@ export class EventMapper {
       case 'message.created': return [{ type: 'message.created', conversationId: e.conversationId, messageId: e.messageId }]
       case 'conversation.updated': return [{ type: 'conversation.updated', conversationId: e.conversationId }]
       case 'ticket.updated': return [{ type: 'ticket.updated', ticketId: e.ticketId }]
+      case 'approval.updated': return [{ type: 'ticket.updated', ticketId: e.ticketId }]
       case 'session.state': return [{ type: 'session.state', role: e.role, sessionId: e.sessionId, ticketId: e.ticketId, state: e.state }]
       case 'session.part': {
         const part = e.part
@@ -63,6 +64,8 @@ export class EventMapper {
           return []
         }
         if (e.ticketId) return [{ type: 'worker.part', ticketId: e.ticketId, part }]
+        // The watchdog's notify_owner streams like the router's reply.
+        if (e.role === 'watchdog') return []
         return []
       }
       default: return []

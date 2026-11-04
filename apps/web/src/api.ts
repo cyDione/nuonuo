@@ -43,11 +43,12 @@ export interface UsageRow { role: RoleId; providerId: string; model: string; cal
 export interface Check { id: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string; fix?: string }
 export interface Health { ok: boolean; version: string; home: string; pid: number; uptimeMs: number; secrets: string; effects: { kind: string; pending: number; failing: number }[] }
 
-export type Stage = 'person/answer' | 'person/blocked' | 'person/failed' | 'queued' | 'working' | 'idle' | 'ended'
-export interface Report { status: 'progress' | 'waiting' | 'ready' | 'blocked' | 'failed' | 'dropped'; summary: string; humanAction?: { question: string; options?: string[] }; at: number }
+export type Stage = 'person/approve' | 'person/answer' | 'person/blocked' | 'person/failed' | 'queued' | 'working' | 'idle' | 'ended'
+export interface Report { status: 'progress' | 'waiting' | 'ready' | 'blocked' | 'failed' | 'dropped'; summary: string; humanAction?: { question: string; options?: string[]; kind?: 'question' | 'handoff' }; at: number }
 export interface Ticket {
   id: string; title: string; name: string; note: string | null; stage: Stage; stageLabel: string; conversationId: string | null; source: string; directory: string
-  latestReport: Report | null; attention: { question: string; options?: string[]; at: number } | null
+  latestReport: Report | null; attention: { question: string; options?: string[]; kind?: 'question' | 'handoff'; at: number } | null
+  approvals: { id: string; command: string; reason: string; risk: string; createdAt: number }[]
   ended: { at: number; by: string; outcome: 'completed' | 'stopped' | 'dropped'; reason?: string } | null; createdAt: number; updatedAt: number
 }
 export type TranscriptItem =
@@ -57,8 +58,12 @@ export type TranscriptItem =
   | { id: string; kind: 'tool-result'; callId: string; tool: string; output: string; at: number }
   | { id: string; kind: 'marker'; type: string; message?: string; at: number }
   | { id: string; kind: 'compaction'; summary: string; at: number }
-export interface TicketDetail { ticket: Ticket; reports: (Report & { id: number; humanAction: Report['humanAction'] | null })[]; transcript: TranscriptItem[]; running: boolean; jobs: { jobId: string; command: string; startedAt: number }[] }
-export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: number; timeoutMinutes: number; blockedCommands: string[]; workspaceRoots: string[] }
+export interface TicketDetail { ticket: Ticket; reports: (Report & { id: number; humanAction: Report['humanAction'] | null })[]; transcript: TranscriptItem[]; running: boolean; jobs: { jobId: string; command: string; startedAt: number }[]; browser: boolean; project: string | null }
+export interface SandboxSettings { mode: 'off' | 'external' | 'all'; image: string; network: 'bridge' | 'none' }
+export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: number; timeoutMinutes: number; blockedCommands: string[]; workspaceRoots: string[]; sandbox: SandboxSettings }
+export interface ReviewSettings { threshold: 'off' | 'destructive' | 'external'; mode: 'model' | 'ask'; destructive: 'ask' | 'review'; rules: string[]; allow: string[]; deny: string[] }
+export interface AuditEntry { id: number; at: number; ticketId: string | null; actor: string; action: string; tool: string | null; input: string | null; risk: string | null; decision: string; reason: string | null }
+export interface MemoryState { user: string; agent: string; projects: { name: string; content: string }[] }
 
 export type ServerEvent =
   | { type: 'message.created'; conversationId: string; messageId: string }

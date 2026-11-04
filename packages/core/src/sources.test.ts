@@ -101,3 +101,15 @@ describe('external sources', () => {
     expect(ticket.id).toBeTruthy()
   })
 })
+
+describe('browser handoff attention', () => {
+  it('is not replaced by a plain question reported afterwards', () => {
+    const { engine } = setup()
+    const owner = gh('me', '@agent 看看待办')
+    engine.receive(owner)
+    const ticket = engine.startTask({ triggerIds: [owner.id], title: '待办' })
+    engine.report(ticket.id, { status: 'waiting', summary: '需要登录', humanAction: { question: '请登录', kind: 'handoff' } })
+    engine.report(ticket.id, { status: 'waiting', summary: '等主人', humanAction: { question: '登录好了吗？' } })
+    expect(engine.ticket(ticket.id).attention).toMatchObject({ question: '请登录', kind: 'handoff' })
+  })
+})

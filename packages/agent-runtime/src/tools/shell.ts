@@ -13,6 +13,10 @@ export interface ShellOptions {
   timeoutMs: number
   blocked: string[]
   signal: AbortSignal
+  /** Review before running: allow, block with a reason, or hand to the owner (the command runs on approval). */
+  gate?: (command: string) => Promise<{ action: 'allow' } | { action: 'block'; reason: string } | { action: 'escalate'; approvalId: string; reason: string }>
+  /** Wraps the command for the execution tier (e.g. inside a Docker sandbox). */
+  wrap?: (command: string) => string
 }
 
 const firstWords = (command: string) => command.split(/[;&|()\n`$]+/).map(part => part.trim().split(/\s+/)[0] ?? '').filter(Boolean)
@@ -31,7 +35,13 @@ export function shellTools(jobs: Jobs, blobs: Blobs, opts: ShellOptions) {
       execute: async ({ command }) => {
         const hit = firstWords(command).find(word => opts.blocked.includes(word))
         if (hit) throw new Error(`命令 ${hit} 在这个执行环境中被禁止`)
-        return render(await jobs.run({ sessionId: opts.sessionId, command, cwd: opts.cwd, env: opts.env, foregroundMs: opts.foregroundMs, timeoutMs: opts.timeoutMs, signal: opts.signal }))
+        const decision = opts.gate ? await opts.gate(command) : { action: 'allow' as const }
+        if (decision.action === 'block') throw new Error(`审核拦截了这条命令：${decision.reason}。不要换个写法绕过；需要的话用 report(waiting, human_action) 问主人。`)
+        if (decision.action === 'escalate') {
+          return `[需要主人批准（${decision.approvalId}）：${decision.reason}。命令还没有执行。主人批准后它会自动运行，结果作为新消息送达；被拒绝也会通知你。先做不依赖它的部分，或者 report(progress) 后结束本轮等待。]`
+        }
+        const run = opts.wrap ? opts.wrap(command) : command
+        return render(await jobs.run({ sessionId: opts.sessionId, command: run, cwd: opts.cwd, env: opts.env, foregroundMs: opts.foregroundMs, timeoutMs: opts.timeoutMs, signal: opts.signal }))
       },
     }),
     job_status: tool({

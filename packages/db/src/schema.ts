@@ -213,3 +213,31 @@ export const blobs = sqliteTable('blobs', {
   meta: json<Record<string, unknown>>('meta').notNull().default({}),
   createdAt: integer('created_at').notNull(),
 })
+
+export const approvals = sqliteTable('approvals', {
+  id: text('id').primaryKey(),
+  ticketId: text('ticket_id').notNull(),
+  sessionId: text('session_id').notNull(),
+  tool: text('tool').notNull(),
+  input: json<Record<string, unknown>>('input').notNull(),
+  risk: text('risk').notNull(),
+  reason: text('reason').notNull(),
+  status: text('status', { enum: ['pending', 'approved', 'denied', 'expired'] }).notNull().default('pending'),
+  decidedBy: text('decided_by'),
+  note: text('note'),
+  createdAt: integer('created_at').notNull(),
+  decidedAt: integer('decided_at'),
+})
+
+export const auditLog = sqliteTable('audit_log', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  at: integer('at').notNull(),
+  ticketId: text('ticket_id'),
+  actor: text('actor').notNull(),
+  action: text('action').notNull(),
+  tool: text('tool'),
+  input: text('input'),
+  risk: text('risk'),
+  decision: text('decision').notNull(),
+  reason: text('reason'),
+})

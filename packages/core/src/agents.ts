@@ -1,5 +1,5 @@
 /** The router and worker agent definitions: tool sets (enforced by code, not prompt) and how their inbox items read. */
-import { fsTools, recallTool, shellTools, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type InboxItem, type TurnContext } from '@super-agent/agent-runtime'
+import { fsTools, recallTool, shellTools, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type BrowserManager, type InboxItem, type TurnContext } from '@super-agent/agent-runtime'
 import { schema, type Store } from '@super-agent/db'
 import { tool, type ToolSet } from 'ai'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
@@ -7,6 +7,8 @@ import { z } from 'zod'
 import { clip, DomainError, Engine, ROUTER_SESSION } from './engine'
 import { sourceOfThread, STAGE_LABEL, type Ticket } from './model'
 import { ROUTER_PROMPT, WORKER_PROMPT } from './prompts'
+import type { Memory } from './memory'
+import { sandboxApplies, sandboxCommand } from './sandbox'
 
 const CONTEXT_MESSAGES = 6
 
@@ -17,10 +19,16 @@ export interface AgentExtensions {
   routerPrompt?(): string
   workerTools?(ticket: Ticket, ctx: TurnContext): ToolSet
   /** Prompt sections for a worker whose task touches a source (e.g. how to use GitHub). */
-  workerPrompt?(ticket: Ticket): string
+  workerPrompt?(ticket: Ticket): string | undefined
   workerEnv?(ticket: Ticket): Record<string, string>
   /** One line describing an external thread for cards (repo, number, state, url). */
   threadInfo?(threadId: string): string | undefined
+  /** Review of a worker's shell command (the Reviewer). */
+  gateShell?(ticket: Ticket, sessionId: string, command: string, cwd: string): Promise<{ action: 'allow' } | { action: 'block'; reason: string } | { action: 'escalate'; approvalId: string; reason: string }>
+  /** Wraps worker shell commands for the execution tier (Docker sandbox). */
+  wrapShell?(ticket: Ticket): ((command: string) => string) | undefined
+  /** Text added to every agent's system prompt (memory). */
+  sharedPrompt?(role: 'router' | 'worker', ticket?: Ticket): string
 }
 
 export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engine, ext: AgentExtensions = {}): { reportedThisTurn: Set<string> } {
@@ -85,7 +93,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     role: 'router',
     pool: 'router',
     maxSteps: 30,
-    system: () => `${ROUTER_PROMPT}${ext.routerPrompt ? `\n\n${ext.routerPrompt()}` : ''}\n\nNow: ${new Date().toString()}`,
+    system: () => `${ROUTER_PROMPT}${ext.routerPrompt ? `\n\n${ext.routerPrompt()}` : ''}${ext.sharedPrompt ? `\n\n${ext.sharedPrompt('router')}` : ''}\n\nNow: ${new Date().toString()}`,
     formatInbox: items => items.map(item => renderRouterItem(item)).join('\n\n'),
     tools: () => ({
       reply: tool({
@@ -114,11 +122,12 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
           ack: z.string().optional().describe('One sentence to the owner naming what will be done'),
           note: z.string().max(200).optional().describe('Routing facts only (≤30 words), never a plan'),
           directory: z.string().optional().describe('An existing project directory, only if the owner named one'),
+          project: z.string().optional().describe('The project this belongs to (e.g. a repository or a long-running effort), for project memory'),
         }),
         execute: async (input, { toolCallId }) => {
           const ticket = engine.startTask({ ...(input.conversation_id ? { conversationId: input.conversation_id } : {}), triggerIds: input.trigger_ids, title: input.title, callId: toolCallId,
             ...(input.name ? { name: input.name } : {}), ...(input.ack ? { ack: input.ack } : {}), ...(input.note ? { note: input.note } : {}),
-            ...(input.directory ? { directory: input.directory } : {}) })
+            ...(input.directory ? { directory: input.directory } : {}), ...(input.project ? { project: input.project } : {}) })
           return { ok: true, ticket_id: ticket.id, directory: ticket.directory }
         },
       }),
@@ -165,6 +174,11 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         return [`<report ticket_id="${t.id}" title="${t.title}" status="${p.status}" conversation_id="${engine.conversationOfThread(t.threadId) ?? ''}" origin="${sourceOfThread(t.threadId)}">`,
           clip(p.summary, 3_000), p.humanAction ? `human_action: ${JSON.stringify(p.humanAction)}${answered ? ' (already answered by the owner — do not forward it)' : ''}` : '', '</report>'].filter(Boolean).join('\n')
       }
+      case 'approval': {
+        let title = p.ticketId
+        try { title = engine.ticket(p.ticketId).title } catch { /* gone */ }
+        return `<approval approval_id="${p.approvalId}" ticket_id="${p.ticketId}" title="${title}" conversation_id="${(() => { try { return engine.conversationOfThread(engine.ticket(p.ticketId).threadId) ?? '' } catch { return '' } })()}">\nThe worker wants to run: ${String(p.command).slice(0, 500)}\nWhy it needs the owner: ${p.reason}\n</approval>`
+      }
       case 'ticket-ended': return `<task_ended ticket_id="${p.ticketId}" outcome="${p.outcome}" by="${p.by}" />`
       case 'recovery': return '<recovery>服务刚刚重启。检查 list_tasks，不要重复已经发出的消息或已经开始的任务。</recovery>'
       default: return `<event>${JSON.stringify(p)}</event>`
@@ -178,7 +192,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     maxSteps: 150,
     system: session => {
       const ticket = engine.ticket(session.ticketId!)
-      const extra = ext.workerPrompt?.(ticket)
+      const extra = [ext.workerPrompt?.(ticket), ext.sharedPrompt?.('worker', ticket)].filter(Boolean).join('\n\n')
       return `${WORKER_PROMPT}${extra ? `\n\n${extra}` : ''}\n\n## Environment\n- Working directory: ${ticket.directory}\n- Task id: ${ticket.id}\n- OS: ${process.platform}\n- Now: ${new Date().toString()}`
     },
     formatInbox: (items, session) => items.map(item => renderWorkerItem(item, session.ticketId!)).join('\n\n'),
@@ -191,6 +205,8 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
           env: workerEnv({ SUPERAGENT_TICKET: ticket.id, SUPERAGENT_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
           foregroundMs: exec.foregroundSeconds * 1000, timeoutMs: exec.timeoutMinutes * 60_000,
+          ...(ext.gateShell ? { gate: (command: string) => ext.gateShell!(ticket, ctx.session.id, command, ticket.directory) } : {}),
+          ...(ext.wrapShell?.(ticket) ? { wrap: ext.wrapShell(ticket)! } : {}),
         }),
         ...webTools(runtime.blobs),
         ...recallTool(runtime),
@@ -254,7 +270,10 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         }
         return `<owner_message trigger_id="${p.triggerId}"${p.note ? ` routing_note="${String(p.note).replace(/"/g, "'")}"` : ''}>\n${trigger?.text ?? ''}\n</owner_message>`
       }
-      case 'note': return `<note from="main agent">${p.text}</note>`
+      case 'note': return `<note from="${p.from ?? 'main agent'}">${p.text}</note>`
+      case 'approval': return p.status === 'approved'
+        ? `<approval approval_id="${p.approvalId}" status="approved">主人批准了：${p.command}${p.note ? `（备注：${p.note}）` : ''}。命令已在后台开始运行，结果会以 job_finished 送达。</approval>`
+        : `<approval approval_id="${p.approvalId}" status="denied">主人拒绝了：${p.command}${p.note ? `（理由：${p.note}）` : ''}。不要再尝试这条命令或它的变体；调整方案，或用 report 说明。</approval>`
       case 'job': return `<job_finished job_id="${p.jobId}" status="${p.status}"${p.exitCode !== undefined ? ` exit_code="${p.exitCode}"` : ''} command="${String(p.command).replace(/"/g, "'").slice(0, 200)}">\n${p.output ?? ''}\n</job_finished>`
       default: return `<event>${JSON.stringify(p)}</event>`
     }
@@ -266,3 +285,53 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
 }
 
 export { DomainError, STAGE_LABEL }
+
+/** Merges several extension sets (sources, memory, review) into one. */
+export function combineExtensions(...exts: AgentExtensions[]): AgentExtensions {
+  const join = (parts: (string | undefined)[]) => parts.filter(Boolean).join('\n\n')
+  const gate = exts.find(e => e.gateShell)?.gateShell
+  const wrap = exts.find(e => e.wrapShell)?.wrapShell
+  return {
+    routerPrompt: () => join(exts.map(e => e.routerPrompt?.())),
+    routerTools: () => Object.assign({}, ...exts.map(e => e.routerTools?.() ?? {})),
+    workerPrompt: t => join(exts.map(e => e.workerPrompt?.(t))),
+    workerTools: (t, ctx) => Object.assign({}, ...exts.map(e => e.workerTools?.(t, ctx) ?? {})),
+    workerEnv: t => Object.assign({}, ...exts.map(e => e.workerEnv?.(t) ?? {})),
+    threadInfo: id => exts.map(e => e.threadInfo?.(id)).find(Boolean),
+    sharedPrompt: (role, t) => join(exts.map(e => e.sharedPrompt?.(role, t))),
+    ...(gate ? { gateShell: gate } : {}),
+    ...(wrap ? { wrapShell: wrap } : {}),
+  }
+}
+
+/** Memory for both agents: the prompt section and remember / forget / search_memory. */
+export function memoryExtension(memory: Memory, engine: Engine): AgentExtensions {
+  return {
+    sharedPrompt: (_role, ticket) => memory.prompt(ticket ? engine.projectOf(ticket) : undefined),
+    routerTools: () => memory.tools(() => 'router'),
+    workerTools: ticket => memory.tools(() => ticket.id, () => engine.projectOf(ticket)),
+  }
+}
+
+/** Runs worker shell commands in the Docker sandbox when the execution settings say so. */
+export function sandboxExtension(engine: Engine): AgentExtensions {
+  return {
+    wrapShell: ticket => {
+      const settings = engine.execution().sandbox
+      return sandboxApplies(settings, ticket) ? (command: string) => sandboxCommand(settings, ticket, command) : undefined
+    },
+    workerPrompt: ticket => sandboxApplies(engine.execution().sandbox, ticket)
+      ? `## Sandbox\nYour shell commands run in a Docker container (${engine.execution().sandbox.image}, network ${engine.execution().sandbox.network}) that only sees your working directory. Tools you need must be installed inside it.`
+      : undefined,
+  }
+}
+
+/** The worker's browser, and handing its page to the owner. */
+export function browserExtension(browser: BrowserManager, engine: Engine, runtime: AgentRuntime): AgentExtensions {
+  return {
+    workerTools: ticket => browser.tools(ticket.id, ticket.directory, runtime.blobs,
+      reason => engine.report(ticket.id, { status: 'waiting', summary: `需要主人接管浏览器：${reason}`, humanAction: { question: reason, kind: 'handoff' } })),
+    workerPrompt: () => `## Browser
+You have a real browser (browser_open / browser_snapshot / browser_click / browser_type / browser_screenshot) with the owner's persistent profile, so sites they logged into stay logged in. Use it for pages that need JavaScript or a login; plain pages are cheaper with web_fetch. When a page needs the owner — logging in, 2FA, a captcha, a payment — call request_handoff with what they should do, then end your turn; never type passwords or payment details yourself.`,
+  }
+}

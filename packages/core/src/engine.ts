@@ -4,10 +4,11 @@
  * the worker facts; people call the people commands. Each command is one transaction; agent wake-ups run after commit.
  */
 import type { AgentRuntime, Bus } from '@super-agent/agent-runtime'
-import { kvGet, newId, schema, type Store } from '@super-agent/db'
+import { kvGet, kvSet, newId, schema, type Store } from '@super-agent/db'
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import { mkdirSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
+import { DEFAULT_SANDBOX, type SandboxSettings } from './sandbox'
 import { sourceOfThread, webchatThread, type Attention, type Ended, type HumanAction, type IncomingTrigger, type Mandate, type Report, type ReportStatus, type SourcePort, type Ticket, type TicketStage } from './model'
 
 export const ROUTER_SESSION = 'ses_router'
@@ -23,10 +24,12 @@ export interface ExecutionSettings {
   blockedCommands: string[]
   /** Existing directories a task may be given as its working directory (in addition to a fresh one under work/). */
   workspaceRoots: string[]
+  sandbox: SandboxSettings
 }
 
 export const DEFAULT_EXECUTION: ExecutionSettings = {
   maxWorkers: 3, foregroundSeconds: 5, timeoutMinutes: 30, blockedCommands: ['sudo', 'su', 'shutdown', 'reboot', 'mkfs'], workspaceRoots: [],
+  sandbox: DEFAULT_SANDBOX,
 }
 
 export interface EngineOptions { home: string; now?: () => number; sources?: SourcePort }
@@ -46,7 +49,8 @@ export class Engine {
   get workRoot() { return join(this.opts.home, 'work') }
 
   execution(): ExecutionSettings {
-    return { ...DEFAULT_EXECUTION, ...(kvGet<Partial<ExecutionSettings>>(this.store, 'settings:execution') ?? {}) }
+    const saved = kvGet<Partial<ExecutionSettings>>(this.store, 'settings:execution') ?? {}
+    return { ...DEFAULT_EXECUTION, ...saved, sandbox: { ...DEFAULT_SANDBOX, ...(saved.sandbox ?? {}) } }
   }
 
   // ── Reads ──────────────────────────────────────────────────────────────────
@@ -72,6 +76,18 @@ export class Engine {
     return this.store.db.select().from(schema.tickets).where(inArray(schema.tickets.id, ids)).orderBy(asc(schema.tickets.createdAt)).all() as unknown as Ticket[]
   }
 
+  /** The project a task belongs to: set when it was started, else its GitHub repository. Drives project memory. */
+  projectOf(ticket: Ticket): string | undefined {
+    const explicit = kvGet<string>(this.store, `ticket:project:${ticket.id}`)
+    if (explicit) return explicit
+    const m = /^github:([\w.-]+\/[\w.-]+)#/.exec(ticket.threadId)
+    return m?.[1]
+  }
+
+  setProject(ticketId: string, project: string): void {
+    kvSet(this.store, `ticket:project:${ticketId}`, project.trim())
+  }
+
   /** Threads a ticket is subscribed to. */
   subscribersOfTicket(ticketId: string): string[] {
     return this.store.db.select({ threadId: schema.subscriptions.threadId }).from(schema.subscriptions).where(eq(schema.subscriptions.ticketId, ticketId)).all().map(r => r.threadId)
@@ -79,6 +95,9 @@ export class Engine {
 
   stage(ticket: Ticket): TicketStage {
     if (ticket.ended) return 'ended'
+    const approvals = this.store.db.select({ id: schema.approvals.id }).from(schema.approvals)
+      .where(and(eq(schema.approvals.ticketId, ticket.id), eq(schema.approvals.status, 'pending'))).get()
+    if (approvals) return 'person/approve'
     if (ticket.attention) return 'person/answer'
     const report = ticket.latestReport
     if (report && (report.status === 'blocked' || report.status === 'failed') && !this.humanInputSince(ticket.sessionId, report.at)) {
@@ -250,6 +269,13 @@ export class Engine {
       this.store.db.insert(schema.messages).values({ id: messageId, conversationId, role: 'user', content: text, triggerId, meta: { source: 'webchat' }, createdAt: messageAt }).run()
       this.store.db.update(schema.conversations).set({ updatedAt: at }).where(eq(schema.conversations.id, conversationId)).run()
 
+      // The watchdog's own conversation talks to the watchdog, not the router.
+      const source = this.store.db.select({ source: schema.conversations.source }).from(schema.conversations).where(eq(schema.conversations.id, conversationId)).get()?.source
+      if (source === 'watchdog') {
+        this.runtime.push('ses_watchdog', { type: 'owner', text, triggerId }, { human: true })
+        this.store.afterCommit(() => this.bus.emit({ type: 'message.created', conversationId, messageId }))
+        return { triggerId, messageId, deliveredTo: [] as string[] }
+      }
       const subscribed = this.subscribers(threadId)
       let targets: Ticket[] = []
       if (opts.replyTo) {
@@ -321,7 +347,7 @@ export class Engine {
     this.bus.emit({ type: 'message.created', conversationId: row.conversationId, messageId })
   }
 
-  startTask(input: { conversationId?: string; triggerIds: string[]; title: string; name?: string; note?: string; ack?: string; directory?: string; callId?: string }): Ticket {
+  startTask(input: { conversationId?: string; triggerIds: string[]; title: string; name?: string; note?: string; ack?: string; directory?: string; project?: string; callId?: string }): Ticket {
     const triggers = input.triggerIds.length
       ? this.store.db.select().from(schema.triggers).where(inArray(schema.triggers.id, input.triggerIds)).all() : []
     if (!triggers.length) throw new DomainError('invalid', 'start_task 需要至少一个 trigger_id')
@@ -352,6 +378,7 @@ export class Engine {
       const cardId = newId('msg')
       this.store.db.insert(schema.messages).values({ id: cardId, conversationId, role: 'event', content: input.title, ticketId: id,
         meta: { kind: 'ticket' }, createdAt: this.stamp() }).run()
+      if (input.project) this.setProject(id, input.project)
       this.startAssignment(id, 'start')
       this.runtime.push(sessionId, { type: 'assignment', ticketId: id, reason: 'start' }, { human: true })
       this.store.afterCommit(() => this.bus.emit({ type: 'message.created', conversationId, messageId: cardId }))
@@ -406,7 +433,9 @@ export class Engine {
       const assignment = this.currentAssignment(ticketId)
       this.store.db.insert(schema.reports).values({ ticketId, assignmentId: assignment?.id ?? null, status: input.status, summary: input.summary,
         humanAction: (input.humanAction ?? null) as any, at }).run()
-      const attention: Attention | null = input.humanAction ? { ...input.humanAction, at } : ticket.attention
+      // A pending browser handoff is not replaced by a plain question the worker adds afterwards.
+      const keepHandoff = ticket.attention?.kind === 'handoff' && input.humanAction && input.humanAction.kind !== 'handoff'
+      const attention: Attention | null = input.humanAction && !keepHandoff ? { ...input.humanAction, at } : ticket.attention
       this.store.db.update(schema.tickets).set({ latestReport: report as any, attention: attention as any, updatedAt: at }).where(eq(schema.tickets.id, ticketId)).run()
       const fresh = this.ticket(ticketId)
       if (input.status === 'ready') this.end(fresh, { at, by: 'worker', outcome: 'completed' })
@@ -460,6 +489,17 @@ export class Engine {
     this.changed(ticketId)
   }
 
+  /** Starts a task's worker again regardless of its stage (the watchdog, for a hung turn). */
+  restart(ticketId: string, reason: string): void {
+    const ticket = this.ticket(ticketId)
+    if (ticket.ended) throw new DomainError('conflict', '任务已结束')
+    this.store.atomic(() => {
+      this.startAssignment(ticketId, 'retry')
+      this.runtime.push(ticket.sessionId, { type: 'assignment', ticketId, reason: 'retry', note: reason }, { human: true })
+    })
+    this.changed(ticketId)
+  }
+
   /** Startup: tickets whose worker was mid-turn get a recovery assignment; the router gets a recovery note. */
   recoveryNote(sessionId: string, role: string): unknown {
     if (role === 'router') return { type: 'recovery' }
@@ -484,6 +524,8 @@ export class Engine {
   /** Ends the ticket and its assignment; its background jobs are killed without waking the worker (dsh-superagent 003). */
   private end(ticket: Ticket, ended: Ended): void {
     this.store.afterCommit(() => this.runtime.jobs.stopAll(ticket.sessionId))
+    this.store.db.update(schema.approvals).set({ status: 'expired', decidedAt: ended.at, decidedBy: 'system' })
+      .where(and(eq(schema.approvals.ticketId, ticket.id), eq(schema.approvals.status, 'pending'))).run()
     this.store.db.update(schema.tickets).set({ ended: ended as any, attention: null, updatedAt: ended.at }).where(eq(schema.tickets.id, ticket.id)).run()
     this.store.db.update(schema.assignments).set({ status: 'ended', endedAt: ended.at, endReason: ended.outcome })
       .where(and(eq(schema.assignments.ticketId, ticket.id), eq(schema.assignments.status, 'running'))).run()

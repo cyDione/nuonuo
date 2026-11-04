@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { CheckCircle2, AlertTriangle, XCircle, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Check, type Health, type TranscriptItem } from '../api'
@@ -17,6 +17,7 @@ export function System() {
       <Info label="密钥存储" value={h.secrets === 'keychain' ? '系统钥匙串' : '加密文件'} />
     </Card>}
     <NotifyToggle />
+    <WatchdogCard />
     <div className="flex items-center justify-between">
       <h2 className="text-sm font-medium">环境检查</h2>
       <Button size="sm" variant="ghost" onClick={() => doctor.refetch()} disabled={doctor.isFetching}><RefreshCw size={13} className={doctor.isFetching ? 'animate-spin' : ''} />重新检查</Button>
@@ -66,5 +67,19 @@ function NotifyToggle() {
       <div className="text-xs text-muted">页面不在前台时，智能体发来消息（任务完成、需要你决定、定时任务结果）会弹出系统通知。</div>
     </div>
     <Button size="sm" disabled={!supported} onClick={async () => setOn(await setNotifications(!on))}>{!supported ? '浏览器不支持' : on ? '已开启' : '开启'}</Button>
+  </Card>
+}
+
+function WatchdogCard() {
+  const run = useMutation({ mutationFn: () => api.post<{ findings: { kind: string; detail: string }[] }>('/watchdog/run') })
+  const open = async () => { const { conversationId } = await api.get<{ conversationId: string }>('/watchdog'); location.hash = `/c/${conversationId}` }
+  return <Card className="flex flex-wrap items-center gap-3 p-4">
+    <div className="min-w-0 flex-1">
+      <div className="text-sm font-medium">Watchdog</div>
+      <div className="text-xs text-muted">每分钟巡检一次：卡住、空转、说「继续」却没人唤醒的任务，以及出错的队列和来源。发现问题会提醒任务或在自己的对话里告诉你。</div>
+      {run.data && <div className="mt-1 text-xs text-faint">{run.data.findings.length ? run.data.findings.map(f => `${f.kind}：${f.detail}`).join('；') : '本次巡检没有发现问题'}</div>}
+    </div>
+    <Button size="sm" variant="ghost" onClick={() => run.mutate()} disabled={run.isPending}>立即巡检</Button>
+    <Button size="sm" onClick={open}>和它对话</Button>
   </Card>
 }

@@ -38,6 +38,11 @@ export function runDoctor(rt: Runtime): Check[] {
   const gh = version('gh')
   checks.push({ id: 'gh', label: 'GitHub CLI', status: gh ? 'ok' : 'warn', detail: gh ?? '未安装', fix: 'M2 的 GitHub 插件可复用 gh 登录' })
   const docker = version('docker', ['version', '--format', '{{.Server.Version}}'])
-  checks.push({ id: 'docker', label: 'Docker', status: docker ? 'ok' : 'warn', detail: docker ? `server ${docker}` : '不可用', fix: '沙箱执行档（M3）需要 Docker' })
+  const sandbox = rt.engine.execution().sandbox
+  checks.push({ id: 'docker', label: 'Docker', status: docker ? 'ok' : sandbox.mode === 'off' ? 'warn' : 'error',
+    detail: docker ? `server ${docker}${sandbox.mode !== 'off' ? `，沙箱：${sandbox.image}` : ''}` : sandbox.mode === 'off' ? '不可用（沙箱未启用）' : '不可用，但沙箱已启用',
+    fix: '安装并启动 Docker（macOS：Docker Desktop / OrbStack），沙箱执行档需要它' })
+  checks.push({ id: 'browser', label: '浏览器', status: rt.browserPath ? 'ok' : 'warn', detail: rt.browserPath ?? '未找到',
+    fix: '安装 Google Chrome，或设置 SUPERAGENT_BROWSER 指向 Chromium/Chrome 可执行文件' })
   return checks
 }

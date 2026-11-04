@@ -23,6 +23,21 @@ export function Execution() {
       <textarea className="min-h-20 w-full rounded-lg border border-line bg-panel px-3 py-2 font-mono text-sm outline-none focus:border-accent"
         value={draft.workspaceRoots.join('\n')} placeholder="~/code" onChange={e => setDraft({ ...draft, workspaceRoots: lines(e.target.value) })} />
     </Field>
+    <div className="grid gap-4 border-t border-line pt-4 sm:grid-cols-3">
+      <Field label="Docker 沙箱" hint="在容器里执行任务的命令，容器只能看到任务目录">
+        <select className="h-9 w-full rounded-lg border border-line bg-panel px-2.5 text-sm" value={draft.sandbox.mode}
+          onChange={e => setDraft({ ...draft, sandbox: { ...draft.sandbox, mode: e.target.value as typeof draft.sandbox.mode } })}>
+          <option value="off">关闭</option><option value="external">外部来源的任务（如 GitHub）</option><option value="all">所有任务</option>
+        </select>
+      </Field>
+      <Field label="镜像"><Input className="font-mono text-xs" value={draft.sandbox.image} onChange={e => setDraft({ ...draft, sandbox: { ...draft.sandbox, image: e.target.value } })} /></Field>
+      <Field label="网络">
+        <select className="h-9 w-full rounded-lg border border-line bg-panel px-2.5 text-sm" value={draft.sandbox.network}
+          onChange={e => setDraft({ ...draft, sandbox: { ...draft.sandbox, network: e.target.value as typeof draft.sandbox.network } })}>
+          <option value="bridge">允许联网</option><option value="none">断网</option>
+        </select>
+      </Field>
+    </div>
     <Field label="禁止的命令" hint="以空格分隔；按命令名拦截。这不是安全边界，只是防止明显的误操作。">
       <Input value={draft.blockedCommands.join(' ')} onChange={e => setDraft({ ...draft, blockedCommands: e.target.value.split(/\s+/).filter(Boolean) })} />
     </Field>

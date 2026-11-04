@@ -4,14 +4,20 @@
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
-  "exports": { ".": "./src/index.ts", "./src/testing": "./src/testing.ts" },
-  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./src/testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
   "dependencies": {
     "@ai-sdk/provider": "^4.0.35",
     "@super-agent/db": "workspace:*",
     "@super-agent/models": "workspace:*",
     "ai": "^7.0.162",
     "drizzle-orm": "^0.45.4",
+    "playwright-core": "1.63.0",
     "zod": "^4.6.7"
   }
 }

@@ -12,7 +12,7 @@ import { VERSION } from './config'
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { reportsOf, ticketView, transcript } from './views'
-import { DomainError, DEFAULT_EXECUTION, ROUTER_SESSION } from '@super-agent/core'
+import { DomainError, DEFAULT_EXECUTION, DEFAULT_REVIEW, ROUTER_SESSION, WATCHDOG_SESSION } from '@super-agent/core'
 import { kvSet } from '@super-agent/db'
 import { fireRoutine } from '@super-agent/sources'
 import { runDoctor } from './doctor'
@@ -64,6 +64,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
 
   const api = new Hono()
   api.use('*', requireToken(token))
+  const guard = <T>(fn: () => T): T => { try { return fn() } catch (error) { throw error instanceof HttpError ? error : new HttpError(400, 'invalid', (error as Error).message) } }
 
   api.get('/health', c => c.json({
     ok: true, version: VERSION, home: rt.config.home, pid: process.pid, uptimeMs: Date.now() - rt.startedAt,
@@ -170,12 +171,13 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
   api.get('/tickets', c => {
     const conversationId = c.req.query('conversation')
     const list = rt.engine.tickets(conversationId ? { threadId: rt.engine.threadOf(conversationId) } : {}).slice(0, 200)
-    return c.json({ tickets: list.map(t => ticketView(rt.engine, t)) })
+    return c.json({ tickets: list.map(t => ticketView(rt.engine, t, rt.reviewer.pending(t.id))) })
   })
   api.get('/tickets/:id', c => {
     const ticket = rt.engine.ticket(c.req.param('id'))
-    return c.json({ ticket: ticketView(rt.engine, ticket), reports: reportsOf(rt.store, ticket.id), transcript: transcript(rt.agents, ticket.sessionId),
-      running: rt.agents.isRunning(ticket.sessionId), jobs: rt.agents.jobs.running(ticket.sessionId) })
+    return c.json({ ticket: ticketView(rt.engine, ticket, rt.reviewer.pending(ticket.id)), reports: reportsOf(rt.store, ticket.id), transcript: transcript(rt.agents, ticket.sessionId),
+      running: rt.agents.isRunning(ticket.sessionId), jobs: rt.agents.jobs.running(ticket.sessionId), approvals: rt.reviewer.pending(ticket.id),
+      browser: rt.browser.hasPage(ticket.id), project: rt.engine.projectOf(ticket) ?? null })
   })
   api.post('/tickets/:id/stop', c => { rt.engine.stopTask(c.req.param('id'), 'person', '主人在界面上停止'); return c.json({ ok: true }) })
   api.post('/tickets/:id/retry', c => { rt.engine.retry(c.req.param('id')); return c.json({ ok: true }) })
@@ -200,7 +202,6 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
 
   // Routines
   const RoutineBody = z.object({ name: z.string().trim().min(1).max(60), schedule: z.string().trim().min(9).max(100), prompt: z.string().trim().min(1).max(4000), enabled: z.boolean().optional() })
-  const guard = <T>(fn: () => T) => { try { return fn() } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) } }
   api.get('/routines', c => c.json({ routines: rt.routines.list() }))
   api.post('/routines', async c => { const input = await body(c, RoutineBody); return c.json({ routine: guard(() => rt.routines.create(input)) }, 201) })
   api.patch('/routines/:id', async c => { const input = await body(c, RoutineBody.partial()); return c.json({ routine: guard(() => rt.routines.update(c.req.param('id'), input)) }) })
@@ -210,10 +211,78 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     return c.json({ ok: true, routine: rt.routines.get(c.req.param('id')) })
   })
 
+  // Review: rules, approvals, audit
+  const ReviewBody = z.object({
+    threshold: z.enum(['off', 'destructive', 'external']), mode: z.enum(['model', 'ask']), destructive: z.enum(['ask', 'review']),
+    rules: z.array(z.string().trim().min(1).max(500)).max(50),
+    allow: z.array(z.string().trim().min(1).max(300)).max(100), deny: z.array(z.string().trim().min(1).max(300)).max(100),
+  }).strict()
+  api.get('/settings/review', c => c.json({ settings: rt.reviewer.settings(), defaults: DEFAULT_REVIEW }))
+  api.put('/settings/review', async c => {
+    const settings = await body(c, ReviewBody)
+    for (const p of [...settings.allow, ...settings.deny]) { try { new RegExp(p) } catch { throw new HttpError(400, 'invalid', `不是合法的正则表达式：${p}`) } }
+    kvSet(rt.store, 'settings:review', settings)
+    return c.json({ settings: rt.reviewer.settings() })
+  })
+  api.get('/approvals', c => c.json({ approvals: rt.reviewer.pending() }))
+  api.post('/approvals/:id', async c => {
+    const { approve, note } = await body(c, z.object({ approve: z.boolean(), note: z.string().max(500).optional() }))
+    return c.json({ approval: guard(() => rt.reviewer.decide(c.req.param('id'), approve, note)) })
+  })
+  api.get('/audit', c => c.json({ entries: rt.reviewer.auditLog(Math.min(Number(c.req.query('limit')) || 200, 1000)) }))
+
+  // Memory
+  api.get('/memory', c => c.json({ user: rt.memory.read('user'), agent: rt.memory.read('agent'),
+    projects: rt.memory.projects().map(name => ({ name, content: rt.memory.read('project', name) })) }))
+  api.put('/memory', async c => {
+    const { layer, project, content } = await body(c, z.object({ layer: z.enum(['user', 'agent', 'project']), project: z.string().optional(), content: z.string().max(200_000) }))
+    guard(() => rt.memory.write(layer, content, project))
+    return c.json({ ok: true })
+  })
+
+  // Watchdog
+  api.get('/watchdog', c => c.json({ conversationId: rt.watchdog.conversation(), state: rt.agents.session(WATCHDOG_SESSION)?.state ?? 'idle' }))
+  api.post('/watchdog/run', c => c.json({ findings: rt.watchdog.tick() }))
+
+  // Browser handoff: the owner operates a task's tab from the web UI, then hands it back.
+  api.post('/browser/:ticket/handoff', c => {
+    const ticket = rt.engine.ticket(c.req.param('ticket'))
+    if (!rt.browser.hasPage(ticket.id)) throw new HttpError(409, 'conflict', '这个任务没有打开的浏览器页面')
+    rt.browser.handoffs.add(ticket.id)
+    return c.json({ ok: true })
+  })
+  api.get('/browser/:ticket/screenshot', async c => {
+    const ticket = rt.engine.ticket(c.req.param('ticket'))
+    if (!rt.browser.hasPage(ticket.id)) throw new HttpError(404, 'missing', '没有打开的页面')
+    const png = await rt.browser.screenshot(ticket.id)
+    return c.body(new Uint8Array(png), 200, { 'content-type': 'image/png', 'cache-control': 'no-store' })
+  })
+  const BrowserInput = z.discriminatedUnion('type', [
+    z.object({ type: z.literal('click'), x: z.number().min(0).max(4000), y: z.number().min(0).max(4000) }),
+    z.object({ type: z.literal('type'), text: z.string().max(2000) }),
+    z.object({ type: z.literal('key'), key: z.string().regex(/^[\w+]{1,30}$/) }),
+    z.object({ type: z.literal('goto'), url: z.string().url() }),
+    z.object({ type: z.literal('scroll'), dy: z.number().min(-5000).max(5000) }),
+  ])
+  api.post('/browser/:ticket/input', async c => {
+    const ticket = rt.engine.ticket(c.req.param('ticket'))
+    if (!rt.browser.handoffs.has(ticket.id)) throw new HttpError(409, 'conflict', '先点「开始接管」')
+    return c.json(await rt.browser.input(ticket.id, await body(c, BrowserInput)))
+  })
+  api.post('/browser/:ticket/return', async c => {
+    const ticket = rt.engine.ticket(c.req.param('ticket'))
+    rt.browser.handoffs.delete(ticket.id)
+    const { note } = await body(c, z.object({ note: z.string().max(1000).optional() }).optional().default({}))
+    const conversationId = rt.engine.conversationOfThread(ticket.threadId)
+    if (conversationId) rt.engine.receiveMessage(conversationId, note?.trim() || '我已经在浏览器里操作完了，交还给你，继续吧。', { replyTo: ticket.id })
+    return c.json({ ok: true })
+  })
+
   // Execution settings
   const ExecutionBody = z.object({
     maxWorkers: z.number().int().min(1).max(16), foregroundSeconds: z.number().min(1).max(600), timeoutMinutes: z.number().int().min(1).max(24 * 60),
     blockedCommands: z.array(z.string().trim().min(1).max(64)).max(100), workspaceRoots: z.array(z.string().trim().min(1).max(500)).max(50),
+    sandbox: z.object({ mode: z.enum(['off', 'external', 'all']), image: z.string().trim().min(1).max(200), network: z.enum(['bridge', 'none']) }).strict(),
   }).strict()
   api.get('/settings/execution', c => c.json({ settings: rt.engine.execution(), defaults: DEFAULT_EXECUTION }))
   api.put('/settings/execution', async c => {

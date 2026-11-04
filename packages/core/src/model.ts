@@ -4,7 +4,7 @@
  */
 export type ReportStatus = 'progress' | 'waiting' | 'ready' | 'blocked' | 'failed' | 'dropped'
 
-export interface HumanAction { question: string; options?: string[] }
+export interface HumanAction { question: string; options?: string[]; kind?: 'question' | 'handoff' }
 
 export interface Report { status: ReportStatus; summary: string; humanAction?: HumanAction; at: number }
 
@@ -38,9 +38,10 @@ export interface Ticket {
 }
 
 /** Mutually exclusive, first match wins (the table of dsh-superagent's 003 Execution, simplified). */
-export type TicketStage = 'person/answer' | 'person/blocked' | 'person/failed' | 'queued' | 'working' | 'idle' | 'ended'
+export type TicketStage = 'person/approve' | 'person/answer' | 'person/blocked' | 'person/failed' | 'queued' | 'working' | 'idle' | 'ended'
 
 export const STAGE_LABEL: Record<TicketStage, string> = {
+  'person/approve': '等你批准',
   'person/answer': '等你回答',
   'person/blocked': '受阻',
   'person/failed': '失败',

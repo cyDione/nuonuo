@@ -205,4 +205,34 @@ export const MIGRATIONS: readonly string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+  /* 4: M3 review (approvals waiting for the owner, audit log) */ `
+  CREATE TABLE approvals (
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    input TEXT NOT NULL,
+    risk TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    decided_by TEXT,
+    note TEXT,
+    created_at INTEGER NOT NULL,
+    decided_at INTEGER
+  );
+  CREATE INDEX approvals_pending ON approvals(status, created_at);
+  CREATE TABLE audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    ticket_id TEXT,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    tool TEXT,
+    input TEXT,
+    risk TEXT,
+    decision TEXT NOT NULL,
+    reason TEXT
+  );
+  CREATE INDEX audit_log_at ON audit_log(at);
+  `,
 ]

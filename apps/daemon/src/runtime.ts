@@ -1,6 +1,6 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
-import { AgentRuntime, Bus } from '@super-agent/agent-runtime'
-import { Engine, registerAgents } from '@super-agent/core'
+import { AgentRuntime, BrowserManager, Bus, findBrowser, workerEnv } from '@super-agent/agent-runtime'
+import { browserExtension, combineExtensions, Engine, Memory, memoryExtension, registerAgents, Reviewer, sandboxExtension, Watchdog } from '@super-agent/core'
 import { Effects, openStore, type Store } from '@super-agent/db'
 import { githubKind, Routines, routinesKind, SourceRegistry } from '@super-agent/sources'
 import { EnvAwareSecrets, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
@@ -20,6 +20,11 @@ export interface Runtime {
   engine: Engine
   sources: SourceRegistry
   routines: Routines
+  reviewer: Reviewer
+  memory: Memory
+  watchdog: Watchdog
+  browser: BrowserManager
+  browserPath?: string
   /** Starts agent turns: recovery of interrupted sessions and anything queued. */
   startAgents(): void
   startedAt: number
@@ -65,14 +70,42 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const engine = new Engine(store, agents, bus, { home: config.home, sources })
     sources.engine = engine
     agents.options.maxWorkers = engine.execution().maxWorkers
-    registerAgents(store, agents, engine, sources.agentExtensions())
+    const reviewer = new Reviewer(store, hub, engine, agents, bus)
+    reviewer.envFor = ticket => workerEnv({ SUPERAGENT_TICKET: ticket.id, SUPERAGENT_DIR: ticket.directory })
+    const memory = new Memory(config.home)
+    const browser = new BrowserManager(join(config.home, 'browser-profile'))
+    const watchdog = new Watchdog(store, agents, engine, {
+      systemProblems: () => [
+        ...effects.health().filter(h => h.failing > 0).map(h => `后台队列 ${h.kind} 连续失败：${h.lastError ?? ''}`),
+        ...sources.list().filter(s => s.enabled && s.health.status === 'error').map(s => `来源 ${s.title} 出错：${s.health.detail ?? ''}`),
+      ],
+    })
+    registerAgents(store, agents, engine, combineExtensions(
+      sources.agentExtensions(),
+      memoryExtension(memory, engine),
+      browserExtension(browser, engine, agents),
+      sandboxExtension(engine),
+      { gateShell: (ticket, sessionId, command, cwd) => reviewer.gateShell(ticket, sessionId, command, cwd) },
+    ))
+    watchdog.register()
+    // A task that ended gives its browser tab back.
+    bus.on(event => {
+      if (event.type !== 'ticket.updated') return
+      try { if (engine.ticket(String(event.ticketId)).ended) void browser.closePage(String(event.ticketId)) } catch { /* deleted */ }
+    })
+    let watchdogTimer: NodeJS.Timeout | undefined
+    const browserPath = await findBrowser()
     return {
-      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, startedAt: Date.now(),
+      ...(browserPath ? { browserPath } : {}),
+      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, watchdog, browser, startedAt: Date.now(),
       startAgents() {
         agents.recover(session => engine.recoveryNote(session.id, session.role))
         sources.startAll()
+        watchdogTimer = setInterval(() => { try { if (hub.resolve('watchdog')) watchdog.tick() } catch (e) { console.error('[watchdog]', e) } }, 60_000)
       },
       async close() {
+        clearInterval(watchdogTimer)
+        await browser.close()
         await sources.stopAll()
         await agents.shutdown()
         await effects.drain()

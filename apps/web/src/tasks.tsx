@@ -1,6 +1,6 @@
 /** Task cards in the timeline, the task drawer with the worker's transcript, and the panel of what waits for the owner. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Brain, CheckCircle2, ChevronDown, ChevronRight, CircleDot, Clock, FolderOpen, Hand, Loader2, MessageCircleQuestion, OctagonX, RotateCcw, Square, Terminal, X } from 'lucide-react'
+import { AlertTriangle, Brain, Globe, ShieldAlert, ShieldCheck, ShieldX, CheckCircle2, ChevronDown, ChevronRight, CircleDot, Clock, FolderOpen, Hand, Loader2, MessageCircleQuestion, OctagonX, RotateCcw, Square, Terminal, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -8,17 +8,19 @@ import { api, type Stage, type Ticket, type TicketDetail, type TranscriptItem } 
 import { openTask, useLive, useOpenTask } from './live'
 import { go } from './route'
 import { Button, cx } from './ui'
+import { HandoffModal } from './handoff'
 
 export const useTickets = () => useQuery({ queryKey: ['tickets'], queryFn: () => api.get<{ tickets: Ticket[] }>('/tickets') })
 
 const STAGE_TONE: Record<Stage, string> = {
-  'person/answer': 'text-warn', 'person/blocked': 'text-warn', 'person/failed': 'text-danger',
+  'person/approve': 'text-warn', 'person/answer': 'text-warn', 'person/blocked': 'text-warn', 'person/failed': 'text-danger',
   queued: 'text-muted', working: 'text-accent', idle: 'text-muted', ended: 'text-faint',
 }
 
 export function StageIcon({ t, size = 14 }: { t: Ticket; size?: number }) {
   const cls = cx('shrink-0', STAGE_TONE[t.stage])
   if (t.stage === 'working') return <Loader2 size={size} className={cx(cls, 'animate-spin')} />
+  if (t.stage === 'person/approve') return <ShieldAlert size={size} className={cls} />
   if (t.stage === 'person/answer') return <MessageCircleQuestion size={size} className={cls} />
   if (t.stage === 'person/blocked') return <Hand size={size} className={cls} />
   if (t.stage === 'person/failed') return <AlertTriangle size={size} className={cls} />
@@ -37,6 +39,9 @@ export function TaskCard({ ticketId, onAnswer }: { ticketId: string; onAnswer(te
   const [expanded, setExpanded] = useState(false)
   const stop = useMutation({ mutationFn: () => api.post(`/tickets/${ticketId}/stop`), onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }) })
   const retry = useMutation({ mutationFn: () => api.post(`/tickets/${ticketId}/retry`), onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }) })
+  const decide = useMutation({ mutationFn: (v: { id: string; approve: boolean; note?: string }) => api.post(`/approvals/${v.id}`, { approve: v.approve, ...(v.note ? { note: v.note } : {}) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }) })
+  const [handoff, setHandoff] = useState<string | null>(null)
   if (!t) return null
   const report = t.latestReport
   const showReport = report && report.status !== 'progress' && report.summary
@@ -48,7 +53,21 @@ export function TaskCard({ ticketId, onAnswer }: { ticketId: string; onAnswer(te
       <span className={cx('text-xs', STAGE_TONE[t.stage])}>{t.stage === 'ended' ? endedLabel(t) : t.stageLabel}</span>
     </div>
     {liveLine && <div className="truncate border-t border-line px-4 py-2 font-mono text-xs text-faint">{liveLine}</div>}
-    {t.attention && <div className="border-t border-line px-4 py-3">
+    {t.approvals.map(a => <div key={a.id} className="border-t border-line px-4 py-3">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-warn"><ShieldAlert size={13} />需要你批准{a.risk === 'destructive' ? '（高风险）' : ''}</div>
+      <pre className="mt-1.5 overflow-x-auto rounded-lg bg-sunken px-3 py-2 font-mono text-xs whitespace-pre-wrap">{a.command}</pre>
+      <div className="mt-1.5 text-xs text-muted">{a.reason}</div>
+      <div className="mt-2 flex gap-1.5">
+        <Button size="sm" variant="primary" disabled={decide.isPending} onClick={() => decide.mutate({ id: a.id, approve: true })}><ShieldCheck size={13} />批准并执行</Button>
+        <Button size="sm" variant="danger" disabled={decide.isPending} onClick={() => { const note = prompt('拒绝的理由（会告诉任务，可留空）') ?? undefined; decide.mutate({ id: a.id, approve: false, ...(note ? { note } : {}) }) }}><ShieldX size={13} />拒绝</Button>
+      </div>
+    </div>)}
+    {t.attention?.kind === 'handoff' && <div className="border-t border-line px-4 py-3">
+      <div className="text-sm">{t.attention.question}</div>
+      <Button size="sm" variant="primary" className="mt-2" onClick={() => setHandoff(t.attention!.question)}><Globe size={13} />接管浏览器</Button>
+    </div>}
+    {handoff && <HandoffModal ticketId={t.id} reason={handoff} onClose={() => setHandoff(null)} />}
+    {t.attention && t.attention.kind !== 'handoff' && <div className="border-t border-line px-4 py-3">
       <div className="text-sm">{t.attention.question}</div>
       {t.attention.options?.length ? <div className="mt-2 flex flex-wrap gap-1.5">
         {t.attention.options.map(o => <Button key={o} size="sm" onClick={() => onAnswer(o, t.id)}>{o}</Button>)}

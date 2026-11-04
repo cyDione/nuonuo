@@ -15,7 +15,14 @@
 >   - **未读与桌面通知**。
 >   - **来源插件协议**：后续的插件（例如 Gmail）都按这套协议接入。
 >
-> 设计和实现细节见 [docs/01-m1-implementation.md](docs/01-m1-implementation.md) 和 [docs/02-m2-implementation.md](docs/02-m2-implementation.md)。审核与记忆会在 M3 加入。
+> - **M3 新增**：
+>   - **审核层**：规则加审核模型；高风险操作一律问你；你批准后命令才执行；所有决定都记入审计。
+>   - **三层记忆**：用户 / 智能体 / 项目，存成可直接编辑的 Markdown 文件。
+>   - **Watchdog**：发现卡住、空转的任务会提醒或重启；你也可以在它的专属对话里问它。
+>   - **浏览器**：智能体用持久化配置的浏览器；遇到需要登录的网页，你在网页里的远程画面上接管，完成后交还。
+>   - **Docker 沙箱**：可选，开启后任务命令在容器里执行。
+>
+> 设计和实现细节见 [docs/01-m1](docs/01-m1-implementation.md)、[docs/02-m2](docs/02-m2-implementation.md)、[docs/03-m3](docs/03-m3-implementation.md)。
 
 ## 快速开始
 
@@ -94,7 +101,7 @@ docs/           调研与设计文档
 
 - ~~M1~~：主 Agent + Worker 双层架构、异步 job、任务卡片、「待你处理」（已完成）
 - ~~M2~~：GitHub 插件、定时任务（Routine）、Agent 主动发起对话（已完成）
-- **M3**：Reviewer 审核与规则、三层记忆、Watchdog、浏览器接管、Docker 沙箱
+- ~~M3~~：Reviewer 审核与规则、三层记忆、Watchdog、浏览器接管、Docker 沙箱（已完成）
 - **M4**：插件 SDK、MCP、Gmail / Telegram、Electron
 
 ## 许可
