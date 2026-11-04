@@ -1,0 +1,23 @@
+{
+  "name": "super-agent",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @super-agent/daemon --filter @super-agent/web dev",
+    "start": "pnpm --filter @super-agent/daemon start",
+    "build": "pnpm --filter @super-agent/web build && pnpm --filter @super-agent/daemon build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild", "@napi-rs/keyring"]
+  }
+}

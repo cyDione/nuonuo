@@ -1,0 +1,38 @@
+{
+  "name": "@super-agent/daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "superagent": "./dist/cli.mjs"
+  },
+  "scripts": {
+    "dev": "SUPERAGENT_HOME=${SUPERAGENT_HOME:-../../.superagent-dev} tsx watch src/cli.ts start --no-open --dev",
+    "start": "tsx src/cli.ts start",
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.96",
+    "@ai-sdk/deepseek": "^3.0.79",
+    "@ai-sdk/google": "^4.0.111",
+    "@ai-sdk/openai": "^4.0.108",
+    "@ai-sdk/openai-compatible": "^3.0.84",
+    "@ai-sdk/provider": "^4.0.35",
+    "@hono/node-server": "^2.1.6",
+    "@napi-rs/keyring": "^2.1.2",
+    "@super-agent/db": "workspace:*",
+    "@super-agent/models": "workspace:*",
+    "ai": "^7.0.162",
+    "better-sqlite3": "^13.0.3",
+    "commander": "^15.0.0",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.16",
+    "nanoid": "^6.0.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "tsdown": "^0.23.5",
+    "tsx": "^4.23.15"
+  }
+}
