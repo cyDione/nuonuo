@@ -25,6 +25,7 @@
     "@super-agent/core": "workspace:*",
     "@super-agent/db": "workspace:*",
     "@super-agent/models": "workspace:*",
+    "@super-agent/sources": "workspace:*",
     "ai": "^7.0.162",
     "better-sqlite3": "^13.0.3",
     "commander": "^15.0.0",

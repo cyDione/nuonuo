@@ -36,7 +36,8 @@ export interface ModelRef { providerId: string; model: string }
 export interface RoleConfig { chain: ModelRef[]; enabled: boolean; reasoning?: string; temperature?: number; maxOutputTokens?: number; dailyTokenLimit?: number; dailyCostLimitUsd?: number }
 export interface Resolved { source: RoleId; model: ModelRef; today: { tokens: number; costUsd: number } }
 export interface RolesResponse { configs: Partial<Record<RoleId, RoleConfig>>; resolved: Record<RoleId, Resolved | null> }
-export interface Conversation { id: string; title: string; pinned: boolean; archived: boolean; createdAt: number; updatedAt: number; lastMessage?: string | null }
+export interface Conversation { id: string; title: string; pinned: boolean; archived: boolean; createdAt: number; updatedAt: number; lastMessage?: string | null
+  source: string; origin: 'owner' | 'agent'; threadId: string | null; meta: { url?: string; [k: string]: unknown }; unread?: number; lastReadAt?: number }
 export interface Message { id: string; conversationId: string; role: 'user' | 'assistant' | 'system' | 'event'; content: string; meta: Record<string, any>; ticketId: string | null; triggerId: string | null; createdAt: number }
 export interface UsageRow { role: RoleId; providerId: string; model: string; calls: number; failures: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number; costUsd: number | null }
 export interface Check { id: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string; fix?: string }
@@ -45,7 +46,7 @@ export interface Health { ok: boolean; version: string; home: string; pid: numbe
 export type Stage = 'person/answer' | 'person/blocked' | 'person/failed' | 'queued' | 'working' | 'idle' | 'ended'
 export interface Report { status: 'progress' | 'waiting' | 'ready' | 'blocked' | 'failed' | 'dropped'; summary: string; humanAction?: { question: string; options?: string[] }; at: number }
 export interface Ticket {
-  id: string; title: string; name: string; note: string | null; stage: Stage; stageLabel: string; conversationId: string | null; directory: string
+  id: string; title: string; name: string; note: string | null; stage: Stage; stageLabel: string; conversationId: string | null; source: string; directory: string
   latestReport: Report | null; attention: { question: string; options?: string[]; at: number } | null
   ended: { at: number; by: string; outcome: 'completed' | 'stopped' | 'dropped'; reason?: string } | null; createdAt: number; updatedAt: number
 }
@@ -66,3 +67,12 @@ export type ServerEvent =
   | { type: 'session.state'; role: string; sessionId: string; ticketId?: string | null; state: string }
   | { type: 'worker.part'; ticketId: string; part: { kind: string; delta?: string; tool?: string; id?: string } }
   | { type: 'conversation.updated'; conversationId: string }
+
+export type FieldSpec =
+  | { key: string; label: string; hint?: string; advanced?: true; type: 'switch' }
+  | { key: string; label: string; hint?: string; advanced?: true; type: 'number'; min: number; max: number }
+  | { key: string; label: string; hint?: string; advanced?: true; type: 'text' | 'list'; placeholder?: string }
+  | { key: string; label: string; hint?: string; advanced?: true; type: 'select'; options: { value: string; label: string }[] }
+export interface SourceInfo { id: string; title: string; description: string; fields: FieldSpec[]; enabled: boolean; config: Record<string, any>
+  health: { status: 'off' | 'starting' | 'ok' | 'error'; detail?: string; at: number }; facts: Record<string, string> }
+export interface Routine { id: string; name: string; schedule: string; prompt: string; enabled: boolean; conversationId: string | null; lastFiredAt: number | null; next: number | null }

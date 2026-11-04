@@ -1,16 +1,29 @@
 /** The router and worker agent definitions: tool sets (enforced by code, not prompt) and how their inbox items read. */
-import { fsTools, recallTool, shellTools, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type InboxItem } from '@super-agent/agent-runtime'
+import { fsTools, recallTool, shellTools, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type InboxItem, type TurnContext } from '@super-agent/agent-runtime'
 import { schema, type Store } from '@super-agent/db'
-import { tool } from 'ai'
+import { tool, type ToolSet } from 'ai'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { z } from 'zod'
 import { clip, DomainError, Engine, ROUTER_SESSION } from './engine'
-import { conversationOf, STAGE_LABEL, webchatThread } from './model'
+import { sourceOfThread, STAGE_LABEL, type Ticket } from './model'
 import { ROUTER_PROMPT, WORKER_PROMPT } from './prompts'
 
 const CONTEXT_MESSAGES = 6
 
-export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engine): { reportedThisTurn: Set<string> } {
+/** What source plugins and routines add to the agents. */
+export interface AgentExtensions {
+  routerTools?(): ToolSet
+  /** Extra router prompt text (for example, how routines work). */
+  routerPrompt?(): string
+  workerTools?(ticket: Ticket, ctx: TurnContext): ToolSet
+  /** Prompt sections for a worker whose task touches a source (e.g. how to use GitHub). */
+  workerPrompt?(ticket: Ticket): string
+  workerEnv?(ticket: Ticket): Record<string, string>
+  /** One line describing an external thread for cards (repo, number, state, url). */
+  threadInfo?(threadId: string): string | undefined
+}
+
+export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engine, ext: AgentExtensions = {}): { reportedThisTurn: Set<string> } {
   const reportedThisTurn = new Set<string>()
   runtime.createSession('router', 'router', { id: ROUTER_SESSION })
 
@@ -22,20 +35,29 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       .orderBy(desc(schema.messages.createdAt)).limit(n + 1).all().filter(m => before === undefined || m.createdAt < before).slice(0, n).reverse()
     return rows.map(m => {
       if (m.role === 'event') return `  [task card ${m.ticketId}: ${m.content}]`
-      const who = m.role === 'user' ? 'owner' : 'agent'
+      const actor = (m.meta as { actor?: string; source?: string }).actor
+      const who = m.role === 'user' ? (actor && actor !== 'owner' ? `${actor} (${(m.meta as { source?: string }).source})` : 'owner') : 'agent'
       return `  ${who}${m.triggerId ? ` (${m.triggerId})` : ''}: ${clip(m.content.replace(/\s+/g, ' '), 300)}`
     }).join('\n')
   }
 
-  const tasksIn = (conversationId: string) => engine.tickets({ threadId: webchatThread(conversationId) }).slice(0, 8)
-    .map(t => `  - ${t.id} "${t.title}" ${t.ended ? `ended:${t.ended.outcome}` : engine.stage(t)}`).join('\n')
+  const tasksIn = (conversationId: string) => {
+    const threadId = engine.threadOf(conversationId)
+    const own = engine.tickets({ threadId })
+    const subscribed = engine.subscribers(threadId).filter(t => !own.some(o => o.id === t.id))
+    return [...own, ...subscribed].slice(0, 8).map(t => `  - ${t.id} "${t.title}" ${t.ended ? `ended:${t.ended.outcome}` : engine.stage(t)}`).join('\n')
+  }
 
   const triggerCard = (triggerId: string, tag = 'message', extra = '') => {
     const trigger = store.db.select().from(schema.triggers).where(eq(schema.triggers.id, triggerId)).get()
     if (!trigger) return `<${tag} trigger_id="${triggerId}">（已不存在）</${tag}>`
-    const cnv = conversationOf(trigger.threadId) ?? ''
+    const cnv = engine.conversationOfThread(trigger.threadId) ?? ''
     const tasks = cnv ? tasksIn(cnv) : ''
-    return [`<${tag} trigger_id="${trigger.id}" conversation_id="${cnv}" conversation="${conversationTitle(cnv)}" at="${new Date(trigger.at).toISOString()}"${extra}>`,
+    const external = trigger.source !== 'webchat'
+    const url = (trigger.meta as { url?: string }).url
+    const info = external ? ext.threadInfo?.(trigger.threadId) : undefined
+    return [`<${tag} trigger_id="${trigger.id}" source="${trigger.source}"${external ? ` from="${trigger.actor}"` : ''} conversation_id="${cnv}" conversation="${conversationTitle(cnv)}" at="${new Date(trigger.at).toISOString()}"${url ? ` url="${url}"` : ''}${extra}>`,
+      info ? `thread: ${info}` : '',
       cnv ? `recent context:\n${recent(cnv, trigger.at) || '  （新对话）'}` : '',
       tasks ? `tasks in this conversation:\n${tasks}` : '',
       `text:\n${trigger.text}`, `</${tag}>`].filter(Boolean).join('\n')
@@ -44,7 +66,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
   runtime.registerResolver('tkt', ref => { try { return engine.describeTicket(engine.ticket(ref)) } catch { return undefined } })
   runtime.registerResolver('trg', ref => {
     const t = store.db.select().from(schema.triggers).where(eq(schema.triggers.id, ref)).get()
-    return t && `<trigger id="${t.id}" conversation="${conversationOf(t.threadId)}" at="${new Date(t.at).toISOString()}" disposition='${JSON.stringify(t.disposition)}'>\n${t.text}\n</trigger>`
+    return t && `<trigger id="${t.id}" source="${t.source}" from="${t.actor}" conversation="${engine.conversationOfThread(t.threadId) ?? ''}" at="${new Date(t.at).toISOString()}" disposition='${JSON.stringify(t.disposition)}'>\n${t.text}\n</trigger>`
   })
   runtime.registerResolver('cnv', (ref, page = 1) => {
     const rows = store.db.select().from(schema.messages).where(eq(schema.messages.conversationId, ref)).orderBy(asc(schema.messages.createdAt)).all()
@@ -55,7 +77,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     // Page 1 is the most recent.
     const slice = rows.slice(Math.max(0, rows.length - p * per), rows.length - (p - 1) * per)
     return `<conversation id="${ref}" title="${conversationTitle(ref)}" page="${p}/${pages}">\n${slice.map(m =>
-      m.role === 'event' ? `[task card ${m.ticketId}]` : `${m.role === 'user' ? 'owner' : 'agent'}${m.triggerId ? ` (${m.triggerId})` : ''}: ${clip(m.content, 2_000)}`).join('\n')}\n</conversation>`
+      m.role === 'event' ? `[task card ${m.ticketId}]` : `${m.role === 'user' ? ((m.meta as { actor?: string }).actor ?? 'owner') : 'agent'}${m.triggerId ? ` (${m.triggerId})` : ''}: ${clip(m.content, 2_000)}`).join('\n')}\n</conversation>`
   })
 
   // ── Router ────────────────────────────────────────────────────────────────
@@ -63,20 +85,30 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     role: 'router',
     pool: 'router',
     maxSteps: 30,
-    system: () => `${ROUTER_PROMPT}\n\nNow: ${new Date().toString()}`,
+    system: () => `${ROUTER_PROMPT}${ext.routerPrompt ? `\n\n${ext.routerPrompt()}` : ''}\n\nNow: ${new Date().toString()}`,
     formatInbox: items => items.map(item => renderRouterItem(item)).join('\n\n'),
     tools: () => ({
       reply: tool({
-        description: 'Post a message to the owner in a conversation. The only way to talk to the owner.',
-        inputSchema: z.object({ conversation_id: z.string(), text: z.string().min(1), ticket_id: z.string().optional() }),
-        execute: async ({ conversation_id, text, ticket_id }, { toolCallId }) =>
-          ({ ok: true, message_id: engine.reply({ conversationId: conversation_id, text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}) }) }),
+        description: 'Post a message in a conversation — the only way to speak. It also goes out to the source (e.g. a GitHub comment) when reply_to is a message from that source, or ticket_id is a task that came from it; otherwise it stays in the web.',
+        inputSchema: z.object({ conversation_id: z.string(), text: z.string().min(1), reply_to: z.string().optional().describe('trigger_id of the message you answer'),
+          ticket_id: z.string().optional().describe('The task this message is about') }),
+        execute: async ({ conversation_id, text, ticket_id, reply_to }, { toolCallId }) =>
+          ({ ok: true, message_id: engine.reply({ conversationId: conversation_id, text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}) }) }),
+      }),
+      new_conversation: tool({
+        description: 'Open a new conversation on your own initiative and post the first message (a notification, a heads-up about something you noticed). Use sparingly.',
+        inputSchema: z.object({ title: z.string().min(1).max(40), text: z.string().min(1) }),
+        execute: async ({ title, text }, { toolCallId }) => {
+          const id = engine.openConversation(title)
+          engine.reply({ conversationId: id, text, callId: toolCallId })
+          return { ok: true, conversation_id: id }
+        },
       }),
       start_task: tool({
         description: 'Start a task: a worker with shell, file and web tools works on the owner\'s original message(s) in its own session. Returns the task id.',
         inputSchema: z.object({
-          conversation_id: z.string(),
-          trigger_ids: z.array(z.string()).min(1).describe('The owner message(s) this task is for'),
+          conversation_id: z.string().optional(),
+          trigger_ids: z.array(z.string()).min(1).describe('The message(s) this task is for, all from one conversation/thread'),
           title: z.string().min(1).max(40).describe("Short title in the owner's language"),
           name: z.string().optional().describe('Optional ascii kebab-case name for the working directory, e.g. "weekly-report"'),
           ack: z.string().optional().describe('One sentence to the owner naming what will be done'),
@@ -84,7 +116,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
           directory: z.string().optional().describe('An existing project directory, only if the owner named one'),
         }),
         execute: async (input, { toolCallId }) => {
-          const ticket = engine.startTask({ conversationId: input.conversation_id, triggerIds: input.trigger_ids, title: input.title, callId: toolCallId,
+          const ticket = engine.startTask({ ...(input.conversation_id ? { conversationId: input.conversation_id } : {}), triggerIds: input.trigger_ids, title: input.title, callId: toolCallId,
             ...(input.name ? { name: input.name } : {}), ...(input.ack ? { ack: input.ack } : {}), ...(input.note ? { note: input.note } : {}),
             ...(input.directory ? { directory: input.directory } : {}) })
           return { ok: true, ticket_id: ticket.id, directory: ticket.directory }
@@ -110,10 +142,11 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         inputSchema: z.object({ include_ended: z.boolean().optional() }),
         execute: async ({ include_ended }) => {
           const list = engine.tickets(include_ended ? {} : { open: true }).slice(0, 30)
-          return list.length ? list.map(t => `${t.id} "${t.title}" ${engine.stage(t)} conversation=${conversationOf(t.threadId)}`).join('\n') : '（没有任务）'
+          return list.length ? list.map(t => `${t.id} "${t.title}" ${engine.stage(t)} conversation=${engine.conversationOfThread(t.threadId) ?? ''}`).join('\n') : '（没有任务）'
         },
       }),
       ...recallTool(runtime),
+      ...(ext.routerTools?.() ?? {}),
     }),
     onTurnError: (_s, error) => console.error('[router] turn failed:', error instanceof Error ? error.message : error),
   }
@@ -129,7 +162,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         try { t = engine.ticket(p.ticketId) } catch { return `<report ticket_id="${p.ticketId}">（任务已删除）</report>` }
         // A question the owner already answered (from the task card) must not be forwarded again.
         const answered = p.humanAction && !t.attention
-        return [`<report ticket_id="${t.id}" title="${t.title}" status="${p.status}" conversation_id="${conversationOf(t.threadId)}">`,
+        return [`<report ticket_id="${t.id}" title="${t.title}" status="${p.status}" conversation_id="${engine.conversationOfThread(t.threadId) ?? ''}" origin="${sourceOfThread(t.threadId)}">`,
           clip(p.summary, 3_000), p.humanAction ? `human_action: ${JSON.stringify(p.humanAction)}${answered ? ' (already answered by the owner — do not forward it)' : ''}` : '', '</report>'].filter(Boolean).join('\n')
       }
       case 'ticket-ended': return `<task_ended ticket_id="${p.ticketId}" outcome="${p.outcome}" by="${p.by}" />`
@@ -145,7 +178,8 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     maxSteps: 150,
     system: session => {
       const ticket = engine.ticket(session.ticketId!)
-      return `${WORKER_PROMPT}\n\n## Environment\n- Working directory: ${ticket.directory}\n- Task id: ${ticket.id}\n- OS: ${process.platform}\n- Now: ${new Date().toString()}`
+      const extra = ext.workerPrompt?.(ticket)
+      return `${WORKER_PROMPT}${extra ? `\n\n${extra}` : ''}\n\n## Environment\n- Working directory: ${ticket.directory}\n- Task id: ${ticket.id}\n- OS: ${process.platform}\n- Now: ${new Date().toString()}`
     },
     formatInbox: (items, session) => items.map(item => renderWorkerItem(item, session.ticketId!)).join('\n\n'),
     tools: ctx => {
@@ -155,11 +189,12 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         ...fsTools(ticket.directory, runtime.blobs),
         ...shellTools(runtime.jobs, runtime.blobs, {
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
-          env: workerEnv({ SUPERAGENT_TICKET: ticket.id, SUPERAGENT_DIR: ticket.directory }),
+          env: workerEnv({ SUPERAGENT_TICKET: ticket.id, SUPERAGENT_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
           foregroundMs: exec.foregroundSeconds * 1000, timeoutMs: exec.timeoutMinutes * 60_000,
         }),
         ...webTools(runtime.blobs),
         ...recallTool(runtime),
+        ...(ext.workerTools?.(ticket, ctx) ?? {}),
         report: tool({
           description: 'Report this task\'s state to the main agent. Required once at the end of every turn.',
           inputSchema: z.object({
@@ -198,11 +233,13 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         const t = engine.ticket(ticketId)
         if (p.reason === 'start') {
           const origin = store.db.select().from(schema.triggers).where(inArray(schema.triggers.id, t.origin.triggerIds)).orderBy(asc(schema.triggers.at)).all()
-          const cnv = conversationOf(t.threadId) ?? ''
-          return [`<assignment task_id="${t.id}" title="${t.title}" conversation_id="${cnv}">`,
+          const cnv = engine.conversationOfThread(t.threadId) ?? ''
+          const info = sourceOfThread(t.threadId) !== 'webchat' ? ext.threadInfo?.(t.threadId) : undefined
+          return [`<assignment task_id="${t.id}" title="${t.title}" conversation_id="${cnv}" source="${sourceOfThread(t.threadId)}">`,
+            info ? `thread: ${info}` : '',
             t.note ? `routing note: ${t.note}` : '',
             cnv ? `conversation context before the request:\n${recent(cnv, origin[0]?.at) || '  （无）'}` : '',
-            `original request from the owner:\n${origin.map(o => `(${o.id}) ${o.text}`).join('\n\n')}`,
+            `original request from the owner:\n${origin.map(o => `(${o.id}${o.source !== 'webchat' ? `, ${o.source} @${o.actor}` : ''}) ${o.text}`).join('\n\n')}`,
             '</assignment>'].filter(Boolean).join('\n')
         }
         if (p.reason === 'resume') return `<resume task_id="${t.id}">任务因主人的新消息恢复（见下一条）。</resume>`
@@ -211,6 +248,10 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       }
       case 'trigger': {
         const trigger = store.db.select().from(schema.triggers).where(eq(schema.triggers.id, p.triggerId)).get()
+        if (trigger && (trigger.source !== 'webchat' || trigger.actor !== 'owner')) {
+          const url = (trigger.meta as { url?: string }).url
+          return `<message trigger_id="${p.triggerId}" source="${trigger.source}" from="${trigger.actor}"${trigger.human ? '' : ' bot="true"'}${url ? ` url="${url}"` : ''}${p.note ? ` routing_note="${String(p.note).replace(/"/g, "'")}"` : ''}>\n${trigger.text}\n</message>`
+        }
         return `<owner_message trigger_id="${p.triggerId}"${p.note ? ` routing_note="${String(p.note).replace(/"/g, "'")}"` : ''}>\n${trigger?.text ?? ''}\n</owner_message>`
       }
       case 'note': return `<note from="main agent">${p.text}</note>`

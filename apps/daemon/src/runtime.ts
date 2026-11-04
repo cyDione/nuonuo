@@ -2,6 +2,7 @@
 import { AgentRuntime, Bus } from '@super-agent/agent-runtime'
 import { Engine, registerAgents } from '@super-agent/core'
 import { Effects, openStore, type Store } from '@super-agent/db'
+import { githubKind, Routines, routinesKind, SourceRegistry } from '@super-agent/sources'
 import { EnvAwareSecrets, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -17,6 +18,8 @@ export interface Runtime {
   bus: Bus
   agents: AgentRuntime
   engine: Engine
+  sources: SourceRegistry
+  routines: Routines
   /** Starts agent turns: recovery of interrupted sessions and anything queued. */
   startAgents(): void
   startedAt: number
@@ -51,17 +54,26 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const { store: base, note } = await openSecretStore(config.home)
     const secrets = new EnvAwareSecrets(base)
     const hub = new ModelHub(store, secrets)
-    bootstrapModels(hub)
+    await bootstrapModels(hub)
     const effects = new Effects(store)
     const bus = new Bus()
     const agents = new AgentRuntime(store, hub, bus)
-    const engine = new Engine(store, agents, bus, { home: config.home })
+    const sources = new SourceRegistry(store, effects)
+    const routines = new Routines(store)
+    sources.register(githubKind())
+    sources.register(routinesKind(routines))
+    const engine = new Engine(store, agents, bus, { home: config.home, sources })
+    sources.engine = engine
     agents.options.maxWorkers = engine.execution().maxWorkers
-    registerAgents(store, agents, engine)
+    registerAgents(store, agents, engine, sources.agentExtensions())
     return {
-      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, startedAt: Date.now(),
-      startAgents() { agents.recover(session => engine.recoveryNote(session.id, session.role)) },
+      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, startedAt: Date.now(),
+      startAgents() {
+        agents.recover(session => engine.recoveryNote(session.id, session.role))
+        sources.startAll()
+      },
       async close() {
+        await sources.stopAll()
         await agents.shutdown()
         await effects.drain()
         store.close()
@@ -76,10 +88,13 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
 }
 
 /** Registers providers for `*_API_KEY` variables and, while no layer is configured, applies the DeepSeek preset. */
-export function bootstrapModels(hub: ModelHub): void {
+export async function bootstrapModels(hub: ModelHub): Promise<void> {
   hub.syncEnvProviders()
   const deepseek = hub.listProviders().find(p => p.kind === 'deepseek' && p.hasKey)
-  if (deepseek && hub.applyPreset('deepseek', deepseek.id, { onlyIfEmpty: true })) {
+  if (!deepseek || Object.values(hub.roleConfigs()).some(c => c.chain.length > 0)) return
+  // Gateways rename models; map the preset onto what this endpoint lists (best effort, offline keeps the official ids).
+  const available = await hub.listModels(deepseek.id).catch(() => undefined)
+  if (hub.applyPreset('deepseek', deepseek.id, { onlyIfEmpty: true, ...(available ? { available } : {}) })) {
     console.log(`已为 ${deepseek.name}${deepseek.keyEnv ? `（${deepseek.keyEnv}）` : ''} 应用 DeepSeek 推荐分层配置`)
   }
 }

@@ -57,6 +57,7 @@ export function useLiveEvents() {
     const handle = (e: ServerEvent) => {
       switch (e.type) {
         case 'message.created':
+          void maybeNotify(e.conversationId, e.messageId)
           void qc.invalidateQueries({ queryKey: ['messages', e.conversationId] }).then(() => clearDraftAfterMessage(e.conversationId))
           soon('conversations', () => qc.invalidateQueries({ queryKey: ['conversations'] }))
           break
@@ -106,4 +107,28 @@ const uiListeners = new Set<() => void>()
 export function openTask(id: string | null) { openTaskId = id; for (const l of uiListeners) l() }
 export function useOpenTask(): string | null {
   return useSyncExternalStore(l => { uiListeners.add(l); return () => uiListeners.delete(l) }, () => openTaskId)
+}
+
+// ── Desktop notifications for what the agent says while the tab is hidden ──
+export const notificationsEnabled = () => { try { return localStorage.getItem('sa-notify') === '1' } catch { return false } }
+export async function setNotifications(on: boolean): Promise<boolean> {
+  if (on && typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
+    if ((await Notification.requestPermission()) !== 'granted') return false
+  }
+  try { localStorage.setItem('sa-notify', on ? '1' : '0') } catch { /* private mode */ }
+  return on
+}
+const notified = new Set<string>()
+async function maybeNotify(conversationId: string, messageId: string) {
+  if (!notificationsEnabled() || document.visibilityState === 'visible' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  if (notified.has(messageId)) return
+  notified.add(messageId)
+  try {
+    const res = await fetch(`/api/messages/${messageId}`, { credentials: 'same-origin' })
+    const { message } = await res.json() as { message: { role: string; content: string; meta: Record<string, any> } }
+    const fromOwner = message.role === 'user' && (message.meta.source ?? 'webchat') === 'webchat'
+    if (fromOwner || message.role === 'event' || message.meta.delivery) return
+    const n = new Notification(message.role === 'assistant' ? 'Super-agent' : `${message.meta.actor ?? message.meta.source}`, { body: message.content.slice(0, 160), tag: conversationId })
+    n.onclick = () => { window.focus(); location.hash = `/c/${conversationId}`; n.close() }
+  } catch { /* best effort */ }
 }

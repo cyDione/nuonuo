@@ -8,7 +8,7 @@ import { kvGet, newId, schema, type Store } from '@super-agent/db'
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import { mkdirSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
-import { conversationOf, webchatThread, type Attention, type Ended, type HumanAction, type Mandate, type Report, type ReportStatus, type Ticket, type TicketStage } from './model'
+import { sourceOfThread, webchatThread, type Attention, type Ended, type HumanAction, type IncomingTrigger, type Mandate, type Report, type ReportStatus, type SourcePort, type Ticket, type TicketStage } from './model'
 
 export const ROUTER_SESSION = 'ses_router'
 
@@ -29,7 +29,7 @@ export const DEFAULT_EXECUTION: ExecutionSettings = {
   maxWorkers: 3, foregroundSeconds: 5, timeoutMinutes: 30, blockedCommands: ['sudo', 'su', 'shutdown', 'reboot', 'mkfs'], workspaceRoots: [],
 }
 
-export interface EngineOptions { home: string; now?: () => number }
+export interface EngineOptions { home: string; now?: () => number; sources?: SourcePort }
 
 type Row = typeof schema.tickets.$inferSelect
 
@@ -72,6 +72,11 @@ export class Engine {
     return this.store.db.select().from(schema.tickets).where(inArray(schema.tickets.id, ids)).orderBy(asc(schema.tickets.createdAt)).all() as unknown as Ticket[]
   }
 
+  /** Threads a ticket is subscribed to. */
+  subscribersOfTicket(ticketId: string): string[] {
+    return this.store.db.select({ threadId: schema.subscriptions.threadId }).from(schema.subscriptions).where(eq(schema.subscriptions.ticketId, ticketId)).all().map(r => r.threadId)
+  }
+
   stage(ticket: Ticket): TicketStage {
     if (ticket.ended) return 'ended'
     if (ticket.attention) return 'person/answer'
@@ -91,7 +96,7 @@ export class Engine {
   describeTicket(ticket: Ticket): string {
     const reports = this.store.db.select().from(schema.reports).where(eq(schema.reports.ticketId, ticket.id)).orderBy(desc(schema.reports.at)).limit(5).all()
     return [
-      `<task id="${ticket.id}" title="${ticket.title}" stage="${this.stage(ticket)}" conversation="${conversationOf(ticket.threadId) ?? ticket.threadId}" dir="${ticket.directory}">`,
+      `<task id="${ticket.id}" title="${ticket.title}" stage="${this.stage(ticket)}" conversation="${this.conversationOfThread(ticket.threadId) ?? ''}" thread="${ticket.threadId}" dir="${ticket.directory}">`,
       ticket.note ? `note: ${ticket.note}` : '',
       ticket.attention ? `waiting for owner: ${ticket.attention.question}` : '',
       ticket.ended ? `ended: ${ticket.ended.outcome} by ${ticket.ended.by}${ticket.ended.reason ? ` (${ticket.ended.reason})` : ''}` : '',
@@ -101,13 +106,134 @@ export class Engine {
     ].filter(Boolean).join('\n')
   }
 
-  // ── Source: web chat ───────────────────────────────────────────────────────
+  // ── Threads and their conversations ────────────────────────────────────────
+
+  /** The thread a conversation shows: its own web chat thread, or the external thread it mirrors. */
+  threadOf(conversationId: string): string {
+    const row = this.store.db.select({ threadId: schema.conversations.threadId }).from(schema.conversations).where(eq(schema.conversations.id, conversationId)).get()
+    if (!row) throw new DomainError('missing', `没有对话 ${conversationId}`)
+    return row.threadId ?? webchatThread(conversationId)
+  }
+
+  /** The conversation that shows a thread, if any. */
+  conversationOfThread(threadId: string): string | undefined {
+    if (threadId.startsWith('webchat:')) return threadId.slice('webchat:'.length)
+    return this.store.db.select({ id: schema.conversations.id }).from(schema.conversations).where(eq(schema.conversations.threadId, threadId)).get()?.id
+  }
 
   ensureThread(conversationId: string): string {
-    const id = webchatThread(conversationId)
-    this.store.db.insert(schema.threads).values({ id, source: 'webchat', ref: conversationId, createdAt: this.now() }).onConflictDoNothing().run()
+    const id = this.threadOf(conversationId)
+    this.store.db.insert(schema.threads).values({ id, source: sourceOfThread(id), ref: conversationId, createdAt: this.now() }).onConflictDoNothing().run()
     return id
   }
+
+  /** Opens (once) the web conversation that mirrors an external thread, so the owner sees it beside their own topics. */
+  mirrorConversation(threadId: string, info: { title: string; url?: string; meta?: Record<string, unknown> }): string {
+    const existing = this.conversationOfThread(threadId)
+    if (existing) return existing
+    const id = newId('cnv')
+    const at = this.stamp()
+    this.store.db.insert(schema.conversations).values({ id, title: info.title.slice(0, 80), source: sourceOfThread(threadId), threadId, origin: 'agent',
+      meta: { ...(info.meta ?? {}), ...(info.url ? { url: info.url } : {}) }, createdAt: at, updatedAt: at }).run()
+    this.store.afterCommit(() => this.bus.emit({ type: 'conversation.updated', conversationId: id }))
+    return id
+  }
+
+  /** Opens a conversation on the agent's initiative (a notification, a routine's results). */
+  openConversation(title: string, opts: { source?: string; meta?: Record<string, unknown> } = {}): string {
+    const id = newId('cnv')
+    const at = this.stamp()
+    this.store.db.insert(schema.conversations).values({ id, title: title.slice(0, 80), source: opts.source ?? 'webchat', origin: 'agent', meta: opts.meta ?? {}, createdAt: at, updatedAt: at }).run()
+    this.store.afterCommit(() => this.bus.emit({ type: 'conversation.updated', conversationId: id }))
+    return id
+  }
+
+  private allowed(source: string, actor: string): boolean {
+    if (source === 'webchat' || source === 'cron') return actor === 'owner'
+    return this.opts.sources?.allowed(source, actor) ?? false
+  }
+
+  // ── Source: any external source ────────────────────────────────────────────
+
+  /**
+   * One event from a source (dsh-superagent's Intake, for one owner):
+   * - it reaches every task subscribed to its thread (fan-out, no authority granted); an allowed person's message resumes
+   *   an ended task that the owner did not stop, bots and CI never do;
+   * - if no task took it and an allowed person addressed the agent, it goes to the router as a request;
+   * - anything else is recorded and ignored.
+   */
+  receive(t: IncomingTrigger): { status: 'stored' | 'duplicate'; deliveredTo: string[]; routed: boolean } {
+    return this.store.atomic(() => {
+      if (this.store.db.select({ id: schema.triggers.id }).from(schema.triggers).where(eq(schema.triggers.id, t.id)).get()) {
+        return { status: 'duplicate' as const, deliveredTo: [], routed: false }
+      }
+      this.store.db.insert(schema.threads).values({ id: t.threadId, source: t.source, ref: t.threadId, meta: { ...(t.thread.meta ?? {}), title: t.thread.title, ...(t.thread.url ? { url: t.thread.url } : {}) }, createdAt: this.now() }).onConflictDoNothing().run()
+      this.store.db.insert(schema.triggers).values({ id: t.id, threadId: t.threadId, source: t.source, actor: t.actor, human: t.human, text: t.text,
+        meta: { ...(t.meta ?? {}), ...(t.url ? { url: t.url } : {}), addressed: t.addressed }, at: t.at }).run()
+      const allowed = t.human && this.allowed(t.source, t.actor)
+      const targets = this.subscribers(t.threadId).filter(ticket => ticket.ended?.by !== 'person' && (!ticket.ended || allowed))
+      const explicit = allowed && t.addressed
+      if (!targets.length && !explicit) {
+        this.setDisposition(t.id, { ignored: !t.human ? 'bot' : !allowed ? 'not_allowed' : 'not_addressed' })
+        return { status: 'stored' as const, deliveredTo: [], routed: false }
+      }
+      const conversationId = this.mirrorConversation(t.threadId, t.thread)
+      const messageId = newId('msg')
+      this.store.db.insert(schema.messages).values({ id: messageId, conversationId, role: 'user', content: t.text, triggerId: t.id,
+        meta: { source: t.source, actor: t.actor, human: t.human, ...(t.url ? { url: t.url } : {}) }, createdAt: this.stamp() }).run()
+      this.store.db.update(schema.conversations).set({ updatedAt: this.now() }).where(eq(schema.conversations.id, conversationId)).run()
+      this.store.afterCommit(() => this.bus.emit({ type: 'message.created', conversationId, messageId }))
+      if (targets.length) {
+        for (const ticket of targets) this.deliver(ticket, t.id, allowed)
+        this.setDisposition(t.id, { deliveredTo: targets.map(x => x.id) })
+        if (allowed) this.runtime.push(ROUTER_SESSION, { type: 'followup', triggerId: t.id, ticketIds: targets.map(x => x.id) }, { wake: false })
+        return { status: 'stored' as const, deliveredTo: targets.map(x => x.id), routed: false }
+      }
+      this.runtime.push(ROUTER_SESSION, { type: 'trigger', triggerId: t.id }, { human: true })
+      return { status: 'stored' as const, deliveredTo: [], routed: true }
+    })
+  }
+
+  /** A followed thread closed (a pull request merged or closed): tasks that opened it end once none of their own threads is open. */
+  threadClosed(threadId: string, outcome: 'merged' | 'closed'): void {
+    const at = this.now()
+    const affected: string[] = []
+    this.store.atomic(() => {
+      this.store.db.update(schema.subscriptions).set({ closed: { at, outcome } }).where(and(eq(schema.subscriptions.threadId, threadId), eq(schema.subscriptions.kind, 'own'))).run()
+      for (const ticket of this.subscribers(threadId)) {
+        if (ticket.ended) continue
+        const own = this.store.db.select().from(schema.subscriptions).where(and(eq(schema.subscriptions.ticketId, ticket.id), eq(schema.subscriptions.kind, 'own'))).all()
+        // The ticket's origin thread does not count: only threads it opened (its pull requests).
+        const opened = own.filter(s => s.threadId !== ticket.threadId)
+        if (!opened.length || opened.some(s => !s.closed)) continue
+        this.end(ticket, { at, by: 'system', outcome })
+        this.runtime.push(ROUTER_SESSION, { type: 'ticket-ended', ticketId: ticket.id, outcome, by: 'system' }, { wake: false })
+        affected.push(ticket.id)
+      }
+    })
+    for (const id of affected) this.changed(id)
+  }
+
+  /** A task follows another thread: one it opened (`own`, e.g. its pull request) or one it reads for context. */
+  follow(ticketId: string, threadId: string, kind: 'own' | 'context', info?: { title: string; url?: string; meta?: Record<string, unknown> }): void {
+    const ticket = this.ticket(ticketId)
+    this.store.atomic(() => {
+      this.store.db.insert(schema.threads).values({ id: threadId, source: sourceOfThread(threadId), ref: threadId, meta: info ? { ...(info.meta ?? {}), title: info.title, ...(info.url ? { url: info.url } : {}) } : {}, createdAt: this.now() }).onConflictDoNothing().run()
+      this.store.db.insert(schema.subscriptions).values({ ticketId: ticket.id, threadId, kind, createdAt: this.now() })
+        .onConflictDoUpdate({ target: [schema.subscriptions.ticketId, schema.subscriptions.threadId], set: { kind, closed: null } }).run()
+    })
+    this.changed(ticketId)
+  }
+
+  /** Threads a task follows, with what a source needs to poll them. */
+  followed(): { threadId: string; ticketId: string; kind: string; closed: unknown; meta: Record<string, unknown> }[] {
+    return this.store.sqlite.prepare(`SELECT s.thread_id AS threadId, s.ticket_id AS ticketId, s.kind, s.closed, t.meta FROM subscriptions s
+      JOIN threads t ON t.id = s.thread_id JOIN tickets k ON k.id = s.ticket_id
+      WHERE (k.ended IS NULL OR k.updated_at > ?) AND json_extract(coalesce(k.ended, '{}'), '$.by') IS NOT 'person'`)
+      .all(this.now() - 14 * 86_400_000).map((r: any) => ({ ...r, closed: r.closed ? JSON.parse(r.closed) : null, meta: JSON.parse(r.meta) }))
+  }
+
+  // ── Source: web chat ───────────────────────────────────────────────────────
 
   /**
    * The owner wrote in a conversation. Fast path: a message aimed at one task (`replyTo`, or the conversation's only open
@@ -121,7 +247,7 @@ export class Engine {
       this.store.db.insert(schema.triggers).values({ id: triggerId, threadId, source: 'webchat', actor: 'owner', human: true, text, at }).run()
       const messageAt = this.stamp()
       const messageId = newId('msg')
-      this.store.db.insert(schema.messages).values({ id: messageId, conversationId, role: 'user', content: text, triggerId, createdAt: messageAt }).run()
+      this.store.db.insert(schema.messages).values({ id: messageId, conversationId, role: 'user', content: text, triggerId, meta: { source: 'webchat' }, createdAt: messageAt }).run()
       this.store.db.update(schema.conversations).set({ updatedAt: at }).where(eq(schema.conversations.id, conversationId)).run()
 
       const subscribed = this.subscribers(threadId)
@@ -150,27 +276,62 @@ export class Engine {
 
   // ── Router commands ────────────────────────────────────────────────────────
 
-  reply(input: { conversationId: string; text: string; ticketId?: string; callId?: string }): string {
+  /**
+   * Posts the agent's message in a conversation. It also goes out through the source's channel (a GitHub comment) when it
+   * answers a message from that source (`replyTo`) or reports on a task that came from it (`ticketId`); otherwise it stays in the web.
+   */
+  reply(input: { conversationId: string; text: string; ticketId?: string; replyTo?: string; callId?: string }): string {
     const conversation = this.store.db.select().from(schema.conversations).where(eq(schema.conversations.id, input.conversationId)).get()
     if (!conversation) throw new DomainError('missing', `没有对话 ${input.conversationId}`)
     const id = newId('msg')
     const at = this.stamp()
+    const via = this.replySource(input.replyTo, input.ticketId)
+    const threadId = conversation.threadId
+    const external = via !== 'webchat' && threadId && sourceOfThread(threadId) === via && this.opts.sources?.hasChannel(via)
     this.store.atomic(() => {
       this.store.db.insert(schema.messages).values({ id, conversationId: input.conversationId, role: 'assistant', content: input.text,
-        ticketId: input.ticketId ?? null, meta: input.callId ? { callId: input.callId } : {}, createdAt: at }).run()
+        ticketId: input.ticketId ?? null, meta: { ...(input.callId ? { callId: input.callId } : {}), ...(external ? { via, delivery: 'pending' } : {}) }, createdAt: at }).run()
       this.store.db.update(schema.conversations).set({ updatedAt: at }).where(eq(schema.conversations.id, input.conversationId)).run()
+      if (external) this.opts.sources!.send({ messageId: id, source: via, threadId: threadId!, text: input.text, ...(input.ticketId ? { ticketId: input.ticketId } : {}) })
     })
     this.bus.emit({ type: 'message.created', conversationId: input.conversationId, messageId: id })
     return id
   }
 
-  startTask(input: { conversationId: string; triggerIds: string[]; title: string; name?: string; note?: string; ack?: string; directory?: string; callId?: string }): Ticket {
-    const threadId = webchatThread(input.conversationId)
+  private replySource(replyTo?: string, ticketId?: string): string {
+    if (replyTo) {
+      const t = this.store.db.select({ source: schema.triggers.source }).from(schema.triggers).where(eq(schema.triggers.id, replyTo)).get()
+      if (t) return t.source
+    }
+    if (ticketId) {
+      const ticket = this.store.db.select().from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get()
+      const origin = ticket && this.store.db.select({ source: schema.triggers.source }).from(schema.triggers).where(eq(schema.triggers.id, (ticket.origin as { triggerIds: string[] }).triggerIds[0]!)).get()
+      if (origin) return origin.source
+    }
+    return 'webchat'
+  }
+
+  /** Marks the delivery of a message that went out through a source channel. */
+  delivered(messageId: string, result: { ok: true; url?: string } | { ok: false; error: string; final?: boolean }): void {
+    const row = this.store.db.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get()
+    if (!row) return
+    const meta = result.ok ? { ...row.meta, delivery: 'sent', ...(result.url ? { url: result.url } : {}) }
+      : { ...row.meta, delivery: result.final ? 'dropped' : 'failing', deliveryError: result.error }
+    this.store.db.update(schema.messages).set({ meta }).where(eq(schema.messages.id, messageId)).run()
+    this.bus.emit({ type: 'message.created', conversationId: row.conversationId, messageId })
+  }
+
+  startTask(input: { conversationId?: string; triggerIds: string[]; title: string; name?: string; note?: string; ack?: string; directory?: string; callId?: string }): Ticket {
     const triggers = input.triggerIds.length
       ? this.store.db.select().from(schema.triggers).where(inArray(schema.triggers.id, input.triggerIds)).all() : []
-    if (!triggers.length) throw new DomainError('invalid', 'start_task 需要至少一个来自主人的 trigger_id')
+    if (!triggers.length) throw new DomainError('invalid', 'start_task 需要至少一个 trigger_id')
     if (triggers.length !== input.triggerIds.length) throw new DomainError('invalid', '有 trigger_id 不存在')
-    if (triggers.some(t => t.threadId !== threadId)) throw new DomainError('invalid', 'trigger 不属于这个对话')
+    const threadId = triggers[0]!.threadId
+    if (triggers.some(t => t.threadId !== threadId)) throw new DomainError('invalid', '一个任务的 trigger 必须来自同一个对话/线程')
+    if (triggers.some(t => !t.human || !this.allowed(t.source, t.actor))) throw new DomainError('invalid', '只有主人（或允许的账号）的消息才能开任务')
+    const conversationId = this.conversationOfThread(threadId)
+    if (!conversationId) throw new DomainError('missing', '这个线程没有对应的对话')
+    if (input.conversationId && input.conversationId !== conversationId) throw new DomainError('invalid', `trigger 属于对话 ${conversationId}，不是 ${input.conversationId}`)
     // Idempotent per trigger set: a retried call returns the ticket it already made.
     const existing = this.tickets({ threadId }).find(t => sameSet(t.origin.triggerIds, input.triggerIds))
     if (existing) return existing
@@ -187,13 +348,13 @@ export class Engine {
         origin: { triggerIds: input.triggerIds }, mandate: mandate as any, directory, sessionId, createdAt: at, updatedAt: at }).run()
       this.store.db.insert(schema.subscriptions).values({ ticketId: id, threadId, kind: 'own', createdAt: at }).run()
       for (const t of input.triggerIds) this.setDisposition(t, { startedTicket: id })
-      if (input.ack) this.reply({ conversationId: input.conversationId, text: input.ack, ticketId: id, ...(input.callId ? { callId: input.callId } : {}) })
+      if (input.ack) this.reply({ conversationId, text: input.ack, ticketId: id, ...(input.callId ? { callId: input.callId } : {}) })
       const cardId = newId('msg')
-      this.store.db.insert(schema.messages).values({ id: cardId, conversationId: input.conversationId, role: 'event', content: input.title, ticketId: id,
+      this.store.db.insert(schema.messages).values({ id: cardId, conversationId, role: 'event', content: input.title, ticketId: id,
         meta: { kind: 'ticket' }, createdAt: this.stamp() }).run()
       this.startAssignment(id, 'start')
       this.runtime.push(sessionId, { type: 'assignment', ticketId: id, reason: 'start' }, { human: true })
-      this.store.afterCommit(() => this.bus.emit({ type: 'message.created', conversationId: input.conversationId, messageId: cardId }))
+      this.store.afterCommit(() => this.bus.emit({ type: 'message.created', conversationId, messageId: cardId }))
     })
     mkdirSync(directory, { recursive: true })
     this.changed(id)

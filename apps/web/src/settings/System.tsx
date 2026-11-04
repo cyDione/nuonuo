@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { CheckCircle2, AlertTriangle, XCircle, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Check, type Health, type TranscriptItem } from '../api'
+import { notificationsEnabled, setNotifications } from '../live'
 import { Button, Card } from '../ui'
 
 export function System() {
@@ -15,6 +16,7 @@ export function System() {
       <Info label="数据目录" value={h.home} mono />
       <Info label="密钥存储" value={h.secrets === 'keychain' ? '系统钥匙串' : '加密文件'} />
     </Card>}
+    <NotifyToggle />
     <div className="flex items-center justify-between">
       <h2 className="text-sm font-medium">环境检查</h2>
       <Button size="sm" variant="ghost" onClick={() => doctor.refetch()} disabled={doctor.isFetching}><RefreshCw size={13} className={doctor.isFetching ? 'animate-spin' : ''} />重新检查</Button>
@@ -53,4 +55,16 @@ function RouterLog() {
 
 function Info({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return <div className="flex gap-3"><span className="w-16 shrink-0 text-muted">{label}</span><span className={mono ? 'truncate font-mono text-xs leading-5' : ''}>{value}</span></div>
+}
+
+function NotifyToggle() {
+  const [on, setOn] = useState(notificationsEnabled())
+  const supported = typeof Notification !== 'undefined'
+  return <Card className="flex items-center gap-3 p-4">
+    <div className="flex-1">
+      <div className="text-sm font-medium">桌面通知</div>
+      <div className="text-xs text-muted">页面不在前台时，智能体发来消息（任务完成、需要你决定、定时任务结果）会弹出系统通知。</div>
+    </div>
+    <Button size="sm" disabled={!supported} onClick={async () => setOn(await setNotifications(!on))}>{!supported ? '浏览器不支持' : on ? '已开启' : '开启'}</Button>
+  </Card>
 }

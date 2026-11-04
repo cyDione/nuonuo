@@ -14,7 +14,7 @@ export interface Ended {
   at: number
   /** `person` covers both the panel's stop button and the router stopping on the owner's request. */
   by: 'person' | 'router' | 'worker' | 'system'
-  outcome: 'completed' | 'stopped' | 'dropped'
+  outcome: 'completed' | 'stopped' | 'dropped' | 'merged' | 'closed'
   reason?: string
 }
 
@@ -52,3 +52,32 @@ export const STAGE_LABEL: Record<TicketStage, string> = {
 
 export const webchatThread = (conversationId: string) => `webchat:${conversationId}`
 export const conversationOf = (threadId: string) => (threadId.startsWith('webchat:') ? threadId.slice('webchat:'.length) : undefined)
+export const sourceOfThread = (threadId: string) => threadId.split(':')[0] ?? 'webchat'
+
+/** An event from an external source, already translated by its Source kind. */
+export interface IncomingTrigger {
+  /** Stable and derived from the source's own id, so re-reading the source never duplicates. */
+  id: string
+  source: string
+  threadId: string
+  actor: string
+  human: boolean
+  /** The message mentions the agent (or is a direct message). */
+  addressed: boolean
+  text: string
+  at: number
+  url?: string
+  meta?: Record<string, unknown>
+  /** How the thread's mirror conversation is titled and linked. */
+  thread: { title: string; url?: string; meta?: Record<string, unknown> }
+}
+
+/** What the engine needs from the source registry. */
+export interface SourcePort {
+  /** May this actor ask for work on this source? (The owner's own identity there, or an allowlisted account.) */
+  allowed(source: string, actor: string): boolean
+  /** Whether the source can carry replies back (GitHub can; routines cannot, so their replies stay in the web). */
+  hasChannel(source: string): boolean
+  /** Queues a message for the source's channel inside the caller's transaction. */
+  send(message: { messageId: string; source: string; threadId: string; text: string; ticketId?: string }): void
+}

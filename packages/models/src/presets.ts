@@ -35,3 +35,15 @@ export const LAYER_PRESETS: readonly LayerPreset[] = [{
     'deepseek-v4-pro': { input: 1.32, cacheRead: 0.044, output: 3.96 },
   },
 }]
+
+/**
+ * Maps a preset's model id onto what a provider actually serves (gateways rename models, e.g. `group/deepseek-v4.1-flash`).
+ * Exact ids win; otherwise the closest family member (flash / pro); a missing pro falls back to flash.
+ */
+export function resolvePresetModel(model: string, available: string[] | undefined): string {
+  if (!available?.length || available.includes(model)) return model
+  const family = /pro/.test(model) ? 'pro' : 'flash'
+  const deepseek = available.filter(id => /deepseek/i.test(id) && !/embed|bge|rerank/i.test(id))
+  const pick = (f: string) => deepseek.filter(id => id.toLowerCase().includes(f)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0]
+  return pick(family) ?? pick('flash') ?? deepseek[0] ?? model
+}

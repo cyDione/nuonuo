@@ -185,4 +185,24 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE messages ADD COLUMN ticket_id TEXT;
   ALTER TABLE messages ADD COLUMN trigger_id TEXT;
   `,
+  /* 3: M2 external sources (mirror conversations for external threads, unread state) and routines */ `
+  ALTER TABLE conversations ADD COLUMN source TEXT NOT NULL DEFAULT 'webchat';
+  ALTER TABLE conversations ADD COLUMN thread_id TEXT;
+  ALTER TABLE conversations ADD COLUMN origin TEXT NOT NULL DEFAULT 'owner';
+  ALTER TABLE conversations ADD COLUMN meta TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE conversations ADD COLUMN last_read_at INTEGER NOT NULL DEFAULT 0;
+  CREATE UNIQUE INDEX conversations_thread ON conversations(thread_id) WHERE thread_id IS NOT NULL;
+  ALTER TABLE subscriptions ADD COLUMN closed TEXT;
+  CREATE TABLE routines (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    schedule TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    conversation_id TEXT,
+    last_fired_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ]

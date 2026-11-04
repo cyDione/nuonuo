@@ -56,6 +56,9 @@ importers:
       '@super-agent/models':
         specifier: workspace:*
         version: link:../../packages/models
+      '@super-agent/sources':
+        specifier: workspace:*
+        version: link:../../packages/sources
       ai:
         specifier: ^7.0.162
         version: 7.0.162(zod@4.6.7)
@@ -221,6 +224,34 @@ importers:
       zod:
         specifier: ^4.6.7
         version: 4.6.7
+
+  packages/sources:
+    dependencies:
+      '@super-agent/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
+      '@super-agent/core':
+        specifier: workspace:*
+        version: link:../core
+      '@super-agent/db':
+        specifier: workspace:*
+        version: link:../db
+      ai:
+        specifier: ^7.0.162
+        version: 7.0.162(zod@4.6.7)
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@ai-sdk/provider':
+        specifier: ^4.0.35
+        version: 4.0.35
+      '@super-agent/models':
+        specifier: workspace:*
+        version: link:../models
 
 packages:
 

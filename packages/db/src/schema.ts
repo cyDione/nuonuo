@@ -63,6 +63,13 @@ export const conversations = sqliteTable('conversations', {
   title: text('title').notNull(),
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+  /** `webchat` for the owner's own topics; an external source (`github`, `cron`) for a thread mirrored into the web. */
+  source: text('source').notNull().default('webchat'),
+  threadId: text('thread_id'),
+  /** `agent` when the agent opened it (a routine, a GitHub thread, a notification). */
+  origin: text('origin').notNull().default('owner'),
+  meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+  lastReadAt: integer('last_read_at').notNull().default(0),
   createdAt: integer('created_at').notNull().default(now),
   updatedAt: integer('updated_at').notNull().default(now),
 })
@@ -122,6 +129,19 @@ export const subscriptions = sqliteTable('subscriptions', {
   threadId: text('thread_id').notNull(),
   kind: text('kind').notNull().default('own'),
   createdAt: integer('created_at').notNull(),
+  closed: json<{ at: number; outcome: string } | null>('closed'),
+})
+
+export const routines = sqliteTable('routines', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  schedule: text('schedule').notNull(),
+  prompt: text('prompt').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  conversationId: text('conversation_id'),
+  lastFiredAt: integer('last_fired_at'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
 })
 
 export const assignments = sqliteTable('assignments', {

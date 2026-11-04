@@ -156,3 +156,14 @@ describe('environment providers and presets', () => {
     expect(hub.getProvider(id!).options.prices?.['deepseek-flash']?.output).toBe(1.2)
   })
 })
+
+describe('resolvePresetModel', async () => {
+  const { resolvePresetModel } = await import('./presets')
+  it('maps preset ids onto a gateway\'s model names', () => {
+    const gateway = ['group/deepseek-v4.1-flash', 'siliconflow/BAAI/bge-m3']
+    expect(resolvePresetModel('deepseek-flash', gateway)).toBe('group/deepseek-v4.1-flash')
+    expect(resolvePresetModel('deepseek-v4-pro', gateway)).toBe('group/deepseek-v4.1-flash')
+    expect(resolvePresetModel('deepseek-v4-pro', ['deepseek-flash', 'deepseek-v4-pro'])).toBe('deepseek-v4-pro')
+    expect(resolvePresetModel('deepseek-flash', undefined)).toBe('deepseek-flash')
+  })
+})

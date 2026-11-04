@@ -6,6 +6,7 @@ import { go, type Route } from './route'
 import { cx } from './ui'
 import { useTickets } from './tasks'
 import { useLive } from './live'
+import { SourceIcon } from './icons'
 
 export function Sidebar({ route }: { route: Route }) {
   const qc = useQueryClient()
@@ -52,7 +53,9 @@ function Item({ c, active, status, onChanged }: { c: Conversation; active: boole
   return <div className="group relative">
     <a href={`#/c/${c.id}`} className={cx('flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm', active ? 'bg-accent-soft text-fg' : 'text-muted hover:bg-sunken hover:text-fg')}>
       {c.pinned && <Pin size={12} className="shrink-0 text-faint" />}
-      <span className="min-w-0 flex-1 truncate">{c.title}</span>
+      {c.source !== 'webchat' && <SourceIcon source={c.source} size={13} className="shrink-0 text-faint" />}
+      <span className={cx('min-w-0 flex-1 truncate', !active && (c.unread ?? 0) > 0 && 'font-semibold text-fg')}>{c.title}</span>
+      {!active && !status && (c.unread ?? 0) > 0 && <span className="shrink-0 rounded-full bg-accent px-1.5 text-[10px] leading-4 font-medium text-accent-fg">{c.unread}</span>}
       {status === 'person' && <span className="size-2 shrink-0 rounded-full bg-warn" title="有任务等你处理" />}
       {status === 'working' && <span className="size-2 shrink-0 animate-pulse rounded-full bg-accent" title="有任务进行中" />}
     </a>

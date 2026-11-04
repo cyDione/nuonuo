@@ -7,6 +7,8 @@ import { api, ApiError, type Conversation, type Message, type RolesResponse } fr
 import { useLive } from './live'
 import { go } from './route'
 import { TaskCard, TasksPanel, useTickets } from './tasks'
+import { SOURCE_LABEL, SourceIcon } from './icons'
+import { ExternalLink } from 'lucide-react'
 
 /** A message typed on the empty screen, sent once the new conversation's page mounts. */
 let pendingSend: { id: string; content: string } | undefined
@@ -22,7 +24,8 @@ export function Chat({ id }: { id?: string }) {
   })
   const list = useQuery({ queryKey: ['conversations'], queryFn: () => api.get<{ conversations: Conversation[] }>('/conversations') })
   const tickets = useTickets()
-  const title = list.data?.conversations.find(c => c.id === id)?.title ?? thread.data?.conversation.title
+  const current = list.data?.conversations.find(c => c.id === id)
+  const title = current?.title ?? thread.data?.conversation.title
   const draft = useLive(s => (id ? s.drafts[id] : undefined))
   const routerBusy = useLive(s => s.routerState === 'running')
   const [error, setError] = useState<string | null>(null)
@@ -58,6 +61,12 @@ export function Chat({ id }: { id?: string }) {
     }
   }
 
+  // Seen: mark the conversation read while it is on screen.
+  useEffect(() => {
+    if (!id || document.visibilityState !== 'visible') return
+    if ((current?.unread ?? 0) > 0 || messages.length) void api.post(`/conversations/${id}/read`).then(() => qc.invalidateQueries({ queryKey: ['conversations'] }))
+  }, [id, messages.length])
+
   useEffect(() => {
     if (id && pendingSend?.id === id) { const { content } = pendingSend; pendingSend = undefined; void send(content) }
   }, [id])
@@ -66,8 +75,11 @@ export function Chat({ id }: { id?: string }) {
 
   return <div className="flex h-full">
     <div className="flex min-w-0 flex-1 flex-col">
-      {thread.data && <header className="flex h-12 shrink-0 items-center border-b border-line px-5">
-        <h1 className="truncate text-sm font-medium">{title}</h1>
+      {thread.data && <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-5">
+        {current && current.source !== 'webchat' && <SourceIcon source={current.source} className="shrink-0 text-muted" />}
+        <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h1>
+        {current?.meta.url && <a href={current.meta.url} target="_blank" rel="noreferrer" className="flex shrink-0 items-center gap-1 text-xs text-accent">
+          在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>}
       </header>}
       {noRouter && <div className="mx-auto mt-4 flex w-full max-w-3xl items-center gap-2 rounded-lg border border-line bg-panel px-4 py-2.5 text-sm">
         <AlertTriangle size={16} className="shrink-0 text-warn" />
@@ -106,12 +118,29 @@ function Welcome({ onPick, disabled }: { onPick(text: string): void; disabled: b
 
 function Item({ m, onAnswer }: { m: Message; onAnswer(text: string, ticketId: string): void }) {
   if (m.role === 'event' && m.ticketId) return <TaskCard ticketId={m.ticketId} onAnswer={onAnswer} />
+  const external = m.role === 'user' && m.meta.source && m.meta.source !== 'webchat'
+  if (external) return <div className="rounded-xl border border-line bg-panel px-4 py-3">
+    <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted">
+      <SourceIcon source={m.meta.source} size={12} />
+      <span className="font-medium text-fg">{m.meta.source === 'cron' ? '定时任务' : m.meta.actor}</span>
+      {m.meta.human === false && <span className="rounded bg-sunken px-1 text-[10px]">bot</span>}
+      <span className="text-faint">· {new Date(m.createdAt).toLocaleString()}</span>
+      {m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="ml-auto text-accent"><ExternalLink size={12} /></a>}
+    </div>
+    <div className="prose-chat text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
+  </div>
   if (m.role === 'user') return <div className="flex justify-end">
     <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent-soft px-4 py-2.5 text-[15px] whitespace-pre-wrap">{m.content}</div>
   </div>
   return <div>
     <div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
     {m.meta.error && <div className="mt-1.5 text-xs text-danger">⚠ {m.meta.error}</div>}
+    {m.meta.via && <div className="mt-1 flex items-center gap-1 text-[11px] text-faint">
+      <SourceIcon source={m.meta.via} size={11} />
+      {m.meta.delivery === 'sent' ? <>已发到 {SOURCE_LABEL[m.meta.via] ?? m.meta.via}{m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent"> ↗</a>}</>
+        : m.meta.delivery === 'pending' ? '发送中…'
+        : <span className="text-danger">{m.meta.delivery === 'dropped' ? '未能发送' : '发送失败，稍后重试'}{m.meta.deliveryError ? `：${m.meta.deliveryError}` : ''}</span>}
+    </div>}
   </div>
 }
 

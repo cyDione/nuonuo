@@ -9,7 +9,13 @@
 > - **界面**：任务卡片、任务执行过程面板、「待你处理」列表、重启后自动恢复。
 > - **其他**：BYOK、分层模型配置、用量统计。
 >
-> 设计和实现细节见 [docs/01-m1-implementation.md](docs/01-m1-implementation.md)。GitHub、定时任务、审核与记忆会在 M2–M3 加入。
+> - **M2 新增**：
+>   - **GitHub**：在 Issue 或 PR 里 @agent 就能派活；智能体在原处回复，并跟进评审、CI 和合并结果。
+>   - **定时任务**：直接说「每天 9 点…」即可创建。
+>   - **未读与桌面通知**。
+>   - **来源插件协议**：后续的插件（例如 Gmail）都按这套协议接入。
+>
+> 设计和实现细节见 [docs/01-m1-implementation.md](docs/01-m1-implementation.md) 和 [docs/02-m2-implementation.md](docs/02-m2-implementation.md)。审核与记忆会在 M3 加入。
 
 ## 快速开始
 
@@ -38,7 +44,11 @@ pnpm start
 1. **设置 → 模型供应商**：添加 API key。支持 Anthropic、OpenAI、Gemini、DeepSeek，以及 OpenRouter / 通义 / Kimi / 智谱 / SiliconFlow / Ollama / LM Studio / 任意 OpenAI 兼容接口。
 2. **设置 → 分层模型**：给「主 Agent」选择模型。其余层不配置时，会沿用上一层的模型。
 3. 回到对话页开始使用。简单的问题，主 Agent 直接回答；需要动手的事，它会开成任务（每个任务在 `~/.superagent/work/` 下有独立的工作目录），完成时、或需要你决定时再回来找你。
-4. **设置 → 执行**：可以调整同时执行的任务数，以及允许任务直接使用的已有目录（例如 `~/code`）。
+4. **GitHub（可选）**：
+   - 准备凭据：设置 `GITHUB_TOKEN`，或者在本机执行 `gh auth login`。
+   - 在「设置 → 来源 → GitHub」填写要监听的仓库并启用。
+   - 之后在 Issue 或 PR 评论里写 `@agent …` 就能派活。
+5. **设置 → 执行**：可以调整同时执行的任务数，以及允许任务直接使用的已有目录（例如 `~/code`）。
 
 ## 命令行
 
@@ -74,6 +84,7 @@ apps/daemon     本机服务：Hono API、SSE、CLI、组合根
 apps/web        React 19 + Vite + Tailwind 4 前端（构建后由 daemon 托管）
 packages/core   领域层：Trigger / Thread / Ticket / 订阅 / 汇报，主 Agent 与 Worker 的工具和提示词
 packages/agent-runtime  Agent 运行时：事件日志、收件箱步间注入、后台命令、文件/Shell/网页工具、recall、压缩
+packages/sources 来源插件协议与注册表、GitHub 来源、定时任务（cron）
 packages/db     SQLite + Drizzle、迁移、持久化副作用队列 Effects
 packages/models 供应商、BYOK 密钥存储、分层模型解析（继承 / 备用链 / 预算）、用量账本
 docs/           调研与设计文档
@@ -82,7 +93,7 @@ docs/           调研与设计文档
 ## 路线图
 
 - ~~M1~~：主 Agent + Worker 双层架构、异步 job、任务卡片、「待你处理」（已完成）
-- **M2**：GitHub 插件、定时任务（Routine）、Agent 主动发起对话
+- ~~M2~~：GitHub 插件、定时任务（Routine）、Agent 主动发起对话（已完成）
 - **M3**：Reviewer 审核与规则、三层记忆、Watchdog、浏览器接管、Docker 沙箱
 - **M4**：插件 SDK、MCP、Gmail / Telegram、Electron
 

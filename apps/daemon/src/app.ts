@@ -14,6 +14,7 @@ import { EventMapper } from './events'
 import { reportsOf, ticketView, transcript } from './views'
 import { DomainError, DEFAULT_EXECUTION, ROUTER_SESSION } from '@super-agent/core'
 import { kvSet } from '@super-agent/db'
+import { fireRoutine } from '@super-agent/sources'
 import { runDoctor } from './doctor'
 import type { Runtime } from './runtime'
 
@@ -139,7 +140,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
   })
   api.delete('/conversations/:id', c => {
     const id = c.req.param('id')
-    for (const t of rt.engine.tickets({ threadId: `webchat:${id}`, open: true })) rt.engine.stopTask(t.id, 'person', '对话已删除')
+    if (conversations.get(id)) for (const t of rt.engine.tickets({ threadId: rt.engine.threadOf(id), open: true })) rt.engine.stopTask(t.id, 'person', '对话已删除')
     conversations.delete(id)
     return c.body(null, 204)
   })
@@ -158,6 +159,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     void conversations.autoTitle(id).then(named => { if (named) rt.bus.emit({ type: 'conversation.updated', conversationId: id }) })
     return c.json({ message: conversations.message(result.messageId), deliveredTo: result.deliveredTo }, 201)
   })
+  api.post('/conversations/:id/read', c => { conversations.markRead(c.req.param('id')); return c.json({ ok: true }) })
   api.get('/messages/:id', c => {
     const message = conversations.message(c.req.param('id'))
     if (!message) throw new HttpError(404, 'missing', 'no such message')
@@ -167,7 +169,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
   // Tasks
   api.get('/tickets', c => {
     const conversationId = c.req.query('conversation')
-    const list = rt.engine.tickets(conversationId ? { threadId: `webchat:${conversationId}` } : {}).slice(0, 200)
+    const list = rt.engine.tickets(conversationId ? { threadId: rt.engine.threadOf(conversationId) } : {}).slice(0, 200)
     return c.json({ tickets: list.map(t => ticketView(rt.engine, t)) })
   })
   api.get('/tickets/:id', c => {
@@ -182,6 +184,31 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     return c.json({ items })
   })
   api.get('/router', c => c.json({ state: rt.agents.session(ROUTER_SESSION)?.state ?? 'idle', transcript: transcript(rt.agents, ROUTER_SESSION).slice(-200) }))
+
+  // Sources
+  api.get('/sources', c => c.json({ sources: rt.sources.list() }))
+  api.put('/sources/:id', async c => {
+    const input = await body(c, z.object({ enabled: z.boolean(), config: z.record(z.string(), z.unknown()) }))
+    try { await rt.sources.save(c.req.param('id'), input) } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) }
+    await new Promise(r => setTimeout(r, 300))
+    return c.json({ sources: rt.sources.list() })
+  })
+  api.post('/sources/:id/poll', async c => {
+    try { await rt.sources.pollNow(c.req.param('id')) } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) }
+    return c.json({ sources: rt.sources.list() })
+  })
+
+  // Routines
+  const RoutineBody = z.object({ name: z.string().trim().min(1).max(60), schedule: z.string().trim().min(9).max(100), prompt: z.string().trim().min(1).max(4000), enabled: z.boolean().optional() })
+  const guard = <T>(fn: () => T) => { try { return fn() } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) } }
+  api.get('/routines', c => c.json({ routines: rt.routines.list() }))
+  api.post('/routines', async c => { const input = await body(c, RoutineBody); return c.json({ routine: guard(() => rt.routines.create(input)) }, 201) })
+  api.patch('/routines/:id', async c => { const input = await body(c, RoutineBody.partial()); return c.json({ routine: guard(() => rt.routines.update(c.req.param('id'), input)) }) })
+  api.delete('/routines/:id', c => { rt.routines.delete(c.req.param('id')); return c.body(null, 204) })
+  api.post('/routines/:id/run', c => {
+    guard(() => rt.routines.runNow(c.req.param('id'), (r, at) => fireRoutine({ engine: rt.engine, store: rt.store }, r, at)))
+    return c.json({ ok: true, routine: rt.routines.get(c.req.param('id')) })
+  })
 
   // Execution settings
   const ExecutionBody = z.object({

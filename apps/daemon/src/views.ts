@@ -1,6 +1,6 @@
 /** Shapes the domain for the web UI: ticket rows, a ticket's page with its worker transcript, and what waits for the owner. */
 import type { AgentRuntime } from '@super-agent/agent-runtime'
-import { conversationOf, STAGE_LABEL, type Engine, type Ticket } from '@super-agent/core'
+import { sourceOfThread, STAGE_LABEL, type Engine, type Ticket } from '@super-agent/core'
 import { schema, type Store } from '@super-agent/db'
 import { desc, eq } from 'drizzle-orm'
 
@@ -8,7 +8,7 @@ export function ticketView(engine: Engine, t: Ticket) {
   const stage = engine.stage(t)
   return {
     id: t.id, title: t.title, name: t.name, note: t.note, stage, stageLabel: STAGE_LABEL[stage],
-    conversationId: conversationOf(t.threadId) ?? null, directory: t.directory,
+    conversationId: engine.conversationOfThread(t.threadId) ?? null, source: sourceOfThread(t.threadId), directory: t.directory,
     latestReport: t.latestReport, attention: t.attention, ended: t.ended, createdAt: t.createdAt, updatedAt: t.updatedAt,
   }
 }

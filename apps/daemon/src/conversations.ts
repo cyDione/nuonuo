@@ -13,11 +13,15 @@ export class Conversations {
   constructor(private store: Store, private hub: ModelHub) {}
 
   list(): (Conversation & { lastMessage: string | null })[] {
-    return this.store.sqlite.prepare(`SELECT c.id, c.title, c.pinned, c.archived, c.created_at AS createdAt, c.updated_at AS updatedAt,
+    // Unread: something the owner did not write arrived after they last looked.
+    return this.store.sqlite.prepare(`SELECT c.id, c.title, c.pinned, c.archived, c.source, c.origin, c.meta, c.thread_id AS threadId,
+        c.created_at AS createdAt, c.updated_at AS updatedAt, c.last_read_at AS lastReadAt,
         (SELECT substr(content, 1, 120) FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user','assistant')
-          ORDER BY created_at DESC LIMIT 1) AS lastMessage
+          ORDER BY created_at DESC LIMIT 1) AS lastMessage,
+        (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id AND m.created_at > c.last_read_at
+          AND NOT (m.role = 'user' AND coalesce(json_extract(m.meta, '$.source'), 'webchat') = 'webchat')) AS unread
       FROM conversations c WHERE c.archived = 0 ORDER BY c.pinned DESC, c.updated_at DESC`).all()
-      .map((row: any) => ({ ...row, pinned: Boolean(row.pinned), archived: Boolean(row.archived) }))
+      .map((row: any) => ({ ...row, pinned: Boolean(row.pinned), archived: Boolean(row.archived), meta: JSON.parse(row.meta ?? '{}') }))
   }
 
   get(id: string): Conversation | undefined {
@@ -36,6 +40,10 @@ export class Conversations {
     return this.get(id)
   }
 
+  markRead(id: string): void {
+    this.store.db.update(schema.conversations).set({ lastReadAt: Date.now() }).where(eq(schema.conversations.id, id)).run()
+  }
+
   delete(id: string): void {
     this.store.db.delete(schema.conversations).where(eq(schema.conversations.id, id)).run()
   }
@@ -52,7 +60,7 @@ export class Conversations {
   /** Names a conversation after its first message with the summarizer layer; falls back to the first line. */
   async autoTitle(conversationId: string): Promise<boolean> {
     const conversation = this.get(conversationId)
-    if (!conversation || conversation.title !== DEFAULT_TITLE) return false
+    if (!conversation || conversation.title !== DEFAULT_TITLE || conversation.source !== 'webchat') return false
     const [first] = this.messages(conversationId).filter(m => m.role === 'user')
     if (!first) return false
     let title = first.content.split('\n')[0]!.slice(0, 24)
