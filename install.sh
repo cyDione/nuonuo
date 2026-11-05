@@ -62,9 +62,9 @@ rm -rf "$prefix.old"
 ln -sf "$prefix/bin/super-assistant" "$bin_dir/super-assistant"
 
 installed="$("$prefix/bin/super-assistant" --version)"
-restarted=""
+restart=""
 if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet super-assistant.service 2>/dev/null; then
-  systemctl --user restart super-assistant.service && restarted=1
+  restart=1
 fi
 say ""
 say "Super-assistant $installed installed to $prefix"
@@ -73,9 +73,17 @@ case ":$PATH:" in
   *":$bin_dir:"*) ;;
   *) say "note: $bin_dir is not on your PATH; add  export PATH=\"$bin_dir:\$PATH\"  to your shell profile" ;;
 esac
-[ -n "$restarted" ] && say "the running service was restarted on the new version"
 say ""
 say "start it:            super-assistant start --no-open   (prints the login link; web UI on 127.0.0.1:7420)"
 say "start at login:      super-assistant service install"
 say "update later:        super-assistant update   (or Settings → System in the web UI)"
 say "from another machine: ssh -L 7420:127.0.0.1:7420 <this host>, then open the login link locally"
+
+# Restart last, without waiting: when the service itself runs this script (the web UI's update button), stopping the
+# service stops this script too, so everything else has to be done by then.
+if [ -n "$restart" ]; then
+  rm -rf "$tmp"
+  say ""
+  say "restarting the running service on the new version"
+  systemctl --user restart --no-block super-assistant.service || die "could not restart super-assistant.service; run: systemctl --user restart super-assistant.service"
+fi

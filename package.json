@@ -12,7 +12,8 @@
     "build": "pnpm --filter @super-assistant/web build && pnpm --filter @super-assistant/daemon build",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
-    "check": "pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "set-version": "node scripts/set-version.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.19.0",

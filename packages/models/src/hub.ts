@@ -134,8 +134,9 @@ export class ModelHub {
   /**
    * Sends a tiny request through one provider/model, bypassing layers, budgets and the ledger. `kind: 'embedding'` calls the
    * embeddings endpoint: an embedding model sent to the chat endpoint is rejected by most providers as a missing model.
+   * Without `kind` (the provider page's connection test) it is guessed from the model id.
    */
-  async testModel(ref: ModelRef, kind: 'language' | 'embedding' = 'language'): Promise<{ ok: true; latencyMs: number; text: string } | { ok: false; latencyMs: number; error: string }> {
+  async testModel(ref: ModelRef, kind: 'language' | 'embedding' = guessModelKind(ref.model)): Promise<{ ok: true; latencyMs: number; text: string } | { ok: false; latencyMs: number; error: string }> {
     const started = this.now()
     try {
       const p = this.getProvider(ref.providerId)
@@ -315,6 +316,11 @@ export function describeError(error: unknown): string {
     return `${error.statusCode ?? ''} ${error.message}${body ? ` — ${body}` : ''}`.trim()
   }
   return error instanceof Error ? error.message : String(error)
+}
+
+/** Whether a model id names an embedding model (text-embedding-3-small, BAAI/bge-m3, nomic-embed-text, …). */
+export function guessModelKind(model: string): 'language' | 'embedding' {
+  return /embed|(^|[/_.:-])(bge|e5|gte)([-_.:]|$)/i.test(model) ? 'embedding' : 'language'
 }
 
 /** Adds a hint to "model does not exist" style failures, the usual sign of a chat model on the embedding layer or the reverse. */

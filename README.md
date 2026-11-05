@@ -95,7 +95,7 @@ loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运�
   gh api repos/cyDione/super-assistant/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
   ```
 
-  会从最新的 GitHub Release 下载包，装到 `~/.local/share/super-assistant`，命令链接到 `~/.local/bin/super-assistant`；重复运行即升级。推送 `v*` 标签时工作流会自动发布 Release。
+  会从最新的 GitHub Release 下载包，装到 `~/.local/share/super-assistant`，命令链接到 `~/.local/bin/super-assistant`；重复运行即升级。推送 `v*` 标签时工作流会自动发布 Release。发版前先用 `pnpm set-version 0.1.4` 把所有包改成同一个版本号并提交，再打 `v0.1.4` 标签；标签和版本号不一致时，工作流会报错并且不发布。
 - **在外面用**：启用 Telegram 插件，用手机指挥家里的电脑，不需要开放端口。或者用 SSH 端口转发 `ssh -L 7420:127.0.0.1:7420 你的电脑`，再在本地打开登录链接。
 - **GitHub**：`gh auth login`（或在 `env` 里放 `GITHUB_TOKEN`），然后在「设置 → 来源 → GitHub」里填写要监听的仓库。
 
@@ -109,6 +109,8 @@ super-assistant update           # 下载并安装最新版本；systemd 服务�
 ```
 
 检查和下载需要 GitHub 访问（已登录的 `gh`，或数据目录 `env` 文件里的 `GITHUB_TOKEN`）。不想后台检查，在 `env` 里写 `SUPER_ASSISTANT_UPDATE_CHECK=0`。
+
+v0.1.0 还没有自动更新功能：从 v0.1.0 升级，需要手动再运行一次上面的 `install.sh` 安装命令，之后的版本就可以用「立即更新」或 `super-assistant update` 了。
 
 从源码运行的：
 

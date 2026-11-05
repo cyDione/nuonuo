@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ModelFactory } from './factory'
-import { ModelHub } from './hub'
+import { guessModelKind, ModelHub } from './hub'
 import { resolveRole, ROLE_IDS, RoleConfigSchema } from './roles'
 import { FileSecrets, MemorySecrets } from './secrets'
 
@@ -190,5 +190,29 @@ describe('testModel', () => {
     const result = await hub.testModel({ providerId: p.id, model: 'Qwen/Qwen3-8B' }, 'embedding')
     expect(result.ok).toBe(false)
     expect(!result.ok && result.error).toMatch(/400 .*Model does not exist[\s\S]*向量层需要 embedding 模型/)
+  })
+
+  it('guesses the kind from the model id when none is given (the provider page)', async () => {
+    store = openStore(':memory:')
+    const used: string[] = []
+    const hub = new ModelHub(store, new MemorySecrets(), {
+      language: () => { used.push('language'); throw new Error('chat endpoint used') },
+      embedding: (_p, _k, model) => ({
+        specificationVersion: 'v4', provider: 'mock', modelId: model, maxEmbeddingsPerCall: 8, supportsParallelCalls: true,
+        doEmbed: async ({ values }) => { used.push('embedding'); return { embeddings: values.map(() => [0.1, 0.2]), warnings: [] } },
+      }),
+    })
+    const p = hub.createProvider({ kind: 'openai-compatible', name: 'SF', baseUrl: 'https://api.siliconflow.cn/v1', apiKey: 'k' })
+    expect(await hub.testModel({ providerId: p.id, model: 'BAAI/bge-m3' })).toMatchObject({ ok: true, text: '2 维向量' })
+    expect(used).toEqual(['embedding'])
+  })
+})
+
+describe('guessModelKind', () => {
+  it('recognises common embedding model ids', () => {
+    for (const m of ['text-embedding-3-small', 'BAAI/bge-m3', 'bge-large-zh-v1.5', 'nomic-embed-text', 'intfloat/e5-mistral-7b-instruct', 'thenlper/gte-large', 'gemini-embedding-001'])
+      expect(guessModelKind(m), m).toBe('embedding')
+    for (const m of ['gpt-5', 'claude-sonnet-5-5', 'Qwen/Qwen3-8B', 'gemini-3-pro', 'llama-3.3-70b'])
+      expect(guessModelKind(m), m).toBe('language')
   })
 })
