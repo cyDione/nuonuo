@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
 
-export type Route = { page: 'chat'; id?: string } | { page: 'settings'; tab: SettingsTab }
-export type SettingsTab = 'providers' | 'roles' | 'sources' | 'plugins' | 'mcp' | 'routines' | 'review' | 'memory' | 'execution' | 'usage' | 'system'
+export type Route = { page: 'chat'; id?: string } | { page: 'activity' } | { page: 'library' } | { page: 'settings'; tab: SettingsTab }
+export type SettingsTab = 'providers' | 'roles' | 'instructions' | 'proactive' | 'sources' | 'plugins' | 'mcp' | 'routines' | 'review' | 'memory' | 'execution' | 'usage' | 'system'
 
 function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/')
   if (parts[0] === 'settings') {
-    const tab = (['providers', 'roles', 'sources', 'plugins', 'mcp', 'routines', 'review', 'memory', 'execution', 'usage', 'system'] as const).find(t => t === parts[1]) ?? 'providers'
+    const tab = (['providers', 'roles', 'instructions', 'proactive', 'sources', 'plugins', 'mcp', 'routines', 'review', 'memory', 'execution', 'usage', 'system'] as const).find(t => t === parts[1]) ?? 'providers'
     return { page: 'settings', tab }
   }
   if (parts[0] === 'c' && parts[1]) return { page: 'chat', id: parts[1] }
+  if (parts[0] === 'activity') return { page: 'activity' }
+  if (parts[0] === 'library') return { page: 'library' }
   return { page: 'chat' }
 }
 

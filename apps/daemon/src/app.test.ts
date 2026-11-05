@@ -23,7 +23,7 @@ beforeEach(async () => {
   rt = await createRuntime(resolveConfig({ port: 7420 }), { lock: false })
   // Swap in a hub whose models are scripted mocks, keeping the runtime's store and secrets.
   const script = (opts: any) => {
-    if (!systemText(opts).includes('router')) return { text: '问候' }
+    if (!systemText(opts).includes("You are the owner's personal assistant")) return { text: '问候' }
     if (opts.prompt.at(-1).role === 'tool') return { text: 'done' }
     const cnv = /conversation_id="([a-z]+_[a-z0-9]+)"/.exec(lastUserText(opts))?.[1]
     return { calls: [{ name: 'reply', input: { conversation_id: cnv, text: '你好，我在。' } }] }

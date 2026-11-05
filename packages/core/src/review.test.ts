@@ -37,7 +37,7 @@ function setup(verdict: () => Scripted) {
   const script = (opts: any): Scripted => {
     const system = systemText(opts)
     if (system.includes('You review one action')) return verdict()
-    if (system.includes('main agent ("router")')) return { text: 'ok' }
+    if (system.includes("You are the owner's personal assistant")) return { text: 'ok' }
     const last = opts.prompt.at(-1)
     if (last.role === 'tool') return JSON.stringify(last.content).includes('"report"') ? { text: 'end' } : { calls: [{ name: 'report', input: { status: 'progress', summary: JSON.stringify(last.content).slice(0, 300) } }] }
     if (lastUserText(opts).includes('<job_finished')) return { calls: [{ name: 'report', input: { status: 'ready', summary: 'pushed' } }] }
@@ -56,7 +56,7 @@ function setup(verdict: () => Scripted) {
   const id = newId('cnv')
   store.db.insert(schema.conversations).values({ id, title: 't', createdAt: Date.now(), updatedAt: Date.now() }).run()
   const { triggerId } = engine.receiveMessage(id, '推送我的分支')
-  return { engine, reviewer, start: () => engine.startTask({ triggerIds: [triggerId], title: '推送' }) }
+  return { engine, reviewer, triggerId, start: () => engine.startTask({ triggerIds: [triggerId], title: '推送' }) }
 }
 const settle = async () => { for (let i = 0; i < 6; i++) { await new Promise(r => setTimeout(r, 40)); await runtime.idle() } }
 const audit = () => store.db.select().from(schema.auditLog).all().map(a => [a.actor, a.decision])
@@ -93,6 +93,15 @@ describe('Reviewer', () => {
     expect(existsSync(join(ticket.directory, 'pushed.txt'))).toBe(true)
     expect(engine.ticket(ticket.id).ended?.outcome).toBe('completed')
     expect(audit()).toEqual([['reviewer', 'escalate'], ['owner', 'allow']])
+  })
+
+  it('never asks the owner during silent work: the step is blocked instead', async () => {
+    const { engine, reviewer, triggerId } = setup(() => ({ text: JSON.stringify({ decision: 'ask_owner', reason: '要推送' }) }))
+    const ticket = engine.startProactive(triggerId, { title: '悄悄看看', reason: '策略' })
+    await settle()
+    expect(reviewer.pending()).toHaveLength(0)
+    expect(JSON.stringify(runtime.history(ticket.sessionId))).toContain('不能做需要主人批准的操作')
+    engine.stopTask(ticket.id, 'person')
   })
 
   it('applies deny rules and the "ask" mode without calling the model', async () => {

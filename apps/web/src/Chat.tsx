@@ -1,19 +1,23 @@
+/**
+ * A conversation, the way a chat app shows one: the owner's messages and the assistant's. The work behind it stays out of
+ * sight — only a quiet "working on…" line, finished results as attachments, and what needs the owner (a yes/no, a
+ * question, the browser) appear here. What was done step by step is one click away, never in the timeline.
+ */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowUp, CornerDownRight, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowUp, ChevronDown, ChevronRight, ExternalLink, Sparkles } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, ApiError, type Conversation, type Message, type RolesResponse } from './api'
-import { useLive } from './live'
+import { api, ApiError, type Conversation, type Delivery, type Message, type RolesResponse } from './api'
+import { openTask, useLive } from './live'
 import { go } from './route'
-import { TaskCard, TasksPanel, useTickets } from './tasks'
+import { FileChip, NeedsYou, needsOwner, useTickets, WorkingLine } from './tasks'
 import { SOURCE_LABEL, SourceIcon } from './icons'
-import { ExternalLink } from 'lucide-react'
 
 /** A message typed on the empty screen, sent once the new conversation's page mounts. */
 let pendingSend: { id: string; content: string } | undefined
 
-const SUGGESTIONS = ['帮我写一个统计当前目录代码行数的脚本，并运行一下', '调研一下 SQLite WAL 模式的优缺点，整理成要点', '你好，介绍一下你能做什么', '同时帮我做两件事：生成 10 个随机密码；查一下今天的日期']
+const SUGGESTIONS = ['帮我写个脚本统计当前目录的代码行数', '调研一下 SQLite WAL 模式的优缺点', '你能帮我做些什么？', '每天早上 9 点给我整理一下 Hacker News 热门']
 
 export function Chat({ id }: { id?: string }) {
   const qc = useQueryClient()
@@ -32,13 +36,14 @@ export function Chat({ id }: { id?: string }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const noRouter = roles.data && !roles.data.resolved.router
 
-  const messages = thread.data?.messages ?? []
-  const openTasks = (tickets.data?.tickets ?? []).filter(t => t.conversationId === id && t.stage !== 'ended')
-  const directTarget = openTasks.length === 1 ? openTasks[0] : undefined
+  const messages = (thread.data?.messages ?? []).filter(m => m.role === 'user' || m.role === 'assistant')
+  const mine = (tickets.data?.tickets ?? []).filter(t => t.conversationId === id && t.stage !== 'ended')
+  const asks = mine.filter(needsOwner)
+  const working = mine.filter(t => t.stage === 'working' || t.stage === 'queued')
   const last = messages.at(-1)
   const thinking = routerBusy && last?.role === 'user' && !draft
 
-  useLayoutEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }) }, [messages.length, draft?.text, thinking])
+  useLayoutEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }) }, [messages.length, draft?.text, thinking, asks.length])
 
   async function send(content: string, replyTo?: string) {
     setError(null)
@@ -73,42 +78,43 @@ export function Chat({ id }: { id?: string }) {
 
   const empty = !id || (thread.isSuccess && messages.length === 0)
 
-  return <div className="flex h-full">
-    <div className="flex min-w-0 flex-1 flex-col">
-      {thread.data && <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-5">
-        {current && current.source !== 'webchat' && <SourceIcon source={current.source} className="shrink-0 text-muted" />}
-        <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h1>
-        {current?.meta.url && <a href={current.meta.url} target="_blank" rel="noreferrer" className="flex shrink-0 items-center gap-1 text-xs text-accent">
-          在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>}
-      </header>}
-      {noRouter && <div className="mx-auto mt-4 flex w-full max-w-3xl items-center gap-2 rounded-lg border border-line bg-panel px-4 py-2.5 text-sm">
-        <AlertTriangle size={16} className="shrink-0 text-warn" />
-        <span className="flex-1">主 Agent 还没有模型。添加供应商的 API key（或设置 DEEPSEEK_API_KEY 等环境变量后重启），再为「主 Agent」选择模型。</span>
-        <a className="font-medium text-accent" href="#/settings/providers">去设置</a>
-      </div>}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        {empty ? <Welcome onPick={t => send(t)} disabled={Boolean(noRouter)} /> :
-          <div className="mx-auto max-w-3xl space-y-5 px-5 py-6">
-            {messages.map(m => <Item key={m.id} m={m} onAnswer={(text, ticketId) => send(text, ticketId)} />)}
-            {draft && <div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.text}</ReactMarkdown><span className="caret" /></div>}
-            {thinking && <div className="flex items-center gap-2 text-sm text-faint"><span className="flex gap-1">
-              {[0, 1, 2].map(i => <span key={i} className="size-1.5 animate-bounce rounded-full bg-faint" style={{ animationDelay: `${i * 120}ms` }} />)}
-            </span>主 Agent 正在处理</div>}
-          </div>}
-      </div>
-      {error && <div className="mx-auto w-full max-w-3xl px-5"><div className="rounded-lg border border-line bg-panel px-3 py-2 text-sm text-danger">{error}</div></div>}
-      <Composer onSend={text => send(text)} disabled={Boolean(noRouter)}
-        hint={directTarget ? <><CornerDownRight size={12} />消息会直接交给进行中的任务「{directTarget.title}」；与它无关的内容会转回主 Agent</> : undefined} />
+  return <div className="flex h-full flex-col">
+    {thread.data && <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-5">
+      {current && current.source !== 'webchat' && <SourceIcon source={current.source} className="shrink-0 text-muted" />}
+      <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h1>
+      {current?.meta.url && <a href={current.meta.url} target="_blank" rel="noreferrer" className="flex shrink-0 items-center gap-1 text-xs text-accent">
+        在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>}
+    </header>}
+    {noRouter && <div className="mx-auto mt-4 flex w-full max-w-3xl items-center gap-2 rounded-lg border border-line bg-panel px-4 py-2.5 text-sm">
+      <AlertTriangle size={16} className="shrink-0 text-warn" />
+      <span className="flex-1">还没有可用的模型。添加供应商的 API key（或设置 DEEPSEEK_API_KEY 等环境变量后重启），再为「主 Agent」选择模型。</span>
+      <a className="font-medium text-accent" href="#/settings/providers">去设置</a>
+    </div>}
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      {empty ? <Welcome onPick={t => send(t)} disabled={Boolean(noRouter)} /> :
+        <div className="mx-auto max-w-3xl space-y-5 px-5 py-6">
+          {messages.map(m => <Item key={m.id} m={m} />)}
+          {draft && <div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.text}</ReactMarkdown><span className="caret" /></div>}
+          {thinking && <Typing />}
+          {asks.map(t => <NeedsYou key={t.id} t={t} onAnswer={(text, ticketId) => send(text, ticketId)} />)}
+        </div>}
     </div>
-    <TasksPanel currentConversation={id} />
+    {error && <div className="mx-auto w-full max-w-3xl px-5"><div className="rounded-lg border border-line bg-panel px-3 py-2 text-sm text-danger">{error}</div></div>}
+    <Composer onSend={text => send(text)} disabled={Boolean(noRouter)} status={<WorkingLine tickets={working} />} />
+  </div>
+}
+
+function Typing() {
+  return <div className="flex h-6 items-center gap-1" aria-label="正在输入">
+    {[0, 1, 2].map(i => <span key={i} className="size-1.5 animate-bounce rounded-full bg-faint" style={{ animationDelay: `${i * 120}ms` }} />)}
   </div>
 }
 
 function Welcome({ onPick, disabled }: { onPick(text: string): void; disabled: boolean }) {
   return <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center px-5 text-center">
     <Sparkles className="mb-4 text-accent" size={28} />
-    <h2 className="text-xl font-semibold">有什么要交给我的？</h2>
-    <p className="mt-2 text-sm text-muted">简单的问题我直接回答；需要动手的事会开成任务，在后台并行完成，完成或需要你决定时我再回来找你。</p>
+    <h2 className="text-xl font-semibold">有什么可以帮你？</h2>
+    <p className="mt-2 text-sm text-muted">交给我就行。需要动手的事我在后台做，做完或者要你拿主意的时候再来找你；你可以同时交代好几件事。</p>
     <div className="mt-6 grid w-full gap-2 sm:grid-cols-2">
       {SUGGESTIONS.map(s => <button key={s} disabled={disabled} onClick={() => onPick(s)}
         className="rounded-xl border border-line bg-panel px-4 py-3 text-left text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50">{s}</button>)}
@@ -116,36 +122,58 @@ function Welcome({ onPick, disabled }: { onPick(text: string): void; disabled: b
   </div>
 }
 
-function Item({ m, onAnswer }: { m: Message; onAnswer(text: string, ticketId: string): void }) {
-  if (m.role === 'event' && m.ticketId) return <TaskCard ticketId={m.ticketId} onAnswer={onAnswer} />
+function Item({ m }: { m: Message }) {
   const external = m.role === 'user' && m.meta.source && m.meta.source !== 'webchat'
-  if (external) return <div className="rounded-xl border border-line bg-panel px-4 py-3">
-    <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted">
-      <SourceIcon source={m.meta.source} size={12} />
-      <span className="font-medium text-fg">{m.meta.source === 'cron' ? '定时任务' : m.meta.actor}</span>
-      {m.meta.human === false && <span className="rounded bg-sunken px-1 text-[10px]">bot</span>}
-      <span className="text-faint">· {new Date(m.createdAt).toLocaleString()}</span>
-      {m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="ml-auto text-accent"><ExternalLink size={12} /></a>}
+  if (external) return <div className="flex gap-2.5">
+    <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-sunken text-muted"><SourceIcon source={m.meta.source} size={14} /></div>
+    <div className="min-w-0 flex-1">
+      <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted">
+        <span className="font-medium text-fg">{m.meta.source === 'cron' ? '定时任务' : m.meta.actor}</span>
+        {m.meta.human === false && <span className="rounded bg-sunken px-1 text-[10px]">bot</span>}
+        <span className="text-faint">{new Date(m.createdAt).toLocaleString()}</span>
+        {m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent"><ExternalLink size={12} /></a>}
+      </div>
+      <div className="prose-chat text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
     </div>
-    <div className="prose-chat text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
   </div>
   if (m.role === 'user') return <div className="flex justify-end">
     <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent-soft px-4 py-2.5 text-[15px] whitespace-pre-wrap">{m.content}</div>
   </div>
-  return <div>
+  const result = m.meta.result as Delivery | undefined
+  return <div className="space-y-2">
     <div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
-    {m.meta.error && <div className="mt-1.5 text-xs text-danger">⚠ {m.meta.error}</div>}
-    {m.meta.via && <div className="mt-1 flex items-center gap-1 text-[11px] text-faint">
+    {result && <Result result={result} />}
+    {m.meta.error && <div className="text-xs text-danger">⚠ {m.meta.error}</div>}
+    {m.meta.via && <div className="flex items-center gap-1 text-[11px] text-faint">
       <SourceIcon source={m.meta.via} size={11} />
       {m.meta.delivery === 'sent' ? <>已发到 {SOURCE_LABEL[m.meta.via] ?? m.meta.via}{m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent"> ↗</a>}</>
         : m.meta.delivery === 'pending' ? '发送中…'
-        : <span className="text-danger">{m.meta.delivery === 'dropped' ? '未能发送' : '发送失败，稍后重试'}{m.meta.deliveryError ? `：${m.meta.deliveryError}` : ''}</span>}
+        : <span className="text-danger">{m.meta.delivery === 'dropped' ? '没能发出去' : '发送失败，稍后重试'}{m.meta.deliveryError ? `：${m.meta.deliveryError}` : ''}</span>}
+    </div>}
+  </div>
+}
+
+/** A finished piece of work: its files, and the full write-up folded under the message. */
+function Result({ result }: { result: Delivery }) {
+  const [open, setOpen] = useState(false)
+  const long = result.summary.length > 160
+  return <div className="space-y-2">
+    {result.files.length > 0 && <div className="flex flex-wrap gap-2">{result.files.map(f => <FileChip key={f.id} {...f} />)}</div>}
+    {long && <div className="rounded-xl border border-line bg-panel">
+      <div className="flex items-center">
+        <button onClick={() => setOpen(v => !v)} className="flex min-w-0 flex-1 items-center gap-1.5 px-3.5 py-2.5 text-left text-sm">
+          {open ? <ChevronDown size={14} className="shrink-0 text-faint" /> : <ChevronRight size={14} className="shrink-0 text-faint" />}
+          <span className="truncate font-medium">{result.title}</span><span className="shrink-0 text-xs text-faint">· 完整结果</span>
+        </button>
+        <button onClick={() => openTask(result.ticketId)} className="shrink-0 px-3.5 text-xs text-faint hover:text-muted">我是怎么做的</button>
+      </div>
+      {open && <div className="prose-chat border-t border-line px-4 py-3 text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown></div>}
     </div>}
   </div>
 }
 
 /** Never blocks on a message in flight: each message is independent, and the owner may type several in a row. */
-function Composer({ onSend, disabled, hint }: { onSend(text: string): void; disabled: boolean; hint?: React.ReactNode }) {
+function Composer({ onSend, disabled, status }: { onSend(text: string): void; disabled: boolean; status?: React.ReactNode }) {
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
   useLayoutEffect(() => {
@@ -160,10 +188,10 @@ function Composer({ onSend, disabled, hint }: { onSend(text: string): void; disa
     onSend(value)
     setText('')
   }
-  return <div className="mx-auto w-full max-w-3xl px-5 pt-3 pb-5">
-    {hint && <div className="mb-1.5 flex items-center gap-1 px-1 text-xs text-faint">{hint}</div>}
+  return <div className="mx-auto w-full max-w-3xl px-5 pt-2 pb-5">
+    {status && <div className="mb-2 px-1">{status}</div>}
     <div className="flex items-end gap-2 rounded-2xl border border-line bg-panel p-2 pl-4 focus-within:border-accent">
-      <textarea ref={ref} value={text} rows={1} autoFocus placeholder={disabled ? '请先在设置中为主 Agent 配置模型' : '给 Super-agent 发消息（Enter 发送，Shift+Enter 换行）'}
+      <textarea ref={ref} value={text} rows={1} autoFocus placeholder={disabled ? '请先在设置中配置模型' : '发消息…（Enter 发送，Shift+Enter 换行）'}
         disabled={disabled} onChange={e => setText(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
         className="max-h-60 min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[15px] outline-none placeholder:text-faint" />

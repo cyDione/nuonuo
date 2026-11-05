@@ -87,7 +87,8 @@ export class AgentRuntime {
   }
 
   recall(ref: string, page?: number): string {
-    const prefix = ref.split('_')[0] ?? ''
+    // Thread ids look like `github:owner/repo#12`; everything else is `prefix_…`.
+    const prefix = /^[a-z]+:/.test(ref) ? 'thread' : ref.split('_')[0] ?? ''
     const resolver = this.resolvers.get(prefix)
     return resolver?.(ref, page) ?? `没有找到 ${ref}`
   }
@@ -105,6 +106,11 @@ export class AgentRuntime {
   session(id: string): SessionRecord | undefined {
     const row = this.store.db.select().from(schema.sessions).where(eq(schema.sessions.id, id)).get()
     return row && { id: row.id, role: row.role, modelRole: row.modelRole as RoleId, ticketId: row.ticketId, state: row.state as SessionState, meta: row.meta }
+  }
+
+  /** Sessions started by another session (a worker's subagents). */
+  children(parentId: string): string[] {
+    return this.store.sqlite.prepare(`SELECT id FROM sessions WHERE json_extract(meta, '$.parent') = ?`).all(parentId).map((r: any) => r.id as string)
   }
 
   /** Queues input for a session; it wakes after the surrounding transaction commits unless `wake` is false. */

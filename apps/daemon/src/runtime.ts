@@ -1,10 +1,10 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-agent/agent-runtime'
-import { browserExtension, combineExtensions, Engine, mcpExtension, Memory, memoryExtension, registerAgents, Reviewer, sandboxExtension, Watchdog } from '@super-agent/core'
+import { browserExtension, combineExtensions, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, Watchdog } from '@super-agent/core'
 import { Effects, kvGet, openStore, type Store } from '@super-agent/db'
 import { gmailPlugin, telegramPlugin } from '@super-agent/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-agent/sources'
-import { EnvAwareSecrets, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
+import { EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DaemonConfig } from './config'
@@ -23,6 +23,8 @@ export interface Runtime {
   routines: Routines
   reviewer: Reviewer
   memory: Memory
+  instructions: Instructions
+  screener: Screener
   watchdog: Watchdog
   browser: BrowserManager
   browserPath?: string
@@ -74,7 +76,16 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     plugins.registerBuiltIn(telegramPlugin)
     plugins.registerBuiltIn(gmailPlugin)
     const mcp = new McpManager(() => kvGet<McpServerConfig[]>(store, 'settings:mcp') ?? [], agents.blobs)
-    const engine = new Engine(store, agents, bus, { home: config.home, sources })
+    const engine = new Engine(store, agents, bus, { home: config.home, sources, screen: triggerId => effects.enqueue('proactive.screen', triggerId, { triggerId }) })
+    const screener = new Screener(store, hub, engine)
+    effects.handle<{ triggerId: string }>('proactive.screen', async ({ triggerId }) => {
+      try { await screener.screen(triggerId) } catch (error) {
+        // Without a usable filter model there is nothing to retry; record it so the activity log says why.
+        if (error instanceof ModelError) { engine.proactiveDecision(triggerId, { act: false, reason: `没有可用的过滤模型：${error.message}` }, 'off'); return }
+        throw error
+      }
+    }, { concurrency: 2, baseDelayMs: 10_000, maxDelayMs: 600_000 })
+    const instructions = new Instructions(store)
     sources.engine = engine
     agents.options.maxWorkers = engine.execution().maxWorkers
     const reviewer = new Reviewer(store, hub, engine, agents, bus)
@@ -86,10 +97,13 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         ...effects.health().filter(h => h.failing > 0).map(h => `后台队列 ${h.kind} 连续失败：${h.lastError ?? ''}`),
         ...sources.list().filter(s => s.enabled && s.health.status === 'error').map(s => `来源 ${s.title} 出错：${s.health.detail ?? ''}`),
       ],
+      correctionTools: () => ({ ...instructions.tools('watchdog'), update_proactive: proactiveTool(store, 'watchdog') }),
     })
     registerAgents(store, agents, engine, combineExtensions(
       sources.agentExtensions(),
       memoryExtension(memory, engine),
+      instructionsExtension(instructions),
+      proactiveExtension(store),
       browserExtension(browser, engine, agents),
       sandboxExtension(engine),
       mcpExtension(mcp, engine, reviewer),
@@ -105,7 +119,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, watchdog, browser, plugins, mcp, startedAt: Date.now(),
+      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, instructions, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
       startAgents() {
         agents.recover(session => engine.recoveryNote(session.id, session.role))
         void plugins.loadEnabled().finally(() => sources.startAll())

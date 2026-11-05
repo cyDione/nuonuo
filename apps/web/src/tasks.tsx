@@ -1,6 +1,10 @@
-/** Task cards in the timeline, the task drawer with the worker's transcript, and the panel of what waits for the owner. */
+/**
+ * The work behind the conversation, shown the way a person would describe it:
+ * - in the chat, only what needs the owner (a yes/no, a question, taking over the browser, a problem) and a quiet "working on…" line;
+ * - everything else — what was done, step by step — is one click away in the activity view, never in the conversation.
+ */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Brain, Globe, ShieldAlert, ShieldCheck, ShieldX, CheckCircle2, ChevronDown, ChevronRight, CircleDot, Clock, FolderOpen, Hand, Loader2, MessageCircleQuestion, OctagonX, RotateCcw, Square, Terminal, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, CircleDot, Clock, FileText, Globe, Hand, Loader2, MessageCircleQuestion, OctagonX, RotateCcw, ShieldAlert, Sparkles, Square, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -12,13 +16,21 @@ import { HandoffModal } from './handoff'
 
 export const useTickets = () => useQuery({ queryKey: ['tickets'], queryFn: () => api.get<{ tickets: Ticket[] }>('/tickets') })
 
-const STAGE_TONE: Record<Stage, string> = {
+/** What a stage means to the owner, in plain words. */
+export const STATE_TEXT: Record<Stage, string> = {
+  'person/approve': '等你点头', 'person/answer': '等你回复', 'person/blocked': '卡住了', 'person/failed': '出了问题',
+  queued: '马上开始', working: '正在做', idle: '在等后续', ended: '已结束',
+}
+export const endedText = (t: Ticket) => (t.ended?.outcome === 'completed' ? '完成了' : t.ended?.outcome === 'dropped' ? '不需要做' : '停下了')
+export const needsOwner = (t: Ticket) => t.stage.startsWith('person/')
+
+const TONE: Record<Stage, string> = {
   'person/approve': 'text-warn', 'person/answer': 'text-warn', 'person/blocked': 'text-warn', 'person/failed': 'text-danger',
   queued: 'text-muted', working: 'text-accent', idle: 'text-muted', ended: 'text-faint',
 }
 
-export function StageIcon({ t, size = 14 }: { t: Ticket; size?: number }) {
-  const cls = cx('shrink-0', STAGE_TONE[t.stage])
+export function StateIcon({ t, size = 14 }: { t: Ticket; size?: number }) {
+  const cls = cx('shrink-0', TONE[t.stage])
   if (t.stage === 'working') return <Loader2 size={size} className={cx(cls, 'animate-spin')} />
   if (t.stage === 'person/approve') return <ShieldAlert size={size} className={cls} />
   if (t.stage === 'person/answer') return <MessageCircleQuestion size={size} className={cls} />
@@ -29,71 +41,100 @@ export function StageIcon({ t, size = 14 }: { t: Ticket; size?: number }) {
   return <CircleDot size={size} className={cls} />
 }
 
-const endedLabel = (t: Ticket) => (t.ended?.outcome === 'completed' ? '已完成' : t.ended?.outcome === 'dropped' ? '无需处理' : '已停止')
-
-export function TaskCard({ ticketId, onAnswer }: { ticketId: string; onAnswer(text: string, ticketId: string): void }) {
+/**
+ * One thing the owner is asked for, as part of the conversation: plain words first, technical detail folded away.
+ * Answers to questions are typed in the composer like any message (they reach the right work automatically).
+ */
+export function NeedsYou({ t, onAnswer }: { t: Ticket; onAnswer(text: string, ticketId: string): void }) {
   const qc = useQueryClient()
-  const tickets = useTickets()
-  const t = tickets.data?.tickets.find(x => x.id === ticketId)
-  const live = useLive(s => s.workerText[ticketId] ?? '')
-  const [expanded, setExpanded] = useState(false)
-  const stop = useMutation({ mutationFn: () => api.post(`/tickets/${ticketId}/stop`), onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }) })
-  const retry = useMutation({ mutationFn: () => api.post(`/tickets/${ticketId}/retry`), onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }) })
-  const decide = useMutation({ mutationFn: (v: { id: string; approve: boolean; note?: string }) => api.post(`/approvals/${v.id}`, { approve: v.approve, ...(v.note ? { note: v.note } : {}) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }) })
+  const refresh = () => qc.invalidateQueries({ queryKey: ['tickets'] })
+  const decide = useMutation({ mutationFn: (v: { id: string; approve: boolean; note?: string }) => api.post(`/approvals/${v.id}`, { approve: v.approve, ...(v.note ? { note: v.note } : {}) }), onSuccess: refresh })
+  const retry = useMutation({ mutationFn: () => api.post(`/tickets/${t.id}/retry`), onSuccess: refresh })
+  const stop = useMutation({ mutationFn: () => api.post(`/tickets/${t.id}/stop`), onSuccess: refresh })
   const [handoff, setHandoff] = useState<string | null>(null)
-  if (!t) return null
-  const report = t.latestReport
-  const showReport = report && report.status !== 'progress' && report.summary
-  const liveLine = t.stage === 'working' ? live.trim().split('\n').filter(Boolean).at(-1) : undefined
-  return <div className="rounded-xl border border-line bg-panel">
-    <div className="flex items-center gap-2 px-4 py-3">
-      <StageIcon t={t} />
-      <span className="min-w-0 flex-1 truncate text-sm font-medium">{t.title}</span>
-      <span className={cx('text-xs', STAGE_TONE[t.stage])}>{t.stage === 'ended' ? endedLabel(t) : t.stageLabel}</span>
-    </div>
-    {liveLine && <div className="truncate border-t border-line px-4 py-2 font-mono text-xs text-faint">{liveLine}</div>}
-    {t.approvals.map(a => <div key={a.id} className="border-t border-line px-4 py-3">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-warn"><ShieldAlert size={13} />需要你批准{a.risk === 'destructive' ? '（高风险）' : ''}</div>
-      <pre className="mt-1.5 overflow-x-auto rounded-lg bg-sunken px-3 py-2 font-mono text-xs whitespace-pre-wrap">{a.command}</pre>
-      <div className="mt-1.5 text-xs text-muted">{a.reason}</div>
-      <div className="mt-2 flex gap-1.5">
-        <Button size="sm" variant="primary" disabled={decide.isPending} onClick={() => decide.mutate({ id: a.id, approve: true })}><ShieldCheck size={13} />批准并执行</Button>
-        <Button size="sm" variant="danger" disabled={decide.isPending} onClick={() => { const note = prompt('拒绝的理由（会告诉任务，可留空）') ?? undefined; decide.mutate({ id: a.id, approve: false, ...(note ? { note } : {}) }) }}><ShieldX size={13} />拒绝</Button>
+  const [detail, setDetail] = useState(false)
+
+  const shell = (children: React.ReactNode) => <div className="rounded-2xl border border-line bg-panel px-4 py-3 shadow-sm">{children}</div>
+
+  if (t.approvals.length) {
+    const a = t.approvals[0]!
+    return shell(<>
+      <div className="flex items-center gap-1.5 text-sm font-medium"><ShieldAlert size={15} className="text-warn" />这一步要你同意{a.risk === 'destructive' ? '（不可撤销）' : ''}</div>
+      <div className="mt-1 text-sm text-muted">{a.reason}</div>
+      <button onClick={() => setDetail(v => !v)} className="mt-1.5 flex items-center gap-0.5 text-xs text-faint hover:text-muted">{detail ? <ChevronDown size={12} /> : <ChevronRight size={12} />}具体操作</button>
+      {detail && <pre className="mt-1 overflow-x-auto rounded-lg bg-sunken px-3 py-2 font-mono text-xs whitespace-pre-wrap">{a.command}</pre>}
+      <div className="mt-2.5 flex gap-1.5">
+        <Button size="sm" variant="primary" disabled={decide.isPending} onClick={() => decide.mutate({ id: a.id, approve: true })}>同意</Button>
+        <Button size="sm" disabled={decide.isPending} onClick={() => { const note = prompt('不同意的原因（可留空）') ?? undefined; decide.mutate({ id: a.id, approve: false, ...(note ? { note } : {}) }) }}>不同意</Button>
       </div>
-    </div>)}
-    {t.attention?.kind === 'handoff' && <div className="border-t border-line px-4 py-3">
-      <div className="text-sm">{t.attention.question}</div>
-      <Button size="sm" variant="primary" className="mt-2" onClick={() => setHandoff(t.attention!.question)}><Globe size={13} />接管浏览器</Button>
-    </div>}
+      {t.approvals.length > 1 && <div className="mt-1.5 text-xs text-faint">还有 {t.approvals.length - 1} 步也在等你</div>}
+    </>)
+  }
+  if (t.attention?.kind === 'handoff') return shell(<>
+    <div className="flex items-center gap-1.5 text-sm font-medium"><Globe size={15} className="text-warn" />需要你在浏览器里操作一下</div>
+    <div className="mt-1 text-sm text-muted">{t.attention.question}</div>
+    <Button size="sm" variant="primary" className="mt-2.5" onClick={() => setHandoff(t.attention!.question)}>打开浏览器</Button>
     {handoff && <HandoffModal ticketId={t.id} reason={handoff} onClose={() => setHandoff(null)} />}
-    {t.attention && t.attention.kind !== 'handoff' && <div className="border-t border-line px-4 py-3">
-      <div className="text-sm">{t.attention.question}</div>
-      {t.attention.options?.length ? <div className="mt-2 flex flex-wrap gap-1.5">
-        {t.attention.options.map(o => <Button key={o} size="sm" onClick={() => onAnswer(o, t.id)}>{o}</Button>)}
-      </div> : null}
-      <div className="mt-1.5 text-xs text-faint">直接在下方输入框回复即可，消息会交给这个任务。</div>
-    </div>}
-    {showReport && !t.attention && <div className="border-t border-line px-4 py-3">
-      <div className={cx('prose-chat text-sm', !expanded && 'line-clamp-4')}><ReactMarkdown remarkPlugins={[remarkGfm]}>{report.summary}</ReactMarkdown></div>
-      {report.summary.length > 200 && <button onClick={() => setExpanded(v => !v)} className="mt-1 text-xs text-accent">{expanded ? '收起' : '展开全部'}</button>}
-    </div>}
-    <div className="flex flex-wrap items-center gap-1 border-t border-line px-2 py-1.5">
-      <Button size="sm" variant="ghost" onClick={() => openTask(t.id)}><Terminal size={13} />查看过程</Button>
-      {(t.stage === 'person/blocked' || t.stage === 'person/failed') && <Button size="sm" variant="ghost" onClick={() => retry.mutate()} disabled={retry.isPending}><RotateCcw size={13} />重试</Button>}
-      {t.stage !== 'ended' && <Button size="sm" variant="ghost" onClick={() => { if (confirm(`停止任务「${t.title}」？`)) stop.mutate() }} disabled={stop.isPending}><Square size={12} />停止</Button>}
-      <span className="ml-auto flex min-w-0 items-center gap-1 truncate pr-2 font-mono text-[11px] text-faint" title={t.directory}><FolderOpen size={12} className="shrink-0" />{t.directory.split('/').slice(-2).join('/')}</span>
-    </div>
+  </>)
+  if (t.attention?.options?.length) return shell(<div className="flex flex-wrap gap-1.5">
+    {t.attention.options.map(o => <Button key={o} size="sm" onClick={() => onAnswer(o, t.id)}>{o}</Button>)}
+  </div>)
+  if (t.stage === 'person/blocked' || t.stage === 'person/failed') return shell(<div className="flex flex-wrap items-center gap-1.5">
+    <span className="mr-auto text-sm text-muted">「{t.title}」{t.stage === 'person/failed' ? '出了问题' : '卡住了'}——可以直接回复我，或者：</span>
+    <Button size="sm" onClick={() => retry.mutate()} disabled={retry.isPending}><RotateCcw size={13} />再试一次</Button>
+    <Button size="sm" variant="ghost" onClick={() => stop.mutate()} disabled={stop.isPending}>算了</Button>
+  </div>)
+  return null
+}
+
+/** The quiet line under the conversation while work goes on; it opens what was done. */
+export function WorkingLine({ tickets }: { tickets: Ticket[] }) {
+  if (!tickets.length) return null
+  return <div className="flex flex-wrap gap-x-3 gap-y-1">
+    {tickets.map(t => <button key={t.id} onClick={() => openTask(t.id)} className="flex min-w-0 items-center gap-1.5 text-xs text-faint hover:text-muted" title="看看我做了什么">
+      <span className="relative flex size-2"><span className="absolute inline-flex size-full animate-ping rounded-full bg-accent opacity-50" /><span className="relative inline-flex size-2 rounded-full bg-accent" /></span>
+      <span className="truncate">{t.stage === 'queued' ? '马上开始' : '正在处理'}：{t.title}</span>
+    </button>)}
   </div>
+}
+
+// ── "What I did": the activity of one piece of work, told as steps ──────────
+
+/** A step in plain words; the raw call stays one click away. */
+function describeStep(tool: string, input: any): { icon: string; text: string } {
+  const i = input ?? {}
+  const short = (v: unknown, n = 80) => { const s = String(v ?? ''); return s.length > n ? `${s.slice(0, n)}…` : s }
+  switch (tool) {
+    case 'shell': return { icon: '⌘', text: `运行 ${short(i.command, 70)}` }
+    case 'read_file': return { icon: '📄', text: `查看 ${short(i.path)}` }
+    case 'write_file': return { icon: '✏️', text: `写入 ${short(i.path)}` }
+    case 'edit_file': return { icon: '✏️', text: `修改 ${short(i.path)}` }
+    case 'list_dir': return { icon: '📁', text: `浏览 ${short(i.path ?? '.')}` }
+    case 'web_fetch': return { icon: '🌐', text: `阅读网页 ${short(i.url, 60)}` }
+    case 'browser_open': return { icon: '🌐', text: `打开 ${short(i.url, 60)}` }
+    case 'browser_click': case 'browser_type': case 'browser_snapshot': case 'browser_screenshot': return { icon: '🌐', text: '在浏览器里操作' }
+    case 'request_handoff': return { icon: '🙋', text: '请你接管浏览器' }
+    case 'job_status': case 'job_stop': return { icon: '⏳', text: '查看后台命令' }
+    case 'recall': return { icon: '🔎', text: '回顾之前的记录' }
+    case 'remember': return { icon: '🧠', text: '记下一条经验' }
+    case 'search_memory': return { icon: '🧠', text: '翻看记忆' }
+    case 'subagent_start': return { icon: '👥', text: `分出一个子任务：${short(i.job, 60)}` }
+    case 'subagent_stop': return { icon: '👥', text: '停下一个子任务' }
+    case 'report': return { icon: '📝', text: i.status === 'ready' ? '整理好结果' : i.status === 'waiting' ? '有问题要问你' : i.status === 'progress' ? '告一段落，等后续' : i.status === 'dropped' ? '判断不需要做' : '说明遇到的问题' }
+    case 'handback': return { icon: '↩︎', text: '把一条无关的消息转回去' }
+    case 'github_follow': return { icon: '🔗', text: '关注一个 GitHub 讨论' }
+    default: return { icon: '•', text: tool.replace(/^mcp_/, '').replace(/_/g, ' ') }
+  }
 }
 
 export function TaskDrawer() {
   const id = useOpenTask()
+  const qc = useQueryClient()
   const detail = useQuery({ queryKey: ['ticket', id], enabled: Boolean(id), queryFn: () => api.get<TicketDetail>(`/tickets/${id}`) })
-  const live = useLive(s => (id ? s.workerText[id] ?? '' : ''))
+  const working = useLive(s => (id ? s.workerState[id] === 'running' : false))
+  const stop = useMutation({ mutationFn: () => api.post(`/tickets/${id}/stop`), onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }) })
   const scroller = useRef<HTMLDivElement>(null)
-  const stick = useRef(true)
-  useLayoutEffect(() => { if (stick.current) scroller.current?.scrollTo({ top: scroller.current.scrollHeight }) }, [detail.data?.transcript.length, live])
+  useLayoutEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }) }, [detail.data?.transcript.length])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') openTask(null) }
     addEventListener('keydown', onKey)
@@ -101,88 +142,77 @@ export function TaskDrawer() {
   }, [])
   if (!id) return null
   const d = detail.data
-  return <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-2xl flex-col border-l border-line bg-panel shadow-2xl">
-    <div className="flex items-center gap-2 border-b border-line px-5 py-3">
-      {d && <StageIcon t={d.ticket} />}
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-medium">{d?.ticket.title ?? '…'}</div>
-        {d && <div className="truncate font-mono text-[11px] text-faint">{d.ticket.id} · {d.ticket.directory}</div>}
+  const t = d?.ticket
+  const steps = d ? toSteps(d.transcript, d.ticket.directory) : []
+  const report = t?.latestReport
+  return <div className="fixed inset-0 z-40 flex justify-end bg-black/20" onMouseDown={e => { if (e.target === e.currentTarget) openTask(null) }}>
+    <div className="flex h-full w-full max-w-xl flex-col border-l border-line bg-panel shadow-2xl">
+      <div className="flex items-start gap-2 border-b border-line px-5 py-4">
+        {t && <div className="mt-0.5"><StateIcon t={t} /></div>}
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium">{t?.title ?? '…'}</div>
+          {t && <div className="mt-0.5 text-xs text-muted">{t.stage === 'ended' ? endedText(t) : STATE_TEXT[t.stage]}{t.proactive ? ' · 我主动发现的' : ''} · {new Date(t.createdAt).toLocaleString()}</div>}
+        </div>
+        {t?.conversationId && <Button size="sm" variant="ghost" onClick={() => { go(`/c/${t.conversationId}`); openTask(null) }}>回到对话</Button>}
+        {t && t.stage !== 'ended' && <Button size="sm" variant="ghost" onClick={() => { if (confirm(`停下「${t.title}」？`)) stop.mutate() }}><Square size={12} />停下</Button>}
+        <button onClick={() => openTask(null)} className="mt-0.5 text-faint hover:text-fg" aria-label="关闭"><X size={18} /></button>
       </div>
-      {d?.ticket.conversationId && <Button size="sm" variant="ghost" onClick={() => { go(`/c/${d.ticket.conversationId}`); openTask(null) }}>回到对话</Button>}
-      <button onClick={() => openTask(null)} className="text-faint hover:text-fg" aria-label="关闭"><X size={18} /></button>
-    </div>
-    {d && d.jobs.length > 0 && <div className="border-b border-line bg-sunken px-5 py-2 text-xs text-muted">
-      后台运行中：{d.jobs.map(j => <code key={j.jobId} className="mr-2 font-mono">{j.command.slice(0, 60)}</code>)}
-    </div>}
-    <div ref={scroller} onScroll={e => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80 }}
-      className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
-      {d?.transcript.map((item, i) => <TranscriptRow key={item.id} item={item} result={item.kind === 'tool-call' ? d.transcript.slice(i + 1).find(r => r.kind === 'tool-result' && r.callId === item.callId) as any : undefined} />)}
-      {live && <div className="prose-chat whitespace-pre-wrap text-sm text-muted">{live}<span className="caret" /></div>}
-      {d && !d.transcript.length && <div className="text-sm text-faint">还没有开始…</div>}
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {t?.proactive && t.why && <div className="mb-4 flex gap-2 rounded-xl bg-accent-soft px-3 py-2.5 text-sm"><Sparkles size={15} className="mt-0.5 shrink-0 text-accent" />没人找我，是按你的主动策略做的：{t.why}</div>}
+        {report && report.status !== 'progress' && report.summary && <section className="mb-5">
+          <h3 className="mb-1.5 text-xs font-medium text-muted">{report.status === 'ready' ? '结果' : '最新情况'}</h3>
+          <div className="prose-chat rounded-xl border border-line px-4 py-3 text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{report.summary}</ReactMarkdown></div>
+        </section>}
+        <h3 className="mb-2 text-xs font-medium text-muted">我做了什么</h3>
+        {!steps.length && <div className="text-sm text-faint">{working ? '刚开始…' : '还没有步骤'}</div>}
+        <ol className="space-y-1">{steps.map(s => <Step key={s.id} step={s} />)}</ol>
+        {working && <div className="mt-2 flex items-center gap-1.5 text-xs text-faint"><Loader2 size={12} className="animate-spin" />进行中</div>}
+        {d && d.jobs.length > 0 && <div className="mt-3 text-xs text-faint">后台还在运行 {d.jobs.length} 个命令</div>}
+      </div>
     </div>
   </div>
 }
 
-function TranscriptRow({ item, result }: { item: TranscriptItem; result?: Extract<TranscriptItem, { kind: 'tool-result' }> }) {
+type StepItem = { id: string; icon: string; text: string; detail?: string; output?: string; pending?: boolean; kind: 'step' | 'note' | 'error' }
+
+function toSteps(items: TranscriptItem[], dir: string): StepItem[] {
+  // Paths read better relative to the working directory.
+  const local = (v: unknown): any => (typeof v === 'string' ? v.split(`${dir}/`).join('').split(dir).join('.') : Array.isArray(v) ? v.map(local) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, local(x)])) : v)
+  const out: StepItem[] = []
+  items.forEach((item, i) => {
+    if (item.kind === 'tool-call') {
+      const result = items.slice(i + 1).find(r => r.kind === 'tool-result' && r.callId === item.callId) as Extract<TranscriptItem, { kind: 'tool-result' }> | undefined
+      const { icon, text } = describeStep(item.tool, local(item.input))
+      out.push({ id: item.id, icon, text, detail: JSON.stringify(item.input, null, 2), ...(result ? { output: result.output } : { pending: true }), kind: 'step' })
+    } else if (item.kind === 'text' && item.text.trim()) out.push({ id: item.id, icon: '💬', text: item.text.trim().split('\n')[0]!.slice(0, 140), detail: item.text, kind: 'note' })
+    else if (item.kind === 'marker' && item.type === 'error') out.push({ id: item.id, icon: '⚠️', text: `出错：${item.message ?? ''}`, kind: 'error' })
+  })
+  return out
+}
+
+function Step({ step }: { step: StepItem }) {
   const [open, setOpen] = useState(false)
-  switch (item.kind) {
-    case 'input': return <div className="rounded-lg bg-sunken px-3 py-2 font-mono text-xs whitespace-pre-wrap text-muted">{item.text}</div>
-    case 'reasoning': return <details className="text-xs text-faint"><summary className="flex cursor-pointer items-center gap-1"><Brain size={12} />思考</summary>
-      <div className="mt-1 whitespace-pre-wrap">{item.text}</div></details>
-    case 'text': return <div className="prose-chat text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown></div>
-    case 'tool-call': {
-      const summary = toolSummary(item.tool, item.input)
-      return <div className="rounded-lg border border-line">
-        <button onClick={() => setOpen(v => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs">
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          <span className="font-medium text-accent">{item.tool}</span>
-          <span className="min-w-0 flex-1 truncate font-mono text-muted">{summary}</span>
-          {!result && <Loader2 size={12} className="animate-spin text-faint" />}
-        </button>
-        {open && <div className="space-y-2 border-t border-line px-3 py-2">
-          <pre className="overflow-x-auto font-mono text-[11px] whitespace-pre-wrap text-muted">{JSON.stringify(item.input, null, 2)}</pre>
-          {result && <pre className="max-h-80 overflow-auto rounded bg-sunken p-2 font-mono text-[11px] whitespace-pre-wrap">{result.output}</pre>}
-        </div>}
-      </div>
-    }
-    case 'tool-result': return null
-    case 'marker': return <div className={cx('text-xs', item.type === 'error' ? 'text-danger' : 'text-faint')}>— {item.type === 'error' ? `出错：${item.message}` : item.type === 'step-limit' ? '达到单轮步数上限' : item.type} —</div>
-    case 'compaction': return <details className="text-xs text-faint"><summary className="cursor-pointer">— 上下文已压缩 —</summary><div className="mt-1 whitespace-pre-wrap">{item.summary}</div></details>
-  }
+  return <li>
+    <button onClick={() => setOpen(v => !v)} className={cx('flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-sunken', step.kind === 'error' && 'text-danger', step.kind === 'note' && 'text-muted')}>
+      <span className="w-5 shrink-0 text-center text-xs leading-5">{step.icon}</span>
+      <span className="min-w-0 flex-1 break-words">{step.text}</span>
+      {step.pending && <Loader2 size={12} className="mt-1 shrink-0 animate-spin text-faint" />}
+    </button>
+    {open && (step.detail || step.output) && <div className="mb-2 space-y-1.5 pl-9">
+      {step.kind === 'note' ? <div className="prose-chat text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{step.detail!}</ReactMarkdown></div>
+        : <pre className="overflow-x-auto rounded-lg bg-sunken px-3 py-2 font-mono text-[11px] whitespace-pre-wrap text-muted">{step.detail}</pre>}
+      {step.output && <pre className="max-h-72 overflow-auto rounded-lg border border-line px-3 py-2 font-mono text-[11px] whitespace-pre-wrap">{step.output}</pre>}
+    </div>}
+  </li>
 }
 
-function toolSummary(tool: string, input: any): string {
-  if (!input || typeof input !== 'object') return ''
-  if (tool === 'shell') return input.command
-  if (tool === 'report') return `${input.status}: ${String(input.summary ?? '').slice(0, 80)}`
-  return input.path ?? input.url ?? input.ref ?? input.job_id ?? JSON.stringify(input).slice(0, 100)
+export function FileChip({ id, name, size }: { id: string; name: string; size: number }) {
+  return <a href={`/api/artifacts/${id}`} target="_blank" rel="noreferrer"
+    className="flex max-w-full min-w-0 items-center gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-sm hover:border-accent">
+    <FileText size={16} className="shrink-0 text-accent" />
+    <span className="min-w-0 truncate">{name}</span>
+    <span className="shrink-0 text-xs text-faint">{fmtSize(size)}</span>
+  </a>
 }
 
-/** Right-hand panel: tasks that wait for the owner first, then running ones. Hidden when there is nothing. */
-export function TasksPanel({ currentConversation }: { currentConversation?: string }) {
-  const tickets = useTickets()
-  const list = tickets.data?.tickets ?? []
-  const person = list.filter(t => t.stage.startsWith('person/'))
-  const active = list.filter(t => t.stage === 'working' || t.stage === 'queued' || t.stage === 'idle')
-  const recent = list.filter(t => t.stage === 'ended').slice(0, 5)
-  if (!person.length && !active.length && !recent.length) return null
-  const Row = ({ t }: { t: Ticket }) => <button onClick={() => openTask(t.id)}
-    className={cx('flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sunken', t.conversationId === currentConversation && 'bg-sunken/60')}>
-    <StageIcon t={t} size={13} /><span className="min-w-0 flex-1 truncate">{t.title}</span>
-    <span className="shrink-0 text-[11px] text-faint">{t.stage === 'ended' ? endedLabel(t) : t.stageLabel}</span>
-  </button>
-  return <aside className="w-72 shrink-0 space-y-4 overflow-y-auto border-l border-line bg-panel p-3 max-xl:hidden">
-    {person.length > 0 && <section>
-      <h3 className="px-2.5 pb-1 text-xs font-medium text-warn">待你处理 · {person.length}</h3>
-      {person.map(t => <Row key={t.id} t={t} />)}
-    </section>}
-    {active.length > 0 && <section>
-      <h3 className="px-2.5 pb-1 text-xs font-medium text-muted">进行中 · {active.length}</h3>
-      {active.map(t => <Row key={t.id} t={t} />)}
-    </section>}
-    {recent.length > 0 && <section>
-      <h3 className="px-2.5 pb-1 text-xs font-medium text-faint">最近结束</h3>
-      {recent.map(t => <Row key={t.id} t={t} />)}
-    </section>}
-  </aside>
-}
+export const fmtSize = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)

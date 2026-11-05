@@ -11,6 +11,7 @@ export type ClientEvent =
   | { type: 'session.state'; role: string; sessionId: string; ticketId?: string | null; state: string }
   | { type: 'worker.part'; ticketId: string; part: unknown }
   | { type: 'conversation.updated'; conversationId: string }
+  | { type: 'activity.updated' }
 
 /** Reads a possibly unfinished JSON object's string field, e.g. `"text":"hel` → `hel`. */
 export function partialString(json: string, field: string): string | undefined {
@@ -43,8 +44,10 @@ export class EventMapper {
       case 'message.created': return [{ type: 'message.created', conversationId: e.conversationId, messageId: e.messageId }]
       case 'conversation.updated': return [{ type: 'conversation.updated', conversationId: e.conversationId }]
       case 'ticket.updated': return [{ type: 'ticket.updated', ticketId: e.ticketId }]
+      case 'activity.updated': return [{ type: 'activity.updated' }]
       case 'approval.updated': return [{ type: 'ticket.updated', ticketId: e.ticketId }]
-      case 'session.state': return [{ type: 'session.state', role: e.role, sessionId: e.sessionId, ticketId: e.ticketId, state: e.state }]
+      // A subagent's state and text belong to its parent's work; the web shows only the helper itself.
+      case 'session.state': return e.role === 'subagent' ? [] : [{ type: 'session.state', role: e.role, sessionId: e.sessionId, ticketId: e.ticketId, state: e.state }]
       case 'session.part': {
         const part = e.part
         if (e.role === 'router') {
@@ -63,7 +66,7 @@ export class EventMapper {
           if (part.kind === 'tool-call' || part.kind === 'tool-result') this.replies.delete(part.id)
           return []
         }
-        if (e.ticketId) return [{ type: 'worker.part', ticketId: e.ticketId, part }]
+        if (e.ticketId && e.role === 'worker') return [{ type: 'worker.part', ticketId: e.ticketId, part }]
         // The watchdog's notify_owner streams like the router's reply.
         if (e.role === 'watchdog') return []
         return []

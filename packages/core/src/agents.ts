@@ -5,13 +5,30 @@ import { tool, type ToolSet } from 'ai'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { z } from 'zod'
 import { clip, DomainError, Engine, ROUTER_SESSION } from './engine'
-import { sourceOfThread, STAGE_LABEL, type Ticket } from './model'
-import { ROUTER_PROMPT, WORKER_PROMPT } from './prompts'
+import { sourceOfThread, STAGE_LABEL, type Mandate, type Ticket } from './model'
+import { PROACTIVE_WORKER_PROMPT, ROUTER_PROMPT, SUBAGENT_PROMPT, WORKER_PROMPT } from './prompts'
+import type { Instructions } from './instructions'
+import { proactiveSettings, saveProactiveSettings } from './proactive'
 import type { Memory } from './memory'
 import { sandboxApplies, sandboxCommand } from './sandbox'
 import type { Reviewer } from './review'
 
 const CONTEXT_MESSAGES = 6
+/** Chat channels keep replies short (article §4.2: ≤ 100 words); long results travel as the attached full result. */
+const CHAT_SOURCES = new Set(['webchat', 'telegram', 'watchdog', 'cron'])
+const CHAT_LIMIT = 120
+const DETAILED_LIMIT = 600
+const MAX_SUBAGENTS = 4
+const CJK = /[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/g
+
+/** Roughly words: Latin words plus CJK characters at ~1.6 per word. */
+export function chatLength(text: string): number {
+  const cjk = (text.match(CJK) ?? []).length
+  const words = text.replace(CJK, ' ').split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length
+  return Math.ceil(cjk / 1.6) + words
+}
+
+const isProactive = (t: Ticket) => (t.mandate as Mandate).strength === 'proactive'
 
 /** What source plugins and routines add to the agents. */
 export interface AgentExtensions {
@@ -43,11 +60,11 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     const rows = store.db.select().from(schema.messages).where(eq(schema.messages.conversationId, conversationId))
       .orderBy(desc(schema.messages.createdAt)).limit(n + 1).all().filter(m => before === undefined || m.createdAt < before).slice(0, n).reverse()
     return rows.map(m => {
-      if (m.role === 'event') return `  [task card ${m.ticketId}: ${m.content}]`
+      if (m.role === 'event') return ''
       const actor = (m.meta as { actor?: string; source?: string }).actor
       const who = m.role === 'user' ? (actor && actor !== 'owner' ? `${actor} (${(m.meta as { source?: string }).source})` : 'owner') : 'agent'
       return `  ${who}${m.triggerId ? ` (${m.triggerId})` : ''}: ${clip(m.content.replace(/\s+/g, ' '), 300)}`
-    }).join('\n')
+    }).filter(Boolean).join('\n')
   }
 
   const tasksIn = (conversationId: string) => {
@@ -89,20 +106,89 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       m.role === 'event' ? `[task card ${m.ticketId}]` : `${m.role === 'user' ? ((m.meta as { actor?: string }).actor ?? 'owner') : 'agent'}${m.triggerId ? ` (${m.triggerId})` : ''}: ${clip(m.content, 2_000)}`).join('\n')}\n</conversation>`
   })
 
+  // Chain of recall (article §3.3): trigger → thread → task → session → another thread.
+  runtime.registerResolver('thread', ref => {
+    const thread = store.db.select().from(schema.threads).where(eq(schema.threads.id, ref)).get()
+    if (!thread) return undefined
+    const events = store.db.select().from(schema.triggers).where(eq(schema.triggers.threadId, ref)).orderBy(desc(schema.triggers.at)).limit(20).all().reverse()
+    const tasks = engine.subscribers(ref)
+    const meta = thread.meta as { title?: string; url?: string }
+    return [`<thread id="${ref}" source="${thread.source}" title="${meta.title ?? ''}"${meta.url ? ` url="${meta.url}"` : ''} conversation="${engine.conversationOfThread(ref) ?? ''}">`,
+      ext.threadInfo?.(ref) ?? '',
+      tasks.length ? `work on this thread: ${tasks.map(t => `${t.id} "${t.title}" ${t.ended ? `ended:${t.ended.outcome}` : engine.stage(t)} session=${t.sessionId}`).join('; ')}` : '',
+      'events (oldest first):',
+      ...events.map(e => `- ${e.id} ${new Date(e.at).toISOString()} ${e.actor}${e.human ? '' : ' (bot)'}: ${clip(e.text.replace(/\s+/g, ' '), 300)}`),
+      '</thread>'].filter(Boolean).join('\n')
+  })
+  runtime.registerResolver('ses', (ref, page = 1) => {
+    const session = runtime.session(ref)
+    if (!session) return undefined
+    const lines: string[] = []
+    for (const e of runtime.events(ref)) {
+      if (e.kind !== 'message') continue
+      const m = e.payload
+      if (typeof m.content === 'string') { lines.push(`${m.role}: ${clip(m.content, 600)}`); continue }
+      for (const p of m.content as any[]) {
+        if (p.type === 'text' && p.text) lines.push(`${m.role}: ${clip(p.text, 600)}`)
+        else if (p.type === 'tool-call') lines.push(`→ ${p.toolName} ${clip(JSON.stringify(p.input), 240)}`)
+        else if (p.type === 'tool-result') lines.push(`  ↳ ${clip(JSON.stringify(p.output?.value ?? p.output), 300)}`)
+      }
+    }
+    const per = 60
+    const pages = Math.max(1, Math.ceil(lines.length / per))
+    const p = Math.min(Math.max(page, 1), pages)
+    // Page 1 is the most recent.
+    const slice = lines.slice(Math.max(0, lines.length - p * per), lines.length - (p - 1) * per)
+    return `<session id="${ref}" role="${session.role}" task="${session.ticketId ?? ''}" state="${session.state}" page="${p}/${pages}">\n${slice.join('\n')}\n</session>`
+  })
+
   // ── Router ────────────────────────────────────────────────────────────────
+  // Models sometimes answer in plain text, which nobody sees. A turn that had something to answer and ended with text but
+  // no message gets one reminder carrying that text, so it is sent properly (or dropped) instead of lost.
+  const SPEAKING = new Set(['reply', 'new_conversation', 'start_task', 'attach', 'ignore', 'stop_task'])
+  const ANSWERABLE = new Set(['trigger', 'handback', 'report', 'approval', 'unsent'])
+  let spoke = false
+  let answerable = false
+  let reminded = false
   const router: AgentDefinition = {
     role: 'router',
     pool: 'router',
     maxSteps: 30,
     system: () => `${ROUTER_PROMPT}${ext.routerPrompt ? `\n\n${ext.routerPrompt()}` : ''}${ext.sharedPrompt ? `\n\n${ext.sharedPrompt('router')}` : ''}\n\nNow: ${new Date().toString()}`,
-    formatInbox: items => items.map(item => renderRouterItem(item)).join('\n\n'),
-    tools: () => ({
+    formatInbox: items => {
+      if (items.some(i => ANSWERABLE.has(i.payload.type) && (i.payload.type !== 'report' || ['ready', 'blocked', 'failed'].includes(i.payload.status) || i.payload.humanAction))) answerable = true
+      return items.map(item => renderRouterItem(item)).join('\n\n')
+    },
+    onTurnEnd: (_session, info) => {
+      const remind = answerable && !spoke && !reminded && !info.cancelled && info.lastText.trim().length > 0
+      spoke = false
+      answerable = false
+      reminded = remind
+      if (remind) store.atomic(() => runtime.push(ROUTER_SESSION, { type: 'unsent', text: clip(info.lastText.trim(), 3_000) }))
+    },
+    tools: () => wrapSpeaking({
       reply: tool({
-        description: 'Post a message in a conversation — the only way to speak. It also goes out to the source (e.g. a GitHub comment) when reply_to is a message from that source, or ticket_id is a task that came from it; otherwise it stays in the web.',
-        inputSchema: z.object({ conversation_id: z.string(), text: z.string().min(1), reply_to: z.string().optional().describe('trigger_id of the message you answer'),
-          ticket_id: z.string().optional().describe('The task this message is about') }),
-        execute: async ({ conversation_id, text, ticket_id, reply_to }, { toolCallId }) =>
-          ({ ok: true, message_id: engine.reply({ conversationId: conversation_id, text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}) }) }),
+        description: 'Post a message to the owner — the only way to speak. It also goes out to the source (e.g. a GitHub comment) when reply_to is a message from that source, or ticket_id is work that came from it; otherwise it stays in the web. With ticket_id, the finished result and its files are attached.',
+        inputSchema: z.object({ conversation_id: z.string().optional().describe('Required unless ticket_id is given'), text: z.string().min(1),
+          reply_to: z.string().optional().describe('trigger_id of the message you answer'),
+          ticket_id: z.string().optional().describe('The work this message is about'),
+          detailed: z.boolean().optional().describe('Only when the owner explicitly asked for a long, detailed answer in chat') }),
+        execute: async ({ conversation_id, text, ticket_id, reply_to, detailed }, { toolCallId }) => {
+          const conversationId = conversation_id ?? (ticket_id ? engine.conversationOfTicket(ticket_id) : undefined)
+          if (!conversationId) return { ok: false, error: 'conversation_id is required without ticket_id' }
+          const source = reply_to || ticket_id ? engine.replySource(reply_to, ticket_id) : conversationSource(conversationId)
+          const length = chatLength(text)
+          const limit = detailed ? DETAILED_LIMIT : CHAT_LIMIT
+          if (CHAT_SOURCES.has(source) && length > limit) {
+            return { ok: false, error: `Not sent: about ${length} words; chat replies must stay under ${limit}. Say only the outcome and key facts${ticket_id ? ' — the full result is attached automatically' : ''}, then call reply again.` }
+          }
+          return { ok: true, message_id: engine.reply({ conversationId, text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}) }) }
+        },
+      }),
+      ignore: tool({
+        description: 'Record that message(s) need nothing from you (thanks, chatter, bots, already handled), with the reason. Nothing is posted.',
+        inputSchema: z.object({ trigger_ids: z.array(z.string()).min(1), reason: z.string().min(1).max(200) }),
+        execute: async ({ trigger_ids, reason }) => { engine.ignore(trigger_ids, reason); return { ok: true } },
       }),
       new_conversation: tool({
         description: 'Open a new conversation on your own initiative and post the first message (a notification, a heads-up about something you noticed). Use sparingly.',
@@ -158,7 +244,25 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       ...recallTool(runtime),
       ...(ext.routerTools?.() ?? {}),
     }),
-    onTurnError: (_s, error) => console.error('[router] turn failed:', error instanceof Error ? error.message : error),
+    onTurnError: (_s, error) => { spoke = false; answerable = false; console.error('[router] turn failed:', error instanceof Error ? error.message : error) },
+  }
+
+  /** Marks the turn as having spoken when a speaking tool succeeds. */
+  function wrapSpeaking(tools: ToolSet): ToolSet {
+    for (const [name, t] of Object.entries(tools)) {
+      if (!SPEAKING.has(name) || !t.execute) continue
+      const run = t.execute
+      t.execute = async (input: any, options: any) => {
+        const result = await run(input, options)
+        if (!(result && typeof result === 'object' && (result as { ok?: boolean }).ok === false)) spoke = true
+        return result
+      }
+    }
+    return tools
+  }
+
+  function conversationSource(id: string): string {
+    return store.db.select({ s: schema.conversations.source }).from(schema.conversations).where(eq(schema.conversations.id, id)).get()?.s ?? 'webchat'
   }
 
   function renderRouterItem(item: InboxItem): string {
@@ -172,8 +276,10 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         try { t = engine.ticket(p.ticketId) } catch { return `<report ticket_id="${p.ticketId}">（任务已删除）</report>` }
         // A question the owner already answered (from the task card) must not be forwarded again.
         const answered = p.humanAction && !t.attention
-        return [`<report ticket_id="${t.id}" title="${t.title}" status="${p.status}" conversation_id="${engine.conversationOfThread(t.threadId) ?? ''}" origin="${sourceOfThread(t.threadId)}">`,
-          clip(p.summary, 3_000), p.humanAction ? `human_action: ${JSON.stringify(p.humanAction)}${answered ? ' (already answered by the owner — do not forward it)' : ''}` : '', '</report>'].filter(Boolean).join('\n')
+        const proactive = isProactive(t)
+        return [`<report ticket_id="${t.id}" title="${t.title}" status="${p.status}" conversation_id="${engine.conversationOfThread(t.threadId) ?? ''}" origin="${sourceOfThread(t.threadId)}"${proactive ? ` proactive="true" why="${String((t.mandate as Mandate).reason ?? '').replace(/"/g, "'")}"` : ''}>`,
+          clip(p.summary, 3_000), p.files?.length ? `files (attached automatically): ${p.files.join(', ')}` : '',
+          p.humanAction ? `human_action: ${JSON.stringify(p.humanAction)}${answered ? ' (already answered by the owner — do not forward it)' : ''}` : '', '</report>'].filter(Boolean).join('\n')
       }
       case 'approval': {
         let title = p.ticketId
@@ -182,6 +288,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       }
       case 'ticket-ended': return `<task_ended ticket_id="${p.ticketId}" outcome="${p.outcome}" by="${p.by}" />`
       case 'recovery': return '<recovery>服务刚刚重启。检查 list_tasks，不要重复已经发出的消息或已经开始的任务。</recovery>'
+      case 'unsent': return `<unsent>Your last turn ended with plain text and no message, so the owner saw NOTHING. Only the reply tool posts messages. If the text below was meant for the owner, send it now with reply (conversation_id, and ticket_id when it is about finished work); if not, end your turn without output.\n---\n${p.text}\n</unsent>`
       default: return `<event>${JSON.stringify(p)}</event>`
     }
   }
@@ -193,7 +300,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     maxSteps: 150,
     system: session => {
       const ticket = engine.ticket(session.ticketId!)
-      const extra = [ext.workerPrompt?.(ticket), ext.sharedPrompt?.('worker', ticket)].filter(Boolean).join('\n\n')
+      const extra = [isProactive(ticket) ? PROACTIVE_WORKER_PROMPT : '', ext.workerPrompt?.(ticket), ext.sharedPrompt?.('worker', ticket)].filter(Boolean).join('\n\n')
       return `${WORKER_PROMPT}${extra ? `\n\n${extra}` : ''}\n\n## Environment\n- Working directory: ${ticket.directory}\n- Task id: ${ticket.id}\n- OS: ${process.platform}\n- Now: ${new Date().toString()}`
     },
     formatInbox: (items, session) => items.map(item => renderWorkerItem(item, session.ticketId!)).join('\n\n'),
@@ -213,17 +320,44 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         ...recallTool(runtime),
         ...(ext.workerTools?.(ticket, ctx) ?? {}),
         report: tool({
-          description: 'Report this task\'s state to the main agent. Required once at the end of every turn.',
+          description: 'Report this work\'s state to the assistant. Required once at the end of every turn.',
           inputSchema: z.object({
             status: z.enum(['progress', 'waiting', 'ready', 'blocked', 'failed', 'dropped']),
             summary: z.string().min(1),
             human_action: z.object({ question: z.string().min(1), options: z.array(z.string()).max(6).optional() }).optional()
               .describe('One concrete question for the owner, with status waiting'),
+            files: z.array(z.string()).max(20).optional().describe('Deliverable files (paths relative to the working directory), sent to the owner as attachments'),
           }),
-          execute: async ({ status, summary, human_action }) => {
-            engine.report(ticket.id, { status, summary, ...(human_action ? { humanAction: human_action } : {}) })
+          execute: async ({ status, summary, human_action, files }) => {
+            const { rejectedFiles } = engine.report(ticket.id, { status, summary, ...(human_action ? { humanAction: human_action } : {}), ...(files?.length ? { files } : {}) })
             reportedThisTurn.add(ctx.session.id)
-            return { ok: true, note: status === 'ready' || status === 'dropped' ? 'Task ended. Finish your turn now.' : 'Recorded. End your turn unless you have more to do now.' }
+            return { ok: true, note: status === 'ready' || status === 'dropped' ? 'Work ended. Finish your turn now.' : 'Recorded. End your turn unless you have more to do now.',
+              ...(rejectedFiles.length ? { not_attached: rejectedFiles, why: 'not a file inside the working directory' } : {}) }
+          },
+        }),
+        subagent_start: tool({
+          description: 'Start a subagent on one focused, independent sub-job (it shares your working directory and tools, but not your context). Returns at once; its result arrives later as a <subagent_result> message. Use for parallel research or trying alternatives.',
+          inputSchema: z.object({ job: z.string().min(1).max(4_000).describe('What to do and what to return, self-contained'), context: z.string().max(4_000).optional() }),
+          execute: async ({ job, context }) => {
+            const running = runtime.children(ctx.session.id).filter(id => { const s = runtime.session(id); return s && (s.state === 'running' || s.state === 'queued' || runtime.pending(id).length > 0) })
+            if (running.length >= MAX_SUBAGENTS) return { ok: false, error: `${MAX_SUBAGENTS} subagents are already running; wait for one to finish or stop one.` }
+            let id = ''
+            store.atomic(() => {
+              id = runtime.createSession('subagent', 'subagent', { ticketId: ticket.id, meta: { parent: ctx.session.id, job: clip(job, 200) } })
+              runtime.push(id, { type: 'subtask', job, ...(context ? { context } : {}) })
+            })
+            return { ok: true, subagent_id: id, note: 'Running. Do not wait: continue other work or report progress and end your turn.' }
+          },
+        }),
+        subagent_stop: tool({
+          description: 'Stop a subagent you started.',
+          inputSchema: z.object({ subagent_id: z.string() }),
+          execute: async ({ subagent_id }) => {
+            if (runtime.session(subagent_id)?.meta.parent !== ctx.session.id) return { ok: false, error: 'not your subagent' }
+            runtime.discardPending(subagent_id)
+            runtime.cancel(subagent_id)
+            stoppedSubagents.add(subagent_id)
+            return { ok: true }
           },
         }),
         handback: tool({
@@ -248,6 +382,15 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     switch (p.type) {
       case 'assignment': {
         const t = engine.ticket(ticketId)
+        if (p.reason === 'start' && isProactive(t)) {
+          const origin = store.db.select().from(schema.triggers).where(inArray(schema.triggers.id, t.origin.triggerIds)).all()
+          const info = ext.threadInfo?.(t.threadId)
+          return [`<assignment task_id="${t.id}" title="${t.title}" source="${sourceOfThread(t.threadId)}" mode="silent">`,
+            info ? `thread: ${info}` : `thread: ${t.threadId}`,
+            `why the owner's strategy picked it: ${(t.mandate as Mandate).reason ?? ''}`,
+            `the event (not addressed to the assistant):\n${origin.map(o => `(${o.id}, ${o.source} @${o.actor}${o.human ? '' : ' bot'}) ${o.text}`).join('\n\n')}`,
+            '</assignment>'].filter(Boolean).join('\n')
+        }
         if (p.reason === 'start') {
           const origin = store.db.select().from(schema.triggers).where(inArray(schema.triggers.id, t.origin.triggerIds)).orderBy(asc(schema.triggers.at)).all()
           const cnv = engine.conversationOfThread(t.threadId) ?? ''
@@ -272,6 +415,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         return `<owner_message trigger_id="${p.triggerId}"${p.note ? ` routing_note="${String(p.note).replace(/"/g, "'")}"` : ''}>\n${trigger?.text ?? ''}\n</owner_message>`
       }
       case 'note': return `<note from="${p.from ?? 'main agent'}">${p.text}</note>`
+      case 'subagent': return `<subagent_result subagent_id="${p.subagentId}" status="${p.status}">\n${p.result}\n</subagent_result>`
       case 'approval-result': return `<approval_result approval_id="${p.approvalId}">${p.error ? `批准后执行失败：${p.error}` : `批准后已执行 ${p.command}，结果：\n${p.output}`}</approval_result>`
       case 'approval': return p.status === 'approved'
         ? `<approval approval_id="${p.approvalId}" status="approved">主人批准了：${p.command}${p.note ? `（备注：${p.note}）` : ''}。已开始执行，结果会作为新消息送达。</approval>`
@@ -281,8 +425,68 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     }
   }
 
+  // ── Subagent: a worker's parallel helper (article §2.2, §4.1) ────────────────
+  const stoppedSubagents = new Set<string>()
+  const finished = new Map<string, string>()
+  const toParent = (session: { id: string; meta: Record<string, unknown>; ticketId: string | null }, status: 'done' | 'failed' | 'stopped', result: string) => {
+    const parent = String(session.meta.parent ?? '')
+    if (!parent || !session.ticketId) return
+    try { if (engine.ticket(session.ticketId).ended) return } catch { return }
+    store.atomic(() => runtime.push(parent, { type: 'subagent', subagentId: session.id, status, result: runtime.blobs.spill('subagent-result', result) }))
+  }
+  const subagent: AgentDefinition = {
+    role: 'subagent',
+    pool: 'worker',
+    maxSteps: 60,
+    system: session => {
+      const ticket = engine.ticket(session.ticketId!)
+      return `${SUBAGENT_PROMPT}\n\n## Environment\n- Working directory: ${ticket.directory}\n- OS: ${process.platform}\n- Now: ${new Date().toString()}`
+    },
+    formatInbox: items => items.map(({ payload: p }) => {
+      if (p.type === 'subtask') return `<subtask>\n${p.job}${p.context ? `\n\ncontext:\n${p.context}` : ''}\n</subtask>`
+      if (p.type === 'job') return `<job_finished job_id="${p.jobId}" status="${p.status}"${p.exitCode !== undefined ? ` exit_code="${p.exitCode}"` : ''}>\n${p.output ?? ''}\n</job_finished>`
+      if (p.type === 'recovery') return '<recovery>服务重启打断了你。检查工作目录里已有的结果，继续，然后 finish。</recovery>'
+      return `<event>${JSON.stringify(p)}</event>`
+    }).join('\n\n'),
+    tools: ctx => {
+      const ticket = engine.ticket(ctx.session.ticketId!)
+      const exec = engine.execution()
+      return {
+        ...fsTools(ticket.directory, runtime.blobs),
+        ...shellTools(runtime.jobs, runtime.blobs, {
+          sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
+          env: workerEnv({ SUPERAGENT_TICKET: ticket.id, SUPERAGENT_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
+          foregroundMs: exec.foregroundSeconds * 1000, timeoutMs: exec.timeoutMinutes * 60_000,
+          ...(ext.gateShell ? { gate: (command: string) => ext.gateShell!(ticket, ctx.session.id, command, ticket.directory) } : {}),
+          ...(ext.wrapShell?.(ticket) ? { wrap: ext.wrapShell(ticket)! } : {}),
+        }),
+        ...webTools(runtime.blobs),
+        ...recallTool(runtime),
+        finish: tool({
+          description: 'Return your result to the helper that started you. Ends your work.',
+          inputSchema: z.object({ result: z.string().min(1) }),
+          execute: async ({ result }) => { finished.set(ctx.session.id, result); return { ok: true, note: 'Delivered. End your turn now.' } },
+        }),
+      }
+    },
+    onTurnEnd: (session, info) => {
+      if (stoppedSubagents.delete(session.id) || info.cancelled) return
+      const result = finished.get(session.id)
+      finished.delete(session.id)
+      if (result !== undefined) return toParent(session, 'done', result)
+      // Still waiting on a background command: it will wake the subagent again.
+      if (info.runningJobs > 0) return
+      toParent(session, info.stepLimit ? 'failed' : 'done', info.lastText || '（子任务结束，没有给出结果）')
+    },
+    onTurnError: (session, error) => {
+      finished.delete(session.id)
+      toParent(session, 'failed', `子任务出错：${error instanceof Error ? error.message : String(error)}`)
+    },
+  }
+
   runtime.register(router)
   runtime.register(worker)
+  runtime.register(subagent)
   return { reportedThisTurn }
 }
 
@@ -352,4 +556,40 @@ export function mcpExtension(mcp: McpManager, engine: Engine, reviewer?: Reviewe
       ? (server, tool, args) => reviewer.gateTool(ticket, ctx.session.id, 'mcp', `${server.name}.${tool} ${JSON.stringify(args)}`, { server: server.name, tool, args })
       : undefined),
   }
+}
+
+/** The owner's standing instructions in every prompt; the main agent can record new ones. */
+export function instructionsExtension(instructions: Instructions): AgentExtensions {
+  return {
+    sharedPrompt: () => instructions.prompt(),
+    routerTools: () => instructions.tools('router'),
+  }
+}
+
+/** Lets the main agent change the proactive strategy when the owner asks. */
+export function proactiveExtension(store: Store): AgentExtensions {
+  return {
+    routerPrompt: () => {
+      const s = proactiveSettings(store)
+      return s.mode === 'off' ? '' : `## Proactive strategy (mode ${s.mode})\nEvents nobody addressed to you are screened against the owner's strategy; silent work reports back with proactive="true".\n${s.strategy}`
+    },
+    routerTools: () => ({ update_proactive: proactiveTool(store, 'router') }),
+  }
+}
+
+export function proactiveTool(store: Store, _by: string) {
+  return tool({
+    description: 'Change how you act on events nobody addressed to you: the mode (off: never; observe: only record what you would have done; auto: work on them silently, report only what is worth it) and the strategy, written in the owner\'s words.',
+    inputSchema: z.object({
+      mode: z.enum(['off', 'observe', 'auto']).optional(),
+      strategy_append: z.string().max(1_000).optional().describe('One line added to the strategy'),
+      strategy_replace: z.string().max(4_000).optional().describe('The whole new strategy'),
+    }),
+    execute: async ({ mode, strategy_append, strategy_replace }) => {
+      const cur = proactiveSettings(store)
+      const strategy = strategy_replace ?? (strategy_append ? [cur.strategy, strategy_append.startsWith('-') ? strategy_append : `- ${strategy_append}`].filter(Boolean).join('\n') : cur.strategy)
+      const next = saveProactiveSettings(store, { ...(mode ? { mode } : {}), strategy })
+      return { ok: true, mode: next.mode }
+    },
+  })
 }

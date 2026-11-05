@@ -1,4 +1,4 @@
-import { Activity, AlarmClock, Brain, Cpu, KeyRound, Play, Plug, Puzzle, Server, ShieldCheck, Stethoscope } from 'lucide-react'
+import { Activity, AlarmClock, Brain, Cpu, KeyRound, NotebookPen, Play, Plug, Puzzle, Server, ShieldCheck, Sparkles, Stethoscope } from 'lucide-react'
 import type { SettingsTab } from '../route'
 import { cx } from '../ui'
 import { Providers } from './Providers'
@@ -12,10 +12,14 @@ import { MemoryPage } from './MemoryPage'
 import { Plugins } from './Plugins'
 import { Mcp } from './Mcp'
 import { Sources } from './Sources'
+import { InstructionsPage } from './Instructions'
+import { ProactivePage } from './Proactive'
 
 const TABS: { id: SettingsTab; label: string; icon: React.ReactNode; intro: string }[] = [
   { id: 'providers', label: '模型供应商', icon: <KeyRound size={15} />, intro: 'API key 存放在系统钥匙串（或加密文件）中；也可以用环境变量（如 DEEPSEEK_API_KEY），启动时自动识别。密钥不进数据库、不进模型上下文，也不会传给任务的命令行环境。' },
   { id: 'roles', label: '分层模型', icon: <Cpu size={15} />, intro: '为每一层分别选择模型。没有配置的层沿用上一层；可设置备用模型与每日预算。' },
+  { id: 'instructions', label: '说明', icon: <NotebookPen size={15} />, intro: '你给智能体的长期说明：怎么跟你说话、哪些事可以自己做、交付时要带上什么。每次修改都会存成新版本，可以随时恢复。对它说「以后……」它也会自己记到这里。' },
+  { id: 'proactive', label: '主动', icon: <Sparkles size={15} />, intro: '没人找它的事件（GitHub 上的新 issue、CI 失败、群里的消息……）先经过程序规则，再由过滤层模型按你写的策略判断值不值得做。值得做的事在后台悄悄做，有价值才告诉你。' },
   { id: 'sources', label: '来源', icon: <Plug size={15} />, intro: '智能体从这些地方接收事件、在原处回复。在 GitHub 上用唤起词（默认 @agent）叫它，它以你的账号回复并带上机器人标记。' },
   { id: 'plugins', label: '插件', icon: <Puzzle size={15} />, intro: '插件为智能体增加新的来源（事件与回复渠道）和工具。内置 Telegram 与 Gmail；第三方插件放进数据目录的 plugins/ 下，启用后才会运行。' },
   { id: 'mcp', label: 'MCP 工具', icon: <Server size={15} />, intro: '接入 MCP（Model Context Protocol）服务，它们的工具会交给任务使用。会对外产生影响的服务建议保留「先经过审核」。' },
@@ -42,6 +46,8 @@ export function Settings({ tab }: { tab: SettingsTab }) {
         <p className="text-sm text-muted">{current.intro}</p>
         {tab === 'providers' && <Providers />}
         {tab === 'roles' && <Roles />}
+        {tab === 'instructions' && <InstructionsPage />}
+        {tab === 'proactive' && <ProactivePage />}
         {tab === 'sources' && <Sources />}
         {tab === 'plugins' && <Plugins />}
         {tab === 'mcp' && <Mcp />}

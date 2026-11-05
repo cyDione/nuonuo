@@ -6,7 +6,7 @@ export type ReportStatus = 'progress' | 'waiting' | 'ready' | 'blocked' | 'faile
 
 export interface HumanAction { question: string; options?: string[]; kind?: 'question' | 'handoff' }
 
-export interface Report { status: ReportStatus; summary: string; humanAction?: HumanAction; at: number }
+export interface Report { status: ReportStatus; summary: string; humanAction?: HumanAction; files?: string[]; at: number }
 
 export interface Attention extends HumanAction { at: number }
 
@@ -18,7 +18,8 @@ export interface Ended {
   reason?: string
 }
 
-export interface Mandate { by: 'owner'; strength: 'explicit'; triggerIds: string[]; at: number }
+/** `explicit`: the owner (or an allowed account) asked. `proactive`: the owner's proactive strategy chose it; it works silently. */
+export interface Mandate { by: 'owner' | 'policy'; strength: 'explicit' | 'proactive'; triggerIds: string[]; at: number; reason?: string }
 
 export interface Ticket {
   id: string

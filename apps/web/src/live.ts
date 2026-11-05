@@ -64,6 +64,9 @@ export function useLiveEvents() {
         case 'conversation.updated':
           qc.invalidateQueries({ queryKey: ['conversations'] })
           break
+        case 'activity.updated':
+          soon('activity', () => qc.invalidateQueries({ queryKey: ['activity'] }), 500)
+          break
         case 'reply.delta':
           set(s => ({ drafts: { ...s.drafts, [e.conversationId]: { callId: e.callId, text: e.text } } }))
           break
@@ -72,6 +75,8 @@ export function useLiveEvents() {
             qc.invalidateQueries({ queryKey: ['tickets'] })
             qc.invalidateQueries({ queryKey: ['ticket', e.ticketId] })
             qc.invalidateQueries({ queryKey: ['inbox'] })
+            qc.invalidateQueries({ queryKey: ['activity'] })
+            qc.invalidateQueries({ queryKey: ['artifacts'] })
           }, 150)
           break
         case 'session.state':

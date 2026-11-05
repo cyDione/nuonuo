@@ -241,3 +241,13 @@ export const auditLog = sqliteTable('audit_log', {
   decision: text('decision').notNull(),
   reason: text('reason'),
 })
+
+/** A file a task delivered (relative to its working directory). */
+export const artifacts = sqliteTable('artifacts', {
+  id: text('id').primaryKey(),
+  ticketId: text('ticket_id').notNull(),
+  path: text('path').notNull(),
+  name: text('name').notNull(),
+  size: integer('size').notNull(),
+  createdAt: integer('created_at').notNull(),
+})

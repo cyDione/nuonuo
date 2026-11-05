@@ -27,7 +27,7 @@ function setup() {
       if (last.includes('<owner_message')) return { calls: [{ name: 'notify_owner', input: { text: '目前没有卡住的任务。' } }] }
       return { text: 'nothing to do' }
     }
-    if (system.includes('main agent ("router")')) return { text: 'ok' }
+    if (system.includes("You are the owner's personal assistant")) return { text: 'ok' }
     return { text: 'idle' }
   }
   const model = new MockLanguageModelV4({ doStream: async o => streamOf(script(o)), doGenerate: async o => generateOf(script(o)) })

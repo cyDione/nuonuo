@@ -208,6 +208,13 @@ export class Reviewer {
 
   /** Stores an approval; the router tells the owner, and the task waits only for this one action. */
   private escalateAction(ticket: Ticket, sessionId: string, tool: string, display: string, input: Record<string, unknown>, risk: Risk, reason: string): GateDecision {
+    // Silent work (the proactive strategy's, not the owner's request) never interrupts the owner with an approval:
+    // the step is blocked, and the worker puts it in its result for the owner to decide on.
+    if (ticket.mandate.strength === 'proactive') {
+      const why = `这是没人要求、悄悄进行的工作，不能做需要主人批准的操作（${reason}）。不要绕过；在本地能做的做完，把这一步写进结果，由主人决定。`
+      this.audit({ ticketId: ticket.id, actor: 'reviewer', action: 'review', tool, input: display, risk, decision: 'block', reason: why })
+      return { action: 'block', by: 'rule', reason: why }
+    }
     const id = newId('apv')
     const at = this.now()
     this.store.atomic(() => {

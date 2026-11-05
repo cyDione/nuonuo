@@ -235,4 +235,15 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX audit_log_at ON audit_log(at);
   `,
+  /* 5: M5 deliverables a task produced (shown as attachments and in the library) */ `
+  CREATE TABLE artifacts (
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX artifacts_path ON artifacts(ticket_id, path);
+  `,
 ]

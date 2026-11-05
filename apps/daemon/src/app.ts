@@ -4,15 +4,16 @@ import { describeError, LAYER_PRESETS, ModelError, PROVIDER_PRESETS, REASONING_L
 import { Hono, type Context } from 'hono'
 import { setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
-import { existsSync } from 'node:fs'
-import { relative } from 'node:path'
+import { createReadStream, existsSync, statSync } from 'node:fs'
+import { extname, relative } from 'node:path'
+import { Readable } from 'node:stream'
 import { z } from 'zod'
 import { COOKIE, hostGuard, requireToken } from './auth'
 import { VERSION } from './config'
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
-import { reportsOf, ticketView, transcript } from './views'
-import { DomainError, DEFAULT_EXECUTION, DEFAULT_REVIEW, ROUTER_SESSION, WATCHDOG_SESSION } from '@super-agent/core'
+import { dispositionText, reportsOf, ticketView, transcript } from './views'
+import { DEFAULT_PROACTIVE, DomainError, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-agent/core'
 import { kvGet, kvSet } from '@super-agent/db'
 import { fireRoutine } from '@super-agent/sources'
 import { runDoctor } from './doctor'
@@ -186,6 +187,61 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     return c.json({ items })
   })
   api.get('/router', c => c.json({ state: rt.agents.session(ROUTER_SESSION)?.state ?? 'idle', transcript: transcript(rt.agents, ROUTER_SESSION).slice(-200) }))
+
+  // Deliverables: files tasks produced, shown as attachments and in the library.
+  const MIME: Record<string, string> = { '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.json': 'application/json; charset=utf-8',
+    '.csv': 'text/csv; charset=utf-8', '.html': 'text/plain; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+    '.webp': 'image/webp', '.svg': 'text/plain; charset=utf-8', '.pdf': 'application/pdf' }
+  const textual = (ext: string) => /^\.(md|txt|json|csv|log|ya?ml|toml|ini|py|js|ts|tsx|jsx|sh|go|rs|java|c|cpp|h|rb|php|sql|html|css|xml|svg)$/.test(ext)
+  api.get('/artifacts', c => {
+    const titles = new Map<string, { title: string; conversationId: string | null }>()
+    const items = rt.engine.artifacts({ limit: 300 }).map(a => {
+      if (!titles.has(a.ticketId)) { try { const t = rt.engine.ticket(a.ticketId); titles.set(a.ticketId, { title: t.title, conversationId: rt.engine.conversationOfThread(t.threadId) ?? null }) } catch { titles.set(a.ticketId, { title: '', conversationId: null }) } }
+      return { ...a, ...titles.get(a.ticketId)!, text: textual(extname(a.name).toLowerCase()) }
+    })
+    return c.json({ artifacts: items })
+  })
+  api.get('/artifacts/:id', c => {
+    const a = rt.engine.artifact(c.req.param('id'))
+    if (!existsSync(a.absolute) || !statSync(a.absolute).isFile()) throw new HttpError(404, 'missing', '文件已不存在')
+    const ext = extname(a.name).toLowerCase()
+    const type = MIME[ext] ?? (textual(ext) ? 'text/plain; charset=utf-8' : 'application/octet-stream')
+    const disposition = c.req.query('download') ? 'attachment' : 'inline'
+    return new Response(Readable.toWeb(createReadStream(a.absolute)) as ReadableStream, { headers: { 'content-type': type,
+      'content-disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(a.name)}`, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'", 'cache-control': 'no-store' } })
+  })
+
+  // Activity: what happened to every event, and what the proactive strategy decided.
+  api.get('/activity', c => {
+    const triggers = rt.engine.triggerLog(Math.min(Number(c.req.query('limit')) || 100, 500)).filter(t => t.source !== 'webchat' || t.actor !== 'owner')
+    return c.json({ proactive: proactiveSettings(rt.store).mode, events: triggers.map(t => ({ id: t.id, source: t.source, actor: t.actor, human: t.human, at: t.at,
+      text: t.text.slice(0, 400), url: (t.meta as { url?: string }).url ?? null, conversationId: rt.engine.conversationOfThread(t.threadId) ?? null,
+      thread: t.threadId, proactive: (t.disposition as any).proactive ?? null, ticketId: (t.disposition as any).startedTicket ?? null, outcome: dispositionText(t.disposition as Record<string, any>) })) })
+  })
+  /** The owner promotes an observed event to silent work. */
+  api.post('/triggers/:id/act', c => {
+    const trigger = rt.engine.triggerLog(1000).find(t => t.id === c.req.param('id'))
+    if (!trigger) throw new HttpError(404, 'missing', 'no such event')
+    const p = (trigger.disposition as any).proactive ?? {}
+    const ticket = rt.engine.startProactive(trigger.id, { title: p.title || '主动处理', reason: p.reason || '主人要求处理', ...(p.goal ? { goal: p.goal } : {}) })
+    rt.bus.emit({ type: 'activity.updated' })
+    return c.json({ ticketId: ticket.id })
+  })
+  const ProactiveBody = z.object({ mode: z.enum(['off', 'observe', 'auto']), strategy: z.string().max(8_000), sources: z.array(z.string().max(40)).max(30),
+    ignoreActors: z.array(z.string().trim().min(1).max(100)).max(100) }).strict()
+  api.get('/settings/proactive', c => c.json({ settings: proactiveSettings(rt.store), defaults: DEFAULT_PROACTIVE }))
+  api.put('/settings/proactive', async c => c.json({ settings: saveProactiveSettings(rt.store, await body(c, ProactiveBody)) }))
+
+  // Standing instructions (versioned)
+  api.get('/instructions', c => c.json({ current: rt.instructions.current(), history: rt.instructions.history(), sections: SECTIONS.map(id => ({ id, label: SECTION_LABEL[id] })) }))
+  api.put('/instructions', async c => {
+    const sections = await body(c, z.object(Object.fromEntries(SECTIONS.map(s => [s, z.string().max(4_000)]))).partial())
+    return c.json({ current: rt.instructions.update(sections, 'owner') })
+  })
+  api.post('/instructions/restore', async c => {
+    const { version } = await body(c, z.object({ version: z.number().int().min(1) }))
+    return c.json({ current: guard(() => rt.instructions.restore(version, 'owner')) })
+  })
 
   // Sources
   api.get('/sources', c => c.json({ sources: rt.sources.list() }))

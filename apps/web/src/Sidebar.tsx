@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { MessageSquarePlus, MoreHorizontal, Pin, PinOff, Settings as SettingsIcon, Trash2, Pencil } from 'lucide-react'
+import { Activity as ActivityIcon, FolderOpen, MessageSquarePlus, MoreHorizontal, Pin, PinOff, Settings as SettingsIcon, Trash2, Pencil } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Conversation } from './api'
 import { go, type Route } from './route'
@@ -15,6 +15,7 @@ export function Sidebar({ route }: { route: Route }) {
   const activeId = route.page === 'chat' ? route.id : undefined
   const tickets = useTickets().data?.tickets ?? []
   const connected = useLive(s => s.connected)
+  const waiting = tickets.filter(t => t.stage.startsWith('person/')).length
   const statusOf = (cnv: string) => {
     const mine = tickets.filter(t => t.conversationId === cnv)
     if (mine.some(t => t.stage.startsWith('person/'))) return 'person'
@@ -37,11 +38,12 @@ export function Sidebar({ route }: { route: Route }) {
       {conversations.length === 0 && <p className="px-3 py-6 text-center text-xs text-faint">还没有对话</p>}
       {conversations.map(c => <Item key={c.id} c={c} active={c.id === activeId} status={statusOf(c.id)} onChanged={() => qc.invalidateQueries({ queryKey: ['conversations'] })} />)}
     </nav>
-    <div className="border-t border-line p-2">
-      <button onClick={() => go('/settings/providers')} className={cx('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-sunken',
-        route.page === 'settings' ? 'bg-sunken text-fg' : 'text-muted')}>
-        <SettingsIcon size={16} /> 设置
-      </button>
+    <div className="space-y-0.5 border-t border-line p-2">
+      <NavButton active={route.page === 'activity'} onClick={() => go('/activity')} icon={<ActivityIcon size={16} />}>
+        活动{waiting > 0 && <span className="ml-auto rounded-full bg-warn px-1.5 text-[10px] leading-4 font-medium text-white">{waiting}</span>}
+      </NavButton>
+      <NavButton active={route.page === 'library'} onClick={() => go('/library')} icon={<FolderOpen size={16} />}>成果</NavButton>
+      <NavButton active={route.page === 'settings'} onClick={() => go('/settings/providers')} icon={<SettingsIcon size={16} />}>设置</NavButton>
     </div>
   </aside>
 }
@@ -56,8 +58,8 @@ function Item({ c, active, status, onChanged }: { c: Conversation; active: boole
       {c.source !== 'webchat' && <SourceIcon source={c.source} size={13} className="shrink-0 text-faint" />}
       <span className={cx('min-w-0 flex-1 truncate', !active && (c.unread ?? 0) > 0 && 'font-semibold text-fg')}>{c.title}</span>
       {!active && !status && (c.unread ?? 0) > 0 && <span className="shrink-0 rounded-full bg-accent px-1.5 text-[10px] leading-4 font-medium text-accent-fg">{c.unread}</span>}
-      {status === 'person' && <span className="size-2 shrink-0 rounded-full bg-warn" title="有任务等你处理" />}
-      {status === 'working' && <span className="size-2 shrink-0 animate-pulse rounded-full bg-accent" title="有任务进行中" />}
+      {status === 'person' && <span className="size-2 shrink-0 rounded-full bg-warn" title="有事等你" />}
+      {status === 'working' && <span className="size-2 shrink-0 animate-pulse rounded-full bg-accent" title="正在处理" />}
     </a>
     <button onClick={() => setMenu(v => !v)} aria-label="更多" className="absolute top-1.5 right-1.5 rounded p-1 text-faint opacity-0 hover:bg-line group-hover:opacity-100">
       <MoreHorizontal size={14} />
@@ -68,6 +70,10 @@ function Item({ c, active, status, onChanged }: { c: Conversation; active: boole
       <MenuItem icon={<Trash2 size={14} />} danger onClick={() => { if (confirm(`删除「${c.title}」？此操作不可撤销。`)) remove.mutate(); setMenu(false) }}>删除</MenuItem>
     </div>}
   </div>
+}
+
+function NavButton({ active, onClick, icon, children }: { active: boolean; onClick(): void; icon: React.ReactNode; children: React.ReactNode }) {
+  return <button onClick={onClick} className={cx('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-sunken', active ? 'bg-sunken text-fg' : 'text-muted')}>{icon}{children}</button>
 }
 
 function MenuItem({ icon, children, onClick, danger }: { icon: React.ReactNode; children: React.ReactNode; onClick(): void; danger?: boolean }) {

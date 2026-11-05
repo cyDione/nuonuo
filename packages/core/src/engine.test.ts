@@ -21,7 +21,7 @@ const ids = (text: string, attr: string) => [...text.matchAll(new RegExp(`${attr
 function script(opts: any): Scripted {
   const system = systemText(opts)
   const last = lastUserText(opts)
-  if (system.includes('main agent ("router")')) {
+  if (system.includes("You are the owner's personal assistant")) {
     if (lastRole(opts) === 'tool') return { text: 'done' }
     const calls: Scripted['calls'] = []
     for (const block of last.split('\n\n')) {
@@ -32,7 +32,7 @@ function script(opts: any): Scripted {
         if (text.startsWith('你好')) calls.push({ name: 'reply', input: { conversation_id: cnv, text: '你好！' } })
         else calls.push({ name: 'start_task', input: { conversation_id: cnv, trigger_ids: [trg], title: text.slice(0, 10), ack: `好的，开始：${text.slice(0, 10)}` } })
       }
-      if (block.startsWith('<report')) calls.push({ name: 'reply', input: { conversation_id: cnv, text: `结果：${block.split('\n')[1]}` } })
+      if (block.startsWith('<report')) calls.push({ name: 'reply', input: { conversation_id: cnv, ticket_id: ids(block, 'ticket_id')[0], text: `结果：${block.split('\n')[1]}` } })
     }
     return calls.length ? { calls } : { text: 'nothing to do' }
   }
@@ -89,7 +89,11 @@ describe('router + workers', () => {
     expect(texts).toContain('你好！')
     expect(texts.filter(t => t.startsWith('好的，开始'))).toHaveLength(3)
     expect(texts.filter(t => t.startsWith('结果：'))).toHaveLength(3)
-    expect(messages(cnv).filter(m => m.role === 'event')).toHaveLength(3)
+    // No task cards in the conversation; each result message carries its finished result.
+    expect(messages(cnv).filter(m => m.role === 'event')).toHaveLength(0)
+    const results = messages(cnv).filter(m => m.role === 'assistant' && (m.meta as any).result)
+    expect(results).toHaveLength(3)
+    expect((results[0]!.meta as any).result.summary).toContain('完成')
   })
 
   it('sends a message in a single-task conversation straight to its worker; the router only gets a quiet follow-up', async () => {

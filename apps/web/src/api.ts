@@ -50,7 +50,16 @@ export interface Ticket {
   latestReport: Report | null; attention: { question: string; options?: string[]; kind?: 'question' | 'handoff'; at: number } | null
   approvals: { id: string; command: string; reason: string; risk: string; createdAt: number }[]
   ended: { at: number; by: string; outcome: 'completed' | 'stopped' | 'dropped'; reason?: string } | null; createdAt: number; updatedAt: number
+  proactive: boolean; why: string | null
 }
+export interface Delivery { ticketId: string; title: string; summary: string; files: { id: string; name: string; size: number }[] }
+export interface Artifact { id: string; ticketId: string; path: string; name: string; size: number; createdAt: number; title: string; conversationId: string | null; text: boolean }
+export interface ActivityEvent { id: string; source: string; actor: string; human: boolean; at: number; text: string; url: string | null; conversationId: string | null; thread: string
+  proactive: { act: boolean; reason: string; mode: string; title?: string; goal?: string } | null; ticketId: string | null; outcome: { tone: 'ok' | 'muted' | 'warn' | 'accent'; text: string } }
+export interface ProactiveSettings { mode: 'off' | 'observe' | 'auto'; strategy: string; sources: string[]; ignoreActors: string[] }
+export type SectionId = 'communication' | 'scope' | 'delivery'
+export interface InstructionsVersion { version: number; sections: Record<SectionId, string>; at: number; by: string; note?: string }
+export interface InstructionsState { current: InstructionsVersion; history: InstructionsVersion[]; sections: { id: SectionId; label: string }[] }
 export type TranscriptItem =
   | { id: string; kind: 'input'; text: string; at: number }
   | { id: string; kind: 'text' | 'reasoning'; text: string; at: number }
@@ -72,6 +81,7 @@ export type ServerEvent =
   | { type: 'session.state'; role: string; sessionId: string; ticketId?: string | null; state: string }
   | { type: 'worker.part'; ticketId: string; part: { kind: string; delta?: string; tool?: string; id?: string } }
   | { type: 'conversation.updated'; conversationId: string }
+  | { type: 'activity.updated' }
 
 export type FieldSpec =
   | { key: string; label: string; hint?: string; advanced?: true; type: 'switch' }

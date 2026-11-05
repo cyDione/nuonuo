@@ -6,8 +6,9 @@
 import type { AgentRuntime, Bus } from '@super-agent/agent-runtime'
 import { kvGet, kvSet, newId, schema, type Store } from '@super-agent/db'
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
-import { mkdirSync } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { mkdirSync, statSync } from 'node:fs'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fastPath, proactiveSettings, type FilterVerdict, type ProactiveMode } from './proactive'
 import { DEFAULT_SANDBOX, type SandboxSettings } from './sandbox'
 import { sourceOfThread, webchatThread, type Attention, type Ended, type HumanAction, type IncomingTrigger, type Mandate, type Report, type ReportStatus, type SourcePort, type Ticket, type TicketStage } from './model'
 
@@ -32,7 +33,16 @@ export const DEFAULT_EXECUTION: ExecutionSettings = {
   sandbox: DEFAULT_SANDBOX,
 }
 
-export interface EngineOptions { home: string; now?: () => number; sources?: SourcePort }
+export interface EngineOptions {
+  home: string
+  now?: () => number
+  sources?: SourcePort
+  /** Queues the Slow Path screening of an unaddressed event, inside the caller's transaction. */
+  screen?: (triggerId: string) => void
+}
+
+/** What an agent message carries when it delivers a finished task: the full result and the files. */
+export interface Delivery { ticketId: string; title: string; summary: string; files: { id: string; name: string; size: number }[] }
 
 type Row = typeof schema.tickets.$inferSelect
 
@@ -193,7 +203,10 @@ export class Engine {
       const targets = this.subscribers(t.threadId).filter(ticket => ticket.ended?.by !== 'person' && (!ticket.ended || allowed))
       const explicit = allowed && t.addressed
       if (!targets.length && !explicit) {
-        this.setDisposition(t.id, { ignored: !t.human ? 'bot' : !allowed ? 'not_allowed' : 'not_addressed' })
+        const ignored = !t.human ? 'bot' : !allowed ? 'not_allowed' : 'not_addressed'
+        const skip = this.opts.screen ? fastPath(proactiveSettings(this.store), t) : 'no_screener'
+        this.setDisposition(t.id, { ignored, ...(skip ? { fastPath: skip } : { screening: true }) })
+        if (!skip) this.opts.screen!(t.id)
         return { status: 'stored' as const, deliveredTo: [], routed: false }
       }
       const conversationId = this.mirrorConversation(t.threadId, t.thread)
@@ -306,31 +319,95 @@ export class Engine {
    * Posts the agent's message in a conversation. It also goes out through the source's channel (a GitHub comment) when it
    * answers a message from that source (`replyTo`) or reports on a task that came from it (`ticketId`); otherwise it stays in the web.
    */
-  reply(input: { conversationId: string; text: string; ticketId?: string; replyTo?: string; callId?: string }): string {
-    const conversation = this.store.db.select().from(schema.conversations).where(eq(schema.conversations.id, input.conversationId)).get()
-    if (!conversation) throw new DomainError('missing', `没有对话 ${input.conversationId}`)
+  reply(input: { conversationId?: string; text: string; ticketId?: string; replyTo?: string; callId?: string }): string {
+    const conversationId = input.conversationId ?? (input.ticketId ? this.conversationOfTicket(input.ticketId) : undefined)
+    if (!conversationId) throw new DomainError('invalid', 'reply 需要 conversation_id 或 ticket_id')
+    const conversation = this.store.db.select().from(schema.conversations).where(eq(schema.conversations.id, conversationId)).get()
+    if (!conversation) throw new DomainError('missing', `没有对话 ${conversationId}`)
     const id = newId('msg')
     const at = this.stamp()
     const via = this.replySource(input.replyTo, input.ticketId)
     const threadId = conversation.threadId
     const external = via !== 'webchat' && threadId && sourceOfThread(threadId) === via && this.opts.sources?.hasChannel(via)
     this.store.atomic(() => {
-      this.store.db.insert(schema.messages).values({ id, conversationId: input.conversationId, role: 'assistant', content: input.text,
-        ticketId: input.ticketId ?? null, meta: { ...(input.callId ? { callId: input.callId } : {}), ...(external ? { via, delivery: 'pending' } : {}) }, createdAt: at }).run()
-      this.store.db.update(schema.conversations).set({ updatedAt: at }).where(eq(schema.conversations.id, input.conversationId)).run()
+      const delivery = this.takeDelivery(conversation.threadId ?? webchatThread(conversationId), input.ticketId)
+      this.store.db.insert(schema.messages).values({ id, conversationId, role: 'assistant', content: input.text,
+        ticketId: input.ticketId ?? delivery?.ticketId ?? null,
+        meta: { ...(input.callId ? { callId: input.callId } : {}), ...(external ? { via, delivery: 'pending' } : {}), ...(delivery ? { result: delivery } : {}) }, createdAt: at }).run()
+      this.store.db.update(schema.conversations).set({ updatedAt: at }).where(eq(schema.conversations.id, conversationId)).run()
+      if (input.replyTo) this.setDisposition(input.replyTo, { answered: id })
       if (external) this.opts.sources!.send({ messageId: id, source: via, threadId: threadId!, text: input.text, ...(input.ticketId ? { ticketId: input.ticketId } : {}) })
     })
-    this.bus.emit({ type: 'message.created', conversationId: input.conversationId, messageId: id })
+    this.bus.emit({ type: 'message.created', conversationId, messageId: id })
     return id
   }
 
-  private replySource(replyTo?: string, ticketId?: string): string {
+  /** The conversation that shows a task; a silent task's thread gets its mirror conversation when it first has something to say. */
+  conversationOfTicket(ticketId: string): string {
+    const ticket = this.ticket(ticketId)
+    const existing = this.conversationOfThread(ticket.threadId)
+    if (existing) return existing
+    const thread = this.store.db.select().from(schema.threads).where(eq(schema.threads.id, ticket.threadId)).get()
+    const meta = (thread?.meta ?? {}) as { title?: string; url?: string }
+    return this.mirrorConversation(ticket.threadId, { title: meta.title ?? ticket.title, ...(meta.url ? { url: meta.url } : {}), meta: thread?.meta as Record<string, unknown> ?? {} })
+  }
+
+  /**
+   * The finished result an agent message carries, once: the task's last `ready` report and its files. Without an explicit
+   * task, a message in the conversation picks up the one task that finished there in the last minutes and was not delivered.
+   */
+  private takeDelivery(threadId: string, ticketId?: string): Delivery | undefined {
+    const candidates = ticketId ? [this.ticket(ticketId)]
+      : this.subscribers(threadId).filter(t => t.latestReport?.status === 'ready' && this.now() - t.latestReport.at < 10 * 60_000)
+    const fresh = candidates.filter(t => t.latestReport?.status === 'ready' && kvGet<number>(this.store, `ticket:delivered:${t.id}`) !== t.latestReport.at)
+    if (fresh.length !== 1) return undefined
+    const t = fresh[0]!
+    const report = t.latestReport!
+    kvSet(this.store, `ticket:delivered:${t.id}`, report.at)
+    const files = report.files?.length ? this.artifacts({ ticketId: t.id }).filter(a => report.files!.includes(a.path)) : []
+    return { ticketId: t.id, title: t.title, summary: report.summary, files: files.map(f => ({ id: f.id, name: f.name, size: f.size })) }
+  }
+
+  // ── Deliverables ───────────────────────────────────────────────────────────
+
+  artifacts(filter: { ticketId?: string; limit?: number } = {}) {
+    const q = this.store.db.select().from(schema.artifacts)
+    return (filter.ticketId ? q.where(eq(schema.artifacts.ticketId, filter.ticketId)) : q).orderBy(desc(schema.artifacts.createdAt)).limit(filter.limit ?? 500).all()
+  }
+
+  artifact(id: string) {
+    const row = this.store.db.select().from(schema.artifacts).where(eq(schema.artifacts.id, id)).get()
+    if (!row) throw new DomainError('missing', `没有文件 ${id}`)
+    const ticket = this.ticket(row.ticketId)
+    return { ...row, absolute: join(ticket.directory, row.path) }
+  }
+
+  /** Registers files a worker delivers; paths must be files inside its working directory. Returns the accepted relative paths. */
+  private registerFiles(ticket: Ticket, files: string[]): { accepted: string[]; rejected: string[] } {
+    const accepted: string[] = []
+    const rejected: string[] = []
+    for (const f of files) {
+      const abs = isAbsolute(f) ? resolve(f) : resolve(ticket.directory, f)
+      const rel = relative(ticket.directory, abs)
+      let size = -1
+      try { const st = statSync(abs); if (st.isFile()) size = st.size } catch { /* missing */ }
+      if (!rel || rel.startsWith('..') || isAbsolute(rel) || size < 0) { rejected.push(f); continue }
+      this.store.db.insert(schema.artifacts).values({ id: newId('art'), ticketId: ticket.id, path: rel, name: basename(rel), size, createdAt: this.now() })
+        .onConflictDoUpdate({ target: [schema.artifacts.ticketId, schema.artifacts.path], set: { size, createdAt: this.now() } }).run()
+      accepted.push(rel)
+    }
+    return { accepted, rejected }
+  }
+
+  /** The source a reply goes out through: the answered message's, or the task's origin (silent work stays in the web). */
+  replySource(replyTo?: string, ticketId?: string): string {
     if (replyTo) {
       const t = this.store.db.select({ source: schema.triggers.source }).from(schema.triggers).where(eq(schema.triggers.id, replyTo)).get()
       if (t) return t.source
     }
     if (ticketId) {
       const ticket = this.store.db.select().from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get()
+      if ((ticket?.mandate as Mandate | undefined)?.strength === 'proactive') return 'webchat'
       const origin = ticket && this.store.db.select({ source: schema.triggers.source }).from(schema.triggers).where(eq(schema.triggers.id, (ticket.origin as { triggerIds: string[] }).triggerIds[0]!)).get()
       if (origin) return origin.source
     }
@@ -375,13 +452,9 @@ export class Engine {
       this.store.db.insert(schema.subscriptions).values({ ticketId: id, threadId, kind: 'own', createdAt: at }).run()
       for (const t of input.triggerIds) this.setDisposition(t, { startedTicket: id })
       if (input.ack) this.reply({ conversationId, text: input.ack, ticketId: id, ...(input.callId ? { callId: input.callId } : {}) })
-      const cardId = newId('msg')
-      this.store.db.insert(schema.messages).values({ id: cardId, conversationId, role: 'event', content: input.title, ticketId: id,
-        meta: { kind: 'ticket' }, createdAt: this.stamp() }).run()
       if (input.project) this.setProject(id, input.project)
       this.startAssignment(id, 'start')
       this.runtime.push(sessionId, { type: 'assignment', ticketId: id, reason: 'start' }, { human: true })
-      this.store.afterCommit(() => this.bus.emit({ type: 'message.created', conversationId, messageId: cardId }))
     })
     mkdirSync(directory, { recursive: true })
     this.changed(id)
@@ -416,6 +489,52 @@ export class Engine {
     this.changed(ticketId)
   }
 
+  /** The router decided an event needs nothing; the reason is kept so "why did nobody answer?" has an answer. */
+  ignore(triggerIds: string[], reason: string): void {
+    this.store.atomic(() => { for (const id of triggerIds) this.setDisposition(id, { ignored: 'router', reason }) })
+  }
+
+  /** Records the Slow Path's verdict on an unaddressed event; in auto mode a silent task starts. */
+  proactiveDecision(triggerId: string, verdict: FilterVerdict, mode: ProactiveMode | 'off'): Ticket | undefined {
+    let ticket: Ticket | undefined
+    this.store.atomic(() => {
+      this.setDisposition(triggerId, { screening: false, proactive: { act: verdict.act, reason: verdict.reason, mode, at: this.now(),
+        ...(verdict.title ? { title: verdict.title } : {}), ...(verdict.goal ? { goal: verdict.goal } : {}) } })
+      if (verdict.act && mode === 'auto') ticket = this.startProactive(triggerId, { title: verdict.title || '主动处理', reason: verdict.reason, ...(verdict.goal ? { goal: verdict.goal } : {}) })
+    })
+    this.bus.emit({ type: 'activity.updated' })
+    return ticket
+  }
+
+  /**
+   * A silent task the owner's strategy chose (speculative execution, article §3.4). It posts nothing and starts no
+   * conversation; the router tells the owner only if the result is worth it.
+   */
+  startProactive(triggerId: string, input: { title: string; reason: string; goal?: string }): Ticket {
+    const trigger = this.store.db.select().from(schema.triggers).where(eq(schema.triggers.id, triggerId)).get()
+    if (!trigger) throw new DomainError('missing', `没有 ${triggerId}`)
+    const existing = this.tickets({ threadId: trigger.threadId }).find(t => t.origin.triggerIds.includes(triggerId))
+    if (existing) return existing
+    const id = newId('tkt')
+    const name = `auto-${id.slice(-6)}`
+    const directory = join(this.workRoot, name)
+    const sessionId = `ses_${id.slice(4)}`
+    const at = this.now()
+    const mandate: Mandate = { by: 'policy', strength: 'proactive', triggerIds: [triggerId], at, reason: input.goal ? `${input.reason}；目标：${input.goal}` : input.reason }
+    this.store.atomic(() => {
+      this.runtime.createSession('worker', 'worker', { id: sessionId, ticketId: id })
+      this.store.db.insert(schema.tickets).values({ id, name, title: input.title.slice(0, 60), note: null, threadId: trigger.threadId,
+        origin: { triggerIds: [triggerId] }, mandate: mandate as any, directory, sessionId, createdAt: at, updatedAt: at }).run()
+      this.store.db.insert(schema.subscriptions).values({ ticketId: id, threadId: trigger.threadId, kind: 'own', createdAt: at }).onConflictDoNothing().run()
+      this.setDisposition(triggerId, { startedTicket: id })
+      this.startAssignment(id, 'start')
+      this.runtime.push(sessionId, { type: 'assignment', ticketId: id, reason: 'start' })
+    })
+    mkdirSync(directory, { recursive: true })
+    this.changed(id)
+    return this.ticket(id)
+  }
+
   note(ticketId: string, text: string): void {
     const ticket = this.ticket(ticketId)
     if (ticket.ended) throw new DomainError('conflict', '任务已结束')
@@ -424,11 +543,12 @@ export class Engine {
 
   // ── Worker facts ───────────────────────────────────────────────────────────
 
-  report(ticketId: string, input: { status: ReportStatus; summary: string; humanAction?: HumanAction }): void {
+  report(ticketId: string, input: { status: ReportStatus; summary: string; humanAction?: HumanAction; files?: string[] }): { rejectedFiles: string[] } {
     const ticket = this.ticket(ticketId)
-    if (ticket.ended && ticket.ended.by === 'person') return
+    if (ticket.ended && ticket.ended.by === 'person') return { rejectedFiles: [] }
     const at = this.now()
-    const report: Report = { status: input.status, summary: input.summary, ...(input.humanAction ? { humanAction: input.humanAction } : {}), at }
+    const { accepted, rejected } = input.files?.length ? this.registerFiles(ticket, input.files) : { accepted: [], rejected: [] }
+    const report: Report = { status: input.status, summary: input.summary, ...(input.humanAction ? { humanAction: input.humanAction } : {}), ...(accepted.length ? { files: accepted } : {}), at }
     this.store.atomic(() => {
       const assignment = this.currentAssignment(ticketId)
       this.store.db.insert(schema.reports).values({ ticketId, assignmentId: assignment?.id ?? null, status: input.status, summary: input.summary,
@@ -443,9 +563,10 @@ export class Engine {
       // The router speaks for results, questions and problems; progress stays on the task card.
       const relay = input.humanAction || ['ready', 'blocked', 'failed'].includes(input.status)
       if (input.status !== 'progress') this.runtime.push(ROUTER_SESSION, { type: 'report', ticketId, status: input.status, summary: input.summary,
-        humanAction: input.humanAction }, { wake: Boolean(relay) })
+        humanAction: input.humanAction, ...(accepted.length ? { files: accepted } : {}) }, { wake: Boolean(relay) })
     })
     this.changed(ticketId)
+    return { rejectedFiles: rejected }
   }
 
   /** A worker returns a message that is not about its task; the router decides it as a new message. */
@@ -465,7 +586,7 @@ export class Engine {
   turnEnded(ticketId: string, info: { reported: boolean; lastText: string; runningJobs: number; cancelled: boolean; stepLimit: boolean }): void {
     const ticket = this.ticket(ticketId)
     if (ticket.ended || info.cancelled || info.reported) { this.changed(ticketId); return }
-    if (info.stepLimit) return this.report(ticketId, { status: 'blocked', summary: `达到单轮步数上限仍未完成。最后的说明：${clip(info.lastText, 800) || '（无）'}` })
+    if (info.stepLimit) { this.report(ticketId, { status: 'blocked', summary: `达到单轮步数上限仍未完成。最后的说明：${clip(info.lastText, 800) || '（无）'}` }); return }
     this.report(ticketId, { status: info.runningJobs > 0 ? 'progress' : 'waiting', summary: clip(info.lastText, 2_000) || '（本轮结束，没有说明）' })
   }
 
@@ -502,10 +623,15 @@ export class Engine {
 
   /** Startup: tickets whose worker was mid-turn get a recovery assignment; the router gets a recovery note. */
   recoveryNote(sessionId: string, role: string): unknown {
-    if (role === 'router') return { type: 'recovery' }
+    if (role !== 'worker') return { type: 'recovery' }
     const ticket = this.store.db.select().from(schema.tickets).where(eq(schema.tickets.sessionId, sessionId)).get()
     if (ticket && !ticket.ended) this.startAssignment(ticket.id, 'restart')
     return { type: 'assignment', ticketId: ticket?.id, reason: 'restart' }
+  }
+
+  /** Recent events with what became of them, newest first (the activity log). */
+  triggerLog(limit = 100) {
+    return this.store.db.select().from(schema.triggers).orderBy(desc(schema.triggers.at)).limit(limit).all()
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────
@@ -523,7 +649,10 @@ export class Engine {
 
   /** Ends the ticket and its assignment; its background jobs are killed without waking the worker (dsh-superagent 003). */
   private end(ticket: Ticket, ended: Ended): void {
-    this.store.afterCommit(() => this.runtime.jobs.stopAll(ticket.sessionId))
+    this.store.afterCommit(() => {
+      this.runtime.jobs.stopAll(ticket.sessionId)
+      for (const child of this.runtime.children(ticket.sessionId)) { this.runtime.discardPending(child); this.runtime.cancel(child) }
+    })
     this.store.db.update(schema.approvals).set({ status: 'expired', decidedAt: ended.at, decidedBy: 'system' })
       .where(and(eq(schema.approvals.ticketId, ticket.id), eq(schema.approvals.status, 'pending'))).run()
     this.store.db.update(schema.tickets).set({ ended: ended as any, attention: null, updatedAt: ended.at }).where(eq(schema.tickets.id, ticket.id)).run()

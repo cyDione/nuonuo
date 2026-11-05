@@ -7,6 +7,7 @@ import { Settings } from './settings/Settings'
 import { Sidebar } from './Sidebar'
 import { useLiveEvents } from './live'
 import { TaskDrawer } from './tasks'
+import { Activity, Library } from './Activity'
 
 export function App() {
   const route = useRoute()
@@ -20,7 +21,7 @@ export function App() {
   return <Shell authed={authed}><div className="flex h-full">
     <Sidebar route={route} />
     <main className="min-w-0 flex-1">
-      {route.page === 'chat' ? <Chat key={route.id ?? 'new'} id={route.id} /> : <Settings tab={route.tab} />}
+      {route.page === 'chat' ? <Chat key={route.id ?? 'new'} id={route.id} /> : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : <Settings tab={route.tab} />}
     </main>
     <TaskDrawer />
   </div></Shell>

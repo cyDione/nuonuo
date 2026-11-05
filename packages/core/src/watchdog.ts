@@ -5,7 +5,7 @@
  */
 import { recallTool, type AgentDefinition, type AgentRuntime, type InboxItem } from '@super-agent/agent-runtime'
 import { kvGet, kvSet, schema, type Store } from '@super-agent/db'
-import { tool } from 'ai'
+import { tool, type ToolSet } from 'ai'
 import { desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { clip, type Engine } from './engine'
@@ -29,6 +29,8 @@ export interface WatchdogOptions {
   quietMs: number
   /** System problems from outside the domain (failing queues, sources). */
   systemProblems?: () => string[]
+  /** Tools that let the watchdog correct the system online (edit instructions, the proactive strategy). */
+  correctionTools?: () => ToolSet
   now?: () => number
 }
 
@@ -41,6 +43,7 @@ Act with the lightest effective step:
 - nudge_task: tell the worker what you observe and what to do differently (stop repeating X, report what blocks it, check Y);
 - restart_task: the turn is hung or hopelessly confused — restart it from its working directory;
 - notify_owner: only when the owner must act or should know (a task cannot progress without them, a system part is broken). One or two sentences, in Chinese.
+When the same kind of mistake keeps recurring (not a one-off), you may correct the system online: update_instructions (how the agent talks, what it may do, what a result must include) or update_proactive (what is worth acting on unasked). Change little, say why, and tell the owner what you changed with notify_owner.
 You never stop tasks and never do the work yourself. When the owner writes to you, answer with notify_owner, using recall and list_tasks to look things up.`
 
 export class Watchdog {
@@ -176,6 +179,7 @@ export class Watchdog {
           execute: async () => this.engine.tickets({ open: true }).map(t => `${t.id} "${t.title}" ${this.engine.stage(t)}`).join('\n') || '（没有进行中的任务）',
         }),
         ...recallTool(this.runtime),
+        ...(this.options.correctionTools?.() ?? {}),
       }),
     }
     this.runtime.register(def)
