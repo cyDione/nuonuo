@@ -11,9 +11,12 @@ import { createRuntime, readLock, type LockInfo } from './runtime'
 import { startDaemon } from './server'
 import { installService, uninstallService } from './service'
 import { runsAsService, Updater } from './update'
+import { findDockerHost, widenPath } from './shell-env'
 
 // Keys in <home>/env reach every command, including a service started at login.
 loadEnvFile(homeDir())
+// A GUI- or launchd-started service on macOS sees only /usr/bin:/bin: find Homebrew, Docker and the login shell's tools.
+widenPath()
 
 const program = new Command('super-assistant').version(VERSION).description('你的个人 Super-assistant（本机运行）')
 const entry = fileURLToPath(import.meta.url)
@@ -126,6 +129,7 @@ program.command('start').description('启动服务（默认只监听 127.0.0.1:7
       launch()
     }
     const started = await startDaemon(config, { restart: () => { void restart() } })
+    void findDockerHost().then(host => { if (host) console.log(`Docker：使用 ${host}`) })
     console.log(`Super-assistant ${VERSION} 已启动`)
     console.log(`  数据目录  ${config.home}`)
     console.log(`  密钥存储  ${started.runtime.secrets.backend}${started.runtime.secretsNote ? `（${started.runtime.secretsNote}）` : ''}`)
@@ -222,7 +226,7 @@ program.command('doctor').description('检查运行环境').action(async () => {
     const icon = { ok: '✓', warn: '!', error: '✗' } as const
     const width = (t: string) => [...t].reduce((n, ch) => n + (/[\u1100-\uffff]/.test(ch) ? 2 : 1), 0)
     const pad = (t: string, n: number) => t + ' '.repeat(Math.max(1, n - width(t)))
-    for (const check of runDoctor(rt)) {
+    for (const check of await runDoctor(rt)) {
       console.log(`${icon[check.status]} ${pad(check.label, 14)}${check.detail}${check.status !== 'ok' && check.fix ? `\n    → ${check.fix}` : ''}`)
     }
   } finally { await rt.close() }

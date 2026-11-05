@@ -1,6 +1,6 @@
 {
   "name": "@super-assistant/plugin-sdk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "MIT",
   "description": "Types and helpers for writing Super-assistant plugins",
   "type": "module",
