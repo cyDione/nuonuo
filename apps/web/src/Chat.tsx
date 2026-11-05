@@ -134,7 +134,7 @@ function Typing() {
   </div>
 }
 
-const SUGGESTIONS: [string, string][] = [['每天 9 点整理 HN 热门', '#1fb37a'], ['周五下午提醒我交周报', '#ef6aa8'], ['比较几款降噪耳机', '#f2b632'], ['起草一封请假邮件', '#5866d0'], ['总结今天的未读消息', '#7b4fe0']]
+const SUGGESTIONS: [string, string][] = [['每天 9 点整理 HN 热门', '#1fb37a'], ['周五下午提醒我交周报', '#ef6aa8'], ['比较几款降噪耳机', '#f2b632'], ['起草一封请假邮件', '#c96a43'], ['总结今天的未读消息', '#3f8f9c']]
 const TILT = [-3, 2, -1.5, 1.5, -2]
 
 function Welcome({ onPick, disabled, main, mood }: { onPick(text: string): void; disabled: boolean; main: boolean; mood: 'idle' | 'working' | 'waiting' }) {

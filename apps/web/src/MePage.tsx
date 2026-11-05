@@ -61,7 +61,7 @@ export function MePage({ tab }: { tab: MeTab }) {
         </MeCard>
       </div>
 
-      <div key={tab} className="page-in">
+      <div>
         {tab === 'persona' ? <PersonaPage /> : tab === 'soul' ? <InstructionsPage /> : <MemoryPage />}
       </div>
     </div>

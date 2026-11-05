@@ -42,7 +42,7 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
       <div className="sheet relative flex min-w-0 flex-1 flex-col overflow-hidden md:rounded-[22px]">
         <MobileBar onMenu={() => setNav(true)} />
         {!chat && <TopBar className="max-md:hidden" />}
-        <div key={route.page === 'chat' ? `c${route.id ?? (route.main ? 'main' : 'new')}` : route.page} className="page-in min-h-0 flex-1">
+        <div key={route.page === 'chat' ? `c${route.id ?? (route.main ? 'main' : 'new')}` : route.page} className="min-h-0 flex-1">
           {chat ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
             : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library />
             : route.page === 'me' ? <MePage tab={route.tab} />

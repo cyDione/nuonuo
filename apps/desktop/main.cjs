@@ -32,7 +32,7 @@ const asset = name => path.join(__dirname, 'assets', name)
 const mac = process.platform === 'darwin'
 // The window is the page: on macOS the title bar is drawn by the web UI (traffic lights sit in the sidebar), and the
 // background matches the sidebar so nothing flashes while it loads (Figma "v4 · 桌面端").
-const windowColor = () => (nativeTheme.shouldUseDarkColors ? '#0f1014' : '#eeeef3')
+const windowColor = () => (nativeTheme.shouldUseDarkColors ? '#12100f' : '#f3f0ec')
 
 function createWindow() {
   win = new BrowserWindow({

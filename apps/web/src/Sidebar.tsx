@@ -40,7 +40,7 @@ export function Sidebar({ route, open, onClose }: { route: Route; open: boolean;
   </>
 }
 
-const TOPIC_COLORS = ['#ef6aa8', '#1fb37a', '#f2b632', '#7b4fe0', '#2f7cf6', '#14b8c4', '#ff6a3d']
+const TOPIC_COLORS = ['#ef6aa8', '#1fb37a', '#f2b632', '#c96a43', '#3f8f9c', '#8a7a6a', '#d0583a']
 export const topicColor = (id: string) => TOPIC_COLORS[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TOPIC_COLORS.length]!
 
 function SidebarBody({ route }: { route: Route }) {

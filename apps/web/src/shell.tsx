@@ -33,13 +33,21 @@ function setPanes(patch: Partial<Panes>) {
 export const usePanes = () => useSyncExternalStore(l => { paneListeners.add(l); return () => paneListeners.delete(l) }, () => panes)
 export const togglePane = (side: PaneSide, open?: boolean) => setPanes(side === 'left' ? { leftOpen: open ?? !panes.leftOpen } : { rightOpen: open ?? !panes.rightOpen })
 
+/** Keyboard shortcuts are used many times a day, so what they do happens at once, without the folding animation. */
+function instantly(fn: () => void) {
+  const root = document.documentElement
+  root.dataset.instant = ''
+  fn()
+  requestAnimationFrame(() => requestAnimationFrame(() => delete root.dataset.instant))
+}
+
 /** ⌘\ folds the left pane, ⌘. the right one (Ctrl on Windows and Linux). */
 export function usePaneShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return
-      if (e.key === '\\') { e.preventDefault(); togglePane('left') }
-      else if (e.key === '.') { e.preventDefault(); togglePane('right') }
+      if (e.key === '\\') { e.preventDefault(); instantly(() => togglePane('left')) }
+      else if (e.key === '.') { e.preventDefault(); instantly(() => togglePane('right')) }
     }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)

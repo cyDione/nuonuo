@@ -5,11 +5,11 @@ import { api, type Persona, type Ticket } from './api'
 import { cx } from './ui'
 
 export const MASCOT = 'mascot'
-/** Mochi's own colour (雾蓝 Mist): bright enough to read on both the light and the dark window (Figma "v4 · 主题色"). */
-export const BRAND = '#7d8bf0'
+/** Mochi's own colour (暖杏 Apricot): reads on both the light and the dark window (Figma "v4 · 主题色"). */
+export const BRAND = '#e9845a'
 const FALLBACK: Persona = { name: '小助', avatar: MASCOT, color: BRAND, personality: '' }
 // Earlier default colours, which read too dark on the dark theme: shown as the current brand blue.
-const OLD_DEFAULTS = new Set(['#4f46e5', '#2f6bff', '#2b4bff', '#2b3cff', '#5c7bff'])
+const OLD_DEFAULTS = new Set(['#4f46e5', '#2f6bff', '#2b4bff', '#2b3cff', '#5c7bff', '#7d8bf0'])
 
 export const usePersona = () => {
   const p = useQuery({ queryKey: ['persona'], queryFn: () => api.get<{ persona: Persona }>('/persona'), staleTime: 60_000 }).data?.persona

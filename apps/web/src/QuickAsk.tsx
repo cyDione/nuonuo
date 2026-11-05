@@ -71,7 +71,7 @@ export function QuickAsk() {
 
   const answer = draft?.text ?? reply?.content
   return <div className="flex h-dvh items-start justify-center p-3">
-    <div className="anim-pop w-full max-w-[600px] overflow-hidden rounded-[22px] border border-line bg-panel/95 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.45)] backdrop-blur-xl" onKeyDown={onKey}>
+    <div className="w-full max-w-[600px] overflow-hidden rounded-[22px] border border-line bg-panel/95 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.45)] backdrop-blur-xl" onKeyDown={onKey}>
       <div className="drag flex items-center gap-3 px-4 py-3.5">
         <Avatar persona={persona} size={30} mood={sentAt && !answer ? 'thinking' : text ? 'listening' : 'idle'} />
         <input ref={input} autoFocus value={text} onChange={e => setText(e.target.value)} placeholder={`问${persona.name}，或者交给它一件事…`} aria-label="快问"

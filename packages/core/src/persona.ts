@@ -3,7 +3,7 @@ import { kvGet, kvSet, type Store } from '@super-assistant/db'
 
 export interface Persona { name: string; avatar: string; color: string; personality: string }
 
-export const DEFAULT_PERSONA: Persona = { name: '小助', avatar: 'mascot', color: '#7d8bf0', personality: '' }
+export const DEFAULT_PERSONA: Persona = { name: '小助', avatar: 'mascot', color: '#e9845a', personality: '' }
 
 export function persona(store: Store): Persona {
   return { ...DEFAULT_PERSONA, ...(kvGet<Partial<Persona>>(store, 'persona') ?? {}) }

@@ -6,7 +6,7 @@ import { Avatar, isMascot, Mascot, MASCOT } from '../persona'
 import { Button, Card, cx, Field, Input } from '../ui'
 
 const AVATARS = ['🦊', '🐱', '🐼', '🦉', '🐙', '🌱', '🌙', '☀️', '🍀', '🎧', '🧭', '🪐', '🐳', '🦄', '🤖']
-const COLORS = ['#7d8bf0', '#1fb37a', '#f2b632', '#ef6aa8', '#ff6a3d', '#7b4fe0', '#14b8c4', '#5c5c5c']
+const COLORS = ['#e9845a', '#5db49c', '#f2be45', '#ef7a8f', '#d0583a', '#8a7a6a', '#3f8f9c', '#5c5c5c']
 const EXAMPLES = ['说话直接、简短，像一个靠谱的同事；先说结论。', '温和耐心，会适当关心我的状态；不说套话。', '有点幽默，偶尔开个玩笑，但正事从不含糊。']
 
 export function PersonaPage() {
