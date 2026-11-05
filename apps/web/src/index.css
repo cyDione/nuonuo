@@ -14,6 +14,9 @@
   --color-bg: var(--bg);
   --color-panel: var(--panel);
   --color-sunken: var(--sunken);
+  --color-card: var(--card);
+  --color-bubble: var(--bubble);
+  --color-hero: var(--hero);
   --color-line: var(--line);
   --color-fg: var(--fg);
   --color-muted: var(--muted);
@@ -38,8 +41,8 @@
 }
 
 :root {
-  --bg: #ececec; --panel: #fafafa; --sunken: #f0f0f0; --line: #e4e4e4;
-  --fg: #121212; --muted: #555555; --faint: #8e8e8e;
+  --bg: #ededed; --panel: #fafafa; --card: #ffffff; --bubble: #f0f0f3; --hero: #f3f5fc; --sunken: #f2f2f2; --line: #e6e6e6;
+  --fg: #121212; --muted: #5c5c5c; --faint: #8e8e8e;
   --ink: #121212; --ink-fg: #fafafa;
   --accent: #012fda; --accent-fg: #ffffff; --accent-soft: #e6ebfd;
   --ok: #15803d; --warn: #b45309; --warn-soft: #fdf1dc; --danger: #d12c2c;
@@ -51,10 +54,10 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0a0a0a; --panel: #141414; --sunken: #1c1c1c; --line: #2a2a2a;
+    --bg: #0b0b0c; --panel: #141415; --card: #1c1c1e; --bubble: #242427; --hero: #141a30; --sunken: #232326; --line: #2c2c2e;
     --fg: #f2f2f2; --muted: #a8a8a8; --faint: #6e6e6e;
     --ink: #f2f2f2; --ink-fg: #121212;
-    --accent: #6f8bff; --accent-fg: #0a0a0a; --accent-soft: #141d45;
+    --accent: #5b7bff; --accent-fg: #ffffff; --accent-soft: #1b2452;
     --ok: #4ade80; --warn: #fbbf24; --warn-soft: #2e2410; --danger: #f87171;
     --lime: #2fc58b; --coral: #f17db3; --sun: #f2b632; --sky: #5b97f8; --grape: #9b77f0;
     --glow: rgb(80 110 255 / 0.18);
@@ -64,10 +67,10 @@
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0a0a0a; --panel: #141414; --sunken: #1c1c1c; --line: #2a2a2a;
+  --bg: #0b0b0c; --panel: #141415; --card: #1c1c1e; --bubble: #242427; --hero: #141a30; --sunken: #232326; --line: #2c2c2e;
   --fg: #f2f2f2; --muted: #a8a8a8; --faint: #6e6e6e;
   --ink: #f2f2f2; --ink-fg: #121212;
-  --accent: #6f8bff; --accent-fg: #0a0a0a; --accent-soft: #141d45;
+  --accent: #5b7bff; --accent-fg: #ffffff; --accent-soft: #1b2452;
   --ok: #4ade80; --warn: #fbbf24; --warn-soft: #2e2410; --danger: #f87171;
   --lime: #2fc58b; --coral: #f17db3; --sun: #f2b632; --sky: #5b97f8; --grape: #9b77f0;
   --glow: rgb(80 110 255 / 0.18);
@@ -168,9 +171,50 @@
 .mascot[data-mood="waiting"] .m-eye { animation: m-blink 3.5s ease-in-out infinite; }
 .mascot[data-mood="sleepy"] .m-body { animation: m-breathe 6s ease-in-out infinite; }
 
+/* ── Motion for the redesign (see the Figma "组件与动效" page) ───────────── */
+.nav-indicator { transition: transform 240ms var(--ease-in-out-strong), opacity 150ms ease; }
+
+.tag { transform: rotate(var(--r, 0deg)); transition: transform 180ms var(--ease-out-strong), box-shadow 180ms ease; animation: tag-in 460ms var(--ease-out-strong) backwards; animation-delay: calc(var(--i, 0) * 60ms + 220ms); }
+.tag:hover:not(:disabled) { transform: rotate(0deg) translateY(-2px); box-shadow: 0 10px 20px -12px rgb(18 18 18 / 0.45); }
+.tag:active:not(:disabled) { transform: rotate(0deg) scale(0.97); }
+@keyframes tag-in { from { opacity: 0; transform: translateY(14px) rotate(calc(var(--r, 0deg) * 3)) } }
+
+.squiggle path { stroke-dasharray: 220; stroke-dashoffset: 220; animation: draw 700ms var(--ease-out-strong) 380ms forwards; }
+@keyframes draw { to { stroke-dashoffset: 0 } }
+
+.glow { background: radial-gradient(closest-side, color-mix(in oklab, var(--accent) 17%, transparent), transparent); animation: drift 16s ease-in-out infinite alternate; }
+.glow-corner { background: radial-gradient(closest-side, color-mix(in oklab, var(--accent) 45%, transparent), transparent); animation: drift 12s ease-in-out infinite alternate; }
+@keyframes drift { from { transform: translate(-6%, -4%) scale(1) } to { transform: translate(6%, 5%) scale(1.12) } }
+
+.progress { position: relative; overflow: hidden; border-radius: 99px; background: color-mix(in oklab, var(--accent) 16%, transparent); }
+.progress::after { content: ""; position: absolute; inset: 0; width: 38%; border-radius: inherit; background: var(--accent); animation: indeterminate 1.4s linear infinite; }
+@keyframes indeterminate { from { transform: translateX(-100%) } to { transform: translateX(265%) } }
+
+.peek { transform: translateY(110%); transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+.peek[data-show="true"] { transform: translateY(18%); }
+
+.hop { animation: hop 700ms var(--ease-out-strong); }
+@keyframes hop { 0%, 100% { transform: none } 30% { transform: translateY(-28%) } 55% { transform: none } 75% { transform: translateY(-8%) } }
+
+.bump { animation: bump 320ms var(--ease-out-strong); }
+@keyframes bump { 0% { transform: scale(0.6); opacity: 0 } 60% { transform: scale(1.15) } 100% { transform: none; opacity: 1 } }
+
+.anim-send { animation: send 340ms cubic-bezier(0.34, 1.3, 0.64, 1) both; transform-origin: bottom right; }
+@keyframes send { from { opacity: 0; transform: translateY(18px) scale(0.96) } }
+
+.leaving { animation: leave 220ms var(--ease-out-strong) forwards; pointer-events: none; }
+@keyframes leave { to { opacity: 0; transform: translateX(10px) scale(0.97) } }
+
+.anim-sheet { animation: sheet-up 340ms var(--ease-drawer) both; }
+@keyframes sheet-up { from { transform: translateY(100%) } }
+
 @media (prefers-reduced-motion: reduce) {
   .anim-rise, .anim-pop, .anim-menu, .stagger > * { animation-name: fade; }
   .anim-drawer-r, .anim-drawer-l { animation: fade 200ms ease-out both; }
   .press:active:not(:disabled) { transform: none; }
-  .mascot *, .ping-soft { animation: none !important; transition: none !important; }
+  .mascot *, .ping-soft, .glow, .glow-corner, .hop, .bump, .tag { animation: none !important; transition: none !important; }
+  .squiggle path { animation: none; stroke-dashoffset: 0; }
+  .anim-send, .anim-sheet, .leaving { animation-name: fade; }
+  .peek { transition: none; }
+  .nav-indicator { transition: opacity 150ms ease; }
 }

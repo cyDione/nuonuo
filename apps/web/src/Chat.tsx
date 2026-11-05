@@ -5,13 +5,14 @@
  * panel's task details, never in the timeline.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlarmClock, AlertTriangle, ArrowUp, ArrowUpRight, ExternalLink, Hash } from 'lucide-react'
+import { AlarmClock, AlertTriangle, ArrowUp, ArrowUpRight, ExternalLink } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, ApiError, type Conversation, type Message, type RolesResponse } from './api'
 import { useLive } from './live'
 import { Avatar, greeting, statusLine, usePersona, type Mood } from './persona'
+import { topicColor } from './Sidebar'
 import { go } from './route'
 import { NeedsYou, needsOwner, useTickets, WorkingLine } from './tasks'
 import { SOURCE_LABEL, SourceIcon } from './icons'
@@ -35,6 +36,8 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const draft = useLive(s => (id ? s.drafts[id] : undefined))
   const routerBusy = useLive(s => s.routerState === 'running')
   const [error, setError] = useState<string | null>(null)
+  const [text, setText] = useState('')
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   // Only messages that arrive while the page is open animate in; history appears at once.
   const [mountedAt] = useState(() => Date.now() - 1500)
@@ -85,8 +88,9 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const external = current && current.source !== 'webchat'
 
   return <div className="flex h-full flex-col">
-    {!main && thread.data && <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-5 md:px-6">
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-sunken text-muted">{external ? <SourceIcon source={current!.source} size={15} /> : <Hash size={15} />}</span>
+    {!main && thread.data && <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-5 md:pr-20 md:pl-6">
+      {external ? <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-sunken text-muted"><SourceIcon source={current!.source} size={15} /></span>
+        : <span className="size-2.5 shrink-0 rounded-full" style={{ background: topicColor(id!) }} />}
       <h1 className="min-w-0 flex-1 truncate font-display text-[15px] font-semibold">{title}</h1>
       {current?.meta.url && <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg">
         在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>}
@@ -97,17 +101,17 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
       <a className="press shrink-0 rounded-full bg-ink px-3 py-1.5 text-xs font-medium text-ink-fg" href="#/settings/providers">去设置</a>
     </div></div>}
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-      {empty ? <Welcome onPick={t => send(t)} disabled={Boolean(noRouter)} main={Boolean(main)} name={persona.name} mood={status.tone} /> :
-        <div className="mx-auto max-w-3xl space-y-3 px-4 py-6 md:px-6">
+      {empty ? <Welcome onPick={t => { setText(t); requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(t.length, t.length) } }) }} disabled={Boolean(noRouter)} main={Boolean(main)} mood={status.tone} /> :
+        <div className="mx-auto max-w-3xl space-y-3.5 px-4 pt-6 pb-4 md:px-8 md:pt-8">
           {messages.map((m, i) => <Item key={m.id} m={m} fresh={m.createdAt > mountedAt} first={messages[i - 1]?.role !== m.role || Boolean(messages[i - 1]?.meta.source && messages[i - 1]!.meta.source !== 'webchat')} />)}
           {draft && <Bubble first={last?.role !== 'assistant'} fresh><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.text}</ReactMarkdown><span className="caret" /></div></Bubble>}
           {thinking && <Bubble first fresh mood="thinking"><Typing /></Bubble>}
-          {asks.map(t => <div key={t.id} className="anim-rise pl-10"><NeedsYou t={t} onAnswer={(text, ticketId) => send(text, ticketId)} /></div>)}
+          {asks.map(t => <div key={t.id} className="anim-rise pl-[42px]"><NeedsYou t={t} onAnswer={(text, ticketId) => send(text, ticketId)} /></div>)}
         </div>}
     </div>
     {error && <div className="mx-auto w-full max-w-3xl px-4 md:px-6"><div className="anim-rise rounded-2xl bg-danger/10 px-4 py-2.5 text-sm text-danger">{error}</div></div>}
-    <Composer onSend={text => send(text)} disabled={Boolean(noRouter)} status={main ? undefined : <WorkingLine tickets={working} />}
-      placeholder={main ? `跟${persona.name}说…（可以连着交代好几件事）` : '在这个侧聊里说…'} />
+    <Composer text={text} setText={setText} inputRef={inputRef} onSend={value => send(value)} disabled={Boolean(noRouter)} status={<WorkingLine tickets={working} />}
+      placeholder={`跟${persona.name}说点什么…`} />
   </div>
 }
 
@@ -117,28 +121,40 @@ function Typing() {
   </div>
 }
 
-const SUGGESTIONS = ['每天早上 9 点给我整理 Hacker News 热门', '周五下午 4 点提醒我交周报', '帮我比较几款降噪耳机']
+const SUGGESTIONS: [string, string][] = [['每天 9 点整理 HN 热门', '#1fb37a'], ['周五下午提醒我交周报', '#ef6aa8'], ['比较几款降噪耳机', '#f2b632'], ['起草一封请假邮件', '#2f6bff'], ['总结今天的未读消息', '#7b4fe0']]
+const TILT = [-3, 2, -1.5, 1.5, -2]
 
-function Welcome({ onPick, disabled, main, name, mood }: { onPick(text: string): void; disabled: boolean; main: boolean; name: string; mood: 'idle' | 'working' | 'waiting' }) {
+function Welcome({ onPick, disabled, main, mood }: { onPick(text: string): void; disabled: boolean; main: boolean; mood: 'idle' | 'working' | 'waiting' }) {
   const persona = usePersona()
-  return <div className="flex min-h-full flex-col items-center justify-center px-4 py-10 text-center md:px-6">
-    <Avatar persona={persona} size={96} mood={main ? mood : 'happy'} track className="anim-pop mb-5 text-fg" />
-    <h2 className="anim-rise font-display text-3xl leading-tight font-semibold text-balance">
-      {main ? <>{greeting()}，我是{name}</> : '新侧聊'}
+  return <div className="relative flex min-h-full flex-col items-center justify-center overflow-hidden px-4 py-10 text-center md:px-6">
+    <div className="glow pointer-events-none absolute top-[6%] left-1/2 -ml-[300px] h-[440px] w-[600px] rounded-full" aria-hidden />
+    <Avatar persona={persona} size={128} mood={main ? mood : 'happy'} track className="anim-pop relative text-fg" />
+    <p className="anim-rise relative mt-3 text-base font-medium text-faint">{main ? greeting() : '新话题'}</p>
+    <h2 className="anim-rise relative mt-1 font-display text-[clamp(30px,6vw,44px)] leading-[1.28] font-semibold text-balance">
+      {main ? <>今天想让我<br /><Mark>帮你做</Mark>点什么？</> : <>这次想<Mark>聊点</Mark>什么？</>}
     </h2>
-    <div className="stagger mt-6 flex max-w-xl flex-wrap justify-center gap-2">
-      {SUGGESTIONS.map(t => <button key={t} disabled={disabled} onClick={() => onPick(t)}
-        className="press rounded-full border border-line bg-panel px-4 py-2 text-sm text-muted hover:border-fg/30 hover:text-fg disabled:opacity-50">{t}</button>)}
+    <div className="relative mt-8 flex max-w-xl flex-wrap justify-center gap-x-2.5 gap-y-3">
+      {SUGGESTIONS.map(([t, c], i) => <button key={t} disabled={disabled} onClick={() => onPick(t)} style={{ background: c, ['--r' as string]: `${TILT[i]}deg`, ['--i' as string]: i }}
+        className={cx('tag rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-50', c === '#f2b632' ? 'text-[#121212]' : 'text-white')}>{t}</button>)}
     </div>
   </div>
 }
 
-/** The assistant's messages are bubbles with its face on the first of a run (Muse), so back-to-back messages stay readable. */
+/** The accented words of the greeting, underlined by a hand-drawn line that draws itself in. */
+function Mark({ children }: { children: React.ReactNode }) {
+  return <span className="relative inline-block text-accent">{children}
+    <svg className="squiggle absolute -bottom-1.5 left-0 h-2.5 w-full" viewBox="0 0 132 10" preserveAspectRatio="none" aria-hidden>
+      <path d="M2 7 C 13 1, 20 1, 24 5 S 35 9, 46 5 S 57 1, 68 5 S 79 9, 90 5 S 101 1, 112 5 S 123 9, 130 4" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" />
+    </svg>
+  </span>
+}
+
+/** The assistant's messages are bubbles with its face on the first of a run; a fresh reply makes it hop. */
 function Bubble({ first, fresh, mood = 'idle', children }: { first: boolean; fresh?: boolean; mood?: Mood; children: React.ReactNode }) {
   const persona = usePersona()
-  return <div className={cx('flex items-start gap-2.5', first && 'pt-2', fresh && 'anim-rise')}>
-    {first ? <Avatar persona={persona} size={30} mood={mood} className="mt-0.5" /> : <span className="w-[30px] shrink-0" />}
-    <div className="min-w-0 max-w-[85%] rounded-[22px] rounded-tl-md bg-sunken px-4 py-2.5">{children}</div>
+  return <div className={cx('flex items-start gap-2.5', first && 'pt-1.5', fresh && 'anim-rise')}>
+    {first ? <span className={cx('mt-0.5 shrink-0', fresh && 'hop')}><Avatar persona={persona} size={32} mood={fresh && mood === 'idle' ? 'happy' : mood} /></span> : <span className="w-8 shrink-0" />}
+    <div className="min-w-0 max-w-[85%] rounded-[22px] rounded-tl-md bg-bubble px-4 py-2.5">{children}</div>
   </div>
 }
 
@@ -150,7 +166,7 @@ function Item({ m, first, fresh }: { m: Message; first: boolean; fresh: boolean 
   </div>
   if (external) return <div className={cx('flex gap-2.5', fresh && 'anim-rise')}>
     <div className="mt-0.5 flex size-[30px] shrink-0 items-center justify-center rounded-xl bg-sunken text-muted"><SourceIcon source={m.meta.source} size={14} /></div>
-    <div className="min-w-0 flex-1 rounded-[22px] rounded-tl-md border border-line px-4 py-2.5">
+    <div className="min-w-0 flex-1 rounded-[22px] rounded-tl-md border border-line bg-card px-4 py-2.5">
       <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
         <span className="font-medium text-fg">{m.meta.source === 'cron' ? '定时任务' : m.meta.actor}</span>
         {m.meta.human === false && <span className="rounded-full bg-sunken px-1.5 text-[10px]">bot</span>}
@@ -160,13 +176,13 @@ function Item({ m, first, fresh }: { m: Message; first: boolean; fresh: boolean 
       <div className="prose-chat text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
     </div>
   </div>
-  if (m.role === 'user') return <div className={cx('flex justify-end', fresh && 'anim-rise')}>
+  if (m.role === 'user') return <div className={cx('flex justify-end', fresh && 'anim-send')}>
     <div className="max-w-[85%] rounded-[22px] rounded-br-md bg-accent px-4 py-2.5 text-[15px] whitespace-pre-wrap text-accent-fg">{m.content}</div>
   </div>
   return <div className="space-y-1.5">
     <Bubble first={first} fresh={fresh}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div></Bubble>
-    {m.meta.error && <div className="flex items-center gap-1 pl-10 text-xs text-danger"><AlertTriangle size={12} />{m.meta.error}</div>}
-    {m.meta.via && <div className="flex items-center gap-1 pl-10 text-[11px] text-faint">
+    {m.meta.error && <div className="flex items-center gap-1 pl-[42px] text-xs text-danger"><AlertTriangle size={12} />{m.meta.error}</div>}
+    {m.meta.via && <div className="flex items-center gap-1 pl-[42px] text-[11px] text-faint">
       <SourceIcon source={m.meta.via} size={11} />
       {m.meta.delivery === 'sent' ? <>已发到 {SOURCE_LABEL[m.meta.via] ?? m.meta.via}{m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent" aria-label="打开"><ArrowUpRight size={11} /></a>}</>
         : m.meta.delivery === 'pending' ? '发送中…'
@@ -176,11 +192,11 @@ function Item({ m, first, fresh }: { m: Message; first: boolean; fresh: boolean 
 }
 
 /** Never blocks on a message in flight: each message is independent, and the owner may type several in a row. */
-function Composer({ onSend, disabled, status, placeholder }: { onSend(text: string): void; disabled: boolean; status?: React.ReactNode; placeholder: string }) {
-  const [text, setText] = useState('')
-  const ref = useRef<HTMLTextAreaElement>(null)
+function Composer({ text, setText, inputRef, onSend, disabled, status, placeholder }: { text: string; setText(v: string): void; inputRef: React.RefObject<HTMLTextAreaElement | null>; onSend(text: string): void; disabled: boolean; status?: React.ReactNode; placeholder: string }) {
+  const persona = usePersona()
+  const [focused, setFocused] = useState(false)
   useLayoutEffect(() => {
-    const el = ref.current
+    const el = inputRef.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`
@@ -191,15 +207,22 @@ function Composer({ onSend, disabled, status, placeholder }: { onSend(text: stri
     onSend(value)
     setText('')
   }
-  return <div className="mx-auto w-full max-w-3xl px-3 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] md:px-6 md:pb-5">
-    {status && <div className="mb-2 px-2">{status}</div>}
-    <div className="flex items-end gap-2 rounded-[26px] border border-line bg-panel p-2 pl-4 shadow-[var(--shadow-sheet)] transition-[border-color,box-shadow] duration-200 focus-within:border-accent focus-within:ring-4 focus-within:ring-accent/12">
-      <textarea ref={ref} value={text} rows={1} autoFocus placeholder={disabled ? '请先在设置中配置模型' : placeholder}
-        disabled={disabled} onChange={e => setText(e.target.value)} aria-label="消息"
-        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
-        className="max-h-60 min-h-[24px] flex-1 resize-none bg-transparent py-2 text-[15px] outline-none placeholder:text-faint focus-visible:outline-none" />
-      <button onClick={submit} aria-label="发送" disabled={!text.trim() || disabled}
-        className={cx('press flex size-10 shrink-0 items-center justify-center rounded-full', text.trim() && !disabled ? 'bg-accent text-accent-fg' : 'bg-sunken text-faint')}><ArrowUp size={18} /></button>
+  const ready = Boolean(text.trim()) && !disabled
+  return <div className="mx-auto w-full max-w-3xl px-3 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] md:px-8 md:pb-6">
+    {status && <div className="mb-2.5 empty:hidden">{status}</div>}
+    <div className="relative">
+      <div className="pointer-events-none absolute bottom-full left-7 h-10 w-12 overflow-hidden" aria-hidden>
+        <div className="peek" data-show={focused && text.length > 0}><Avatar persona={persona} size={46} mood="listening" /></div>
+      </div>
+      <div className="relative flex items-end gap-2 rounded-[28px] border border-line bg-card p-2 pl-5 shadow-[var(--shadow-sheet)] transition-[border-color,box-shadow] duration-200 focus-within:border-accent focus-within:ring-4 focus-within:ring-accent/12">
+        <textarea ref={inputRef} value={text} rows={1} autoFocus placeholder={disabled ? '请先在设置中配置模型' : placeholder}
+          disabled={disabled} onChange={e => setText(e.target.value)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} aria-label="消息"
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
+          className="max-h-60 min-h-[24px] flex-1 resize-none bg-transparent py-2.5 text-[15px] outline-none placeholder:text-faint focus-visible:outline-none" />
+        <button onClick={submit} aria-label="发送" disabled={!ready}
+          className={cx('press flex size-11 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-200', ready ? 'bg-accent text-accent-fg' : 'bg-sunken text-faint')}>
+          <ArrowUp size={19} className={cx('transition-transform duration-200 ease-out', ready && '-translate-y-px')} /></button>
+      </div>
     </div>
   </div>
 }

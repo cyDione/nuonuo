@@ -3,16 +3,13 @@
  * what is going on, what comes next, what I noticed on my own, and where every event went.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlarmClock, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, FolderOpen, Inbox, KeyRound, Sparkles, X } from 'lucide-react'
-import { useEffect } from 'react'
+import { AlarmClock, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, FolderOpen, Inbox, KeyRound, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { api, type ActivityEvent, type Artifact, type Routine, type Ticket } from './api'
-import { openActivity, openTask, useActivityOpen } from './live'
-import { Avatar, statusLine, usePersona } from './persona'
+import { openTask } from './live'
 import { endedText, FileChip, fmtSize, NeedsYou, needsOwner, STATE_TEXT, StateIcon, useTickets } from './tasks'
 import { SourceIcon, SOURCE_LABEL } from './icons'
-import { Button, cx, Empty, IconButton } from './ui'
-import { StatusDot } from './Sidebar'
+import { Button, cx, Empty } from './ui'
 import { go } from './route'
 
 const ago = (at: number) => {
@@ -21,33 +18,6 @@ const ago = (at: number) => {
   if (s < 3600) return `${Math.round(s / 60)} 分钟前`
   if (s < 86_400) return `${Math.round(s / 3600)} 小时前`
   return new Date(at).toLocaleDateString()
-}
-
-/** Muse: tap the assistant's avatar to see what it is doing, what waits for you, and what you allowed. */
-export function ActivityPanel() {
-  const open = useActivityOpen()
-  const persona = usePersona()
-  const tickets = useTickets().data?.tickets ?? []
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') openActivity(false) }
-    addEventListener('keydown', onKey)
-    return () => removeEventListener('keydown', onKey)
-  }, [])
-  if (!open) return null
-  const status = statusLine(tickets.filter(t => t.stage !== 'ended'))
-  return <div className="anim-fade fixed inset-0 z-30 flex justify-end bg-[var(--scrim)]" onMouseDown={e => { if (e.target === e.currentTarget) openActivity(false) }}>
-    <div role="dialog" aria-modal="true" aria-label={`${persona.name}在做什么`} className="anim-drawer-r flex h-full w-full max-w-lg flex-col overflow-hidden bg-panel shadow-2xl md:my-2 md:mr-2 md:h-[calc(100%-1rem)] md:rounded-[24px]">
-      <div className="flex items-center gap-4 border-b border-line px-5 py-4">
-        <span className="flex size-16 items-center justify-center rounded-[20px] border border-line bg-panel"><Avatar persona={persona} size={52} mood={status.tone} className="text-fg" /></span>
-        <div className="min-w-0 flex-1">
-          <div className="font-display text-xl font-semibold">{persona.name}</div>
-          <div className={cx('mt-0.5 flex items-center gap-1.5 truncate text-xs', status.tone === 'waiting' ? 'text-warn' : 'text-muted')}><StatusDot tone={status.tone} /><span className="truncate">{status.text}</span></div>
-        </div>
-        <IconButton label="关闭" onClick={() => openActivity(false)} className="self-start"><X size={18} /></IconButton>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5"><ActivityBody compact /></div>
-    </div>
-  </div>
 }
 
 export function Activity() {

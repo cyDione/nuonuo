@@ -19,7 +19,7 @@ export function PersonaPage() {
   const dirty = JSON.stringify(form) !== JSON.stringify(data.persona)
   return <div className="space-y-3">
     <Card className="flex items-center gap-6 p-6 max-sm:flex-col max-sm:items-start">
-      <span className="flex size-32 shrink-0 items-center justify-center rounded-[28px] border border-line bg-panel"><Avatar persona={form} size={96} mood="happy" track className="text-fg" /></span>
+      <span className="relative flex size-36 shrink-0 items-center justify-center overflow-hidden rounded-[28px] bg-hero"><span className="glow-corner pointer-events-none absolute -right-10 -bottom-12 size-40 rounded-full" aria-hidden /><Avatar persona={form} size={104} mood="happy" track className="relative text-fg" /></span>
       <div className="min-w-0 flex-1 space-y-3">
         <Field label="名字"><div className="w-56"><Input value={form.name} maxLength={24} onChange={e => setForm({ ...form, name: e.target.value })} /></div></Field>
         <div className="space-y-1.5">
