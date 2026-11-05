@@ -9,7 +9,8 @@ import type { Store } from '@super-assistant/db'
 import type { ToolSet } from 'ai'
 import type { z } from 'zod'
 
-interface FieldBase { key: string; label: string; hint?: string; advanced?: true }
+/** `links`: shortcuts shown under the field (e.g. where to create the OAuth client whose ID goes here). */
+interface FieldBase { key: string; label: string; hint?: string; advanced?: true; links?: { label: string; href: string }[] }
 export type FieldSpec =
   | FieldBase & { type: 'switch' }
   | FieldBase & { type: 'number'; min: number; max: number }
