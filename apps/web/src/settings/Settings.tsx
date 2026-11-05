@@ -48,7 +48,7 @@ const GROUPS: { title: string; tabs: Tab[] }[] = [
 ]
 const TABS = GROUPS.flatMap(g => g.tabs)
 
-export function Settings({ tab }: { tab: SettingsTab }) {
+export function Settings({ tab, item }: { tab: SettingsTab; item?: string }) {
   const current = TABS.find(t => t.id === tab) ?? TABS[0]!
   return <div className="flex h-full">
     <nav className="w-52 shrink-0 space-y-4 overflow-y-auto border-r border-line px-3 py-5 max-md:hidden">
@@ -64,19 +64,19 @@ export function Settings({ tab }: { tab: SettingsTab }) {
         <div className="md:hidden"><select className="h-9 w-full rounded-lg border border-line bg-panel px-2 text-sm" value={current.id} onChange={e => { location.hash = `/settings/${e.target.value}` }}>
           {GROUPS.map(g => <optgroup key={g.title} label={g.title}>{g.tabs.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}</optgroup>)}
         </select></div>
-        <header><h2 className="text-lg font-semibold">{current.label}</h2><p className="mt-1 text-sm text-muted">{current.intro}</p></header>
+        {!item && <header><h2 className="text-lg font-semibold">{current.label}</h2><p className="mt-1 text-sm text-muted">{current.intro}</p></header>}
         {tab === 'persona' && <PersonaPage />}
         {tab === 'instructions' && <InstructionsPage />}
         {tab === 'memory' && <MemoryPage />}
         {tab === 'proactive' && <ProactivePage />}
         {tab === 'routines' && <Routines />}
-        {tab === 'sources' && <Sources />}
+        {tab === 'sources' && <Sources {...(item ? { item } : {})} />}
         {tab === 'plugins' && <Plugins />}
         {tab === 'mcp' && <Mcp />}
         {tab === 'review' && <Review />}
         {tab === 'execution' && <Execution />}
         {tab === 'providers' && <Providers />}
-        {tab === 'roles' && <Roles />}
+        {tab === 'roles' && <Roles {...(item ? { item } : {})} />}
         {tab === 'usage' && <Usage />}
         {tab === 'system' && <System />}
       </div>

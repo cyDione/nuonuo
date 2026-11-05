@@ -1,5 +1,5 @@
 /** Small shared controls built on the theme tokens in index.css. */
-import { X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
 
 const cx = (...parts: (string | false | undefined | null)[]) => parts.filter(Boolean).join(' ')
@@ -71,3 +71,25 @@ export function Empty({ icon, title, children }: { icon?: ReactNode; title: stri
 
 export const fmtNum = (n: number | null | undefined) => (n ?? 0).toLocaleString('zh-CN')
 export const fmtUsd = (n: number | null | undefined) => (n == null ? '—' : `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`)
+
+/** A clickable row in a settings list that opens the item's own page. */
+export function ListRow({ href, icon, title, badge, detail, aside }: { href: string; icon?: ReactNode; title: ReactNode; badge?: ReactNode; detail?: ReactNode; aside?: ReactNode }) {
+  return <a href={href} className="flex items-center gap-3 px-4 py-3 hover:bg-sunken">
+    {icon && <div className="shrink-0 text-muted">{icon}</div>}
+    <div className="min-w-0 flex-1">
+      <div className="flex items-center gap-2"><span className="truncate text-sm font-medium">{title}</span>{badge}</div>
+      {detail && <div className="mt-0.5 truncate text-xs text-muted">{detail}</div>}
+    </div>
+    {aside && <div className="shrink-0 text-right text-xs text-faint">{aside}</div>}
+    <ChevronRight size={16} className="shrink-0 text-faint" />
+  </a>
+}
+
+/** Header of a settings item page, with a link back to its list. */
+export function DetailHeader({ back, backLabel, icon, title, badge, children }: { back: string; backLabel: string; icon?: ReactNode; title: ReactNode; badge?: ReactNode; children?: ReactNode }) {
+  return <header className="space-y-2">
+    <a href={back} className="inline-flex items-center gap-0.5 text-sm text-muted hover:text-fg"><ChevronLeft size={16} />{backLabel}</a>
+    <div className="flex items-center gap-2">{icon && <span className="text-muted">{icon}</span>}<h2 className="text-lg font-semibold">{title}</h2>{badge}</div>
+    {children && <div className="text-sm text-muted">{children}</div>}
+  </header>
+}
