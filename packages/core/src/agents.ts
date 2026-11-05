@@ -14,7 +14,7 @@ import { sandboxApplies, sandboxCommand } from './sandbox'
 import type { Reviewer } from './review'
 
 const CONTEXT_MESSAGES = 6
-/** Chat channels keep replies short (article §4.2: ≤ 100 words); long results travel as the attached full result. */
+/** Chat channels keep replies short (article §4.2: ≤ 100 words); the full result stays in the work's details. */
 const CHAT_SOURCES = new Set(['webchat', 'telegram', 'watchdog', 'cron'])
 const CHAT_LIMIT = 120
 const DETAILED_LIMIT = 600
@@ -180,7 +180,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     },
     tools: () => wrapSpeaking({
       reply: tool({
-        description: 'Post a message to the owner — the only way to speak. It also goes out to the source (e.g. a GitHub comment) when reply_to is a message from that source, or ticket_id is work that came from it; otherwise it stays in the web. With ticket_id, the finished result and its files are attached.',
+        description: 'Post a message to the owner — the only way to speak. It also goes out to the source (e.g. a GitHub comment) when reply_to is a message from that source, or ticket_id is work that came from it; otherwise it stays in the web. The owner sees only your text: the full result and files stay in the work\'s details.',
         inputSchema: z.object({ conversation_id: z.string().optional().describe('Required unless ticket_id is given'), text: z.string().min(1),
           reply_to: z.string().optional().describe('trigger_id of the message you answer'),
           ticket_id: z.string().optional().describe('The work this message is about'),
@@ -192,7 +192,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
           const length = chatLength(text)
           const limit = detailed ? DETAILED_LIMIT : CHAT_LIMIT
           if (CHAT_SOURCES.has(source) && length > limit) {
-            return { ok: false, error: `Not sent: about ${length} words; chat replies must stay under ${limit}. Say only the outcome and key facts${ticket_id ? ' — the full result is attached automatically' : ''}, then call reply again.` }
+            return { ok: false, error: `Not sent: about ${length} words; chat replies must stay under ${limit}. Say only the outcome and key facts${ticket_id ? ' — the full result stays in the work\'s details' : ''}, then call reply again.` }
           }
           return { ok: true, message_id: engine.reply({ conversationId, text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}) }) }
         },
@@ -220,7 +220,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       }),
       message_owner: tool({
         description: 'Say something to the owner on your own initiative, in the main conversation (a heads-up, a follow-up, a reminder). Only when it is worth an interruption.',
-        inputSchema: z.object({ text: z.string().min(1), ticket_id: z.string().optional().describe('The work it is about, so its result is attached') }),
+        inputSchema: z.object({ text: z.string().min(1), ticket_id: z.string().optional().describe('The work it is about') }),
         execute: async ({ text, ticket_id }, { toolCallId }) => {
           if (chatLength(text) > CHAT_LIMIT) return { ok: false, error: `Not sent: chat messages must stay under ${CHAT_LIMIT} words.` }
           return { ok: true, message_id: engine.reply({ conversationId: engine.mainConversation(), text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}) }) }
@@ -316,7 +316,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         const answered = p.humanAction && !t.attention
         const proactive = isProactive(t)
         return [`<report ticket_id="${t.id}" title="${t.title}" status="${p.status}" conversation_id="${engine.conversationOfThread(t.threadId) ?? ''}" origin="${sourceOfThread(t.threadId)}"${proactive ? ` proactive="true" why="${String((t.mandate as Mandate).reason ?? '').replace(/"/g, "'")}"` : ''}>`,
-          clip(p.summary, 3_000), p.files?.length ? `files (attached automatically): ${p.files.join(', ')}` : '',
+          clip(p.summary, 3_000), p.files?.length ? `files (kept in the work\'s details): ${p.files.join(', ')}` : '',
           p.humanAction ? `human_action: ${JSON.stringify(p.humanAction)}${answered ? ' (already answered by the owner — do not forward it)' : ''}` : '', '</report>'].filter(Boolean).join('\n')
       }
       case 'approval': {
@@ -375,7 +375,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
             summary: z.string().min(1),
             human_action: z.object({ question: z.string().min(1), options: z.array(z.string()).max(6).optional() }).optional()
               .describe('One concrete question for the owner, with status waiting'),
-            files: z.array(z.string()).max(20).optional().describe('Deliverable files (paths relative to the working directory), sent to the owner as attachments'),
+            files: z.array(z.string()).max(20).optional().describe('Deliverable files the work produced (paths relative to the working directory), kept in the work\'s details and file library'),
           }),
           execute: async ({ status, summary, human_action, files }) => {
             const { rejectedFiles } = engine.report(ticket.id, { status, summary, ...(human_action ? { humanAction: human_action } : {}), ...(files?.length ? { files } : {}) })
