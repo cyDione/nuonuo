@@ -24,7 +24,7 @@ export function InstructionsPage() {
   return <div className="space-y-3">
     {data.sections.map(s => <Card key={s.id} className="p-4">
       <div className="text-sm font-medium">{s.label}</div>
-      <textarea className="mt-2 min-h-24 w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm leading-6 outline-none focus:border-accent"
+      <textarea className="mt-2 min-h-24 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm leading-6 outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none"
         value={draft[s.id]} placeholder={HINT[s.id]} onChange={e => setDraft({ ...draft, [s.id]: e.target.value })} />
     </Card>)}
     <div className="flex items-center gap-2">

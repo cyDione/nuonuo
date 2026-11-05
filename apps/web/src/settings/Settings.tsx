@@ -50,35 +50,43 @@ const TABS = GROUPS.flatMap(g => g.tabs)
 
 export function Settings({ tab, item }: { tab: SettingsTab; item?: string }) {
   const current = TABS.find(t => t.id === tab) ?? TABS[0]!
+  const group = GROUPS.findIndex(g => g.tabs.includes(current))
   return <div className="flex h-full">
-    <nav className="w-52 shrink-0 space-y-4 overflow-y-auto border-r border-line px-3 py-5 max-md:hidden">
-      <h1 className="px-2 text-lg font-semibold">设置</h1>
+    <nav className="w-56 shrink-0 space-y-5 overflow-y-auto border-r border-line px-3 py-6 max-md:hidden" aria-label="设置">
+      <div className="px-2"><div className="tech mb-2">System / Config</div><h1 className="font-display text-2xl font-semibold">设置</h1></div>
       {GROUPS.map(g => <div key={g.title}>
-        <div className="px-2 pb-1 text-[11px] font-medium text-faint">{g.title}</div>
-        {g.tabs.map(t => <a key={t.id} href={`#/settings/${t.id}`} className={cx('flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm',
-          t.id === current.id ? 'bg-accent-soft text-fg' : 'text-muted hover:bg-sunken hover:text-fg')}>{t.icon}{t.label}</a>)}
+        <div className="eyebrow px-2 pb-1.5">{g.title}</div>
+        {g.tabs.map(t => <a key={t.id} href={`#/settings/${t.id}`} aria-current={t.id === current.id ? 'page' : undefined} className={cx('press flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm',
+          t.id === current.id ? 'bg-sunken font-medium text-fg' : 'text-muted hover:bg-sunken/60 hover:text-fg')}>
+          <span className={cx('shrink-0', t.id === current.id && 'text-accent')}>{t.icon}</span>{t.label}</a>)}
       </div>)}
     </nav>
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-4xl space-y-4 px-6 py-6">
-        <div className="md:hidden"><select className="h-9 w-full rounded-lg border border-line bg-panel px-2 text-sm" value={current.id} onChange={e => { location.hash = `/settings/${e.target.value}` }}>
+      <div className="mx-auto max-w-4xl space-y-5 px-4 py-6 md:px-8 md:py-8">
+        <div className="md:hidden"><select aria-label="设置分区" className="h-11 w-full rounded-xl border border-line bg-panel px-3 text-sm" value={current.id} onChange={e => { location.hash = `/settings/${e.target.value}` }}>
           {GROUPS.map(g => <optgroup key={g.title} label={g.title}>{g.tabs.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}</optgroup>)}
         </select></div>
-        {!item && <header><h2 className="text-lg font-semibold">{current.label}</h2><p className="mt-1 text-sm text-muted">{current.intro}</p></header>}
-        {tab === 'persona' && <PersonaPage />}
-        {tab === 'instructions' && <InstructionsPage />}
-        {tab === 'memory' && <MemoryPage />}
-        {tab === 'proactive' && <ProactivePage />}
-        {tab === 'routines' && <Routines />}
-        {tab === 'sources' && <Sources {...(item ? { item } : {})} />}
-        {tab === 'plugins' && <Plugins />}
-        {tab === 'mcp' && <Mcp />}
-        {tab === 'review' && <Review />}
-        {tab === 'execution' && <Execution />}
-        {tab === 'providers' && <Providers />}
-        {tab === 'roles' && <Roles {...(item ? { item } : {})} />}
-        {tab === 'usage' && <Usage />}
-        {tab === 'system' && <System />}
+        {!item && <header key={current.id} className="anim-rise">
+          <div className="tech mb-3">0{group + 1}_{GROUPS[group]?.title} / {current.id}</div>
+          <h2 className="font-display text-3xl font-semibold text-balance">{current.label}</h2>
+          <p className="mt-2 max-w-2xl text-sm text-pretty text-muted">{current.intro}</p>
+        </header>}
+        <div key={`${current.id}/${item ?? ''}`} className="anim-rise space-y-4 [animation-delay:40ms]">
+          {tab === 'persona' && <PersonaPage />}
+          {tab === 'instructions' && <InstructionsPage />}
+          {tab === 'memory' && <MemoryPage />}
+          {tab === 'proactive' && <ProactivePage />}
+          {tab === 'routines' && <Routines />}
+          {tab === 'sources' && <Sources {...(item ? { item } : {})} />}
+          {tab === 'plugins' && <Plugins />}
+          {tab === 'mcp' && <Mcp />}
+          {tab === 'review' && <Review />}
+          {tab === 'execution' && <Execution />}
+          {tab === 'providers' && <Providers />}
+          {tab === 'roles' && <Roles {...(item ? { item } : {})} />}
+          {tab === 'usage' && <Usage />}
+          {tab === 'system' && <System />}
+        </div>
       </div>
     </div>
   </div>

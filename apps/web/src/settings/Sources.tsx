@@ -136,7 +136,7 @@ function FieldInput({ f: spec, value, onChange }: { f: FieldSpec; value: any; on
     className="mr-2 inline-flex items-center gap-0.5 text-accent hover:underline" onClick={e => e.stopPropagation()}>{l.label}<ExternalLink size={11} /></a>)}</> } : spec
   switch (f.type) {
     case 'list': return <Field label={f.label} {...(f.hint ? { hint: f.hint } : {})}>
-      <textarea className="min-h-20 w-full rounded-lg border border-line bg-panel px-3 py-2 font-mono text-sm outline-none focus:border-accent" placeholder={f.placeholder}
+      <textarea className="min-h-20 w-full rounded-xl border border-line bg-panel px-3 py-2 font-mono text-sm outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none" placeholder={f.placeholder}
         value={(value ?? []).join('\n')} onChange={e => onChange(e.target.value.split('\n').map(s => s.trim()).filter(Boolean))} />
     </Field>
     case 'secret': return <Field label={f.label} hint={value === '••••••' ? '已保存在钥匙串里；留空保存会清除' : f.hint ?? '保存在系统钥匙串里，不写入数据库'}>

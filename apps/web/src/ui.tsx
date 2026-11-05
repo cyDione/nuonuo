@@ -5,42 +5,45 @@ import { useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type Re
 const cx = (...parts: (string | false | undefined | null)[]) => parts.filter(Boolean).join(' ')
 export { cx }
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'ink'
 export function Button({ variant = 'secondary', size = 'md', className, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md' }) {
   return <button {...props} className={cx(
-    'inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap',
-    size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-9 px-3.5 text-sm',
+    'press inline-flex items-center justify-center gap-1.5 rounded-full font-medium disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap',
+    size === 'sm' ? 'h-8 px-3 text-xs' : 'h-10 px-4 text-sm',
     variant === 'primary' && 'bg-accent text-accent-fg hover:opacity-90',
-    variant === 'secondary' && 'border border-line bg-panel hover:bg-sunken',
+    variant === 'ink' && 'bg-ink text-ink-fg hover:opacity-90',
+    variant === 'secondary' && 'border border-line bg-panel hover:border-faint',
     variant === 'ghost' && 'hover:bg-sunken text-muted hover:text-fg',
-    variant === 'danger' && 'border border-line bg-panel text-danger hover:bg-sunken',
+    variant === 'danger' && 'border border-line bg-panel text-danger hover:border-danger',
     className)} />
 }
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={cx('h-9 w-full rounded-lg border border-line bg-panel px-3 text-sm outline-none focus:border-accent placeholder:text-faint', className)} />
+  return <input {...props} className={cx('h-10 w-full rounded-xl border border-line bg-panel px-3 text-sm outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none placeholder:text-faint', className)} />
 }
 
 export function Select({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={cx('h-9 w-full rounded-lg border border-line bg-panel px-2.5 text-sm outline-none focus:border-accent', className)}>{children}</select>
+  return <select {...props} className={cx('h-10 w-full rounded-xl border border-line bg-panel px-2.5 text-sm outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none', className)}>{children}</select>
 }
 
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return <label className="block space-y-1.5">
     <span className="text-xs font-medium text-muted">{label}</span>
     {children}
-    {hint && <span className="block text-xs text-faint">{hint}</span>}
+    {hint && <span className="block text-xs text-pretty text-faint">{hint}</span>}
   </label>
 }
 
 export function Badge({ tone = 'neutral', children }: { tone?: 'neutral' | 'ok' | 'warn' | 'danger' | 'accent'; children: ReactNode }) {
-  return <span className={cx('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-    tone === 'neutral' && 'bg-sunken text-muted', tone === 'ok' && 'bg-sunken text-ok', tone === 'warn' && 'bg-sunken text-warn',
-    tone === 'danger' && 'bg-sunken text-danger', tone === 'accent' && 'bg-accent-soft text-accent')}>{children}</span>
+  return <span className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
+    tone === 'neutral' && 'bg-sunken text-muted', tone === 'ok' && 'bg-ok/10 text-ok', tone === 'warn' && 'bg-warn-soft text-warn',
+    tone === 'danger' && 'bg-danger/10 text-danger', tone === 'accent' && 'bg-accent-soft text-accent')}>
+    {tone !== 'neutral' && <span className="size-1.5 rounded-full bg-current" />}{children}
+  </span>
 }
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx('rounded-xl border border-line bg-panel', className)}>{children}</div>
+  return <div className={cx('rounded-2xl border border-line bg-panel', className)}>{children}</div>
 }
 
 export function Modal({ title, onClose, children, footer }: { title: string; onClose(): void; children: ReactNode; footer?: ReactNode }) {
@@ -49,23 +52,29 @@ export function Modal({ title, onClose, children, footer }: { title: string; onC
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
   }, [onClose])
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-    <div className="w-full max-w-lg rounded-2xl border border-line bg-panel shadow-xl">
-      <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-        <h2 className="font-semibold">{title}</h2>
-        <button onClick={onClose} className="text-faint hover:text-fg" aria-label="关闭"><X size={18} /></button>
+  return <div className="anim-fade fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4 " onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+    <div role="dialog" aria-modal="true" aria-label={title} className="anim-pop w-full max-w-lg rounded-3xl border border-line bg-panel shadow-2xl">
+      <div className="flex items-center justify-between px-6 pt-5 pb-3">
+        <h2 className="font-display text-lg font-semibold">{title}</h2>
+        <IconButton label="关闭" onClick={onClose}><X size={18} /></IconButton>
       </div>
-      <div className="max-h-[70vh] space-y-4 overflow-y-auto px-5 py-4">{children}</div>
-      {footer && <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
+      <div className="max-h-[70vh] space-y-4 overflow-y-auto px-6 pb-5">{children}</div>
+      {footer && <div className="flex items-center justify-end gap-2 border-t border-line px-6 py-3.5">{footer}</div>}
     </div>
   </div>
 }
 
-export function Empty({ icon, title, children }: { icon?: ReactNode; title: string; children?: ReactNode }) {
-  return <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-    {icon && <div className="text-faint">{icon}</div>}
-    <div className="font-medium">{title}</div>
-    {children && <div className="max-w-sm text-sm text-muted">{children}</div>}
+/** A round icon-only button; the label doubles as its tooltip and accessible name. */
+export function IconButton({ label, onClick, children, className }: { label: string; onClick(): void; children: ReactNode; className?: string }) {
+  return <button onClick={onClick} aria-label={label} title={label} className={cx('press inline-flex size-8 shrink-0 items-center justify-center rounded-full text-faint hover:bg-sunken hover:text-fg', className)}>{children}</button>
+}
+
+export function Empty({ icon, title, children, action }: { icon?: ReactNode; title: string; children?: ReactNode; action?: ReactNode }) {
+  return <div className="anim-rise flex flex-col items-center justify-center gap-2 py-14 text-center">
+    {icon && <div className="mb-1 flex size-14 items-center justify-center rounded-2xl bg-accent-soft text-accent">{icon}</div>}
+    <div className="font-display text-base font-semibold">{title}</div>
+    {children && <div className="max-w-sm text-sm text-pretty text-muted">{children}</div>}
+    {action && <div className="mt-2">{action}</div>}
   </div>
 }
 
@@ -74,22 +83,25 @@ export const fmtUsd = (n: number | null | undefined) => (n == null ? '—' : `$$
 
 /** A clickable row in a settings list that opens the item's own page. */
 export function ListRow({ href, icon, title, badge, detail, aside }: { href: string; icon?: ReactNode; title: ReactNode; badge?: ReactNode; detail?: ReactNode; aside?: ReactNode }) {
-  return <a href={href} className="flex items-center gap-3 px-4 py-3 hover:bg-sunken">
-    {icon && <div className="shrink-0 text-muted">{icon}</div>}
+  return <a href={href} className="group flex items-center gap-3 px-4 py-3.5 transition-colors duration-150 hover:bg-sunken/60">
+    {icon && <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-sunken text-muted transition-colors duration-150 group-hover:bg-accent-soft group-hover:text-accent">{icon}</div>}
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2"><span className="truncate text-sm font-medium">{title}</span>{badge}</div>
       {detail && <div className="mt-0.5 truncate text-xs text-muted">{detail}</div>}
     </div>
-    {aside && <div className="shrink-0 text-right text-xs text-faint">{aside}</div>}
-    <ChevronRight size={16} className="shrink-0 text-faint" />
+    {aside && <div className="shrink-0 text-right text-xs text-faint tabular-nums">{aside}</div>}
+    <ChevronRight size={16} className="shrink-0 text-faint transition-transform duration-200 ease-out group-hover:translate-x-0.5" />
   </a>
 }
 
 /** Header of a settings item page, with a link back to its list. */
 export function DetailHeader({ back, backLabel, icon, title, badge, children }: { back: string; backLabel: string; icon?: ReactNode; title: ReactNode; badge?: ReactNode; children?: ReactNode }) {
-  return <header className="space-y-2">
-    <a href={back} className="inline-flex items-center gap-0.5 text-sm text-muted hover:text-fg"><ChevronLeft size={16} />{backLabel}</a>
-    <div className="flex items-center gap-2">{icon && <span className="text-muted">{icon}</span>}<h2 className="text-lg font-semibold">{title}</h2>{badge}</div>
-    {children && <div className="text-sm text-muted">{children}</div>}
+  return <header className="anim-rise space-y-3">
+    <a href={back} className="inline-flex items-center gap-0.5 rounded-full py-1 pr-2.5 text-sm text-muted hover:text-fg"><ChevronLeft size={16} />{backLabel}</a>
+    <div className="flex items-center gap-3">
+      {icon && <span className="flex size-10 items-center justify-center rounded-xl bg-accent-soft text-accent">{icon}</span>}
+      <h2 className="font-display text-2xl font-semibold text-balance">{title}</h2>{badge}
+    </div>
+    {children && <div className="text-sm text-pretty text-muted">{children}</div>}
   </header>
 }
