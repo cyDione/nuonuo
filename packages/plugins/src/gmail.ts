@@ -35,6 +35,14 @@ const SCOPE = 'https://www.googleapis.com/auth/gmail.modify'
 export const DEFAULT_GOOGLE_CLIENT_ID = ''
 export const DEFAULT_GOOGLE_CLIENT_SECRET = ''
 
+/** Where to create the OAuth client, in the order the steps happen (Google Auth Platform pages of the Cloud console). */
+const GOOGLE_SETUP_LINKS = [
+  { label: '① 启用 Gmail API', href: 'https://console.cloud.google.com/apis/library/gmail.googleapis.com' },
+  { label: '② 品牌信息', href: 'https://console.cloud.google.com/auth/branding' },
+  { label: '③ 受众 / 发布', href: 'https://console.cloud.google.com/auth/audience' },
+  { label: '④ 创建客户端', href: 'https://console.cloud.google.com/auth/clients/create' },
+]
+
 interface Part { mimeType?: string; body?: { data?: string }; parts?: Part[]; headers?: { name: string; value: string }[] }
 interface GMessage { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: Part }
 
@@ -181,8 +189,10 @@ export function gmailKind(deps: { fetch?: typeof fetch } = {}): SourceKind<Confi
     authorized: ctx => Boolean(ctx.secret.get('refresh_token')),
     fields: [
       { key: 'clientId', type: 'text', label: 'OAuth Client ID', placeholder: '….apps.googleusercontent.com', ...(DEFAULT_GOOGLE_CLIENT_ID ? { advanced: true as const } : {}),
-        hint: DEFAULT_GOOGLE_CLIENT_ID ? '留空使用内置的客户端' : 'Google Cloud 控制台 → API 和服务 → 凭据 → 创建 OAuth 客户端 ID（桌面应用）' },
-      { key: 'clientSecret', type: 'secret', label: 'OAuth Client Secret', ...(DEFAULT_GOOGLE_CLIENT_ID ? { advanced: true as const } : {}) },
+        hint: DEFAULT_GOOGLE_CLIENT_ID ? '留空使用内置的客户端' : '按顺序：① 启用 Gmail API ② 填应用名称和邮箱 ③ 受众选「外部」并「发布应用」（否则授权 7 天就失效）④ 创建客户端，类型选「桌面应用」，把 ID 和 Secret 复制到这里',
+        links: GOOGLE_SETUP_LINKS },
+      { key: 'clientSecret', type: 'secret', label: 'OAuth Client Secret', ...(DEFAULT_GOOGLE_CLIENT_ID ? { advanced: true as const } : {}),
+        hint: '和 Client ID 在同一个页面里，创建客户端后弹窗中显示' },
       { key: 'allowedSenders', type: 'list', label: '可以给智能体派活的发件地址', hint: '你自己的 Gmail 地址自动允许；每行一个' },
       { key: 'triggerLabel', type: 'text', label: '派活标签', hint: '给任意邮件打上这个标签，它就会交给智能体处理' },
       { key: 'pollSeconds', type: 'number', label: '检查间隔（秒）', min: 30, max: 3600, advanced: true },

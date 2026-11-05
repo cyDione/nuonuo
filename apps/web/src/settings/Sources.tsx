@@ -130,7 +130,10 @@ function Authorization({ s, onDone }: { s: SourceInfo; onDone(): void }) {
   </Card>
 }
 
-function FieldInput({ f, value, onChange }: { f: FieldSpec; value: any; onChange(v: unknown): void }) {
+function FieldInput({ f: spec, value, onChange }: { f: FieldSpec; value: any; onChange(v: unknown): void }) {
+  // Links ride along in the hint, so every field type shows them.
+  const f = spec.links?.length ? { ...spec, hint: <>{spec.hint}{spec.hint && ' '}{spec.links.map(l => <a key={l.href} href={l.href} target="_blank" rel="noopener"
+    className="mr-2 inline-flex items-center gap-0.5 text-accent hover:underline" onClick={e => e.stopPropagation()}>{l.label}<ExternalLink size={11} /></a>)}</> } : spec
   switch (f.type) {
     case 'list': return <Field label={f.label} {...(f.hint ? { hint: f.hint } : {})}>
       <textarea className="min-h-20 w-full rounded-lg border border-line bg-panel px-3 py-2 font-mono text-sm outline-none focus:border-accent" placeholder={f.placeholder}

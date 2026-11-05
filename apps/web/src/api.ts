@@ -87,12 +87,13 @@ export type ServerEvent =
   | { type: 'activity.updated' }
   | { type: 'persona.updated' }
 
-export type FieldSpec =
+type FieldLinks = { links?: { label: string; href: string }[] }
+export type FieldSpec = FieldLinks & (
   | { key: string; label: string; hint?: string; advanced?: true; type: 'switch' }
   | { key: string; label: string; hint?: string; advanced?: true; type: 'number'; min: number; max: number }
   | { key: string; label: string; hint?: string; advanced?: true; type: 'text' | 'list'; placeholder?: string }
   | { key: string; label: string; hint?: string; advanced?: true; type: 'select'; options: { value: string; label: string }[] }
-  | { key: string; label: string; hint?: string; advanced?: true; type: 'secret'; placeholder?: string }
+  | { key: string; label: string; hint?: string; advanced?: true; type: 'secret'; placeholder?: string })
 export interface SourceAction { id: string; label: string; path: string; show?: 'authorized' | 'unauthorized'; confirm?: string; primary?: true }
 export interface SourceInfo { id: string; title: string; description: string; fields: FieldSpec[]; actions: SourceAction[]; authorized?: boolean; enabled: boolean; config: Record<string, any>
   health: { status: 'off' | 'starting' | 'ok' | 'error'; detail?: string; at: number }; facts: Record<string, string> }

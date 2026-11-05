@@ -15,8 +15,8 @@ GitHub 和 Gmail 都用 OAuth 授权接入：在设置页点一下，用自己�
 
 ### GitHub OAuth App
 
-1. GitHub → Settings → Developer settings → OAuth Apps → New OAuth App。
-2. Homepage URL 随便填（例如仓库地址），Authorization callback URL 填 `http://127.0.0.1:7420`（设备码流程用不到它，但表单要求必填）。
+1. 打开 [新建 OAuth App](https://github.com/settings/applications/new)（GitHub → Settings → Developer settings → OAuth Apps → New OAuth App）。
+2. 名称随意，Homepage URL 和 Authorization callback URL 都填 `http://127.0.0.1:7420`（设备码流程用不到它，但表单要求必填）。
 3. 创建后勾选 **Enable Device Flow** 并保存。
 4. 把 Client ID（`Ov23…`）填进「设置 → 来源 → GitHub → OAuth App Client ID」。设备码流程不需要 Client Secret。
 
@@ -24,10 +24,10 @@ GitHub 和 Gmail 都用 OAuth 授权接入：在设置页点一下，用自己�
 
 ### Google OAuth 客户端（Gmail）
 
-1. Google Cloud 控制台新建项目，启用 **Gmail API**。
-2. 「OAuth 同意屏幕」：用户类型选「外部」，加上 `https://www.googleapis.com/auth/gmail.modify` 范围。
+1. Google Cloud 控制台新建项目，[启用 **Gmail API**](https://console.cloud.google.com/apis/library/gmail.googleapis.com)。
+2. [品牌信息](https://console.cloud.google.com/auth/branding) 填应用名称和邮箱；[受众](https://console.cloud.google.com/auth/audience) 用户类型选「外部」，加上 `https://www.googleapis.com/auth/gmail.modify` 范围。
    - **发布状态改成「正式版」**。停在「测试」状态时，Google 签发的 refresh token 7 天就过期，Gmail 每周都要重新授权。未经验证的正式版应用在授权时会显示「Google 未验证此应用」，点「高级 → 继续」即可；个人用不需要送审。
-3. 「凭据 → 创建凭据 → OAuth 客户端 ID」，应用类型选 **桌面应用**。桌面应用类型允许任意 `http://localhost:<端口>` / `http://127.0.0.1:<端口>` 回调，所以不用登记回调地址。
+3. [创建客户端](https://console.cloud.google.com/auth/clients/create)，应用类型选 **桌面应用**。桌面应用类型允许任意 `http://localhost:<端口>` / `http://127.0.0.1:<端口>` 回调，所以不用登记回调地址。
 4. 把 Client ID 和 Client Secret 填进「设置 → 来源 → Gmail」。按 Google 对已安装应用的说明，桌面客户端的 secret 不算机密（每份安装都带着它）；授权码由 PKCE 和本机回调保护。
 
 断开授权时会调用 Google 的 revoke 接口，授权会从你账号的「第三方访问」列表里消失。
