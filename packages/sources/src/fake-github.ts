@@ -15,6 +15,11 @@ export class FakeGithub {
   private clock = Date.now()
   readonly base = 'http://fake-github.local'
   me: User
+  /** OAuth device flow: the code shown to the owner, and whether they entered it on the (fake) github.com. */
+  device = { clientId: 'client-1', deviceCode: 'device-1', userCode: 'ABCD-1234', token: 'oauth-token-1', approved: false, polls: 0 }
+  approve() { this.device.approved = true }
+  /** The Authorization header of the last API call. */
+  lastAuth: string | undefined
 
   constructor(login = 'me') { this.me = { login, type: 'User' } }
 
@@ -49,7 +54,8 @@ export class FakeGithub {
   fetch: typeof fetch = async (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
     const method = init?.method ?? 'GET'
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined
+    this.lastAuth = (init?.headers as Record<string, string> | undefined)?.authorization
+    const body = parseBody(init?.body ? String(init.body) : '')
     const result = this.route(method, url, body)
     return new Response(result.body === undefined ? null : JSON.stringify(result.body), { status: result.status, headers: { 'content-type': 'application/json' } })
   }
@@ -58,7 +64,7 @@ export class FakeGithub {
   listen(port: number): Promise<Server> {
     const server = createServer(async (req, res) => {
       let raw = ''; for await (const c of req) raw += c
-      const result = this.route(req.method ?? 'GET', new URL(req.url ?? '/', `http://127.0.0.1:${port}`), raw ? JSON.parse(raw) : undefined)
+      const result = this.route(req.method ?? 'GET', new URL(req.url ?? '/', `http://127.0.0.1:${port}`), parseBody(raw))
       res.writeHead(result.status, { 'content-type': 'application/json' }).end(result.body === undefined ? '' : JSON.stringify(result.body))
     })
     return new Promise(resolve => server.listen(port, '127.0.0.1', () => resolve(server)))
@@ -69,6 +75,15 @@ export class FakeGithub {
     const since = url.searchParams.get('since') ?? ''
     const html = (repo: string, n: number, frag = '') => `https://github.com/${repo}/issues/${n}${frag}`
     let m: RegExpExecArray | null
+    if (p === '/login/device/code' && method === 'POST') {
+      if (body.client_id !== this.device.clientId) return { status: 200, body: { error: 'unauthorized_client' } }
+      return { status: 200, body: { device_code: this.device.deviceCode, user_code: this.device.userCode, verification_uri: 'https://github.com/login/device', expires_in: 900, interval: 0 } }
+    }
+    if (p === '/login/oauth/access_token' && method === 'POST') {
+      this.device.polls++
+      if (body.device_code !== this.device.deviceCode) return { status: 200, body: { error: 'bad_verification_code' } }
+      return { status: 200, body: this.device.approved ? { access_token: this.device.token, token_type: 'bearer', scope: body.scope ?? '' } : { error: 'authorization_pending' } }
+    }
     if (p === '/user') return { status: 200, body: this.me }
     if ((m = /^\/repos\/([^/]+\/[^/]+)\/issues\/comments$/.exec(p))) {
       const repo = m[1]!
@@ -112,4 +127,10 @@ export class FakeGithub {
     return { number: i.number, title: i.title, body: i.body, user: i.user, state: i.state, created_at: i.created_at, updated_at: i.updated_at,
       html_url: `https://github.com/${repo}/${i.pr ? 'pull' : 'issues'}/${i.number}`, ...(i.pr ? { pull_request: { url: '' } } : {}) }
   }
+}
+
+/** JSON, or a form body (the OAuth endpoints). */
+function parseBody(raw: string): any {
+  if (!raw) return undefined
+  try { return JSON.parse(raw) } catch { return Object.fromEntries(new URLSearchParams(raw)) }
 }

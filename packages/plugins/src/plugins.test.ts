@@ -75,11 +75,14 @@ describe('Gmail', () => {
     const start = await registry.http('gmail', new Request(`${origin}/api/sources/gmail/http/oauth/start`), 'oauth/start', { public: false, origin })
     const { url } = await start!.json() as { url: string }
     const state = new URL(url).searchParams.get('state')!
+    expect(new URL(url).searchParams.get('code_challenge_method')).toBe('S256')
+    expect(registry.list().find(s => s.id === 'gmail')).toMatchObject({ authorized: false, actions: [{ id: 'authorize' }] })
     expect(new URL(url).searchParams.get('redirect_uri')).toBe(`${origin}/plugin/gmail/oauth/callback`)
     expect((await registry.http('gmail', new Request(`${origin}/plugin/gmail/oauth/callback?code=x&state=forged`), 'oauth/callback', { public: true, origin }))!.status).toBe(400)
     const done = await registry.http('gmail', new Request(`${origin}/plugin/gmail/oauth/callback?code=${gm.issuedCode}&state=${state}`), 'oauth/callback', { public: true, origin })
     expect(done!.status).toBe(302)
     expect(secrets.get('source:gmail:runtime:refresh_token')).toBe(gm.refreshToken)
+    expect(registry.list().find(s => s.id === 'gmail')!.actions.map(a => a.id)).toEqual(['reauthorize', 'disconnect'])
 
     await registry.save('gmail', { enabled: true, config: { clientId: 'cid', clientSecret: '••••••', allowedSenders: ['boss@work.com'], apiUrl: base, authUrl: `${base}/auth`, tokenUrl: `${base}/token` } })
     await registry.pollNow('gmail') // remembers the account and the cursor
@@ -102,6 +105,12 @@ describe('Gmail', () => {
     expect(Buffer.from(gm.drafts[0]!.raw.split('\r\n\r\n')[1]!, 'base64').toString()).toBe('好的，周报周五前给您。')
     const sent = store.db.select().from(schema.messages).all().find(m => m.content.startsWith('好的，周报'))
     expect(sent!.meta).toMatchObject({ via: 'gmail', delivery: 'sent' })
+
+    await registry.http('gmail', new Request(`${origin}/api/sources/gmail/http/oauth/disconnect`, { method: 'POST' }), 'oauth/disconnect', { public: false, origin })
+    expect(secrets.get('source:gmail:runtime:refresh_token')).toBeUndefined()
+    expect(gm.revoked).toEqual([gm.refreshToken])
+    expect(registry.list().find(s => s.id === 'gmail')!.authorized).toBe(false)
+    await expect(registry.pollNow('gmail')).rejects.toThrow('还没有授权 Gmail')
   })
 
   it('reads text out of html-only mail', () => {

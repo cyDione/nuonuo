@@ -93,3 +93,48 @@ describe('GitHub source', () => {
     expect(engine.ticket(ticket.id).ended).toMatchObject({ outcome: 'merged' })
   })
 })
+
+describe('GitHub authorization', () => {
+  it('signs in with the OAuth device flow, uses that token, and disconnects', async () => {
+    store = openStore(':memory:')
+    const secrets = new MemorySecrets()
+    registry = new SourceRegistry(store, new Effects(store), secrets)
+    registry.engine = { followed: () => [], receive: () => {} } as unknown as Engine
+    const gh = new FakeGithub('me')
+    registry.register(githubKind({ fetch: gh.fetch, token: async () => undefined }))
+    await registry.save('github', { enabled: false, config: { repos: ['me/app'], apiUrl: gh.base, oauthUrl: gh.base, clientId: gh.device.clientId } })
+    const info = () => registry.list().find(s => s.id === 'github')!
+    expect(info()).toMatchObject({ authorized: false, actions: [{ id: 'authorize' }] })
+
+    const http = (path: string) => registry.http('github', new Request(`http://127.0.0.1:7420/api/sources/github/http/${path}`, { method: 'POST' }), path, { public: false, origin: 'http://127.0.0.1:7420' })
+    expect(await registry.http('github', new Request('http://127.0.0.1:7420/plugin/github/oauth/device'), 'oauth/device', { public: true, origin: '' })).toBeUndefined()
+    const { device } = await (await http('oauth/device'))!.json() as { device: { userCode: string; verificationUri: string; poll: string } }
+    expect(device).toMatchObject({ userCode: 'ABCD-1234', verificationUri: 'https://github.com/login/device', poll: 'oauth/status' })
+    const status = async () => (await (await http('oauth/status'))!.json()) as { status: string; login?: string }
+    expect((await status()).status).toBe('pending')
+    gh.approve()
+    await expect.poll(async () => (await status()).status).toBe('done')
+    expect(await status()).toMatchObject({ login: 'me' })
+    expect(secrets.get('source:github:runtime:token')).toBe('oauth-token-1')
+    expect(info()).toMatchObject({ authorized: true, facts: { 账号: 'me', 授权: 'OAuth 授权' } })
+    expect(info().actions.map(a => a.id)).toEqual(['reauthorize', 'disconnect'])
+
+    await registry.save('github', { enabled: true, config: { ...info().config } })
+    await registry.pollNow('github')
+    expect(gh.lastAuth).toBe('Bearer oauth-token-1')
+
+    await http('oauth/disconnect')
+    expect(secrets.get('source:github:runtime:token')).toBeUndefined()
+    expect(info().authorized).toBe(false)
+    await expect(registry.pollNow('github')).rejects.toThrow('还没有授权 GitHub')
+  })
+
+  it('explains a missing client ID', async () => {
+    store = openStore(':memory:')
+    registry = new SourceRegistry(store, new Effects(store), new MemorySecrets())
+    registry.register(githubKind({ token: async () => undefined }))
+    const res = await registry.http('github', new Request('http://x/'), 'oauth/device', { public: false, origin: '' })
+    expect(res!.status).toBe(400)
+    expect(((await res!.json()) as { error: string }).error).toContain('Client ID')
+  })
+})

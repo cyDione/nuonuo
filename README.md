@@ -97,7 +97,9 @@ loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运�
 
   会从最新的 GitHub Release 下载包，装到 `~/.local/share/super-assistant`，命令链接到 `~/.local/bin/super-assistant`；重复运行即升级。推送 `v*` 标签时工作流会自动发布 Release。发版前先用 `pnpm set-version 0.1.4` 把所有包改成同一个版本号并提交，再打 `v0.1.4` 标签；标签和版本号不一致时，工作流会报错并且不发布。
 - **在外面用**：启用 Telegram 插件，用手机指挥家里的电脑，不需要开放端口。或者用 SSH 端口转发 `ssh -L 7420:127.0.0.1:7420 你的电脑`，再在本地打开登录链接。
-- **GitHub**：`gh auth login`（或在 `env` 里放 `GITHUB_TOKEN`），然后在「设置 → 来源 → GitHub」里填写要监听的仓库。
+- **GitHub**：在「设置 → 来源 → GitHub」点「授权 GitHub」，页面会给出一个验证码，在 github.com/login/device 输入并同意即可（设备码授权，不需要回调地址，通过 SSH 端口转发访问也能用）；再填写要监听的仓库。授权后智能体的 `gh` 和 git 也用这个授权。没有授权时仍会退回到 `env` 里的 `GITHUB_TOKEN` 或本机 `gh auth login`。
+- **Gmail**：启用 Gmail 插件，在「设置 → 来源 → Gmail」点「授权 Gmail」，用 Google 账号登录并同意，浏览器会跳回本机服务（经 `ssh -L` 转发也可以）。随时可以点「断开授权」，会同时在 Google 那边撤销。
+- 两个授权用到的 OAuth 应用怎么建，见 [docs/10-oauth.md](docs/10-oauth.md)。
 
 **升级**：
 

@@ -1,14 +1,15 @@
 /**
  * Gmail, the Muse way: the agent reads mail and writes drafts; you send them. It never sends mail itself.
  *
- * - Authorization: an OAuth "Desktop app" client of your own Google Cloud project; the consent screen redirects back to the
- *   daemon on 127.0.0.1, and the refresh token goes into the secret store.
+ * - Authorization: "授权 Gmail" opens Google's consent screen (OAuth for installed apps, with PKCE), which redirects back to
+ *   the daemon on 127.0.0.1 — also through `ssh -L`, since the browser follows the redirect. The refresh token goes into the
+ *   secret store. The client is a built-in "Desktop app" client, or one of your own Google Cloud project.
  * - Reading: History API polling from a cursor, so a sleeping laptop catches up.
  * - Requests: mail from your allowed addresses, or mail you label (default `super-assistant`), goes to the agent; other mail is
  *   recorded but not acted on. Replies to a mail thread are saved as a draft reply in that thread.
  * - Workers get gmail_search / gmail_read / gmail_draft.
  */
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import pkg from '../package.json' with { type: 'json' }
 import { definePlugin, tool, z, type SourceContext, type SourceKind } from '@super-assistant/plugin-sdk'
 
@@ -26,6 +27,13 @@ type Config = z.infer<typeof GmailConfig>
 type Ctx = SourceContext<Config>
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.modify'
+
+/**
+ * The built-in "Desktop app" OAuth client. For installed apps Google treats the client secret as not confidential (it ships
+ * inside every copy); the authorization code is protected by PKCE and the loopback redirect. Empty until one is registered.
+ */
+export const DEFAULT_GOOGLE_CLIENT_ID = ''
+export const DEFAULT_GOOGLE_CLIENT_SECRET = ''
 
 interface Part { mimeType?: string; body?: { data?: string }; parts?: Part[]; headers?: { name: string; value: string }[] }
 interface GMessage { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: Part }
@@ -51,18 +59,25 @@ export function messageText(m: GMessage): string {
 
 export function gmailKind(deps: { fetch?: typeof fetch } = {}): SourceKind<Config> {
   const f = deps.fetch ?? fetch
+  /** Access tokens by refresh token, so a new authorization never reuses the old one's access token. */
   const tokens = new Map<string, { token: string; expires: number }>()
+  /** Your own client when you filled one in, else the built-in one. */
+  const client = (ctx: Ctx) => ctx.config.clientId ? { id: ctx.config.clientId, secret: ctx.config.clientSecret } : { id: DEFAULT_GOOGLE_CLIENT_ID, secret: DEFAULT_GOOGLE_CLIENT_SECRET }
 
   async function accessToken(ctx: Ctx): Promise<string> {
-    const cached = tokens.get(ctx.config.clientId)
-    if (cached && cached.expires > Date.now() + 60_000) return cached.token
     const refresh = ctx.secret.get('refresh_token')
-    if (!refresh) throw Object.assign(new Error('还没有授权 Gmail：在 设置 → 来源 → Gmail 点「授权」'), { status: 401 })
-    const res = await f(ctx.config.tokenUrl, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: ctx.config.clientId, client_secret: ctx.config.clientSecret, refresh_token: refresh, grant_type: 'refresh_token' }) })
-    const data = await res.json() as { access_token?: string; expires_in?: number; error?: string }
-    if (!data.access_token) throw Object.assign(new Error(`刷新 Gmail 令牌失败：${data.error ?? res.status}`), { status: 401 })
-    tokens.set(ctx.config.clientId, { token: data.access_token, expires: Date.now() + (data.expires_in ?? 3600) * 1000 })
+    if (!refresh) throw Object.assign(new Error('还没有授权 Gmail：在 设置 → 来源 → Gmail 点「授权 Gmail」'), { status: 401 })
+    const cached = tokens.get(refresh)
+    if (cached && cached.expires > Date.now() + 60_000) return cached.token
+    const { id, secret } = client(ctx)
+    const res = await f(ctx.config.tokenUrl, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(30_000),
+      body: new URLSearchParams({ client_id: id, ...(secret ? { client_secret: secret } : {}), refresh_token: refresh, grant_type: 'refresh_token' }) })
+    const data = await res.json().catch(() => ({})) as { access_token?: string; expires_in?: number; error?: string }
+    if (!data.access_token) {
+      const message = data.error === 'invalid_grant' ? 'Gmail 授权已失效（被撤销或过期），请在 设置 → 来源 → Gmail 重新点「授权 Gmail」' : `刷新 Gmail 令牌失败：${data.error ?? res.status}`
+      throw Object.assign(new Error(message), { status: 401 })
+    }
+    tokens.set(refresh, { token: data.access_token, expires: Date.now() + (data.expires_in ?? 3600) * 1000 })
     return data.access_token
   }
 
@@ -156,12 +171,18 @@ export function gmailKind(deps: { fetch?: typeof fetch } = {}): SourceKind<Confi
   return {
     id: 'gmail',
     title: 'Gmail',
-    description: '读邮件、起草回复，由你决定是否发送（智能体从不直接发信）。来自允许地址的邮件、或你打上标签的邮件会交给智能体处理。需要自己的 Google Cloud OAuth 客户端（桌面应用类型）。',
+    description: '读邮件、起草回复，由你决定是否发送（智能体从不直接发信）。来自允许地址的邮件、或你打上标签的邮件会交给智能体处理。点「授权 Gmail」用 Google 账号登录授权即可接入。',
     schema: GmailConfig,
-    actions: [{ id: 'authorize', label: '授权 Gmail', path: 'oauth/start' }],
+    actions: [
+      { id: 'authorize', label: '授权 Gmail', path: 'oauth/start', show: 'unauthorized', primary: true },
+      { id: 'reauthorize', label: '重新授权', path: 'oauth/start', show: 'authorized' },
+      { id: 'disconnect', label: '断开授权', path: 'oauth/disconnect', show: 'authorized', confirm: '断开后会撤销这次授权，智能体将不能再读你的邮件。确定断开？' },
+    ],
+    authorized: ctx => Boolean(ctx.secret.get('refresh_token')),
     fields: [
-      { key: 'clientId', type: 'text', label: 'OAuth Client ID', placeholder: '….apps.googleusercontent.com' },
-      { key: 'clientSecret', type: 'secret', label: 'OAuth Client Secret' },
+      { key: 'clientId', type: 'text', label: 'OAuth Client ID', placeholder: '….apps.googleusercontent.com', ...(DEFAULT_GOOGLE_CLIENT_ID ? { advanced: true as const } : {}),
+        hint: DEFAULT_GOOGLE_CLIENT_ID ? '留空使用内置的客户端' : 'Google Cloud 控制台 → API 和服务 → 凭据 → 创建 OAuth 客户端 ID（桌面应用）' },
+      { key: 'clientSecret', type: 'secret', label: 'OAuth Client Secret', ...(DEFAULT_GOOGLE_CLIENT_ID ? { advanced: true as const } : {}) },
       { key: 'allowedSenders', type: 'list', label: '可以给智能体派活的发件地址', hint: '你自己的 Gmail 地址自动允许；每行一个' },
       { key: 'triggerLabel', type: 'text', label: '派活标签', hint: '给任意邮件打上这个标签，它就会交给智能体处理' },
       { key: 'pollSeconds', type: 'number', label: '检查间隔（秒）', min: 30, max: 3600, advanced: true },
@@ -237,28 +258,44 @@ You can search and read the owner's mail (gmail_search, gmail_read) and write dr
     async http(ctx, request, path, info) {
       const redirectUri = `${info.origin}/plugin/gmail/oauth/callback`
       if (path === 'oauth/start' && !info.public) {
-        if (!ctx.config.clientId || !ctx.config.clientSecret) return new Response('先填写 Client ID 和 Client Secret 并保存', { status: 400 })
+        if (!client(ctx).id) return Response.json({ error: '先在下面填写 OAuth Client ID 和 Client Secret 并保存（Google Cloud 控制台 → 凭据 → OAuth 客户端 ID，类型选「桌面应用」）' }, { status: 400 })
         const state = randomBytes(16).toString('hex')
-        ctx.state.set('oauth_state', { state, at: Date.now() })
-        const url = `${ctx.config.authUrl}?${new URLSearchParams({ client_id: ctx.config.clientId, redirect_uri: redirectUri, response_type: 'code', scope: SCOPE,
-          access_type: 'offline', prompt: 'consent', state })}`
+        const verifier = randomBytes(32).toString('base64url')
+        ctx.state.set('oauth_state', { state, verifier, at: Date.now() })
+        const url = `${ctx.config.authUrl}?${new URLSearchParams({ client_id: client(ctx).id, redirect_uri: redirectUri, response_type: 'code', scope: SCOPE,
+          access_type: 'offline', prompt: 'consent', state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' })}`
         return Response.json({ url })
+      }
+      if (path === 'oauth/disconnect' && !info.public) {
+        const refresh = ctx.secret.get('refresh_token')
+        if (refresh) {
+          tokens.delete(refresh)
+          // Revoke at Google too, so the grant disappears from the account's third-party access list; best effort.
+          await f(`${new URL(ctx.config.tokenUrl).origin}/revoke`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ token: refresh }), signal: AbortSignal.timeout(15_000) }).catch(() => undefined)
+        }
+        ctx.secret.delete('refresh_token')
+        ctx.state.set('email', null)
+        ctx.state.set('historyId', null)
+        ctx.facts({ 账号: '未授权' })
+        return Response.json({ ok: true })
       }
       if (path === 'oauth/callback' && info.public) {
         const params = new URL(request.url).searchParams
-        const expected = ctx.state.get<{ state: string; at: number }>('oauth_state')
+        const expected = ctx.state.get<{ state: string; verifier?: string; at: number }>('oauth_state')
         if (!expected || params.get('state') !== expected.state || Date.now() - expected.at > 15 * 60_000) return new Response('授权已过期或无效，请回到设置页重新点「授权」', { status: 400 })
         ctx.state.set('oauth_state', null)
         if (params.get('error')) return new Response(`授权被取消：${params.get('error')}`, { status: 400 })
         const res = await f(ctx.config.tokenUrl, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ code: params.get('code') ?? '', client_id: ctx.config.clientId, client_secret: ctx.config.clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' }) })
-        const data = await res.json() as { refresh_token?: string; access_token?: string; expires_in?: number; error?: string }
+          body: new URLSearchParams({ code: params.get('code') ?? '', client_id: client(ctx).id, ...(client(ctx).secret ? { client_secret: client(ctx).secret } : {}),
+            redirect_uri: redirectUri, grant_type: 'authorization_code', ...(expected.verifier ? { code_verifier: expected.verifier } : {}) }) })
+        const data = await res.json().catch(() => ({})) as { refresh_token?: string; access_token?: string; expires_in?: number; error?: string }
         if (!data.refresh_token) return new Response(`换取令牌失败：${data.error ?? '没有返回 refresh_token'}`, { status: 400 })
         ctx.secret.set('refresh_token', data.refresh_token)
-        if (data.access_token) tokens.set(ctx.config.clientId, { token: data.access_token, expires: Date.now() + (data.expires_in ?? 3600) * 1000 })
+        if (data.access_token) tokens.set(data.refresh_token, { token: data.access_token, expires: Date.now() + (data.expires_in ?? 3600) * 1000 })
         ctx.state.set('email', null)
         ctx.state.set('historyId', null)
-        return new Response(null, { status: 302, headers: { location: '/#/settings/sources' } })
+        return new Response(null, { status: 302, headers: { location: '/#/settings/sources/gmail' } })
       }
       return undefined
     },
