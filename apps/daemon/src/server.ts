@@ -22,7 +22,9 @@ export async function startDaemon(config: DaemonConfig, opts: { restart?: () => 
   const token = loadToken(config.home)
   // Bundled, this module is cli.mjs itself; from source it is src/server.ts. Either locates the installation.
   const updater = new Updater({ home: config.home, entry: fileURLToPath(import.meta.url), restart: opts.restart })
-  const app = createApp(runtime, token, findWebRoot(), updater)
+  // Aborted on shutdown: ends the web UI's event streams, which would otherwise hold the server open.
+  const closing = new AbortController()
+  const app = createApp(runtime, token, findWebRoot(), updater, closing.signal)
   runtime.effects.start()
   runtime.startAgents()
   updater.startBackgroundChecks()
@@ -35,7 +37,15 @@ export async function startDaemon(config: DaemonConfig, opts: { restart?: () => 
     runtime, updater, server, url, loginUrl: `${url}/auth?token=${token}`,
     async stop() {
       updater.stop()
-      await new Promise<void>(resolve => server.close(() => resolve()))
+      // End the event streams first: a browser keeps them open while it waits for the server to come back, so
+      // server.close() would wait for a client that is itself waiting for us (the process never exits).
+      closing.abort()
+      const closed = new Promise<void>(resolve => server.close(() => resolve()))
+      const sockets = server as unknown as { closeIdleConnections?(): void; closeAllConnections?(): void }
+      sockets.closeIdleConnections?.()
+      // In-flight requests get a moment; whatever is left is cut, so shutdown always finishes.
+      const timer = setTimeout(() => sockets.closeAllConnections?.(), 1_500)
+      try { await closed } finally { clearTimeout(timer) }
       await runtime.close()
     },
   }

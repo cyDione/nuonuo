@@ -39,7 +39,8 @@ async function body<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
   return parsed.data
 }
 
-export function createApp(rt: Runtime, token: string, webRoot?: string, updater?: Updater): Hono {
+/** `closing` aborts on shutdown so long-lived event streams end instead of holding the HTTP server open. */
+export function createApp(rt: Runtime, token: string, webRoot?: string, updater?: Updater, closing?: AbortSignal): Hono {
   const app = new Hono()
   const conversations = new Conversations(rt.store, rt.hub)
 
@@ -423,7 +424,11 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
       for (const e of mapper.map(event)) queue.push(JSON.stringify(e))
       wake?.()
     })
-    const closed = new Promise<void>(resolve => c.req.raw.signal.addEventListener('abort', () => resolve()))
+    const closed = new Promise<void>(resolve => {
+      const done = () => resolve()
+      c.req.raw.signal.addEventListener('abort', done, { once: true })
+      closing?.addEventListener('abort', done, { once: true })
+    })
     try {
       await sse.writeSSE({ event: 'ready', data: '{}' })
       for (;;) {

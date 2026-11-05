@@ -36,6 +36,8 @@ Environment=SUPER_ASSISTANT_HOME=${home}
 Environment=PATH=${process.env.PATH}
 Restart=on-failure
 RestartSec=5
+# A shutdown that hangs must not stall a systemctl restart for the 90s default.
+TimeoutStopSec=15
 
 [Install]
 WantedBy=default.target
