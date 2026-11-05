@@ -95,12 +95,12 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json({ provider: rt.hub.updateProvider(c.req.param('id'), input) })
   })
   api.delete('/providers/:id', c => { rt.hub.deleteProvider(c.req.param('id')); return c.body(null, 204) })
+  // `?role=` filters and orders for that layer (the reviewer gets Jev first). Never cached: the page's refresh must refetch.
   api.get('/providers/:id/models', async c => {
-    try { return c.json({ models: await rt.hub.listModels(c.req.param('id')) }) }
-    catch (error) {
-      if (error instanceof ModelError) throw error
-      return c.json({ models: [], error: describeError(error) })
-    }
+    const role = c.req.query('role') as RoleId | undefined
+    if (role !== undefined && !ROLE_IDS.includes(role)) throw new HttpError(400, 'invalid', `unknown layer ${role}`)
+    c.header('Cache-Control', 'no-store')
+    return c.json(await rt.hub.modelOptions(c.req.param('id'), role))
   })
   api.post('/models/test', async c => {
     const { kind, ...ref } = await body(c, z.object({ providerId: z.string(), model: z.string().trim().min(1), kind: z.enum(['language', 'embedding']).optional() }))

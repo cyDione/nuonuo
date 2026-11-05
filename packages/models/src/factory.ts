@@ -31,6 +31,8 @@ export type ModelFactory = {
   embedding(provider: ProviderRecord, apiKey: string | undefined, model: string): EmbeddingModelV4
   /** Decision models (TypeSafe Jev). Defaults to the HTTP client. */
   systemOne?(provider: ProviderRecord, apiKey: string | undefined): SystemOneClient
+  /** Live model ids. Defaults to the provider's list endpoint. */
+  listModels?(provider: ProviderRecord, apiKey: string | undefined): Promise<string[]>
 }
 
 function sdkProvider(p: ProviderRecord, apiKey: string | undefined) {
@@ -78,7 +80,28 @@ export async function listProviderModels(p: ProviderRecord, apiKey: string | und
   else if (apiKey) headers.authorization = `Bearer ${apiKey}`
   const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(15_000) })
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-  const body = await response.json() as { data?: { id: string }[]; models?: { name: string }[] }
-  const ids = body.data?.map(m => m.id) ?? body.models?.map(m => m.name.replace(/^models\//, '')) ?? []
+  return parseModelList(await response.json())
+}
+
+/**
+ * Model ids from a list response: OpenAI `{ data: [{ id }] }`, Gemini `{ models: [{ name: 'models/…' }] }`, and the shapes
+ * gateways use instead (a bare array, `{ data: { models: [...] } }`, plain strings, `name` / `model` in place of `id`).
+ */
+export function parseModelList(body: unknown): string[] {
+  const nested = (v: unknown): unknown[] | undefined => {
+    if (Array.isArray(v)) return v
+    if (v && typeof v === 'object') {
+      const o = v as Record<string, unknown>
+      for (const key of ['data', 'models', 'items', 'list']) { const found = nested(o[key]); if (found) return found }
+    }
+    return undefined
+  }
+  const ids = (nested(body) ?? []).map(m => {
+    if (typeof m === 'string') return m
+    if (!m || typeof m !== 'object') return undefined
+    const o = m as Record<string, unknown>
+    const id = [o.id, o.model, o.name].find((v): v is string => typeof v === 'string' && v.trim() !== '')
+    return id?.trim().replace(/^models\//, '')
+  }).filter((id): id is string => Boolean(id))
   return [...new Set(ids)].sort()
 }

@@ -286,4 +286,39 @@ describe('Jev through a multi-provider gateway', () => {
     const none = systemOneClient(['https://gw3.example/v1/systemone'], 'k', {}, (async () => new Response('nope', { status: 404 })) as any)
     await expect(none(request)).rejects.toThrow(/没有找到决策接口/)
   })
+
+  it('offers the gateway\'s Jev on the review layer even when /models does not list it, and only there', async () => {
+    store = openStore(':memory:')
+    let live: string[] | Error = ['group/deepseek-v4.1-flash', 'gpt-x']
+    let calls = 0
+    const factory: ModelFactory = {
+      language: () => { throw new Error('unused') }, embedding: () => { throw new Error('unused') },
+      listModels: async () => { calls++; if (live instanceof Error) throw live; return live },
+    }
+    const hub = new ModelHub(store, new MemorySecrets(), factory)
+    const gw = hub.createProvider({ kind: 'openai-compatible', name: '聚合网关', baseUrl: 'https://gw.example/v1', apiKey: 'k' })
+    expect((await hub.modelOptions(gw.id, 'reviewer')).models).toEqual(['jev-latest', 'group/deepseek-v4.1-flash', 'gpt-x'])
+    expect((await hub.modelOptions(gw.id, 'router')).models).toEqual(['group/deepseek-v4.1-flash', 'gpt-x'])
+    live = ['gpt-x', 'typesafe/jev-1.13']
+    expect((await hub.modelOptions(gw.id, 'reviewer')).models).toEqual(['jev-latest', 'typesafe/jev-1.13', 'gpt-x'])
+    expect((await hub.modelOptions(gw.id, 'worker')).models).toEqual(['gpt-x'])
+    // A failure keeps the suggestions and says why; every call asks the provider again, so a retry picks up a fixed key.
+    live = new Error('401 Unauthorized')
+    expect(await hub.modelOptions(gw.id, 'reviewer')).toEqual({ models: ['jev-latest'], error: '401 Unauthorized' })
+    live = ['gpt-y']
+    expect(await hub.modelOptions(gw.id, 'reviewer')).toEqual({ models: ['jev-latest', 'gpt-y'] })
+    expect(calls).toBe(6)
+    const ts = hub.createProvider({ kind: 'typesafe', name: 'TypeSafe', apiKey: 'k' })
+    expect((await hub.modelOptions(ts.id, 'reviewer')).models).toEqual(['jev-latest', 'gpt-y'])
+  })
+
+  it('reads model lists in the shapes gateways send', async () => {
+    const { parseModelList } = await import('./factory')
+    expect(parseModelList({ object: 'list', data: [{ id: 'b' }, { id: 'a' }, { id: 'a' }] })).toEqual(['a', 'b'])
+    expect(parseModelList({ models: [{ name: 'models/gemini-x' }] })).toEqual(['gemini-x'])
+    expect(parseModelList([{ id: 'jev-latest' }, 'plain'])).toEqual(['jev-latest', 'plain'])
+    expect(parseModelList({ success: true, data: { models: [{ model: 'm1' }] } })).toEqual(['m1'])
+    expect(parseModelList({ data: ['x', null, { id: '' }] })).toEqual(['x'])
+    expect(parseModelList({ error: 'nope' })).toEqual([])
+  })
 })

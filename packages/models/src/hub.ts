@@ -8,7 +8,7 @@ import { APICallError } from '@ai-sdk/provider'
 import { newId, schema, type Store } from '@super-assistant/db'
 import { embed, generateText } from 'ai'
 import { and, eq, gte, sql } from 'drizzle-orm'
-import { isDecisionModel, type ProviderKind } from './catalog'
+import { DECISION_MODEL_SUGGESTIONS, isDecisionModel, presetOf, type ProviderKind } from './catalog'
 import type { EmbeddingModelV4 } from '@ai-sdk/provider'
 import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOptions, type ProviderRecord } from './factory'
 import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
@@ -129,7 +129,26 @@ export class ModelHub {
 
   async listModels(id: string): Promise<string[]> {
     const p = this.getProvider(id)
-    return listProviderModels(p, this.key(p))
+    return this.factory.listModels ? this.factory.listModels(p, this.key(p)) : listProviderModels(p, this.key(p))
+  }
+
+  /**
+   * What the settings page offers for a provider on a layer: the provider's live models plus its preset's suggestions, and
+   * on a decision layer (the reviewer) the decision models first, since gateways serve Jev without listing it on `/models`.
+   * A decision model is never offered on a layer that cannot use it. A failed live list still returns the suggestions, with
+   * the reason in `error`, and is fetched again on the next call (nothing is cached here).
+   */
+  async modelOptions(id: string, role?: RoleId): Promise<{ models: string[]; error?: string }> {
+    const p = this.getProvider(id)
+    let live: string[] = []
+    let error: string | undefined
+    try { live = await this.listModels(id) } catch (e) { error = describeError(e) }
+    const decisionLayer = role !== undefined && DECISION_ROLES.includes(role)
+    const all = [...new Set([...(decisionLayer ? DECISION_MODEL_SUGGESTIONS : []), ...(presetOf(p.kind, p.baseUrl)?.suggestedModels ?? []), ...live])]
+    const models = role === undefined ? all
+      : decisionLayer ? [...all.filter(m => isDecisionModel(p.kind, m)), ...all.filter(m => !isDecisionModel(p.kind, m))]
+      : all.filter(m => !isDecisionModel(p.kind, m))
+    return error === undefined ? { models } : { models, error }
   }
 
   /**

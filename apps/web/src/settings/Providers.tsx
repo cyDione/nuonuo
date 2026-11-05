@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { api, type Preset, type Price, type Provider } from '../api'
 import { Badge, Button, Card, Empty, Field, Input, Modal } from '../ui'
 import { useCatalog, useModelOptions, useProviders } from './hooks'
+import { ModelPicker } from './ModelPicker'
 
 const KIND_LABEL: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Gemini', deepseek: 'DeepSeek', 'openai-compatible': 'OpenAI 兼容', typesafe: 'TypeSafe（决策模型）' }
 
@@ -26,7 +27,7 @@ function ProviderCard({ p }: { p: Provider }) {
   const remove = useMutation({ mutationFn: () => api.del(`/providers/${p.id}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['providers'] }); qc.invalidateQueries({ queryKey: ['roles'] }) } })
   // Jev via a gateway: the decisions endpoint is found automatically; this pins it when the gateway uses another path.
   const decisions = useMutation({ mutationFn: (url: string) => api.patch(`/providers/${p.id}`, { options: { ...p.options, decisionsUrl: url || undefined } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['providers'] }) })
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['providers'] }); qc.invalidateQueries({ queryKey: ['models', p.id] }) } })
   const editDecisions = () => {
     const url = prompt('Jev 决策接口的完整地址（留空则自动查找 /systemone、/decisions 等常见路径）', p.options.decisionsUrl ?? '')
     if (url !== null) decisions.mutate(url.trim())
@@ -57,19 +58,16 @@ function ProviderCard({ p }: { p: Provider }) {
 }
 
 function TestRow({ p }: { p: Provider }) {
-  const { models, error, loading } = useModelOptions(p)
+  const { models, error, loading, refresh } = useModelOptions(p)
   const [model, setModel] = useState('')
   const test = useMutation({ mutationFn: () => api.post<{ ok: boolean; latencyMs: number; text?: string; error?: string }>('/models/test', { providerId: p.id, model: model || models[0] }) })
-  const listId = `models-${p.id}`
   return <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
     <span className="text-xs text-muted">连通测试</span>
-    <Input list={listId} value={model} onChange={e => setModel(e.target.value)} placeholder={models[0] ?? '模型 id'} className="h-7 max-w-64 text-xs" />
-    <datalist id={listId}>{models.map(m => <option key={m} value={m} />)}</datalist>
+    <ModelPicker className="w-64 max-w-full" value={model} onChange={setModel} models={models} loading={loading} error={error} onRefresh={refresh} placeholder={models[0] ?? '模型 id'} />
     <Button size="sm" onClick={() => test.mutate()} disabled={test.isPending || !(model || models[0])}>
       {test.isPending ? <Loader2 size={13} className="animate-spin" /> : '测试'}
     </Button>
-    {loading && <span className="text-xs text-faint">读取模型列表…</span>}
-    {!loading && error && <span className="text-xs text-faint" title={error}>未能读取模型列表，可手动输入</span>}
+    {!loading && error && <span className="text-xs text-faint" title={error}>未能读取模型列表，可手动输入或点 ↻ 重试</span>}
     {test.data && (test.data.ok
       ? <span className="flex items-center gap-1 text-xs text-ok"><CheckCircle2 size={13} />{test.data.latencyMs} ms · {test.data.text}</span>
       : <span className="flex items-center gap-1 text-xs text-danger" title={test.data.error}><XCircle size={13} />{test.data.error?.slice(0, 120)}</span>)}
