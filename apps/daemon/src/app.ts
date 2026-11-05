@@ -13,7 +13,7 @@ import { VERSION } from './config'
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
-import { DEFAULT_PROACTIVE, DomainError, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-agent/core'
+import { DEFAULT_PROACTIVE, DomainError, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-agent/core'
 import { kvGet, kvSet } from '@super-agent/db'
 import { fireRoutine } from '@super-agent/sources'
 import { runDoctor } from './doctor'
@@ -178,7 +178,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     const ticket = rt.engine.ticket(c.req.param('id'))
     return c.json({ ticket: ticketView(rt.engine, ticket, rt.reviewer.pending(ticket.id)), reports: reportsOf(rt.store, ticket.id), transcript: transcript(rt.agents, ticket.sessionId),
       running: rt.agents.isRunning(ticket.sessionId), jobs: rt.agents.jobs.running(ticket.sessionId), approvals: rt.reviewer.pending(ticket.id),
-      browser: rt.browser.hasPage(ticket.id), project: rt.engine.projectOf(ticket) ?? null })
+      browser: rt.browser.hasPage(ticket.id), project: rt.engine.projectOf(ticket) ?? null, usage: rt.engine.usageOf(ticket.id) })
   })
   api.post('/tickets/:id/stop', c => { rt.engine.stopTask(c.req.param('id'), 'person', '主人在界面上停止'); return c.json({ ok: true }) })
   api.post('/tickets/:id/retry', c => { rt.engine.retry(c.req.param('id')); return c.json({ ok: true }) })
@@ -214,23 +214,35 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
   // Activity: what happened to every event, and what the proactive strategy decided.
   api.get('/activity', c => {
     const triggers = rt.engine.triggerLog(Math.min(Number(c.req.query('limit')) || 100, 500)).filter(t => t.source !== 'webchat' || t.actor !== 'owner')
-    return c.json({ proactive: proactiveSettings(rt.store).mode, events: triggers.map(t => ({ id: t.id, source: t.source, actor: t.actor, human: t.human, at: t.at,
+    return c.json({ proactive: proactiveSettings(rt.store).mode, stats: rt.engine.attentionStats(), events: triggers.map(t => ({ id: t.id, source: t.source, actor: t.actor, human: t.human, at: t.at,
       text: t.text.slice(0, 400), url: (t.meta as { url?: string }).url ?? null, conversationId: rt.engine.conversationOfThread(t.threadId) ?? null,
-      thread: t.threadId, proactive: (t.disposition as any).proactive ?? null, ticketId: (t.disposition as any).startedTicket ?? null, outcome: dispositionText(t.disposition as Record<string, any>) })) })
+      thread: t.threadId, proactive: (t.disposition as any).proactive ?? null, feedback: (t.disposition as any).feedback ?? null, ticketId: (t.disposition as any).startedTicket ?? null, outcome: dispositionText(t.disposition as Record<string, any>) })) })
   })
   /** The owner promotes an observed event to silent work. */
   api.post('/triggers/:id/act', c => {
     const trigger = rt.engine.triggerLog(1000).find(t => t.id === c.req.param('id'))
     if (!trigger) throw new HttpError(404, 'missing', 'no such event')
     const p = (trigger.disposition as any).proactive ?? {}
-    const ticket = rt.engine.startProactive(trigger.id, { title: p.title || '主动处理', reason: p.reason || '主人要求处理', ...(p.goal ? { goal: p.goal } : {}) })
+    const ticket = rt.engine.startProactive(trigger.id, { title: p.title || '主动处理', reason: p.reason || '主人要求处理', ...(p.goal ? { goal: p.goal } : {}), byOwner: true })
     rt.bus.emit({ type: 'activity.updated' })
     return c.json({ ticketId: ticket.id })
   })
+  api.post('/triggers/:id/feedback', async c => {
+    const { useful } = await body(c, z.object({ useful: z.boolean() }))
+    rt.engine.proactiveFeedback(c.req.param('id'), useful)
+    return c.json({ ok: true })
+  })
   const ProactiveBody = z.object({ mode: z.enum(['off', 'observe', 'auto']), strategy: z.string().max(8_000), sources: z.array(z.string().max(40)).max(30),
-    ignoreActors: z.array(z.string().trim().min(1).max(100)).max(100) }).strict()
-  api.get('/settings/proactive', c => c.json({ settings: proactiveSettings(rt.store), defaults: DEFAULT_PROACTIVE }))
-  api.put('/settings/proactive', async c => c.json({ settings: saveProactiveSettings(rt.store, await body(c, ProactiveBody)) }))
+    ignoreActors: z.array(z.string().trim().min(1).max(100)).max(100),
+    budget: z.object({ concurrent: z.number().int().min(1).max(10), daily: z.number().int().min(1).max(200) }) }).passthrough()
+  api.get('/settings/proactive', c => c.json({ settings: proactiveSettings(rt.store), defaults: DEFAULT_PROACTIVE, history: proactiveHistory(rt.store).slice(0, 10) }))
+  api.put('/settings/proactive', async c => {
+    const { mode, strategy, sources, ignoreActors, budget } = await body(c, ProactiveBody)
+    const before = proactiveSettings(rt.store).mode
+    const settings = saveProactiveSettings(rt.store, { mode, strategy, sources, ignoreActors, budget }, 'owner')
+    if (before !== 'off' && settings.mode === 'off') rt.engine.revokeProactive('主人关闭了主动处理')
+    return c.json({ settings })
+  })
 
   // Standing instructions (versioned)
   api.get('/instructions', c => c.json({ current: rt.instructions.current(), history: rt.instructions.history(), sections: SECTIONS.map(id => ({ id, label: SECTION_LABEL[id] })) }))

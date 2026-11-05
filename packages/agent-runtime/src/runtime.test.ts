@@ -75,6 +75,19 @@ describe('AgentRuntime', () => {
     expect(prompts.length).toBe(3)
   }, 10_000)
 
+  it('blocks a forbidden program however it is spelled, and starts a command in the background on request', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sa-ws-'))
+    setup(() => ({ text: 'x' }))
+    const tools = shellTools(runtime.jobs, runtime.blobs, { sessionId: 's', cwd: dir, env: workerEnv(), foregroundMs: 5_000, timeoutMs: 10_000, blocked: ['sudo'], signal: new AbortController().signal })
+    for (const cmd of ['/usr/bin/sudo ls', 'FOO=1 sudo ls', 'env sudo ls', 'echo hi && nohup sudo ls'])
+      await expect((tools.shell as any).execute({ command: cmd }, {}), cmd).rejects.toThrow(/sudo/)
+    const started = Date.now()
+    const out = await (tools.shell as any).execute({ command: 'sleep 1; echo done', background: true }, {})
+    expect(Date.now() - started).toBeLessThan(800)
+    expect(out).toContain('已转入后台')
+    runtime.jobs.stopAll('s')
+  })
+
   it('keeps one extra worker slot for a person and queues other work', async () => {
     let release!: () => void
     const gate = new Promise<void>(r => { release = r })

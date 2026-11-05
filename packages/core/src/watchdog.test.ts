@@ -72,6 +72,14 @@ describe('Watchdog', () => {
     expect(watchdog.probe()).toEqual([expect.objectContaining({ kind: 'stalled', ticketId: ticket.id })])
   })
 
+  it('flags a task that spends too many tokens (a hard signal beside the model\'s judgement)', async () => {
+    const { watchdog, ticket } = setup()
+    await settle()
+    watchdog.probe()
+    store.sqlite.prepare("INSERT INTO usage_ledger (at, role, provider_id, model, input_tokens, output_tokens, ref) VALUES (?, 'worker', 'p', 'm', 3200000, 10000, ?)").run(Date.now(), ticket.id)
+    expect(watchdog.probe().map(f => f.kind)).toContain('expensive')
+  })
+
   it('talks with the owner in its own conversation instead of the router', async () => {
     const { engine, watchdog } = setup()
     await settle()

@@ -19,7 +19,12 @@ export interface ShellOptions {
   wrap?: (command: string) => string
 }
 
-const firstWords = (command: string) => command.split(/[;&|()\n`$]+/).map(part => part.trim().split(/\s+/)[0] ?? '').filter(Boolean)
+/** The program of each part of a command line, by basename: `/usr/bin/sudo` is still `sudo`; `env`/`command`/`nohup` wrappers are looked through. */
+const firstWords = (command: string) => command.split(/[;&|()\n`$]+/).flatMap(part => {
+  const words = part.trim().split(/\s+/).filter(w => w && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w))
+  const i = words.findIndex(w => !['env', 'command', 'nohup', 'exec', 'time', 'nice'].includes(w.split('/').pop()!))
+  return i >= 0 ? [words[i]!.split('/').pop()!] : []
+}).filter(Boolean)
 
 export function shellTools(jobs: Jobs, blobs: Blobs, opts: ShellOptions) {
   const render = (r: { jobId: string; status: string; exitCode: number | null; output: string; durationMs: number }) => {

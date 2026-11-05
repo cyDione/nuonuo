@@ -21,23 +21,44 @@ export interface ProactiveSettings {
   sources: string[]
   /** Accounts never screened (noisy bots). */
   ignoreActors: string[]
+  /** Speculative work has a cost: at most this many silent tasks at once, and per day. */
+  budget: { concurrent: number; daily: number }
+  /** Every change is a new version; decisions and silent tasks record the version they were made under. */
+  version: number
+  by?: string
+  at?: number
 }
 
 export const DEFAULT_STRATEGY = `- 我关注的仓库里 CI 失败、或有人报告了看起来能复现的 bug：先在本地悄悄复现、定位，准备好修复方案再告诉我；复现不了就算了，不用告诉我。
 - 有人问的问题能直接查到答案：起草一个回复给我过目，不要自己发出去。
 - 闲聊、感谢、已经有人在处理的事、机器人的例行通知：不用管。`
 
-export const DEFAULT_PROACTIVE: ProactiveSettings = { mode: 'off', strategy: DEFAULT_STRATEGY, sources: [], ignoreActors: ['dependabot[bot]', 'renovate[bot]'] }
+export const DEFAULT_PROACTIVE: ProactiveSettings = { mode: 'off', strategy: DEFAULT_STRATEGY, sources: [], ignoreActors: ['dependabot[bot]', 'renovate[bot]'],
+  budget: { concurrent: 2, daily: 10 }, version: 0 }
 
 const KEY = 'settings:proactive'
+const HISTORY = 'settings:proactive:history'
+const POLICY: (keyof ProactiveSettings)[] = ['mode', 'strategy', 'sources', 'ignoreActors', 'budget']
 
 export function proactiveSettings(store: Store): ProactiveSettings {
-  return { ...DEFAULT_PROACTIVE, ...(kvGet<Partial<ProactiveSettings>>(store, KEY) ?? {}) }
+  const saved = kvGet<Partial<ProactiveSettings>>(store, KEY) ?? {}
+  return { ...DEFAULT_PROACTIVE, ...saved, budget: { ...DEFAULT_PROACTIVE.budget, ...(saved.budget ?? {}) } }
 }
 
-export function saveProactiveSettings(store: Store, patch: Partial<ProactiveSettings>): ProactiveSettings {
-  const next = { ...proactiveSettings(store), ...patch }
-  kvSet(store, KEY, next)
+export function proactiveHistory(store: Store): ProactiveSettings[] {
+  return kvGet<ProactiveSettings[]>(store, HISTORY) ?? []
+}
+
+/** Saves a change as a new policy version (unchanged settings keep their version). */
+export function saveProactiveSettings(store: Store, patch: Partial<ProactiveSettings>, by = 'owner'): ProactiveSettings {
+  const cur = proactiveSettings(store)
+  const merged = { ...cur, ...patch, budget: { ...cur.budget, ...(patch.budget ?? {}) } }
+  if (POLICY.every(k => JSON.stringify(merged[k]) === JSON.stringify(cur[k]))) return cur
+  const next: ProactiveSettings = { ...merged, version: cur.version + 1, by, at: Date.now() }
+  store.atomic(() => {
+    kvSet(store, KEY, next)
+    kvSet(store, HISTORY, [next, ...proactiveHistory(store)].slice(0, 30))
+  })
   return next
 }
 

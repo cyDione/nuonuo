@@ -11,7 +11,7 @@ import { chatLength, instructionsExtension, proactiveExtension, registerAgents, 
 import { Engine, ROUTER_SESSION } from './engine'
 import { Instructions } from './instructions'
 import type { IncomingTrigger } from './model'
-import { fastPath, saveProactiveSettings, Screener, DEFAULT_PROACTIVE } from './proactive'
+import { fastPath, proactiveSettings, saveProactiveSettings, Screener, DEFAULT_PROACTIVE } from './proactive'
 
 let store: Store
 let runtime: AgentRuntime
@@ -173,6 +173,51 @@ describe('proactive routing', () => {
     expect(engine.tickets()).toHaveLength(0)
     const d = store.db.select().from(schema.triggers).all().find(t => t.id === picked.id)!.disposition as any
     expect(d).toMatchObject({ ignored: 'router', reason: '已经有人在看', proactive: { act: true } })
+  })
+})
+
+describe('proactive policy (what the article\'s critics asked for)', () => {
+  it('records the policy version, keeps to the budget, and stops silent work when turned off', async () => {
+    const { engine } = setup({ sources: true })
+    const v = saveProactiveSettings(store, { mode: 'auto', budget: { concurrent: 1, daily: 5 } })
+    behaviour = { worker: () => ({ text: 'thinking' }), router: () => ({ text: 'x' }) }
+    const a = gh('alice', '崩溃了'); const b = gh('bob', '也崩溃了')
+    engine.receive(a); engine.receive(b)
+    for (const t of [a, b]) engine.proactiveDecision(t.id, { act: true, reason: '可能是 bug' }, 'observe')
+    const first = engine.startProactive(a.id, { title: '看看', reason: 'r' })
+    expect(first.mandate).toMatchObject({ policy: v.version, by: 'policy' })
+    expect(() => engine.startProactive(b.id, { title: '看看', reason: 'r' })).toThrow(/预算/)
+    // The owner's own "去做" is not limited by the budget.
+    expect(engine.startProactive(b.id, { title: '看看', reason: 'r', byOwner: true }).mandate).toMatchObject({ by: 'owner' })
+    expect(engine.revokeProactive('主动处理已关闭')).toEqual([first.id])
+    expect(engine.ticket(first.id).ended).toMatchObject({ outcome: 'stopped', by: 'system' })
+  })
+
+  it('turns "not useful" feedback into a line of the strategy, as a new version', () => {
+    const { engine } = setup({ sources: true })
+    saveProactiveSettings(store, { mode: 'observe' })
+    const t = gh('bot-ish', '依赖更新提醒')
+    engine.receive(t)
+    engine.proactiveDecision(t.id, { act: true, reason: '可能需要升级', title: '依赖更新' }, 'observe')
+    const before = proactiveSettings(store).version
+    engine.proactiveFeedback(t.id, false)
+    const after = proactiveSettings(store)
+    expect(after.version).toBe(before + 1)
+    expect(after.strategy).toContain('不用管这类事：「依赖更新」')
+    expect(engine.attentionStats()).toMatchObject({ picked: 1, useless: 1 })
+  })
+
+  it('tells a worker about other open work on its thread', async () => {
+    const { engine } = setup({ sources: true })
+    let assignment = ''
+    behaviour = { worker: (last, o) => { if (last.includes('<assignment')) assignment += last; return lastRole(o) === 'tool' ? { text: 'x' } : { calls: [{ name: 'report', input: { status: 'progress', summary: 'wip' } }] } } }
+    const a = gh('me', '@agent 修按钮'); const b = gh('me', '@agent 顺便改文案')
+    engine.receive(a); engine.receive(b)
+    const first = engine.startTask({ triggerIds: [a.id], title: '修按钮' })
+    engine.startTask({ triggerIds: [b.id], title: '改文案' })
+    await settle()
+    expect(assignment).toContain(`other open work on this thread`)
+    expect(assignment).toContain(first.id)
   })
 })
 

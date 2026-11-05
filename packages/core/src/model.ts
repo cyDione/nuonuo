@@ -19,7 +19,7 @@ export interface Ended {
 }
 
 /** `explicit`: the owner (or an allowed account) asked. `proactive`: the owner's proactive strategy chose it; it works silently. */
-export interface Mandate { by: 'owner' | 'policy'; strength: 'explicit' | 'proactive'; triggerIds: string[]; at: number; reason?: string }
+export interface Mandate { by: 'owner' | 'policy'; strength: 'explicit' | 'proactive'; triggerIds: string[]; at: number; reason?: string; policy?: number }
 
 export interface Ticket {
   id: string

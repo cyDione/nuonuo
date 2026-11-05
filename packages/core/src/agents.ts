@@ -193,8 +193,13 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
           const trigger = store.db.select().from(schema.triggers).where(eq(schema.triggers.id, trigger_id)).get()
           const verdict = (trigger?.disposition as { proactive?: { act?: boolean; reason?: string } } | undefined)?.proactive
           if (!verdict?.act) return { ok: false, error: 'Only events the proactive filter picked can get silent work.' }
-          const ticket = engine.startProactive(trigger_id, { title, reason: verdict.reason ?? '', ...(goal ? { goal } : {}) })
-          return { ok: true, ticket_id: ticket.id }
+          try {
+            const ticket = engine.startProactive(trigger_id, { title, reason: verdict.reason ?? '', ...(goal ? { goal } : {}) })
+            return { ok: true, ticket_id: ticket.id }
+          } catch (error) {
+            if (error instanceof DomainError && error.code === 'conflict') return { ok: false, error: `${error.message}. Use ignore with this reason; it stays on the activity page for the owner.` }
+            throw error
+          }
         },
       }),
       ignore: tool({
@@ -395,6 +400,12 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     },
   }
 
+  /** Subscriptions are not locks: a worker learns who else works on its thread, so it can avoid conflicting changes. */
+  function otherWork(t: Ticket): string {
+    const others = engine.subscribers(t.threadId).filter(x => x.id !== t.id && !x.ended)
+    return others.length ? `other open work on this thread (coordinate; do not duplicate or overwrite it): ${others.map(x => `${x.id} "${x.title}"`).join(', ')}` : ''
+  }
+
   function renderWorkerItem(item: InboxItem, ticketId: string): string {
     const p = item.payload
     switch (p.type) {
@@ -406,6 +417,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
           return [`<assignment task_id="${t.id}" title="${t.title}" source="${sourceOfThread(t.threadId)}" mode="silent">`,
             info ? `thread: ${info}` : `thread: ${t.threadId}`,
             `why the owner's strategy picked it: ${(t.mandate as Mandate).reason ?? ''}`,
+            otherWork(t),
             `the event (not addressed to the assistant):\n${origin.map(o => `(${o.id}, ${o.source} @${o.actor}${o.human ? '' : ' bot'}) ${o.text}`).join('\n\n')}`,
             '</assignment>'].filter(Boolean).join('\n')
         }
@@ -417,6 +429,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
             info ? `thread: ${info}` : '',
             t.note ? `routing note: ${t.note}` : '',
             cnv ? `conversation context before the request:\n${recent(cnv, origin[0]?.at) || '  （无）'}` : '',
+            otherWork(t),
             `original request from the owner:\n${origin.map(o => `(${o.id}${o.source !== 'webchat' ? `, ${o.source} @${o.actor}` : ''}) ${o.text}`).join('\n\n')}`,
             '</assignment>'].filter(Boolean).join('\n')
         }
@@ -585,17 +598,17 @@ export function instructionsExtension(instructions: Instructions): AgentExtensio
 }
 
 /** Lets the main agent change the proactive strategy when the owner asks. */
-export function proactiveExtension(store: Store): AgentExtensions {
+export function proactiveExtension(store: Store, engine?: Engine): AgentExtensions {
   return {
     routerPrompt: () => {
       const s = proactiveSettings(store)
       return s.mode === 'off' ? '' : `## Proactive strategy (mode ${s.mode})\nEvents nobody addressed to you are screened against the owner's strategy; silent work reports back with proactive="true".\n${s.strategy}`
     },
-    routerTools: () => ({ update_proactive: proactiveTool(store, 'router') }),
+    routerTools: () => ({ update_proactive: proactiveTool(store, 'router', engine) }),
   }
 }
 
-export function proactiveTool(store: Store, _by: string) {
+export function proactiveTool(store: Store, by: string, engine?: Engine) {
   return tool({
     description: 'Change how you act on events nobody addressed to you: the mode (off: never; observe: only record what you would have done; auto: work on them silently, report only what is worth it) and the strategy, written in the owner\'s words.',
     inputSchema: z.object({
@@ -611,8 +624,9 @@ export function proactiveTool(store: Store, _by: string) {
       const strategy = strategy_replace ?? (strategy_append ? [cur.strategy, strategy_append.startsWith('-') ? strategy_append : `- ${strategy_append}`].filter(Boolean).join('\n') : cur.strategy)
       const drop = new Set((ignore_actors_remove ?? []).map(a => a.toLowerCase()))
       const ignoreActors = [...new Set([...cur.ignoreActors, ...(ignore_actors_add ?? [])])].filter(a => !drop.has(a.toLowerCase()))
-      const next = saveProactiveSettings(store, { ...(mode ? { mode } : {}), strategy, ignoreActors, ...(sources ? { sources } : {}) })
-      return { ok: true, mode: next.mode, ignore_actors: next.ignoreActors, sources: next.sources }
+      const next = saveProactiveSettings(store, { ...(mode ? { mode } : {}), strategy, ignoreActors, ...(sources ? { sources } : {}) }, by)
+      const stopped = cur.mode !== 'off' && next.mode === 'off' ? engine?.revokeProactive('主动处理已关闭') ?? [] : []
+      return { ok: true, version: next.version, mode: next.mode, ignore_actors: next.ignoreActors, sources: next.sources, ...(stopped.length ? { stopped_silent_work: stopped.length } : {}) }
     },
   })
 }

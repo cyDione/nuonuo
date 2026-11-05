@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlarmClock, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, FolderOpen, Inbox, Sparkles } from 'lucide-react'
 import { useState } from 'react'
-import { api, type ActivityEvent, type Artifact, type Routine, type Ticket } from './api'
+import { api, type ActivityEvent, type Artifact, type AttentionStats, type Routine, type Ticket } from './api'
 import { openTask } from './live'
 import { endedText, FileChip, fmtSize, NeedsYou, needsOwner, STATE_TEXT, StateIcon, useTickets } from './tasks'
 import { SourceIcon, SOURCE_LABEL } from './icons'
@@ -23,7 +23,7 @@ const ago = (at: number) => {
 export function Activity() {
   const tickets = useTickets().data?.tickets ?? []
   const routines = useQuery({ queryKey: ['routines'], queryFn: () => api.get<{ routines: Routine[] }>('/routines') }).data?.routines ?? []
-  const activity = useQuery({ queryKey: ['activity'], queryFn: () => api.get<{ proactive: string; events: ActivityEvent[] }>('/activity') }).data
+  const activity = useQuery({ queryKey: ['activity'], queryFn: () => api.get<{ proactive: string; stats: AttentionStats; events: ActivityEvent[] }>('/activity') }).data
   const person = tickets.filter(needsOwner)
   const going = tickets.filter(t => !needsOwner(t) && t.stage !== 'ended')
   const done = tickets.filter(t => t.stage === 'ended').slice(0, 12)
@@ -48,6 +48,7 @@ export function Activity() {
     {(noticed.length > 0 || activity?.proactive !== 'off') && <Section title="我主动留意到的" intro={activity?.proactive === 'observe' ? '观察模式：只记下我本来会去做的事，你点「去做」我才动手。' : activity?.proactive === 'auto' ? '自动模式：值得做的我会先悄悄做，有结果再告诉你。' : undefined}>
       {noticed.length ? noticed.slice(0, 20).map(e => <Noticed key={e.id} e={e} />) : <p className="px-1 text-sm text-faint">还没有。</p>}
     </Section>}
+    {activity?.stats && <Stats s={activity.stats} />}
     {done.length > 0 && <Section title="最近完成">{done.map(t => <Row key={t.id} t={t} />)}</Section>}
     <section>
       <button onClick={() => setLog(v => !v)} className="flex items-center gap-1 px-1 text-xs font-medium text-muted hover:text-fg">
@@ -59,6 +60,16 @@ export function Activity() {
       </div>}
     </section>
   </Page>
+}
+
+/** How much attention the agent took, and how its initiative went — the numbers the article's critics ask for. */
+function Stats({ s }: { s: AttentionStats }) {
+  const asked = s.approvals + s.questions
+  if (!asked && !s.screened) return null
+  return <p className="px-1 text-xs text-faint">
+    最近 {s.days} 天：找你拿主意 {asked} 次（批准 {s.approvals}、提问 {s.questions}）
+    {s.screened > 0 && <>；主动判断 {s.screened} 件，留意到 {s.picked} 件，悄悄做了 {s.silent} 件，告诉你 {s.told} 件{s.useful + s.useless > 0 ? `，你标记有用 ${s.useful}、没用 ${s.useless}` : ''}</>}。
+  </p>
 }
 
 function Row({ t }: { t: Ticket }) {
@@ -74,6 +85,7 @@ function Row({ t }: { t: Ticket }) {
 function Noticed({ e }: { e: ActivityEvent }) {
   const qc = useQueryClient()
   const act = useMutation({ mutationFn: () => api.post(`/triggers/${e.id}/act`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['activity'] }); qc.invalidateQueries({ queryKey: ['tickets'] }) } })
+  const feedback = useMutation({ mutationFn: (useful: boolean) => api.post(`/triggers/${e.id}/feedback`, { useful }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['activity'] }); qc.invalidateQueries({ queryKey: ['proactive'] }) } })
   return <div className="flex items-start gap-2.5 rounded-lg px-2 py-2 text-sm">
     <SourceIcon source={e.source} size={14} className="mt-0.5 shrink-0 text-muted" />
     <div className="min-w-0 flex-1">
@@ -81,8 +93,14 @@ function Noticed({ e }: { e: ActivityEvent }) {
       <div className="text-xs text-muted">{e.proactive?.reason}</div>
       <div className="mt-0.5 truncate text-xs text-faint">{e.actor}：{e.text.slice(0, 120)}</div>
     </div>
-    {e.ticketId ? <Button size="sm" variant="ghost" onClick={() => openTask(e.ticketId)}>看看</Button>
-      : <Button size="sm" onClick={() => act.mutate()} disabled={act.isPending}>去做</Button>}
+    <div className="flex shrink-0 items-center gap-1">
+      {e.ticketId ? <Button size="sm" variant="ghost" onClick={() => openTask(e.ticketId)}>看看</Button>
+        : <Button size="sm" onClick={() => act.mutate()} disabled={act.isPending}>去做</Button>}
+      {e.feedback ? <span className="px-1 text-xs text-faint">{e.feedback.useful ? '你觉得有用' : '以后不管这类'}</span> : <>
+        <Button size="sm" variant="ghost" title="这次留意得好" onClick={() => feedback.mutate(true)} disabled={feedback.isPending}>有用</Button>
+        <Button size="sm" variant="ghost" title="写进主动策略：以后不管这类事" onClick={() => feedback.mutate(false)} disabled={feedback.isPending}>别管这类</Button>
+      </>}
+    </div>
   </div>
 }
 

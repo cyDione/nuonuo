@@ -46,11 +46,16 @@ export function ProactivePage() {
           {!sources.length && <span className="text-xs text-faint">还没有启用来源。</span>}
         </div>
       </div>
+      <div className="flex flex-wrap gap-4">
+        <Field label="同时进行的静默工作（件）"><div className="w-28"><Input type="number" min={1} max={10} value={form.budget.concurrent} onChange={e => setForm({ ...form, budget: { ...form.budget, concurrent: Number(e.target.value) || 1 } })} /></div></Field>
+        <Field label="每天最多开始（件）"><div className="w-28"><Input type="number" min={1} max={200} value={form.budget.daily} onChange={e => setForm({ ...form, budget: { ...form.budget, daily: Number(e.target.value) || 1 } })} /></div></Field>
+      </div>
       <Field label="不理会的账号（逗号分隔）">
         <Input value={form.ignoreActors.join(', ')} onChange={e => setForm({ ...form, ignoreActors: e.target.value.split(',').map(x => x.trim()).filter(Boolean) })} />
       </Field>
     </Card>
-    <div className="flex justify-end gap-2">
+    <div className="flex items-center justify-end gap-2">
+      <span className="mr-auto text-xs text-faint">{data.settings.version ? `第 ${data.settings.version} 版 · ${({ owner: '你', router: '智能体（按你的要求）', watchdog: 'Watchdog' } as Record<string, string>)[data.settings.by ?? ''] ?? data.settings.by ?? ''}${data.settings.at ? ` · ${new Date(data.settings.at).toLocaleString()}` : ''}` : ''}</span>
       <Button size="sm" variant="ghost" onClick={() => setForm({ ...form, strategy: data.defaults.strategy })}>用示例策略</Button>
       {dirty && <Button size="sm" variant="ghost" onClick={() => setForm(data.settings)}>还原</Button>}
       <Button size="sm" variant="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate(form)}>保存</Button>

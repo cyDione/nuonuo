@@ -151,7 +151,7 @@ export function TaskDrawer() {
         {t && <div className="mt-0.5"><StateIcon t={t} /></div>}
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium">{t?.title ?? '…'}</div>
-          {t && <div className="mt-0.5 text-xs text-muted">{t.stage === 'ended' ? endedText(t) : STATE_TEXT[t.stage]}{t.proactive ? ' · 我主动发现的' : ''} · {new Date(t.createdAt).toLocaleString()}</div>}
+          {t && <div className="mt-0.5 text-xs text-muted">{t.stage === 'ended' ? endedText(t) : STATE_TEXT[t.stage]}{t.proactive ? ' · 我主动发现的' : ''} · {new Date(t.createdAt).toLocaleString()}{d && d.usage.tokens > 0 ? ` · ${fmtTokens(d.usage.tokens)} tokens${d.usage.costUsd ? `（约 $${d.usage.costUsd.toFixed(2)}）` : ''}` : ''}</div>}
         </div>
         {t?.conversationId && <Button size="sm" variant="ghost" onClick={() => { go(`/c/${t.conversationId}`); openTask(null) }}>回到对话</Button>}
         {t && t.stage !== 'ended' && <Button size="sm" variant="ghost" onClick={() => { if (confirm(`停下「${t.title}」？`)) stop.mutate() }}><Square size={12} />停下</Button>}
@@ -214,5 +214,7 @@ export function FileChip({ id, name, size }: { id: string; name: string; size: n
     <span className="shrink-0 text-xs text-faint">{fmtSize(size)}</span>
   </a>
 }
+
+const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n))
 
 export const fmtSize = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)

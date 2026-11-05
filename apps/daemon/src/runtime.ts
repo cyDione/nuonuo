@@ -7,6 +7,7 @@ import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } fro
 import { EnvAwareSecrets, LAYER_PRESETS, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { ToolSet } from 'ai'
 import type { DaemonConfig } from './config'
 
 export interface Runtime {
@@ -97,13 +98,20 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         ...effects.health().filter(h => h.failing > 0).map(h => `后台队列 ${h.kind} 连续失败：${h.lastError ?? ''}`),
         ...sources.list().filter(s => s.enabled && s.health.status === 'error').map(s => `来源 ${s.title} 出错：${s.health.detail ?? ''}`),
       ],
-      correctionTools: () => ({ ...instructions.tools('watchdog'), update_proactive: proactiveTool(store, 'watchdog') }),
+      // Online corrections take effect at once (article §6), but never silently: each one is announced to the owner with
+      // how to undo it, so changes to prompts and trigger rules stay under the owner's control.
+      correctionTools: () => announced({ ...instructions.tools('watchdog'), update_proactive: proactiveTool(store, 'watchdog', engine) }, (name, result) => {
+        const r = result as { version?: number }
+        const what = name === 'update_instructions' ? `说明（第 ${r.version} 版）` : `主动策略（第 ${r.version} 版）`
+        const where = name === 'update_instructions' ? '设置 → 说明' : '设置 → 主动'
+        engine.reply({ conversationId: watchdog.conversation(), text: `我刚改了${what}。不同意的话告诉我，或者在${where}里恢复到上一版。` })
+      }),
     })
     registerAgents(store, agents, engine, combineExtensions(
       sources.agentExtensions(),
       memoryExtension(memory, engine),
       instructionsExtension(instructions),
-      proactiveExtension(store),
+      proactiveExtension(store, engine),
       browserExtension(browser, engine, agents),
       sandboxExtension(engine),
       mcpExtension(mcp, engine, reviewer),
@@ -142,6 +150,20 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     if (options.lock !== false) rmSync(lockFile, { force: true })
     throw error
   }
+}
+
+/** Calls `after` once a tool succeeded (ok !== false). */
+function announced(tools: ToolSet, after: (name: string, result: unknown) => void): ToolSet {
+  for (const [name, t] of Object.entries(tools)) {
+    const run = t.execute
+    if (!run) continue
+    t.execute = async (input: any, options: any) => {
+      const result = await run(input, options)
+      if (!(result && typeof result === 'object' && (result as { ok?: boolean }).ok === false)) { try { after(name, result) } catch (e) { console.error('[watchdog] announce', e) } }
+      return result
+    }
+  }
+  return tools
 }
 
 /** Registers providers for `*_API_KEY` variables and, while no layer is configured, applies the DeepSeek preset. */

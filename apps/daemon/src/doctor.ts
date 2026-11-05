@@ -19,6 +19,9 @@ export function runDoctor(rt: Runtime): Check[] {
     detail: `${process.platform} ${process.arch}`, fix: '目前只适配 macOS 与 Linux' })
   try { accessSync(rt.config.home, constants.W_OK); checks.push({ id: 'home', label: '数据目录', status: 'ok', detail: rt.config.home }) }
   catch { checks.push({ id: 'home', label: '数据目录', status: 'error', detail: `${rt.config.home} 不可写` }) }
+  const root = process.getuid?.() === 0
+  checks.push({ id: 'user', label: '运行身份', status: root ? 'warn' : 'ok', detail: root ? 'root' : `uid ${process.getuid?.() ?? '?'}`,
+    fix: root ? '任务的命令以服务的身份执行。建议用一个单独的普通用户运行 superagent，只给它需要的权限；或在 设置 → 执行 里把沙箱设为「全部」' : undefined })
   const sqlite = rt.store.sqlite.prepare('select sqlite_version() as v').get() as { v: string }
   checks.push({ id: 'sqlite', label: 'SQLite', status: 'ok', detail: sqlite.v })
   checks.push({ id: 'secrets', label: '密钥存储', status: rt.secrets.backend === 'keychain' ? 'ok' : 'warn',

@@ -8,7 +8,7 @@ import { kvGet, kvSet, newId, schema, type Store } from '@super-agent/db'
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import { mkdirSync, statSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { fastPath, proactiveSettings, type FilterVerdict, type ProactiveMode } from './proactive'
+import { fastPath, proactiveSettings, saveProactiveSettings, type FilterVerdict, type ProactiveMode } from './proactive'
 import { DEFAULT_SANDBOX, type SandboxSettings } from './sandbox'
 import { sourceOfThread, webchatThread, type Attention, type Ended, type HumanAction, type IncomingTrigger, type Mandate, type Report, type ReportStatus, type SourcePort, type Ticket, type TicketStage } from './model'
 
@@ -507,7 +507,7 @@ export class Engine {
   /** Records the Slow Path's verdict on an unaddressed event; in auto mode the event goes on to the Router. */
   proactiveDecision(triggerId: string, verdict: FilterVerdict, mode: ProactiveMode | 'off'): void {
     this.store.atomic(() => {
-      this.setDisposition(triggerId, { screening: false, proactive: { act: verdict.act, reason: verdict.reason, mode, at: this.now(),
+      this.setDisposition(triggerId, { screening: false, proactive: { act: verdict.act, reason: verdict.reason, mode, at: this.now(), policy: proactiveSettings(this.store).version,
         ...(verdict.title ? { title: verdict.title } : {}), ...(verdict.goal ? { goal: verdict.goal } : {}) } })
       // As in the article's figure, an event that passes both filters is routed by the Router, which decides whether to
       // start silent work (start_silent_task) or leave it (ignore); it is not dispatched behind the Router's back.
@@ -520,17 +520,25 @@ export class Engine {
    * A silent task the owner's strategy chose (speculative execution, article §3.4). It posts nothing and starts no
    * conversation; the router tells the owner only if the result is worth it.
    */
-  startProactive(triggerId: string, input: { title: string; reason: string; goal?: string }): Ticket {
+  startProactive(triggerId: string, input: { title: string; reason: string; goal?: string; byOwner?: boolean }): Ticket {
     const trigger = this.store.db.select().from(schema.triggers).where(eq(schema.triggers.id, triggerId)).get()
     if (!trigger) throw new DomainError('missing', `没有 ${triggerId}`)
     const existing = this.tickets({ threadId: trigger.threadId }).find(t => t.origin.triggerIds.includes(triggerId))
     if (existing) return existing
+    const settings = proactiveSettings(this.store)
+    // Speculative work costs compute: a budget the owner sets, except when the owner asked for it from the activity page.
+    if (!input.byOwner) {
+      const silent = this.tickets().filter(t => (t.mandate as Mandate).strength === 'proactive')
+      if (silent.filter(t => !t.ended).length >= settings.budget.concurrent) throw new DomainError('conflict', `已有 ${settings.budget.concurrent} 件静默工作在进行（主动预算上限）`)
+      if (silent.filter(t => this.now() - t.createdAt < 86_400_000).length >= settings.budget.daily) throw new DomainError('conflict', `过去 24 小时已开始 ${settings.budget.daily} 件静默工作（主动预算上限）`)
+    }
     const id = newId('tkt')
     const name = `auto-${id.slice(-6)}`
     const directory = join(this.workRoot, name)
     const sessionId = `ses_${id.slice(4)}`
     const at = this.now()
-    const mandate: Mandate = { by: 'policy', strength: 'proactive', triggerIds: [triggerId], at, reason: input.goal ? `${input.reason}；目标：${input.goal}` : input.reason }
+    const mandate: Mandate = { by: input.byOwner ? 'owner' : 'policy', strength: 'proactive', triggerIds: [triggerId], at, policy: settings.version,
+      reason: input.goal ? `${input.reason}；目标：${input.goal}` : input.reason }
     this.store.atomic(() => {
       this.runtime.createSession('worker', 'worker', { id: sessionId, ticketId: id })
       this.store.db.insert(schema.tickets).values({ id, name, title: input.title.slice(0, 60), note: null, threadId: trigger.threadId,
@@ -543,6 +551,57 @@ export class Engine {
     mkdirSync(directory, { recursive: true })
     this.changed(id)
     return this.ticket(id)
+  }
+
+  /** Turning proactive work off withdraws the strategy's mandate: silent work still running stops (prototype: weakening a rule revokes acceptance). */
+  revokeProactive(reason: string): string[] {
+    const open = this.tickets({ open: true }).filter(t => (t.mandate as Mandate).strength === 'proactive' && (t.mandate as Mandate).by === 'policy')
+    for (const t of open) this.stopTask(t.id, 'system', reason)
+    return open.map(t => t.id)
+  }
+
+  /**
+   * The owner's verdict on something done unasked. "Not useful" becomes a line in the strategy (in the owner's words),
+   * so the filter learns what not to bother them with.
+   */
+  proactiveFeedback(triggerId: string, useful: boolean): void {
+    const trigger = this.store.db.select().from(schema.triggers).where(eq(schema.triggers.id, triggerId)).get()
+    if (!trigger) throw new DomainError('missing', `没有 ${triggerId}`)
+    const d = trigger.disposition as { proactive?: { title?: string; reason?: string } }
+    if (!d.proactive) throw new DomainError('invalid', '这不是主动处理的事件')
+    this.store.atomic(() => {
+      this.setDisposition(triggerId, { feedback: { useful, at: this.now() } })
+      if (!useful) {
+        const cur = proactiveSettings(this.store)
+        const what = d.proactive!.title || clip(trigger.text.replace(/\s+/g, ' '), 40)
+        saveProactiveSettings(this.store, { strategy: `${cur.strategy}\n- 不用管这类事：「${what}」（${trigger.source}，你标记过没用）` }, 'owner')
+      }
+    })
+    this.bus.emit({ type: 'activity.updated' })
+  }
+
+  /** How much the agent asked of the owner, and how its own initiative went (last 7 days). */
+  attentionStats(days = 7) {
+    const since = this.now() - days * 86_400_000
+    const q = (sql: string, ...args: unknown[]) => (this.store.sqlite.prepare(sql).get(...args) as { n: number }).n
+    return {
+      days,
+      approvals: q('SELECT count(*) n FROM approvals WHERE created_at > ?', since),
+      questions: q("SELECT count(*) n FROM reports WHERE at > ? AND human_action IS NOT NULL", since),
+      screened: q("SELECT count(*) n FROM triggers WHERE at > ? AND json_extract(disposition, '$.proactive') IS NOT NULL", since),
+      picked: q("SELECT count(*) n FROM triggers WHERE at > ? AND json_extract(disposition, '$.proactive.act') = 1", since),
+      silent: q("SELECT count(*) n FROM tickets WHERE created_at > ? AND json_extract(mandate, '$.strength') = 'proactive'", since),
+      told: q(`SELECT count(DISTINCT m.ticket_id) n FROM messages m JOIN tickets t ON t.id = m.ticket_id
+        WHERE m.created_at > ? AND m.role = 'assistant' AND json_extract(t.mandate, '$.strength') = 'proactive'`, since),
+      useful: q("SELECT count(*) n FROM triggers WHERE at > ? AND json_extract(disposition, '$.feedback.useful') = 1", since),
+      useless: q("SELECT count(*) n FROM triggers WHERE at > ? AND json_extract(disposition, '$.feedback.useful') = 0", since),
+    }
+  }
+
+  /** Tokens and cost a task used, its subagents included. */
+  usageOf(ticketId: string): { tokens: number; costUsd: number | null } {
+    const r = this.store.sqlite.prepare('SELECT coalesce(sum(input_tokens + output_tokens), 0) tokens, sum(cost_usd) cost FROM usage_ledger WHERE ref = ?').get(ticketId) as { tokens: number; cost: number | null }
+    return { tokens: r.tokens, costUsd: r.cost }
   }
 
   note(ticketId: string, text: string): void {

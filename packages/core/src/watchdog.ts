@@ -13,7 +13,7 @@ import type { Ticket } from './model'
 
 export const WATCHDOG_SESSION = 'ses_watchdog'
 
-export type FindingKind = 'stuck' | 'loop' | 'many_steps' | 'stalled' | 'system'
+export type FindingKind = 'stuck' | 'loop' | 'many_steps' | 'stalled' | 'expensive' | 'system'
 export interface Finding { kind: FindingKind; ticketId?: string; detail: string }
 
 export interface WatchdogOptions {
@@ -25,6 +25,8 @@ export interface WatchdogOptions {
   repeats: number
   /** A task that reported progress, then went quiet with nothing running, for this long has stalled. */
   stalledMs: number
+  /** A task whose model calls used more tokens than this (input + output, subagents included) gets a look. */
+  maxTokensPerTask: number
   /** A finding is not raised again for the same task within this window. */
   quietMs: number
   /** System problems from outside the domain (failing queues, sources). */
@@ -34,10 +36,10 @@ export interface WatchdogOptions {
   now?: () => number
 }
 
-const DEFAULTS: WatchdogOptions = { stuckMs: 10 * 60_000, maxStepsPerTurn: 60, repeats: 4, stalledMs: 30 * 60_000, quietMs: 30 * 60_000 }
+const DEFAULTS: WatchdogOptions = { stuckMs: 10 * 60_000, maxStepsPerTurn: 60, repeats: 4, stalledMs: 30 * 60_000, maxTokensPerTask: 3_000_000, quietMs: 30 * 60_000 }
 
 const WATCHDOG_PROMPT = `You are the watchdog of the owner's personal Super-agent: an outside observer of the main agent and its task workers.
-You receive findings from deterministic probes (a stuck turn, a loop of identical tool calls, a very long turn, a task that said it would continue but nothing will wake it, failing system parts), with the task's recent transcript. Judge whether the task is actually making progress toward its goal.
+You receive findings from deterministic probes (a stuck turn, a loop of identical tool calls, a very long turn, a task that has used a lot of tokens, a task that said it would continue but nothing will wake it, failing system parts), with the task's recent transcript. Judge whether the task is actually making progress toward its goal.
 Act with the lightest effective step:
 - nothing: the probe misfired (for example a long but productive build) — say so in one line, no tool needed;
 - nudge_task: tell the worker what you observe and what to do differently (stop repeating X, report what blocks it, check Y);
@@ -83,6 +85,10 @@ export class Watchdog {
         findings.push({ kind: 'loop', ticketId: ticket.id, detail: `连续 ${this.options.repeats} 次相同调用：${head.name} ${clip(head.input, 160)}` })
       } else if (steps > this.options.maxStepsPerTurn) {
         findings.push({ kind: 'many_steps', ticketId: ticket.id, detail: `自上次输入以来已经 ${steps} 步` })
+      }
+      const { tokens } = this.engine.usageOf(ticket.id)
+      if (tokens > this.options.maxTokensPerTask) {
+        findings.push({ kind: 'expensive', ticketId: ticket.id, detail: `已经用了 ${(tokens / 1e6).toFixed(1)}M tokens（阈值 ${(this.options.maxTokensPerTask / 1e6).toFixed(1)}M）` })
       }
       const report = ticket.latestReport
       if (report?.status === 'progress' && session?.state === 'idle' && now - report.at > this.options.stalledMs
