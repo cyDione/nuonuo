@@ -264,4 +264,4 @@ You can search and read the owner's mail (gmail_search, gmail_read) and write dr
   }
 }
 
-export const gmailPlugin = definePlugin({ id: 'gmail', name: 'Gmail', version: '0.1.0', description: '读邮件、写草稿', sources: [gmailKind()] })
+export const gmailPlugin = definePlugin({ id: 'gmail', name: 'Gmail', version: '0.1.3', description: '读邮件、写草稿', sources: [gmailKind()] })

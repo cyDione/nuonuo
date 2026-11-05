@@ -155,4 +155,4 @@ export function telegramKind(deps: { fetch?: typeof fetch } = {}): SourceKind<Co
   }
 }
 
-export const telegramPlugin = definePlugin({ id: 'telegram', name: 'Telegram', version: '0.1.0', description: '用 Telegram 远程对话', sources: [telegramKind()] })
+export const telegramPlugin = definePlugin({ id: 'telegram', name: 'Telegram', version: '0.1.3', description: '用 Telegram 远程对话', sources: [telegramKind()] })
