@@ -4,7 +4,7 @@ import { browserExtension, combineExtensions, Distiller, personaPrompt, Engine, 
 import { Effects, kvGet, kvSet, openStore, type Store } from '@super-agent/db'
 import { gmailPlugin, telegramPlugin } from '@super-agent/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-agent/sources'
-import { EnvAwareSecrets, LAYER_PRESETS, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
+import { EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolSet } from 'ai'
@@ -192,16 +192,14 @@ function announced(tools: ToolSet, after: (name: string, result: unknown) => voi
   return tools
 }
 
-/** Registers providers for `*_API_KEY` variables and, while no layer is configured, applies the DeepSeek preset. */
-export async function bootstrapModels(hub: ModelHub): Promise<void> {
+/**
+ * Registers providers for `*_API_KEY` variables. On first start (no layer configured yet), SUPERAGENT_MODEL puts the layers on
+ * that model of the first provider found in the environment, e.g. for a quick test setup without opening Settings.
+ */
+export async function bootstrapModels(hub: ModelHub, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   hub.syncEnvProviders()
-  const deepseek = hub.listProviders().find(p => p.kind === 'deepseek' && p.hasKey)
-  if (!deepseek || Object.values(hub.roleConfigs()).some(c => c.chain.length > 0)) return
-  // Gateways rename models; map the preset onto what this endpoint lists (best effort, offline keeps the official ids).
-  const available = await hub.listModels(deepseek.id).catch(() => undefined)
-  // SUPERAGENT_PRESET picks another layer setup (e.g. deepseek-flash: every layer on V4.1 Flash, for testing).
-  const preset = process.env.SUPERAGENT_PRESET?.trim() || 'deepseek'
-  if (hub.applyPreset(preset, deepseek.id, { onlyIfEmpty: true, ...(available ? { available } : {}) })) {
-    console.log(`已为 ${deepseek.name}${deepseek.keyEnv ? `（${deepseek.keyEnv}）` : ''} 应用分层配置：${LAYER_PRESETS.find(p => p.id === preset)?.label ?? preset}`)
-  }
+  const model = env.SUPERAGENT_MODEL?.trim()
+  const provider = hub.listProviders().find(p => p.keyEnv && p.hasKey)
+  if (!model || !provider) return
+  if (hub.applyDefaultModel(provider.id, model)) console.log(`已将各层模型设为 ${provider.name} 的 ${model}（SUPERAGENT_MODEL）`)
 }

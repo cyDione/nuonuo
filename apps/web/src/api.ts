@@ -28,8 +28,7 @@ export type ProviderKind = 'anthropic' | 'openai' | 'google' | 'deepseek' | 'ope
 export interface Preset { id: string; kind: ProviderKind; label: string; baseUrl?: string; keyRequired: boolean; suggestedModels: string[]; docsUrl?: string }
 export type RoleId = 'router' | 'worker' | 'subagent' | 'filter' | 'reviewer' | 'watchdog' | 'summarizer' | 'embedding' | 'vision'
 export interface RoleSpec { id: RoleId; label: string; duty: string; advice: string; inherits?: RoleId; optional?: boolean; kind: 'language' | 'embedding' }
-export interface LayerPreset { id: string; label: string; kind: ProviderKind; layers: Record<string, { model: string; reasoning?: string; enabled?: boolean }> }
-export interface Catalog { presets: Preset[]; roles: RoleSpec[]; reasoningLevels: string[]; layerPresets: LayerPreset[] }
+export interface Catalog { presets: Preset[]; roles: RoleSpec[]; reasoningLevels: string[] }
 export interface Provider { id: string; kind: ProviderKind; name: string; baseUrl: string | null; options: { prices?: Record<string, Price> }; hasKey: boolean; keyHint?: string; keyEnv?: string }
 export interface Price { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
 export interface ModelRef { providerId: string; model: string }

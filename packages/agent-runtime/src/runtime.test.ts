@@ -149,7 +149,7 @@ describe('workspace safety', () => {
     expect(Object.keys(fsTools(dir, null as any))).toEqual(['read_file', 'write_file', 'edit_file', 'list_dir'])
   })
   it('strips credentials from the worker environment', () => {
-    const env = workerEnv({ X: '1' }, { PATH: '/bin', DEEPSEEK_API_KEY: 'k', GITHUB_TOKEN: 't', AWS_SECRET_ACCESS_KEY: 's', HOME: '/h' })
+    const env = workerEnv({ X: '1' }, { PATH: '/bin', OPENAI_API_KEY: 'k', GITHUB_TOKEN: 't', AWS_SECRET_ACCESS_KEY: 's', HOME: '/h' })
     expect(env).toEqual({ PATH: '/bin', HOME: '/h', X: '1', SUPERAGENT_WORKER: '1' })
   })
 })

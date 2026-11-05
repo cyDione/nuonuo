@@ -103,7 +103,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
     </header>}
     {noRouter && <div className="mx-auto mt-4 flex w-full max-w-3xl items-center gap-2 rounded-lg border border-line bg-panel px-4 py-2.5 text-sm">
       <AlertTriangle size={16} className="shrink-0 text-warn" />
-      <span className="flex-1">还没有可用的模型。添加供应商的 API key（或设置 DEEPSEEK_API_KEY 等环境变量后重启），再为「主 Agent」选择模型。</span>
+      <span className="flex-1">还没有可用的模型。添加供应商的 API key（或设置 OPENAI_API_KEY 等环境变量后重启），再为「主 Agent」选择模型。</span>
       <a className="font-medium text-accent" href="#/settings/providers">去设置</a>
     </div>}
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">

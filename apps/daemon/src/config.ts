@@ -24,7 +24,7 @@ export function resolveConfig(opts: { port?: number; dev?: boolean } = {}): Daem
 
 /**
  * Loads `<home>/env` (KEY=value lines) into the environment, without overriding what is already set. A service started
- * at login (launchd / systemd) does not see the shell's exports, so keys such as DEEPSEEK_API_KEY live here instead.
+ * at login (launchd / systemd) does not see the shell's exports, so keys such as OPENAI_API_KEY live here instead.
  * The file holds secrets: it is kept at mode 0600.
  */
 export function loadEnvFile(home: string, env: NodeJS.ProcessEnv = process.env): string[] {

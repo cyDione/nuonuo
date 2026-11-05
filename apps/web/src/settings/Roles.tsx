@@ -13,11 +13,7 @@ export function Roles() {
   const roles = useQuery({ queryKey: ['roles'], queryFn: () => api.get<RolesResponse>('/roles') })
   if (!catalog.data || !roles.data || !providers.data) return null
   if (providers.data.providers.length === 0) return <Card className="p-5 text-sm text-muted">先在「模型供应商」中添加至少一个供应商。</Card>
-  const presetTargets = catalog.data.layerPresets.flatMap(preset => providers.data!.providers.filter(p => p.kind === preset.kind).map(p => ({ preset, provider: p })))
   return <div className="space-y-3">
-    {presetTargets.map(({ preset, provider }) => <PresetBar key={`${preset.id}-${provider.id}`} label={preset.label} providerName={provider.name}
-      models={Object.entries(preset.layers).filter(([, v]) => v.enabled !== false).map(([k, v]) => `${catalog.data!.roles.find(r => r.id === k)?.label.split('（')[0]}：${v.model}${v.reasoning ? `（${v.reasoning}）` : ''}`)}
-      onApply={() => api.post(`/presets/${preset.id}/apply`, { providerId: provider.id })} />)}
     {catalog.data.roles.map(spec => <RoleCard key={spec.id} spec={spec} specs={catalog.data!.roles} levels={catalog.data!.reasoningLevels}
       config={roles.data!.configs[spec.id] ?? EMPTY} resolved={roles.data!.resolved[spec.id]} providers={providers.data!.providers} />)}
   </div>
@@ -108,16 +104,4 @@ function ChainRow({ index, value, providers, onChange, onRemove }: { index: numb
 function clean(c: RoleConfig): RoleConfig {
   return Object.fromEntries(Object.entries({ ...c, chain: c.chain.map(r => ({ ...r, model: r.model.trim() })) })
     .filter(([, v]) => v !== undefined && !(typeof v === "number" && Number.isNaN(v)))) as unknown as RoleConfig
-}
-
-function PresetBar({ label, providerName, models, onApply }: { label: string; providerName: string; models: string[]; onApply(): Promise<unknown> }) {
-  const qc = useQueryClient()
-  const apply = useMutation({ mutationFn: onApply, onSuccess: () => { qc.invalidateQueries({ queryKey: ['roles'] }); qc.invalidateQueries({ queryKey: ['providers'] }) } })
-  return <Card className="flex flex-wrap items-center gap-3 p-4">
-    <div className="min-w-0 flex-1">
-      <div className="text-sm font-medium">{label} <span className="font-normal text-muted">· {providerName}</span></div>
-      <div className="mt-0.5 text-xs text-faint">{models.join(' · ')}</div>
-    </div>
-    <Button size="sm" disabled={apply.isPending} onClick={() => { if (confirm('用推荐配置覆盖这些层的当前设置？')) apply.mutate() }}>{apply.isSuccess ? '已应用' : '应用'}</Button>
-  </Card>
 }

@@ -12,7 +12,6 @@ import type { ProviderKind } from './catalog'
 import type { EmbeddingModelV4 } from '@ai-sdk/provider'
 import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOptions, type ProviderRecord } from './factory'
 import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
-import { LAYER_PRESETS, resolvePresetModel } from './presets'
 import { resolveRole, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId } from './roles'
 import type { SecretStore } from './secrets'
 
@@ -119,23 +118,11 @@ export class ModelHub {
     return created
   }
 
-  /** Applies a recommended layer preset to a provider; with `onlyIfEmpty`, does nothing once any layer is configured. */
-  applyPreset(presetId: string, providerId: string, options: { onlyIfEmpty?: boolean; available?: string[] } = {}): boolean {
-    const preset = LAYER_PRESETS.find(p => p.id === presetId)
-    if (!preset) throw new ModelError('invalid', `unknown preset ${presetId}`)
-    const provider = this.getProvider(providerId)
-    if (provider.kind !== preset.kind) throw new ModelError('invalid', `preset ${presetId} needs a ${preset.kind} provider`)
-    if (options.onlyIfEmpty && Object.values(this.roleConfigs()).some(c => c.chain.length > 0)) return false
-    this.store.atomic(() => {
-      for (const [role, { model, enabled, ...rest }] of Object.entries(preset.layers) as [RoleId, any][]) {
-        this.saveRole(role, { ...rest, enabled: enabled ?? true, chain: [{ providerId, model: resolvePresetModel(model, options.available) }] })
-      }
-      if (preset.prices) {
-        const prices = Object.fromEntries(Object.entries(preset.prices).map(([model, price]) => [resolvePresetModel(model, options.available), price]))
-        this.store.db.update(schema.providers).set({ options: { ...provider.options, prices: { ...prices, ...provider.options.prices } } })
-          .where(eq(schema.providers.id, providerId)).run()
-      }
-    })
+  /** First start only: puts the main layer on `model` (the other layers inherit it); does nothing once any layer is configured. */
+  applyDefaultModel(providerId: string, model: string): boolean {
+    this.getProvider(providerId)
+    if (Object.values(this.roleConfigs()).some(c => c.chain.length > 0)) return false
+    this.saveRole('router', { enabled: true, chain: [{ providerId, model }] })
     return true
   }
 

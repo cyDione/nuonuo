@@ -85,16 +85,13 @@
 
 ## 五、模型配置
 
-| 配置 | 用法 | 各层模型 |
-|---|---|---|
-| 推荐配置 | 默认 | 主 Agent、Watchdog、摘要用 V4.1 Flash；Worker 和审核用 V4 Pro |
-| 全部 Flash（测试） | 启动时加 `SUPERAGENT_PRESET=deepseek-flash` | 所有层都是 V4.1 Flash，只有思考强度不同：对话、执行、审核用 high，摘要和过滤用 low |
+项目不内置任何供应商的推荐配置，各层模型在「设置 → 分层模型」里选。没单独配置的层沿用主 Agent（或 Worker）的模型。
 
-查过历次实测的用量账本：所有调用用的都是 `group/deepseek-v4.1-flash`。原因是测试网关只提供 Flash，推荐配置里的 Pro 会自动退回成 Flash。现在测试改为显式使用"全部 Flash"配置。
+测试时可以在首次启动前设置 `SUPERAGENT_MODEL=<模型 id>`：各层都用环境变量里第一个供应商的这个模型，已经配置过任何一层后不再生效。下面的实测用的是一个测试网关上的 DeepSeek V4.1 Flash，只是测试环境，不代表推荐。
 
 ## 六、实测（2026-11-05，所有层都用 V4.1 Flash）
 
-启动时加了 `SUPERAGENT_PRESET=deepseek-flash`。用量账本里过滤、审核、主 Agent、子任务、摘要、Watchdog、执行七层的调用全部是 `group/deepseek-v4.1-flash`。
+各层都设成同一个测试模型。用量账本里过滤、审核、主 Agent、子任务、摘要、Watchdog、执行七层的调用全部是 `group/deepseek-v4.1-flash`。
 
 | 场景 | 结果 |
 |---|---|

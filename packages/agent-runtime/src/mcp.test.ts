@@ -13,7 +13,7 @@ describe('McpManager', () => {
   it('connects a stdio server, exposes its tools, resolves ${ENV} and keeps other variables out', async () => {
     const store = openStore(':memory:')
     let servers = [calc()]
-    const mcp = new McpManager(() => servers, new Blobs(store), { TEST_CALC_USER: 'owner', DEEPSEEK_API_KEY: 'sk-x', PATH: process.env.PATH })
+    const mcp = new McpManager(() => servers, new Blobs(store), { TEST_CALC_USER: 'owner', OPENAI_API_KEY: 'sk-x', PATH: process.env.PATH })
     try {
       const [status] = await mcp.sync()
       expect(status).toMatchObject({ name: 'calc', state: 'connected' })

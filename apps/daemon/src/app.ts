@@ -1,6 +1,6 @@
 /** HTTP surface of the daemon: the JSON API under /api, the login link under /auth, and the web UI's static files. */
 import { serveStatic } from '@hono/node-server/serve-static'
-import { describeError, LAYER_PRESETS, ModelError, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type ProviderKind, type RoleId } from '@super-agent/models'
+import { describeError, ModelError, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type ProviderKind, type RoleId } from '@super-agent/models'
 import { Hono, type Context } from 'hono'
 import { setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
@@ -72,8 +72,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     secrets: rt.secrets.backend, effects: rt.effects.health(),
   }))
   api.get('/doctor', c => c.json({ checks: runDoctor(rt) }))
-  api.get('/catalog', c => c.json({ presets: PROVIDER_PRESETS, roles: ROLES, reasoningLevels: REASONING_LEVELS,
-    layerPresets: LAYER_PRESETS.map(p => ({ id: p.id, label: p.label, kind: p.kind, layers: p.layers })) }))
+  api.get('/catalog', c => c.json({ presets: PROVIDER_PRESETS, roles: ROLES, reasoningLevels: REASONING_LEVELS }))
 
   // Providers
   api.get('/providers', c => c.json({ providers: rt.hub.listProviders() }))
@@ -93,11 +92,6 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
       if (error instanceof ModelError) throw error
       return c.json({ models: [], error: describeError(error) })
     }
-  })
-  api.post('/presets/:id/apply', async c => {
-    const { providerId } = await body(c, z.object({ providerId: z.string() }))
-    rt.hub.applyPreset(c.req.param('id'), providerId)
-    return c.json({ ok: true })
   })
   api.post('/models/test', async c => {
     const ref = await body(c, z.object({ providerId: z.string(), model: z.string().trim().min(1) }))

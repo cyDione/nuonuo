@@ -44,8 +44,6 @@
 >   - **设置**：按组归类。
 >
 > 设计和实现细节见 docs/ 下的 [01-m1](docs/01-m1-implementation.md)、[02-m2](docs/02-m2-implementation.md)、[03-m3](docs/03-m3-implementation.md)、[04-plugin-sdk](docs/04-plugin-sdk.md)、[05-m4](docs/05-m4-implementation.md)、[06-audit](docs/06-audit.md)、[07-architecture](docs/07-architecture.md)（论文架构逐节对照）、[08-industry-review](docs/08-industry-review.md)（业界解读查漏补缺）、[09-m6](docs/09-m6-muse-and-memory.md)。
->
-> 测试时让所有层都用 DeepSeek V4.1 Flash：启动前设置 `SUPERAGENT_PRESET=deepseek-flash`。
 
 ## 部署（自己的 Mac 或 Linux 电脑）
 
@@ -66,11 +64,11 @@ pnpm build
 
 ```bash
 mkdir -p ~/.superagent
-printf 'DEEPSEEK_API_KEY=sk-...\n' > ~/.superagent/env   # 每行 KEY=value；也可放 DEEPSEEK_BASE_URL、GITHUB_TOKEN 等
+printf 'OPENAI_API_KEY=sk-...\n' > ~/.superagent/env   # 每行 KEY=value；换成你用的供应商，也可放 *_BASE_URL、GITHUB_TOKEN 等
 chmod 600 ~/.superagent/env
 ```
 
-检测到 DeepSeek 时会自动套用推荐的分层配置（主 Agent 用 Flash，执行层用 V4 Pro）。想让所有层都用 Flash，在 `env` 里加一行 `SUPERAGENT_PRESET=deepseek-flash`；这只在首次启动、还没配置过任何层时生效。
+各层用哪个模型在「设置 → 分层模型」里选。想跳过这一步（比如测试），在 `env` 里加一行 `SUPERAGENT_MODEL=<模型 id>`，各层都用 `env` 里第一个供应商的这个模型；这只在首次启动、还没配置过任何层时生效。
 
 **3. 启动，检查**：
 

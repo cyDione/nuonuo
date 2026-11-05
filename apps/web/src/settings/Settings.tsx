@@ -38,7 +38,7 @@ const GROUPS: { title: string; tabs: Tab[] }[] = [
     { id: 'execution', label: '执行环境', icon: <Play size={15} />, intro: '任务在本机执行：每件事有自己的工作目录。这里控制并发、命令超时、允许使用的已有目录，以及 Docker 沙箱。' },
   ] },
   { title: '模型', tabs: [
-    { id: 'providers', label: '模型供应商', icon: <KeyRound size={15} />, intro: 'API key 存放在系统钥匙串（或加密文件）中；也可以用环境变量（如 DEEPSEEK_API_KEY），启动时自动识别。密钥不进数据库、不进模型上下文，也不会传给任务的命令行环境。' },
+    { id: 'providers', label: '模型供应商', icon: <KeyRound size={15} />, intro: 'API key 存放在系统钥匙串（或加密文件）中；也可以用环境变量（如 OPENAI_API_KEY），启动时自动识别。密钥不进数据库、不进模型上下文，也不会传给任务的命令行环境。' },
     { id: 'roles', label: '分层模型', icon: <Cpu size={15} />, intro: '为每一层分别选择模型。没有配置的层沿用上一层；可设置备用模型与每日预算。' },
     { id: 'usage', label: '用量', icon: <Activity size={15} />, intro: '按层与模型统计调用次数、token 与估算费用（在供应商中填写价格后显示费用）。' },
   ] },

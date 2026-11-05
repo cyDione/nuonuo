@@ -46,14 +46,8 @@ Worker 每一轮结束时必须调用 `report` 汇报状态：
 | 任务跟随 PR，PR 合并或关闭后才结束 | 收到 `ready` 汇报即结束；之后可以在对话里继续，让它恢复 | M2 接入 GitHub 后再加入跟随 PR 的逻辑 |
 | 依托 DSH 的会话和后台任务 | 自研运行时，支持多家模型供应商 | 满足 BYOK 和分层模型配置的需求 |
 
-## DeepSeek 适配
+## 环境变量里的供应商
 
-- **用环境变量配置**：启动时如果设置了 `DEEPSEEK_API_KEY`（以及可选的 `DEEPSEEK_BASE_URL`），会自动登记为只读供应商。密钥不会复制到其他地方，也会从 Worker 的命令行环境中剔除。
-- **自动套用推荐配置**：在还没有任何分层配置时，自动套用推荐配置：
-  - 主 Agent：`deepseek-flash`（V4.1 Flash），思考强度 high
-  - Worker / Reviewer：`deepseek-v4-pro`，high
-  - Watchdog：flash，high
-  - Summarizer：flash，low
-  - Vision：flash，high
-  - Filter：默认关闭
-- **思考模式下的工具调用**：每一轮都必须回传之前的 `reasoning_content`，否则 API 返回 400。运行时会把推理内容存进事件日志，由 `@ai-sdk/deepseek` 自动回传。端到端测试中用模拟服务强制执行这条规则，结果是 0 个 400。
+- **用环境变量配置**：启动时如果设置了某家供应商的 API key 变量（如 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`，以及可选的 `*_BASE_URL`），会自动登记为只读供应商。密钥不会复制到其他地方，也会从 Worker 的命令行环境中剔除。
+- **不预设任何模型**：项目不内置某家供应商的推荐配置，各层模型在「设置 → 分层模型」里自己选。测试时可以在首次启动前设置 `SUPERAGENT_MODEL=<模型 id>`，各层都用环境变量里第一个供应商的这个模型；已经配置过任何一层后不再生效。
+- **思考模式下的工具调用**（以 DeepSeek 为例）：每一轮都必须回传之前的 `reasoning_content`，否则 API 返回 400。运行时会把推理内容存进事件日志，由 `@ai-sdk/deepseek` 自动回传。端到端测试中用模拟服务强制执行这条规则，结果是 0 个 400。
