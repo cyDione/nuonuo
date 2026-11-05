@@ -1,6 +1,6 @@
 {
   "name": "@super-assistant/plugin-sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Types and helpers for writing Super-assistant plugins",
   "type": "module",
   "main": "./src/index.ts",
