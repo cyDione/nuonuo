@@ -21,9 +21,9 @@ export const MARKER = '<!-- super-assistant -->'
 
 /**
  * The built-in OAuth App (device flow enabled). A client ID is public by design: the device flow needs no secret.
- * Empty until one is registered; then `clientId` in the settings is only needed to use another app.
+ * The owner's "Super Assistant" app; `clientId` in the settings is only needed to use another app.
  */
-export const DEFAULT_GITHUB_CLIENT_ID = ''
+export const DEFAULT_GITHUB_CLIENT_ID = 'Ov23liK2hYlHXMinmLMg'
 /** What `gh` asks for, so workers can use `gh` and git with the same token. */
 export const GITHUB_SCOPES = 'repo read:org workflow'
 
@@ -265,7 +265,7 @@ export function githubKind(deps: { fetch?: typeof fetch; token?: () => Promise<s
       { key: 'pollSeconds', type: 'number', label: '轮询间隔（秒）', min: 15, max: 3600, advanced: true },
       { key: 'apiUrl', type: 'text', label: 'API 地址', advanced: true, hint: 'GitHub Enterprise 填 https://host/api/v3' },
       { key: 'clientId', type: 'text', label: 'OAuth App Client ID', placeholder: 'Ov23…', ...(DEFAULT_GITHUB_CLIENT_ID ? { advanced: true as const } : {}),
-        hint: DEFAULT_GITHUB_CLIENT_ID ? '留空使用内置的应用' : '点下面的链接新建 OAuth App：名称随意，Homepage 和 Callback URL 都填 http://127.0.0.1:7420；创建后勾选 Enable Device Flow 并保存，把 Client ID（Ov23 开头）填在这里。不需要 Client Secret',
+        hint: DEFAULT_GITHUB_CLIENT_ID ? '留空使用内置的应用' : '点下面的链接新建 OAuth App：名称随意，Homepage 和 Redirect URI 都填 http://127.0.0.1:7420；勾选 Enable Device Flow，取消勾选 Expire user access tokens（否则 8 小时就要重新授权），把 Client ID（Ov23 开头）填在这里。不需要 Client Secret',
         links: [{ label: '新建 GitHub OAuth App', href: 'https://github.com/settings/applications/new' }, { label: '已有的 OAuth Apps', href: 'https://github.com/settings/developers' }] },
       { key: 'oauthUrl', type: 'text', label: 'OAuth 地址', advanced: true, hint: 'GitHub Enterprise 填 https://host' },
     ],

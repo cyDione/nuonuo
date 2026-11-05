@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { FakeGithub } from './fake-github'
-import { githubKind, MARKER } from './github'
+import { DEFAULT_GITHUB_CLIENT_ID, githubKind, MARKER } from './github'
 import { SourceRegistry } from './registry'
 
 let store: Store
@@ -129,12 +129,14 @@ describe('GitHub authorization', () => {
     await expect(registry.pollNow('github')).rejects.toThrow('还没有授权 GitHub')
   })
 
-  it('explains a missing client ID', async () => {
+  it('uses the built-in OAuth App when no client ID is set', async () => {
     store = openStore(':memory:')
     registry = new SourceRegistry(store, new Effects(store), new MemorySecrets())
-    registry.register(githubKind({ token: async () => undefined }))
+    const gh = new FakeGithub('me')
+    gh.device.clientId = DEFAULT_GITHUB_CLIENT_ID
+    registry.register(githubKind({ fetch: gh.fetch, token: async () => undefined }))
+    await registry.save('github', { enabled: false, config: { oauthUrl: gh.base, apiUrl: gh.base } })
     const res = await registry.http('github', new Request('http://x/'), 'oauth/device', { public: false, origin: '' })
-    expect(res!.status).toBe(400)
-    expect(((await res!.json()) as { error: string }).error).toContain('Client ID')
+    expect(((await res!.json()) as { device: { userCode: string } }).device.userCode).toBe('ABCD-1234')
   })
 })

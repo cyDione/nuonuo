@@ -11,13 +11,13 @@ GitHub 和 Gmail 都用 OAuth 授权接入：在设置页点一下，用自己�
 
 ## 用到的 OAuth 应用
 
-代码里有内置客户端的位置（`DEFAULT_GITHUB_CLIENT_ID`、`DEFAULT_GOOGLE_CLIENT_ID` / `DEFAULT_GOOGLE_CLIENT_SECRET`）。内置值为空时，设置页会直接显示 Client ID 字段；有内置值时这些字段收进「高级」，留空即用内置的。
+GitHub 已内置一个 OAuth App（`DEFAULT_GITHUB_CLIENT_ID`），直接点「授权 GitHub」即可，下面的 GitHub 步骤只在想换用自己的应用时才需要。Gmail 没有内置客户端（`DEFAULT_GOOGLE_CLIENT_ID` / `DEFAULT_GOOGLE_CLIENT_SECRET` 为空）。内置值为空时，设置页会直接显示 Client ID 字段；有内置值时这些字段收进「高级」，留空即用内置的。
 
 ### GitHub OAuth App
 
 1. 打开 [新建 OAuth App](https://github.com/settings/applications/new)（GitHub → Settings → Developer settings → OAuth Apps → New OAuth App）。
-2. 名称随意，Homepage URL 和 Authorization callback URL 都填 `http://127.0.0.1:7420`（设备码流程用不到它，但表单要求必填）。
-3. 创建后勾选 **Enable Device Flow** 并保存。
+2. 名称随意，Homepage URL 和 Redirect URI（旧版表单叫 Authorization callback URL）都填 `http://127.0.0.1:7420`（设备码流程用不到它，但表单要求必填）。
+3. 勾选 **Enable Device Flow**；**取消勾选 Expire user access tokens**（勾着时令牌 8 小时过期，需要 Client Secret 才能续期，而设备码流程不用 Secret，所以只能重新授权）。
 4. 把 Client ID（`Ov23…`）填进「设置 → 来源 → GitHub → OAuth App Client ID」。设备码流程不需要 Client Secret。
 
 申请的权限是 `repo read:org workflow`，和 `gh auth login` 默认的一样，这样派给智能体的任务能用同一个令牌跑 `gh` 和 `git push`。断开授权只删除本机令牌；要在 GitHub 那边也撤销，去 Settings → Applications → Authorized OAuth Apps。
