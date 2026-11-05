@@ -1,6 +1,7 @@
 {
   "name": "@super-assistant/daemon",
   "version": "0.1.10",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "bin": {

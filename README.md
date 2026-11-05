@@ -337,4 +337,6 @@ pnpm check   # 类型检查 + 测试 + 构建
 
 ## 许可
 
+[MIT](LICENSE)。
+
 领域设计参考了 [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype)（MIT）。后续移植的代码会在对应文件中保留原版权声明。
