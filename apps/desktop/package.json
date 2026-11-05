@@ -1,7 +1,7 @@
 {
   "name": "@super-assistant/desktop",
   "productName": "Super-assistant",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "description": "Super-assistant desktop client: window, tray, notifications, global shortcut",
   "main": "main.cjs",

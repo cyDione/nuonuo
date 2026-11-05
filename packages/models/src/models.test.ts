@@ -287,6 +287,19 @@ describe('Jev through a multi-provider gateway', () => {
     await expect(none(request)).rejects.toThrow(/没有找到决策接口/)
   })
 
+  it('adds a missing /v1 to the base URL and explains a 401 from a gateway\'s web page', async () => {
+    const { decisionEndpoints, systemOneClient } = await import('./systemone')
+    expect(decisionEndpoints('https://magpie.example', 'typesafe')).toEqual(['https://magpie.example/v1/systemone'])
+    expect(decisionEndpoints('https://magpie.example/', 'openai-compatible')[0]).toBe('https://magpie.example/v1/systemone')
+    expect(decisionEndpoints('https://magpie.example/v1/systemone', 'typesafe')).toEqual(['https://magpie.example/v1/systemone'])
+    expect(decisionEndpoints('https://api.typesafe.ai/v1', 'typesafe')).toEqual(['https://api.typesafe.ai/v1/systemone'])
+    const request = { model: 'jev-latest', state: 's', questions: { d: { type: 'noul' as const } } }
+    const page = systemOneClient(['https://gw4.example/systemone'], 'k', {}, (async () => new Response('open the link magpie web printed', { status: 401, statusText: 'Unauthorized' })) as any)
+    await expect(page(request)).rejects.toThrow(/Base URL 可能指向了网页.*\/v1/)
+    const badKey = systemOneClient(['https://gw5.example/v1/systemone'], 'k', {}, (async () => new Response('{"error":{"message":"not an enabled key"}}', { status: 401, statusText: 'Unauthorized' })) as any)
+    await expect(badKey(request)).rejects.toThrow(/检查 API Key/)
+  })
+
   it('offers the gateway\'s Jev on the review layer even when /models does not list it, and only there', async () => {
     store = openStore(':memory:')
     let live: string[] | Error = ['group/deepseek-v4.1-flash', 'gpt-x']
