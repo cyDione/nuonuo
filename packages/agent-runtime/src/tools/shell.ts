@@ -30,9 +30,9 @@ export function shellTools(jobs: Jobs, blobs: Blobs, opts: ShellOptions) {
   }
   return {
     shell: tool({
-      description: `Run a bash command in the task's working directory. Commands still running after ${Math.round(opts.foregroundMs / 1000)}s continue in the background and their result arrives later as a message — never sleep or poll in a loop. Hard limit ${Math.round(opts.timeoutMs / 60000)} minutes.`,
-      inputSchema: z.object({ command: z.string().min(1) }),
-      execute: async ({ command }) => {
+      description: `Run a bash command in the task's working directory. With background: true it starts and returns at once (use it for builds, test suites, servers, downloads); otherwise commands still running after ${Math.round(opts.foregroundMs / 1000)}s move to the background. A background command's result arrives later as a message — never sleep or poll in a loop; job_stop ends it. Hard limit ${Math.round(opts.timeoutMs / 60000)} minutes.`,
+      inputSchema: z.object({ command: z.string().min(1), background: z.boolean().optional().describe('Start it and return immediately (asynchronous start)') }),
+      execute: async ({ command, background }) => {
         const hit = firstWords(command).find(word => opts.blocked.includes(word))
         if (hit) throw new Error(`命令 ${hit} 在这个执行环境中被禁止`)
         const decision = opts.gate ? await opts.gate(command) : { action: 'allow' as const }
@@ -41,7 +41,7 @@ export function shellTools(jobs: Jobs, blobs: Blobs, opts: ShellOptions) {
           return `[需要主人批准（${decision.approvalId}）：${decision.reason}。命令还没有执行。主人批准后它会自动运行，结果作为新消息送达；被拒绝也会通知你。先做不依赖它的部分，或者 report(progress) 后结束本轮等待。]`
         }
         const run = opts.wrap ? opts.wrap(command) : command
-        return render(await jobs.run({ sessionId: opts.sessionId, command: run, cwd: opts.cwd, env: opts.env, foregroundMs: opts.foregroundMs, timeoutMs: opts.timeoutMs, signal: opts.signal }))
+        return render(await jobs.run({ sessionId: opts.sessionId, command: run, cwd: opts.cwd, env: opts.env, foregroundMs: background ? 0 : opts.foregroundMs, timeoutMs: opts.timeoutMs, signal: opts.signal }))
       },
     }),
     job_status: tool({

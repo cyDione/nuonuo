@@ -111,7 +111,8 @@ describe('proactive intake', () => {
         expect(last).toContain('mode="silent"')
         return { calls: [{ name: 'report', input: { status: 'ready', summary: '复现了：表单为空时 submit 抛错。修复补丁在 fix.patch。' } }] }
       },
-      router: last => last.includes('proactive="true"')
+      router: last => last.startsWith('<proactive') ? { calls: [{ name: 'start_silent_task', input: { trigger_id: attr(last, 'trigger_id'), title: attr(last, 'suggested_title') ?? '看看' } }] }
+        : last.includes('proactive="true"')
         ? { calls: [{ name: 'reply', input: { ticket_id: attr(last, 'ticket_id'), text: '我注意到登录页崩溃，已经在本地复现，修复方案也准备好了，要我提 PR 吗？' } }] }
         : { text: 'nothing' },
     }
@@ -139,7 +140,8 @@ describe('proactive intake', () => {
     behaviour = {
       filter: { act: true, reason: '可能是 bug', title: '看看' },
       worker: () => ({ calls: [{ name: 'report', input: { status: 'dropped', summary: '复现不了' } }] }),
-      router: () => ({ text: 'nothing' }),
+      router: last => last.startsWith('<proactive') ? { calls: [{ name: 'start_silent_task', input: { trigger_id: attr(last, 'trigger_id'), title: attr(last, 'suggested_title') ?? '看看' } }] }
+        : ({ text: 'nothing' }),
     }
     const t = gh('bob', '偶尔会白屏？')
     engine.receive(t)
@@ -148,6 +150,29 @@ describe('proactive intake', () => {
     expect(engine.tickets()[0]!.ended?.outcome).toBe('dropped')
     expect(store.db.select().from(schema.messages).all()).toHaveLength(0)
     expect(routerCalls.filter(c => c.name === 'reply')).toHaveLength(0)
+    expect(routerCalls.filter(c => c.name === 'start_silent_task')).toHaveLength(1)
+  })
+})
+
+describe('proactive routing', () => {
+  it('the router can still decline an event the filter picked; it cannot start silent work on anything else', async () => {
+    const { engine, screener } = setup({ sources: true })
+    saveProactiveSettings(store, { mode: 'auto' })
+    const picked = gh('carol', '这个 API 好像慢了')
+    const other = gh('dave', '随便聊聊')
+    behaviour = {
+      filter: { act: true, reason: '可能是性能问题' },
+      router: last => last.startsWith('<proactive')
+        ? { calls: [{ name: 'start_silent_task', input: { trigger_id: other.id, title: 'x' } }, { name: 'ignore', input: { trigger_ids: [attr(last, 'trigger_id')], reason: '已经有人在看' } }] }
+        : { text: 'nothing' },
+    }
+    engine.receive(picked)
+    engine.receive(other)
+    await screener.screen(picked.id)
+    await settle()
+    expect(engine.tickets()).toHaveLength(0)
+    const d = store.db.select().from(schema.triggers).all().find(t => t.id === picked.id)!.disposition as any
+    expect(d).toMatchObject({ ignored: 'router', reason: '已经有人在看', proactive: { act: true } })
   })
 })
 

@@ -34,6 +34,22 @@ export const LAYER_PRESETS: readonly LayerPreset[] = [{
     'deepseek-flash': { input: 0.3, cacheRead: 0.006, output: 1.2 },
     'deepseek-v4-pro': { input: 1.32, cacheRead: 0.044, output: 3.96 },
   },
+}, {
+  // For testing: every layer on V4.1 Flash (start with SUPERAGENT_PRESET=deepseek-flash). Only the reasoning effort differs.
+  id: 'deepseek-flash',
+  label: 'DeepSeek 全部 Flash（测试）',
+  kind: 'deepseek',
+  layers: {
+    router: { model: 'deepseek-flash', reasoning: 'high' },
+    worker: { model: 'deepseek-flash', reasoning: 'high' },
+    subagent: { model: 'deepseek-flash', reasoning: 'high' },
+    reviewer: { model: 'deepseek-flash', reasoning: 'high' },
+    watchdog: { model: 'deepseek-flash', reasoning: 'high' },
+    summarizer: { model: 'deepseek-flash', reasoning: 'low' },
+    vision: { model: 'deepseek-flash', reasoning: 'high' },
+    filter: { model: 'deepseek-flash', reasoning: 'low' },
+  },
+  prices: { 'deepseek-flash': { input: 0.3, cacheRead: 0.006, output: 1.2 } },
 }]
 
 /**

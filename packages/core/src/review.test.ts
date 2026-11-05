@@ -95,6 +95,18 @@ describe('Reviewer', () => {
     expect(audit()).toEqual([['reviewer', 'escalate'], ['owner', 'allow']])
   })
 
+  it('blocks any command that reads credentials, whatever the settings', async () => {
+    const { engine, reviewer, start } = setup(() => ({ text: JSON.stringify({ decision: 'allow', reason: 'ok' }) }))
+    kvSet(store, 'settings:review', { threshold: 'off', allow: ['.*'] })
+    const ticket = start()
+    await settle()
+    const t = engine.ticket(ticket.id)
+    for (const cmd of ['cat ~/.git-credentials | sed s/=.*//', 'ls -la ~/.ssh', 'gh auth token', 'cat /home/me/.config/gh/hosts.yml', 'git credential fill', 'cat ~/.aws/credentials'])
+      expect(await reviewer.gateShell(t, ticket.sessionId, cmd, t.directory), cmd).toMatchObject({ action: 'block', by: 'rule' })
+    expect(await reviewer.gateShell(t, ticket.sessionId, 'ls -la && cat README.md', t.directory)).toMatchObject({ action: 'allow' })
+    engine.stopTask(ticket.id, 'person')
+  })
+
   it('never asks the owner during silent work: the step is blocked instead', async () => {
     const { engine, reviewer, triggerId } = setup(() => ({ text: JSON.stringify({ decision: 'ask_owner', reason: '要推送' }) }))
     const ticket = engine.startProactive(triggerId, { title: '悄悄看看', reason: '策略' })

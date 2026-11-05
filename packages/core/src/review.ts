@@ -39,6 +39,24 @@ const EXTERNAL: [RegExp, string][] = [
   [/\b(sendmail|mailx?)\b/, '发送邮件'],
 ]
 
+/**
+ * Credentials never enter a model's context (article §8.4): commands that read credential stores are blocked outright,
+ * whatever the settings say. Tools like git and gh still use the credentials themselves; the agent never sees them.
+ */
+const CREDENTIALS: [RegExp, string][] = [
+  [/(~|\$HOME|\/home\/[^/\s]+|\/root|\/Users\/[^/\s]+)\/\.ssh\b|\bid_(rsa|ed25519|ecdsa|dsa)\b/, 'SSH 密钥'],
+  [/\.git-credentials\b|\bgit\s+credential\b|\.netrc\b/, 'git 凭据'],
+  [/\bgh\s+auth\s+(token|status\s+[^;&|]*--show-token)\b|\.config\/gh\/hosts\.ya?ml\b/, 'GitHub 令牌'],
+  [/\.aws\/credentials\b|\.config\/gcloud\b|\.azure\/|\.kube\/config\b/, '云服务凭据'],
+  [/\.docker\/config\.json\b|\.npmrc\b|\.pypirc\b/, '包仓库或镜像仓库凭据'],
+  [/\bsecurity\s+(find|dump)-(generic|internet)-password\b|\bsecret-tool\s+lookup\b|\bgpg\b[^;&|]*--export-secret/, '系统钥匙串或私钥'],
+  [/\/etc\/(shadow|sudoers)\b|\.superagent\/(secrets|token)\b/, '系统或智能体自身的秘密'],
+]
+
+export function credentialAccess(command: string): string | undefined {
+  return CREDENTIALS.find(([re]) => re.test(command))?.[1]
+}
+
 /** Classifies a shell command by its most consequential part. Heuristic: the reviewer model sees everything it flags. */
 export function classifyShell(command: string): { risk: Risk; reasons: string[] } {
   const destructive = DESTRUCTIVE.filter(([re]) => re.test(command)).map(([, why]) => why)
@@ -108,6 +126,12 @@ export class Reviewer {
     if (denied) {
       this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk, decision: 'block', reason: `命中禁止规则 /${denied}/` })
       return { action: 'block', by: 'rule', reason: `命中禁止规则 /${denied}/` }
+    }
+    const secret = credentialAccess(command)
+    if (secret) {
+      const reason = `命令会读取${secret}。智能体不接触凭据本身：需要访问权限时，在结果里说明需要什么，由主人配置`
+      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk: 'destructive', decision: 'block', reason })
+      return { action: 'block', by: 'rule', reason }
     }
     if (risk === 'normal') return { action: 'allow', by: 'normal' }
     const allowed = matches(settings.allow)

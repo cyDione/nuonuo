@@ -82,7 +82,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     const external = trigger.source !== 'webchat'
     const url = (trigger.meta as { url?: string }).url
     const info = external ? ext.threadInfo?.(trigger.threadId) : undefined
-    return [`<${tag} trigger_id="${trigger.id}" source="${trigger.source}"${external ? ` from="${trigger.actor}"` : ''} conversation_id="${cnv}" conversation="${conversationTitle(cnv)}" at="${new Date(trigger.at).toISOString()}"${url ? ` url="${url}"` : ''}${extra}>`,
+    return [`<${tag} trigger_id="${trigger.id}" source="${trigger.source}"${external ? ` from="${trigger.actor}"` : ''} conversation_id="${cnv}" conversation="${conversationTitle(cnv)}"${external ? ` thread="${trigger.threadId}"` : ''} at="${new Date(trigger.at).toISOString()}"${url ? ` url="${url}"` : ''}${extra}>`,
       info ? `thread: ${info}` : '',
       cnv ? `recent context:\n${recent(cnv, trigger.at) || '  （新对话）'}` : '',
       tasks ? `tasks in this conversation:\n${tasks}` : '',
@@ -92,7 +92,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
   runtime.registerResolver('tkt', ref => { try { return engine.describeTicket(engine.ticket(ref)) } catch { return undefined } })
   runtime.registerResolver('trg', ref => {
     const t = store.db.select().from(schema.triggers).where(eq(schema.triggers.id, ref)).get()
-    return t && `<trigger id="${t.id}" source="${t.source}" from="${t.actor}" conversation="${engine.conversationOfThread(t.threadId) ?? ''}" at="${new Date(t.at).toISOString()}" disposition='${JSON.stringify(t.disposition)}'>\n${t.text}\n</trigger>`
+    return t && `<trigger id="${t.id}" source="${t.source}" from="${t.actor}" thread="${t.threadId}" conversation="${engine.conversationOfThread(t.threadId) ?? ''}" at="${new Date(t.at).toISOString()}" disposition='${JSON.stringify(t.disposition)}'>\n${t.text}\n</trigger>`
   })
   runtime.registerResolver('cnv', (ref, page = 1) => {
     const rows = store.db.select().from(schema.messages).where(eq(schema.messages.conversationId, ref)).orderBy(asc(schema.messages.createdAt)).all()
@@ -147,6 +147,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
   // no message gets one reminder carrying that text, so it is sent properly (or dropped) instead of lost.
   const SPEAKING = new Set(['reply', 'new_conversation', 'start_task', 'attach', 'ignore', 'stop_task'])
   const ANSWERABLE = new Set(['trigger', 'handback', 'report', 'approval', 'unsent'])
+  SPEAKING.add('start_silent_task')
   let spoke = false
   let answerable = false
   let reminded = false
@@ -183,6 +184,17 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
             return { ok: false, error: `Not sent: about ${length} words; chat replies must stay under ${limit}. Say only the outcome and key facts${ticket_id ? ' — the full result is attached automatically' : ''}, then call reply again.` }
           }
           return { ok: true, message_id: engine.reply({ conversationId, text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}) }) }
+        },
+      }),
+      start_silent_task: tool({
+        description: 'Start silent work on an event that passed the proactive filter (<proactive>): a helper investigates or prepares something locally, posts nothing anywhere, and reports back with proactive="true". Use ignore instead if it is not worth it after all.',
+        inputSchema: z.object({ trigger_id: z.string(), title: z.string().min(1).max(40).describe("Short title in the owner's language"), goal: z.string().max(300).optional() }),
+        execute: async ({ trigger_id, title, goal }) => {
+          const trigger = store.db.select().from(schema.triggers).where(eq(schema.triggers.id, trigger_id)).get()
+          const verdict = (trigger?.disposition as { proactive?: { act?: boolean; reason?: string } } | undefined)?.proactive
+          if (!verdict?.act) return { ok: false, error: 'Only events the proactive filter picked can get silent work.' }
+          const ticket = engine.startProactive(trigger_id, { title, reason: verdict.reason ?? '', ...(goal ? { goal } : {}) })
+          return { ok: true, ticket_id: ticket.id }
         },
       }),
       ignore: tool({
@@ -286,6 +298,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         try { title = engine.ticket(p.ticketId).title } catch { /* gone */ }
         return `<approval approval_id="${p.approvalId}" ticket_id="${p.ticketId}" title="${title}" conversation_id="${(() => { try { return engine.conversationOfThread(engine.ticket(p.ticketId).threadId) ?? '' } catch { return '' } })()}">\nThe worker wants to run: ${String(p.command).slice(0, 500)}\nWhy it needs the owner: ${p.reason}\n</approval>`
       }
+      case 'proactive': return triggerCard(p.triggerId, 'proactive', ` filter_reason="${String(p.reason ?? '').replace(/"/g, "'")}"${p.title ? ` suggested_title="${String(p.title).replace(/"/g, "'")}"` : ''}${p.goal ? ` suggested_goal="${String(p.goal).replace(/"/g, "'")}"` : ''}`)
       case 'ticket-ended': return `<task_ended ticket_id="${p.ticketId}" outcome="${p.outcome}" by="${p.by}" />`
       case 'recovery': return '<recovery>服务刚刚重启。检查 list_tasks，不要重复已经发出的消息或已经开始的任务。</recovery>'
       case 'unsent': return `<unsent>Your last turn ended with plain text and no message, so the owner saw NOTHING. Only the reply tool posts messages. If the text below was meant for the owner, send it now with reply (conversation_id, and ticket_id when it is about finished work); if not, end your turn without output.\n---\n${p.text}\n</unsent>`
@@ -359,6 +372,11 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
             stoppedSubagents.add(subagent_id)
             return { ok: true }
           },
+        }),
+        unfollow_thread: tool({
+          description: 'Stop receiving events from a thread you followed but no longer need (not your own origin thread).',
+          inputSchema: z.object({ thread_id: z.string() }),
+          execute: async ({ thread_id }) => { engine.unfollow(ticket.id, thread_id); return { ok: true } },
         }),
         handback: tool({
           description: 'Hand an owner message back to the main agent because it is not about this task. Do not answer it yourself.',
@@ -584,12 +602,17 @@ export function proactiveTool(store: Store, _by: string) {
       mode: z.enum(['off', 'observe', 'auto']).optional(),
       strategy_append: z.string().max(1_000).optional().describe('One line added to the strategy'),
       strategy_replace: z.string().max(4_000).optional().describe('The whole new strategy'),
+      ignore_actors_add: z.array(z.string().min(1).max(100)).max(20).optional().describe('Fast Path rule: accounts never screened'),
+      ignore_actors_remove: z.array(z.string()).max(20).optional(),
+      sources: z.array(z.string()).max(20).optional().describe('Fast Path rule: sources whose events are screened ([] = all)'),
     }),
-    execute: async ({ mode, strategy_append, strategy_replace }) => {
+    execute: async ({ mode, strategy_append, strategy_replace, ignore_actors_add, ignore_actors_remove, sources }) => {
       const cur = proactiveSettings(store)
       const strategy = strategy_replace ?? (strategy_append ? [cur.strategy, strategy_append.startsWith('-') ? strategy_append : `- ${strategy_append}`].filter(Boolean).join('\n') : cur.strategy)
-      const next = saveProactiveSettings(store, { ...(mode ? { mode } : {}), strategy })
-      return { ok: true, mode: next.mode }
+      const drop = new Set((ignore_actors_remove ?? []).map(a => a.toLowerCase()))
+      const ignoreActors = [...new Set([...cur.ignoreActors, ...(ignore_actors_add ?? [])])].filter(a => !drop.has(a.toLowerCase()))
+      const next = saveProactiveSettings(store, { ...(mode ? { mode } : {}), strategy, ignoreActors, ...(sources ? { sources } : {}) })
+      return { ok: true, mode: next.mode, ignore_actors: next.ignoreActors, sources: next.sources }
     },
   })
 }

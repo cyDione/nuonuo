@@ -257,6 +257,14 @@ export class Engine {
     this.changed(ticketId)
   }
 
+  /** A task stops following a thread it no longer needs; its origin thread stays. */
+  unfollow(ticketId: string, threadId: string): void {
+    const ticket = this.ticket(ticketId)
+    if (threadId === ticket.threadId) throw new DomainError('invalid', '不能取消订阅任务自己的来源线程')
+    this.store.db.delete(schema.subscriptions).where(and(eq(schema.subscriptions.ticketId, ticketId), eq(schema.subscriptions.threadId, threadId))).run()
+    this.changed(ticketId)
+  }
+
   /** Threads a task follows, with what a source needs to poll them. */
   followed(): { threadId: string; ticketId: string; kind: string; closed: unknown; meta: Record<string, unknown> }[] {
     return this.store.sqlite.prepare(`SELECT s.thread_id AS threadId, s.ticket_id AS ticketId, s.kind, s.closed, t.meta FROM subscriptions s
@@ -357,9 +365,11 @@ export class Engine {
    * task, a message in the conversation picks up the one task that finished there in the last minutes and was not delivered.
    */
   private takeDelivery(threadId: string, ticketId?: string): Delivery | undefined {
+    // A finished result, or partial work (blocked / failed) that already produced files.
+    const deliverable = (t: Ticket) => Boolean(t.latestReport && (t.latestReport.status === 'ready' || (['blocked', 'failed'].includes(t.latestReport.status) && t.latestReport.files?.length)))
     const candidates = ticketId ? [this.ticket(ticketId)]
-      : this.subscribers(threadId).filter(t => t.latestReport?.status === 'ready' && this.now() - t.latestReport.at < 10 * 60_000)
-    const fresh = candidates.filter(t => t.latestReport?.status === 'ready' && kvGet<number>(this.store, `ticket:delivered:${t.id}`) !== t.latestReport.at)
+      : this.subscribers(threadId).filter(t => deliverable(t) && this.now() - t.latestReport!.at < 10 * 60_000)
+    const fresh = candidates.filter(t => deliverable(t) && kvGet<number>(this.store, `ticket:delivered:${t.id}`) !== t.latestReport!.at)
     if (fresh.length !== 1) return undefined
     const t = fresh[0]!
     const report = t.latestReport!
@@ -494,16 +504,16 @@ export class Engine {
     this.store.atomic(() => { for (const id of triggerIds) this.setDisposition(id, { ignored: 'router', reason }) })
   }
 
-  /** Records the Slow Path's verdict on an unaddressed event; in auto mode a silent task starts. */
-  proactiveDecision(triggerId: string, verdict: FilterVerdict, mode: ProactiveMode | 'off'): Ticket | undefined {
-    let ticket: Ticket | undefined
+  /** Records the Slow Path's verdict on an unaddressed event; in auto mode the event goes on to the Router. */
+  proactiveDecision(triggerId: string, verdict: FilterVerdict, mode: ProactiveMode | 'off'): void {
     this.store.atomic(() => {
       this.setDisposition(triggerId, { screening: false, proactive: { act: verdict.act, reason: verdict.reason, mode, at: this.now(),
         ...(verdict.title ? { title: verdict.title } : {}), ...(verdict.goal ? { goal: verdict.goal } : {}) } })
-      if (verdict.act && mode === 'auto') ticket = this.startProactive(triggerId, { title: verdict.title || '主动处理', reason: verdict.reason, ...(verdict.goal ? { goal: verdict.goal } : {}) })
+      // As in the article's figure, an event that passes both filters is routed by the Router, which decides whether to
+      // start silent work (start_silent_task) or leave it (ignore); it is not dispatched behind the Router's back.
+      if (verdict.act && mode === 'auto') this.runtime.push(ROUTER_SESSION, { type: 'proactive', triggerId, reason: verdict.reason, title: verdict.title, goal: verdict.goal }, { wake: true })
     })
     this.bus.emit({ type: 'activity.updated' })
-    return ticket
   }
 
   /**

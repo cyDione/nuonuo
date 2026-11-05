@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ModelFactory } from './factory'
 import { ModelHub } from './hub'
-import { resolveRole, RoleConfigSchema } from './roles'
+import { resolveRole, ROLE_IDS, RoleConfigSchema } from './roles'
 import { FileSecrets, MemorySecrets } from './secrets'
 
 const usage = (input: number, output: number): LanguageModelV4Usage => ({
@@ -154,6 +154,12 @@ describe('environment providers and presets', () => {
     await generateText({ model: hub.model('router'), prompt: 'x' })
     expect(seen).toEqual(['sk-env-deepseek-5678'])
     expect(hub.getProvider(id!).options.prices?.['deepseek-flash']?.output).toBe(1.2)
+    // The test setup: every layer on V4.1 Flash, mapped onto the gateway's model name.
+    for (const role of ROLE_IDS) if (role !== 'embedding') hub.saveRole(role, { chain: [], enabled: true })
+    expect(hub.applyPreset('deepseek-flash', id!, { available: ['group/deepseek-v4.1-flash'] })).toBe(true)
+    for (const role of ['router', 'worker', 'subagent', 'reviewer', 'watchdog', 'summarizer', 'vision', 'filter'] as const) {
+      expect(hub.resolve(role)?.config.chain[0]?.model, role).toBe('group/deepseek-v4.1-flash')
+    }
   })
 })
 

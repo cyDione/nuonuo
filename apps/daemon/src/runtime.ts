@@ -4,7 +4,7 @@ import { browserExtension, combineExtensions, Engine, Instructions, instructions
 import { Effects, kvGet, openStore, type Store } from '@super-agent/db'
 import { gmailPlugin, telegramPlugin } from '@super-agent/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-agent/sources'
-import { EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
+import { EnvAwareSecrets, LAYER_PRESETS, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DaemonConfig } from './config'
@@ -151,7 +151,9 @@ export async function bootstrapModels(hub: ModelHub): Promise<void> {
   if (!deepseek || Object.values(hub.roleConfigs()).some(c => c.chain.length > 0)) return
   // Gateways rename models; map the preset onto what this endpoint lists (best effort, offline keeps the official ids).
   const available = await hub.listModels(deepseek.id).catch(() => undefined)
-  if (hub.applyPreset('deepseek', deepseek.id, { onlyIfEmpty: true, ...(available ? { available } : {}) })) {
-    console.log(`已为 ${deepseek.name}${deepseek.keyEnv ? `（${deepseek.keyEnv}）` : ''} 应用 DeepSeek 推荐分层配置`)
+  // SUPERAGENT_PRESET picks another layer setup (e.g. deepseek-flash: every layer on V4.1 Flash, for testing).
+  const preset = process.env.SUPERAGENT_PRESET?.trim() || 'deepseek'
+  if (hub.applyPreset(preset, deepseek.id, { onlyIfEmpty: true, ...(available ? { available } : {}) })) {
+    console.log(`已为 ${deepseek.name}${deepseek.keyEnv ? `（${deepseek.keyEnv}）` : ''} 应用分层配置：${LAYER_PRESETS.find(p => p.id === preset)?.label ?? preset}`)
   }
 }
