@@ -5,6 +5,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Download, ExternalLink, X } from 'lucide-react'
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -74,7 +75,8 @@ export function ArtifactModal({ id, name, onClose }: { id: string; name: string;
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
   }, [onClose])
-  return <div className="anim-fade fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4 " onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+  // Portalled to <body>: a transformed or clipped ancestor (list rows animate in) would otherwise trap the fixed overlay.
+  return createPortal(<div className="anim-fade fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4 " onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
     <div role="dialog" aria-modal="true" aria-label={name} className="anim-pop flex max-h-[92vh] w-full max-w-4xl flex-col rounded-3xl border border-line bg-panel shadow-2xl">
       <div className="flex items-center gap-2 border-b border-line px-5 py-3">
         <span className="min-w-0 flex-1 truncate font-display font-semibold">{name}</span>
@@ -84,5 +86,5 @@ export function ArtifactModal({ id, name, onClose }: { id: string; name: string;
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-5"><ArtifactBody id={id} name={name} /></div>
     </div>
-  </div>
+  </div>, document.body)
 }
