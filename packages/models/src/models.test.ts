@@ -216,3 +216,32 @@ describe('guessModelKind', () => {
       expect(guessModelKind(m), m).toBe('language')
   })
 })
+
+describe('decision models (TypeSafe Jev)', () => {
+  it('may only serve the review layer, and the main model is not replaced by it', () => {
+    store = openStore(':memory:')
+    const hub = new ModelHub(store, new MemorySecrets(), { language: () => { throw new Error('x') }, embedding: () => { throw new Error('x') } })
+    const llm = hub.createProvider({ kind: 'openai', name: 'o', apiKey: 'k' })
+    const jev = hub.createProvider({ kind: 'typesafe', name: 'TypeSafe', apiKey: 'k' })
+    expect(() => hub.saveRole('router', { chain: [{ providerId: jev.id, model: 'jev-latest' }] })).toThrow(/决策模型，只能用于审核/)
+    hub.saveRole('router', { chain: [{ providerId: llm.id, model: 'm' }] })
+    expect(hub.usesDecisionModel('reviewer')).toBe(false)
+    hub.saveRole('reviewer', { chain: [{ providerId: jev.id, model: 'jev-latest' }] })
+    expect(hub.usesDecisionModel('reviewer')).toBe(true)
+  })
+
+  it('posts state and questions to /systemone with the key, and surfaces HTTP errors as API errors', async () => {
+    const { systemOneClient } = await import('./systemone')
+    const seen: { url: string; init: RequestInit }[] = []
+    const ok = systemOneClient(null, 'sk-1', {}, (async (url: string, init: RequestInit) => {
+      seen.push({ url, init })
+      return new Response(JSON.stringify({ model: 'jev-1', answers: { d: { type: 'noul', noul: 0.9 } } }), { status: 200 })
+    }) as any)
+    expect(await ok({ model: 'jev-latest', state: 's', questions: { d: { type: 'noul', instructions: 'x' } } })).toMatchObject({ answers: { d: { noul: 0.9 } } })
+    expect(seen[0]!.url).toBe('https://api.typesafe.ai/v1/systemone')
+    expect((seen[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer sk-1')
+    const busy = systemOneClient('https://example.test/v1/', 'k', {}, (async () => new Response('{"error":"overloaded"}', { status: 529 })) as any)
+    const error = await busy({ model: 'jev-latest', state: 's', questions: { d: { type: 'noul' } } }).catch(e => e)
+    expect(APICallError.isInstance(error) && error.statusCode === 529 && error.isRetryable).toBe(true)
+  })
+})

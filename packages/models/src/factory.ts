@@ -6,6 +6,7 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { EmbeddingModelV4, LanguageModelV4 } from '@ai-sdk/provider'
 import type { ProviderKind } from './catalog'
+import { SYSTEM_ONE_BASE, systemOneClient, type SystemOneClient } from './systemone'
 
 export interface ProviderRecord {
   id: string
@@ -26,6 +27,8 @@ export interface ProviderOptions {
 export type ModelFactory = {
   language(provider: ProviderRecord, apiKey: string | undefined, model: string): LanguageModelV4
   embedding(provider: ProviderRecord, apiKey: string | undefined, model: string): EmbeddingModelV4
+  /** Decision models (TypeSafe Jev). Defaults to the HTTP client. */
+  systemOne?(provider: ProviderRecord, apiKey: string | undefined): SystemOneClient
 }
 
 function sdkProvider(p: ProviderRecord, apiKey: string | undefined) {
@@ -39,6 +42,7 @@ function sdkProvider(p: ProviderRecord, apiKey: string | undefined) {
     case 'openai-compatible':
       if (!base) throw new Error(`provider ${p.name} needs a base URL`)
       return createOpenAICompatible({ name: p.id, baseURL: base, apiKey: apiKey || 'none', headers, includeUsage: true })
+    case 'typesafe': throw new Error(`${p.name} 是决策模型（TypeSafe Jev），没有对话接口，只能用于审核层`)
   }
 }
 
@@ -50,6 +54,7 @@ export const defaultFactory: ModelFactory = {
     if (!make) throw new Error(`${p.kind} has no embedding models`)
     return make.call(provider, model) as EmbeddingModelV4
   },
+  systemOne: (p, key) => systemOneClient(p.baseUrl, key, p.options.headers),
 }
 
 const DEFAULT_BASE: Partial<Record<ProviderKind, string>> = {
@@ -57,6 +62,7 @@ const DEFAULT_BASE: Partial<Record<ProviderKind, string>> = {
   openai: 'https://api.openai.com/v1',
   google: 'https://generativelanguage.googleapis.com/v1beta',
   deepseek: 'https://api.deepseek.com',
+  typesafe: SYSTEM_ONE_BASE,
 }
 
 /** Live model ids from the provider's list endpoint. */

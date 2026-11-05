@@ -126,7 +126,8 @@ function rejectsResponseFormat(error: unknown): boolean {
 
 const roleLabel = (role: RoleId) => roleSpec(role).label.replace(/（.*）$/, '')
 
-function toStructuredError(error: unknown, role: RoleId): StructuredCallError {
+/** Turns a model-layer failure into a StructuredCallError whose message says what went wrong, in the owner's words. */
+export function toStructuredError(error: unknown, role: RoleId): StructuredCallError {
   if (error instanceof StructuredCallError) return error
   const cause = rootCause(error)
   const label = roleLabel(role)

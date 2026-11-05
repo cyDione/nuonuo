@@ -28,6 +28,9 @@ export const ROLES: readonly RoleSpec[] = [
   { id: 'vision', label: '视觉（Vision）', duty: '截图与网页理解', advice: '多模态；为空时用 Worker', inherits: 'worker', kind: 'language' },
 ]
 
+/** Layers that may use a decision model (TypeSafe Jev) instead of a language model. */
+export const DECISION_ROLES: readonly RoleId[] = ['reviewer']
+
 export const roleSpec = (id: RoleId): RoleSpec => ROLES.find(r => r.id === id)!
 
 export const ModelRefSchema = z.object({ providerId: z.string().min(1), model: z.string().trim().min(1) }).strict()

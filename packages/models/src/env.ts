@@ -12,6 +12,7 @@ export const ENV_PROVIDERS: readonly EnvProviderSpec[] = [
   { env: ['OPENAI_API_KEY'], kind: 'openai', name: 'OpenAI', baseUrlEnv: 'OPENAI_BASE_URL' },
   { env: ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'], kind: 'google', name: 'Google Gemini' },
   { env: ['DEEPSEEK_API_KEY'], kind: 'deepseek', name: 'DeepSeek', baseUrlEnv: 'DEEPSEEK_BASE_URL' },
+  { env: ['TYPESAFE_API_KEY'], kind: 'typesafe', name: 'TypeSafe Jev', baseUrl: 'https://api.typesafe.ai/v1' },
   { env: ['OPENROUTER_API_KEY'], kind: 'openai-compatible', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1' },
   { env: ['DASHSCOPE_API_KEY'], kind: 'openai-compatible', name: '通义千问 DashScope', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
   { env: ['MOONSHOT_API_KEY'], kind: 'openai-compatible', name: 'Moonshot Kimi', baseUrl: 'https://api.moonshot.cn/v1' },

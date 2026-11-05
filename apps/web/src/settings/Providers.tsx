@@ -5,7 +5,7 @@ import { api, type Preset, type Price, type Provider } from '../api'
 import { Badge, Button, Card, Empty, Field, Input, Modal } from '../ui'
 import { useCatalog, useModelOptions, useProviders } from './hooks'
 
-const KIND_LABEL: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Gemini', deepseek: 'DeepSeek', 'openai-compatible': 'OpenAI 兼容' }
+const KIND_LABEL: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Gemini', deepseek: 'DeepSeek', 'openai-compatible': 'OpenAI 兼容', typesafe: 'TypeSafe（决策模型）' }
 
 export function Providers() {
   const providers = useProviders()

@@ -4,7 +4,7 @@ import { browserExtension, combineExtensions, Distiller, personaPrompt, Engine, 
 import { Effects, kvGet, kvSet, openStore, type Store } from '@super-assistant/db'
 import { gmailPlugin, telegramPlugin } from '@super-assistant/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-assistant/sources'
-import { EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-assistant/models'
+import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-assistant/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolSet } from 'ai'
@@ -205,7 +205,7 @@ function announced(tools: ToolSet, after: (name: string, result: unknown) => voi
 export async function bootstrapModels(hub: ModelHub, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   hub.syncEnvProviders()
   const model = env.SUPER_ASSISTANT_MODEL?.trim()
-  const provider = hub.listProviders().find(p => p.keyEnv && p.hasKey)
+  const provider = hub.listProviders().find(p => p.keyEnv && p.hasKey && !DECISION_KINDS.includes(p.kind))
   if (!model || !provider) return
   if (hub.applyDefaultModel(provider.id, model)) console.log(`已将各层模型设为 ${provider.name} 的 ${model}（SUPER_ASSISTANT_MODEL）`)
 }
