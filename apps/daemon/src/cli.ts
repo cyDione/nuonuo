@@ -28,18 +28,26 @@ program.command('start').description('启动本机服务（仅监听 127.0.0.1�
   .action(async (opts: { port?: number; open: boolean; dev?: boolean }) => {
     const config = resolveConfig(opts)
     let stopping = false
+    let child: ReturnType<typeof spawn> | undefined
     // After a self-update from the web UI (when not run by systemd): stop, then run the new version in this terminal.
+    const launch = () => {
+      if (child) return
+      const args = process.argv.slice(2)
+      child = spawn(process.execPath, [entry, ...args, ...(args.includes('--no-open') ? [] : ['--no-open'])], { stdio: 'inherit' })
+      // Ctrl+C reaches the child directly (same process group); a SIGTERM to this process is passed on.
+      process.removeAllListeners('SIGINT').on('SIGINT', () => {})
+      process.removeAllListeners('SIGTERM').on('SIGTERM', () => child?.kill('SIGTERM'))
+      child.on('error', error => { console.error(`无法启动新版本：${error.message}`); process.exit(1) })
+      child.on('exit', code => process.exit(code ?? 0))
+    }
     const restart = async () => {
       if (stopping) return
       stopping = true
       console.log('已安装新版本，正在重启…')
-      await started.stop()
-      const args = process.argv.slice(2)
-      const child = spawn(process.execPath, [entry, ...args, ...(args.includes('--no-open') ? [] : ['--no-open'])], { stdio: 'inherit' })
-      // Ctrl+C reaches the child directly (same process group); a SIGTERM to this process is passed on.
-      process.removeAllListeners('SIGINT').on('SIGINT', () => {})
-      process.removeAllListeners('SIGTERM').on('SIGTERM', () => child.kill('SIGTERM'))
-      child.on('exit', code => process.exit(code ?? 0))
+      // A shutdown that hangs must not stop the new version from starting: launch anyway once the deadline passes.
+      const deadline = setTimeout(() => { console.error('停止超时，直接启动新版本'); launch() }, 8_000)
+      try { await started.stop() } catch (error) { console.error(error instanceof Error ? error.message : error) } finally { clearTimeout(deadline) }
+      launch()
     }
     const started = await startDaemon(config, { restart: () => { void restart() } })
     console.log(`Super-assistant ${VERSION} 已启动`)
@@ -47,11 +55,15 @@ program.command('start').description('启动本机服务（仅监听 127.0.0.1�
     console.log(`  密钥存储  ${started.runtime.secrets.backend}${started.runtime.secretsNote ? `（${started.runtime.secretsNote}）` : ''}`)
     console.log(`  登录链接  ${config.dev ? started.loginUrl.replace(started.url, 'http://localhost:5173') : started.loginUrl}`)
     if (opts.open && !config.dev) openBrowser(started.loginUrl)
-    const stop = async () => {
-      if (stopping) return
+    const stop = async (signal: NodeJS.Signals) => {
+      // A second Ctrl+C means "I don't care how far you got": exit now instead of ignoring it.
+      if (stopping) { console.error(`\n再次收到 ${signal}，强制退出`); process.exit(130) }
       stopping = true
       console.log('正在停止…')
-      await started.stop()
+      const deadline = setTimeout(() => { console.error('停止超时，强制退出'); process.exit(1) }, 15_000)
+      deadline.unref()
+      try { await started.stop() } catch (error) { console.error(error instanceof Error ? error.message : error) }
+      clearTimeout(deadline)
       process.exit(0)
     }
     process.on('SIGINT', stop)

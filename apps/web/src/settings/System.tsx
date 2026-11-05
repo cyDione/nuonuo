@@ -94,7 +94,7 @@ function UpdateCard() {
   const check = useMutation({ mutationFn: () => api.post<UpdateStatus>('/update/check'), onSuccess: data => qc.setQueryData(['update'], data) })
   const start = useMutation({
     mutationFn: () => api.post<UpdateStatus>('/update'),
-    onSuccess: data => { qc.setQueryData(['update'], data); setUpdating({ from: data.current, target: data.run?.target ?? '' }) },
+    onSuccess: data => { qc.setQueryData(['update'], data); setLost(false); setUpdating({ from: data.current, target: data.run?.target ?? '' }) },
   })
   const s = status.data
   // The service restarts mid-update: requests fail for a moment, then the new version answers.
@@ -105,10 +105,22 @@ function UpdateCard() {
     if (s && s.current !== updating.from && !reloaded.current) { reloaded.current = true; setTimeout(() => location.reload(), 800) }
     if (s?.run?.state === 'failed') setUpdating(null)
   }, [status.dataUpdatedAt, status.errorUpdatedAt])
+  // Restarting is either quick or broken. After a while say what happened instead of showing 正在重启 forever.
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    if (!updating) { setSlow(false); return }
+    const t = setTimeout(() => setSlow(true), 45_000)
+    return () => clearTimeout(t)
+  }, [updating])
 
   if (!s) return null
   const running = Boolean(updating) || s.run?.state === 'running'
   const done = s && updating && s.current !== updating.from
+  const stuck = running && slow && Boolean(updating)
+  const stuckText = lost
+    ? '服务没有回来：在终端运行 super-assistant start，或用 systemctl --user status super-assistant 查看原因'
+    : s.current === updating?.from ? `已安装 ${updating?.target}，但服务仍报告 ${s.current}：安装包与版本号不符，或重启没有生效`
+    : '已安装更新，但没有检测到服务重启：请手动重启并查看服务日志'
   return <Card className="space-y-2 p-4">
     <div className="flex flex-wrap items-center gap-3">
       <div className="min-w-0 flex-1">
@@ -119,7 +131,7 @@ function UpdateCard() {
         </div>
         <div className="text-xs text-muted">
           {done ? `已更新到 ${s.current}，正在刷新页面…`
-            : running ? (lost ? '正在重启服务…' : `正在安装 ${updating?.target || s.run?.target}…`)
+            : running ? (stuck ? stuckText : lost ? '正在重启服务…' : `正在安装 ${updating?.target || s.run?.target}…`)
             : s.checkError ? <span className="text-danger">检查失败：{s.checkError}</span>
             : s.available ? <>当前 {s.current}，最新 {s.latest?.tag}{s.latest?.url && <> · <a className="underline" href={s.latest.url} target="_blank" rel="noreferrer">更新说明</a></>}。{s.hint}。</>
             : s.checkedAt ? `当前 ${s.current} · 上次检查 ${new Date(s.checkedAt).toLocaleString()}`
@@ -129,6 +141,7 @@ function UpdateCard() {
         {s.run?.state === 'failed' && !running && <div className="mt-0.5 text-xs text-danger">更新失败：{s.run.error}</div>}
       </div>
       <Button size="sm" variant="ghost" onClick={() => check.mutate()} disabled={check.isPending || running}><RefreshCw size={13} className={check.isPending ? 'animate-spin' : ''} />检查更新</Button>
+      {stuck && <Button size="sm" variant="ghost" onClick={() => setUpdating(null)}>知道了</Button>}
       {s.available && s.canUpdate && <Button size="sm" variant="primary" onClick={() => start.mutate()} disabled={start.isPending || running}><Download size={13} />立即更新</Button>}
     </div>
     {start.error && <div className="text-xs text-danger">{(start.error as Error).message}</div>}
