@@ -138,7 +138,7 @@ export async function setNotifications(on: boolean): Promise<boolean> {
 const notified = new Set<string>()
 async function maybeNotify(conversationId: string, messageId: string) {
   // Inside the desktop app, the app shows native notifications itself.
-  if ((window as { superagentDesktop?: unknown }).superagentDesktop) return
+  if ((window as { superAssistantDesktop?: unknown }).superAssistantDesktop) return
   if (!notificationsEnabled() || document.visibilityState === 'visible' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
   if (notified.has(messageId)) return
   notified.add(messageId)
@@ -147,7 +147,7 @@ async function maybeNotify(conversationId: string, messageId: string) {
     const { message } = await res.json() as { message: { role: string; content: string; meta: Record<string, any> } }
     const fromOwner = message.role === 'user' && (message.meta.source ?? 'webchat') === 'webchat'
     if (fromOwner || message.role === 'event' || message.meta.delivery) return
-    const n = new Notification(message.role === 'assistant' ? 'Super-agent' : `${message.meta.actor ?? message.meta.source}`, { body: message.content.slice(0, 160), tag: conversationId })
+    const n = new Notification(message.role === 'assistant' ? 'Super-assistant' : `${message.meta.actor ?? message.meta.source}`, { body: message.content.slice(0, 160), tag: conversationId })
     n.onclick = () => { window.focus(); location.hash = `/c/${conversationId}`; n.close() }
   } catch { /* best effort */ }
 }

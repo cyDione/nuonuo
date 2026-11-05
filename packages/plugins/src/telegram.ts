@@ -3,7 +3,7 @@
  * URL needed); messages from allowed accounts become requests, and the agent answers in the same chat.
  * Private chats always address the agent; in groups, mention the bot or reply to it. `/new` starts a fresh topic.
  */
-import { definePlugin, z, type SourceContext, type SourceKind } from '@super-agent/plugin-sdk'
+import { definePlugin, z, type SourceContext, type SourceKind } from '@super-assistant/plugin-sdk'
 
 export const TelegramConfig = z.object({
   token: z.string().default(''),

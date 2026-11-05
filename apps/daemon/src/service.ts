@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-const LABEL = 'dev.superagent.daemon'
+const LABEL = 'dev.super-assistant.daemon'
 
 export function serviceFiles(entry: string, home: string) {
   const node = process.execPath
@@ -16,7 +16,7 @@ export function serviceFiles(entry: string, home: string) {
 <plist version="1.0"><dict>
   <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key><array>${args.map(a => `<string>${a}</string>`).join('')}</array>
-  <key>EnvironmentVariables</key><dict><key>SUPERAGENT_HOME</key><string>${home}</string><key>PATH</key><string>${process.env.PATH}</string></dict>
+  <key>EnvironmentVariables</key><dict><key>SUPER_ASSISTANT_HOME</key><string>${home}</string><key>PATH</key><string>${process.env.PATH}</string></dict>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>${home}/logs/daemon.log</string>
   <key>StandardErrorPath</key><string>${home}/logs/daemon.log</string>
@@ -25,14 +25,14 @@ export function serviceFiles(entry: string, home: string) {
     return { file, content: plist, enable: ['launchctl', ['load', '-w', file]] as const, disable: ['launchctl', ['unload', '-w', file]] as const }
   }
   if (process.platform === 'linux') {
-    const file = join(homedir(), '.config/systemd/user/superagent.service')
+    const file = join(homedir(), '.config/systemd/user/super-assistant.service')
     const unit = `[Unit]
-Description=Super-agent personal daemon
+Description=Super-assistant personal daemon
 After=network-online.target
 
 [Service]
 ExecStart=${args.map(a => (a.includes(' ') ? `"${a}"` : a)).join(' ')}
-Environment=SUPERAGENT_HOME=${home}
+Environment=SUPER_ASSISTANT_HOME=${home}
 Environment=PATH=${process.env.PATH}
 Restart=on-failure
 RestartSec=5
@@ -40,8 +40,8 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 `
-    return { file, content: unit, enable: ['systemctl', ['--user', 'enable', '--now', 'superagent.service']] as const,
-      disable: ['systemctl', ['--user', 'disable', '--now', 'superagent.service']] as const }
+    return { file, content: unit, enable: ['systemctl', ['--user', 'enable', '--now', 'super-assistant.service']] as const,
+      disable: ['systemctl', ['--user', 'disable', '--now', 'super-assistant.service']] as const }
   }
   throw new Error(`不支持的平台：${process.platform}（目前支持 macOS 与 Linux）`)
 }

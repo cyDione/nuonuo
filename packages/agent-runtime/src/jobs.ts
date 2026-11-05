@@ -3,7 +3,7 @@
  * and the call returns at once (asynchronous ReAct: the session keeps taking messages), and its completion is pushed to the
  * session's inbox as a new event.
  */
-import { newId, schema, type Store } from '@super-agent/db'
+import { newId, schema, type Store } from '@super-assistant/db'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { and, eq } from 'drizzle-orm'
 

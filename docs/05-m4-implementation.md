@@ -2,7 +2,7 @@
 
 ## 插件 SDK（`packages/sources/src/plugins.ts`、`packages/plugin-sdk`）
 
-- **第三方插件**：放在 `<home>/plugins/<名字>/`，由 `package.json` 的 `superagent.plugin` 字段指定入口文件。
+- **第三方插件**：放在 `<home>/plugins/<名字>/`，由 `package.json` 的 `super-assistant.plugin` 字段指定入口文件。
   - 列表只读取 manifest，不执行代码；你启用之后才 `import`。
   - 加载出错只影响这个插件本身，不会拖垮服务。
   - 来源 id 不能和已有的重复。
@@ -37,14 +37,14 @@
 - **读信**：用 History API 从游标处增量读取；游标过期时重置。
 - **谁的邮件会交给智能体**：
   - 来自允许地址的邮件（你自己的地址自动允许）。
-  - 你打上派活标签（默认 `superagent`）的邮件。打标签是你做的动作，所以这个事件以你的名义发出。
+  - 你打上派活标签（默认 `super-assistant`）的邮件。打标签是你做的动作，所以这个事件以你的名义发出。
   - 其余邮件只记录，不处理。
 - **回复**：在同一个邮件线程里存成草稿回复（带 `In-Reply-To`）。
 - **Worker 工具**：`gmail_search` / `gmail_read` / `gmail_draft`。
 
 ## Electron 桌面端（`apps/desktop`）
 
-- **连接服务**：连接已经在运行的本机服务；没有的话，用系统的 Node 启动它（`SUPERAGENT_NODE` / `SUPERAGENT_CLI` 可以指定）。服务以 detached 方式运行，关掉窗口或退出 App 后，定时任务和各来源照常工作。之所以不把服务放进 Electron 里跑：SQLite 和钥匙串是原生模块，会遇到 Electron ABI 不兼容的问题。
+- **连接服务**：连接已经在运行的本机服务；没有的话，用系统的 Node 启动它（`SUPER_ASSISTANT_NODE` / `SUPER_ASSISTANT_CLI` 可以指定）。服务以 detached 方式运行，关掉窗口或退出 App 后，定时任务和各来源照常工作。之所以不把服务放进 Electron 里跑：SQLite 和钥匙串是原生模块，会遇到 Electron ABI 不兼容的问题。
 - **窗口**：直接加载本机服务的网页界面。外部链接用系统浏览器打开；关闭窗口只是隐藏到托盘。
 - **托盘**：显示待处理事项的数量；菜单里有「新对话」「开机时启动」「设置」，退出时可选保留或停止后台服务。macOS 上还会显示 Dock 角标。
 - **系统通知**：订阅服务的事件流，窗口不在前台时，智能体的新消息会弹出系统通知，点击直达对应的对话。网页版检测到运行在桌面端时，不再弹浏览器通知，避免重复。

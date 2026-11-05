@@ -1,14 +1,14 @@
 {
-  "name": "@super-agent/plugin-sdk",
+  "name": "@super-assistant/plugin-sdk",
   "version": "0.1.0",
-  "description": "Types and helpers for writing Super-agent plugins",
+  "description": "Types and helpers for writing Super-assistant plugins",
   "type": "module",
   "main": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "tsc -p tsconfig.json" },
   "dependencies": {
-    "@super-agent/core": "workspace:*",
-    "@super-agent/sources": "workspace:*",
+    "@super-assistant/core": "workspace:*",
+    "@super-assistant/sources": "workspace:*",
     "ai": "^7.0.162",
     "zod": "^4.6.7"
   }

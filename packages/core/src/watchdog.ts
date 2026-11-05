@@ -3,8 +3,8 @@
  * the watchdog agent reads the task's recent transcript and decides: nudge the worker, restart it, tell the owner, or let it be.
  * The owner can also talk to it in its own conversation ("为什么 tkt_x 卡住了？").
  */
-import { recallTool, type AgentDefinition, type AgentRuntime, type InboxItem } from '@super-agent/agent-runtime'
-import { kvGet, kvSet, schema, type Store } from '@super-agent/db'
+import { recallTool, type AgentDefinition, type AgentRuntime, type InboxItem } from '@super-assistant/agent-runtime'
+import { kvGet, kvSet, schema, type Store } from '@super-assistant/db'
 import { tool, type ToolSet } from 'ai'
 import { desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
@@ -38,7 +38,7 @@ export interface WatchdogOptions {
 
 const DEFAULTS: WatchdogOptions = { stuckMs: 10 * 60_000, maxStepsPerTurn: 60, repeats: 4, stalledMs: 30 * 60_000, maxTokensPerTask: 3_000_000, quietMs: 30 * 60_000 }
 
-const WATCHDOG_PROMPT = `You are the watchdog of the owner's personal Super-agent: an outside observer of the main agent and its task workers.
+const WATCHDOG_PROMPT = `You are the watchdog of the owner's personal Super-assistant: an outside observer of the main agent and its task workers.
 You receive findings from deterministic probes (a stuck turn, a loop of identical tool calls, a very long turn, a task that has used a lot of tokens, a task that said it would continue but nothing will wake it, failing system parts), with the task's recent transcript. Judge whether the task is actually making progress toward its goal.
 Act with the lightest effective step:
 - nothing: the probe misfired (for example a long but productive build) — say so in one line, no tool needed;

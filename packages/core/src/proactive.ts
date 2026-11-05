@@ -4,8 +4,8 @@
  * only recorded ("I would have…"); in `auto` mode a silent task works on it and the result reaches the owner only if it
  * is worth their attention.
  */
-import { kvGet, kvSet, schema, type Store } from '@super-agent/db'
-import type { ModelHub } from '@super-agent/models'
+import { kvGet, kvSet, schema, type Store } from '@super-assistant/db'
+import type { ModelHub } from '@super-assistant/models'
 import { generateText, Output } from 'ai'
 import { desc, eq } from 'drizzle-orm'
 import { z } from 'zod'

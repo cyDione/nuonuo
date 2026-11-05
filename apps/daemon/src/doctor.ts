@@ -1,4 +1,4 @@
-/** Environment checks shown by `superagent doctor` and Settings → System. */
+/** Environment checks shown by `super-assistant doctor` and Settings → System. */
 import { execFileSync } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
 import type { Runtime } from './runtime'
@@ -21,7 +21,7 @@ export function runDoctor(rt: Runtime): Check[] {
   catch { checks.push({ id: 'home', label: '数据目录', status: 'error', detail: `${rt.config.home} 不可写` }) }
   const root = process.getuid?.() === 0
   checks.push({ id: 'user', label: '运行身份', status: root ? 'warn' : 'ok', detail: root ? 'root' : `uid ${process.getuid?.() ?? '?'}`,
-    fix: root ? '任务的命令以服务的身份执行。建议用一个单独的普通用户运行 superagent，只给它需要的权限；或在 设置 → 执行 里把沙箱设为「全部」' : undefined })
+    fix: root ? '任务的命令以服务的身份执行。建议用一个单独的普通用户运行 super-assistant，只给它需要的权限；或在 设置 → 执行 里把沙箱设为「全部」' : undefined })
   const sqlite = rt.store.sqlite.prepare('select sqlite_version() as v').get() as { v: string }
   checks.push({ id: 'sqlite', label: 'SQLite', status: 'ok', detail: sqlite.v })
   checks.push({ id: 'secrets', label: '密钥存储', status: rt.secrets.backend === 'keychain' ? 'ok' : 'warn',
@@ -46,6 +46,6 @@ export function runDoctor(rt: Runtime): Check[] {
     detail: docker ? `server ${docker}${sandbox.mode !== 'off' ? `，沙箱：${sandbox.image}` : ''}` : sandbox.mode === 'off' ? '不可用（沙箱未启用）' : '不可用，但沙箱已启用',
     fix: '安装并启动 Docker（macOS：Docker Desktop / OrbStack），沙箱执行档需要它' })
   checks.push({ id: 'browser', label: '浏览器', status: rt.browserPath ? 'ok' : 'warn', detail: rt.browserPath ?? '未找到',
-    fix: '安装 Google Chrome，或设置 SUPERAGENT_BROWSER 指向 Chromium/Chrome 可执行文件' })
+    fix: '安装 Google Chrome，或设置 SUPER_ASSISTANT_BROWSER 指向 Chromium/Chrome 可执行文件' })
   return checks
 }

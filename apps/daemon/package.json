@@ -1,13 +1,13 @@
 {
-  "name": "@super-agent/daemon",
+  "name": "@super-assistant/daemon",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "superagent": "./dist/cli.mjs"
+    "super-assistant": "./dist/cli.mjs"
   },
   "scripts": {
-    "dev": "SUPERAGENT_HOME=${SUPERAGENT_HOME:-../../.superagent-dev} tsx watch src/cli.ts start --no-open --dev",
+    "dev": "SUPER_ASSISTANT_HOME=${SUPER_ASSISTANT_HOME:-../../.super-assistant-dev} tsx watch src/cli.ts start --no-open --dev",
     "start": "tsx src/cli.ts start",
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json"
@@ -22,13 +22,13 @@
     "@hono/node-server": "^2.1.6",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@napi-rs/keyring": "^2.1.2",
-    "@super-agent/agent-runtime": "workspace:*",
-    "@super-agent/core": "workspace:*",
-    "@super-agent/db": "workspace:*",
-    "@super-agent/models": "workspace:*",
-    "@super-agent/plugin-sdk": "workspace:*",
-    "@super-agent/plugins": "workspace:*",
-    "@super-agent/sources": "workspace:*",
+    "@super-assistant/agent-runtime": "workspace:*",
+    "@super-assistant/core": "workspace:*",
+    "@super-assistant/db": "workspace:*",
+    "@super-assistant/models": "workspace:*",
+    "@super-assistant/plugin-sdk": "workspace:*",
+    "@super-assistant/plugins": "workspace:*",
+    "@super-assistant/sources": "workspace:*",
     "ai": "^7.0.162",
     "better-sqlite3": "^13.0.3",
     "commander": "^15.0.0",

@@ -1,10 +1,10 @@
 /**
- * Third-party plugins: a folder in `<home>/plugins/` with a package.json whose `superagent.plugin` names an ES module.
+ * Third-party plugins: a folder in `<home>/plugins/` with a package.json whose `super-assistant.plugin` names an ES module.
  * The manifest is read to list the plugin; its code runs only once the owner enables it (plugins run with the daemon's
  * own rights, so enabling one is a decision of trust). The module's default export is a plugin object or a function that
  * receives the SDK, so a plugin needs no dependencies of its own.
  */
-import { kvGet, kvSet, type Store } from '@super-agent/db'
+import { kvGet, kvSet, type Store } from '@super-assistant/db'
 import { jsonSchema, tool } from 'ai'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
@@ -13,7 +13,7 @@ import { z } from 'zod'
 import type { SourceKind } from './kind'
 import type { SourceRegistry } from './registry'
 
-export interface SuperAgentPlugin {
+export interface SuperAssistantPlugin {
   id: string
   name?: string
   version?: string
@@ -22,12 +22,12 @@ export interface SuperAgentPlugin {
 }
 
 export const PLUGIN_API_VERSION = 1
-export const definePlugin = <T extends SuperAgentPlugin>(plugin: T): T => plugin
+export const definePlugin = <T extends SuperAssistantPlugin>(plugin: T): T => plugin
 
 /** Everything a plugin may use from the host, passed to its factory. */
 export const sdk = { apiVersion: PLUGIN_API_VERSION, definePlugin, tool, jsonSchema, z }
 export type PluginSdk = typeof sdk
-export type PluginModule = SuperAgentPlugin | ((sdk: PluginSdk) => SuperAgentPlugin | Promise<SuperAgentPlugin>)
+export type PluginModule = SuperAssistantPlugin | ((sdk: PluginSdk) => SuperAssistantPlugin | Promise<SuperAssistantPlugin>)
 
 export interface PluginManifest { id: string; name: string; version: string; description: string; dir: string; entry: string; apiVersion: number }
 
@@ -42,14 +42,14 @@ export interface PluginInfo extends PluginManifest {
 const ID = /^[a-z0-9][a-z0-9_-]{0,40}$/
 
 export class PluginManager {
-  private loaded = new Map<string, { plugin: SuperAgentPlugin; manifest: PluginManifest }>()
+  private loaded = new Map<string, { plugin: SuperAssistantPlugin; manifest: PluginManifest }>()
   private errors = new Map<string, string>()
-  private builtIns = new Map<string, SuperAgentPlugin>()
+  private builtIns = new Map<string, SuperAssistantPlugin>()
 
   constructor(private dir: string, private registry: SourceRegistry, private store: Store) {}
 
   /** First-party plugins ship with the app and are always loaded; their sources start disabled like any other. */
-  registerBuiltIn(plugin: SuperAgentPlugin): void {
+  registerBuiltIn(plugin: SuperAssistantPlugin): void {
     this.builtIns.set(plugin.id, plugin)
     for (const kind of plugin.sources ?? []) this.registry.register(kind)
   }
@@ -64,7 +64,7 @@ export class PluginManager {
       if (!existsSync(pkgFile)) continue
       try {
         const pkg = JSON.parse(readFileSync(pkgFile, 'utf8'))
-        const meta = pkg.superagent ?? {}
+        const meta = pkg['super-assistant'] ?? {}
         if (!meta.plugin) continue
         const id = String(meta.id ?? pkg.name ?? name.name).replace(/^@[^/]+\//, '').toLowerCase()
         const entry = resolve(dir, meta.plugin)

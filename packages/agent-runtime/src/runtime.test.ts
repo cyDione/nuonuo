@@ -1,5 +1,5 @@
-import { openStore, type Store } from '@super-agent/db'
-import { MemorySecrets, ModelHub } from '@super-agent/models'
+import { openStore, type Store } from '@super-assistant/db'
+import { MemorySecrets, ModelHub } from '@super-assistant/models'
 import { MockLanguageModelV4 } from 'ai/test'
 import { tool } from 'ai'
 import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -150,6 +150,6 @@ describe('workspace safety', () => {
   })
   it('strips credentials from the worker environment', () => {
     const env = workerEnv({ X: '1' }, { PATH: '/bin', OPENAI_API_KEY: 'k', GITHUB_TOKEN: 't', AWS_SECRET_ACCESS_KEY: 's', HOME: '/h' })
-    expect(env).toEqual({ PATH: '/bin', HOME: '/h', X: '1', SUPERAGENT_WORKER: '1' })
+    expect(env).toEqual({ PATH: '/bin', HOME: '/h', X: '1', SUPER_ASSISTANT_WORKER: '1' })
   })
 })

@@ -1,7 +1,7 @@
 /** Shapes the domain for the web UI: ticket rows, a ticket's page with its worker transcript, and what waits for the owner. */
-import type { AgentRuntime } from '@super-agent/agent-runtime'
-import { sourceOfThread, STAGE_LABEL, type Engine, type Ticket } from '@super-agent/core'
-import { schema, type Store } from '@super-agent/db'
+import type { AgentRuntime } from '@super-assistant/agent-runtime'
+import { sourceOfThread, STAGE_LABEL, type Engine, type Ticket } from '@super-assistant/core'
+import { schema, type Store } from '@super-assistant/db'
 import { desc, eq } from 'drizzle-orm'
 
 export function ticketView(engine: Engine, t: Ticket, approvals: { id: string; input: Record<string, unknown>; reason: string; risk: string; createdAt: number }[] = []) {

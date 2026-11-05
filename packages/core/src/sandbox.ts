@@ -30,11 +30,11 @@ export function sandboxCommand(settings: SandboxSettings, ticket: Ticket, comman
     `--network ${settings.network}`,
     `--user ${uid}:${gid}`,
     '-e HOME=/tmp -e CI=1',
-    `-e SUPERAGENT_TICKET=${ticket.id}`,
+    `-e SUPER_ASSISTANT_TICKET=${ticket.id}`,
     `-v ${quote(`${dir}:${dir}`)}`,
     `-w ${quote(dir)}`,
     '--memory 4g --pids-limit 512',
-    `--label superagent.ticket=${ticket.id}`,
+    `--label super-assistant.ticket=${ticket.id}`,
     quote(settings.image),
     'bash -lc', quote(command)].join(' ')
 }

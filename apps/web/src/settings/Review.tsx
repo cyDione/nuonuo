@@ -39,7 +39,7 @@ export function Review() {
         <Area value={draft.rules} onChange={rules => setDraft({ ...draft, rules })} />
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="直接放行（正则，每行一条）" hint="命中即放行，不调用模型"><Area mono value={draft.allow} onChange={allow => setDraft({ ...draft, allow })} placeholder="^git push origin superagent/" /></Field>
+        <Field label="直接放行（正则，每行一条）" hint="命中即放行，不调用模型"><Area mono value={draft.allow} onChange={allow => setDraft({ ...draft, allow })} placeholder="^git push origin super-assistant/" /></Field>
         <Field label="直接拦截（正则，每行一条）" hint="命中即拦截，优先于放行"><Area mono value={draft.deny} onChange={deny => setDraft({ ...draft, deny })} placeholder="push .*\b(main|master)\b" /></Field>
       </div>
       {(dirty || save.error) && <div className="flex items-center justify-end gap-2 border-t border-line pt-3">

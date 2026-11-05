@@ -1,4 +1,4 @@
-import { openStore } from '@super-agent/db'
+import { openStore } from '@super-assistant/db'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Blobs } from './blobs'

@@ -8,8 +8,8 @@
  * - Turns take slots: the router has its own; workers share `maxWorkers`, plus one slot kept for a person's message so new
  *   work never blocks a person from continuing existing work.
  */
-import { newId, schema, type Store } from '@super-agent/db'
-import { describeError, type ModelHub, type RoleId } from '@super-agent/models'
+import { newId, schema, type Store } from '@super-assistant/db'
+import { describeError, type ModelHub, type RoleId } from '@super-assistant/models'
 import { generateText, stepCountIs, streamText, type ModelMessage, type ToolSet } from 'ai'
 import { and, asc, eq, gt, isNull, sql } from 'drizzle-orm'
 import { Blobs } from './blobs'

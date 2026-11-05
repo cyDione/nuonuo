@@ -5,7 +5,7 @@
  */
 import type { LanguageModelV4, LanguageModelV4CallOptions, LanguageModelV4StreamPart, LanguageModelV4Usage } from '@ai-sdk/provider'
 import { APICallError } from '@ai-sdk/provider'
-import { newId, schema, type Store } from '@super-agent/db'
+import { newId, schema, type Store } from '@super-assistant/db'
 import { generateText } from 'ai'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import type { ProviderKind } from './catalog'
@@ -208,7 +208,7 @@ export class ModelHub {
 
     return {
       specificationVersion: 'v4',
-      provider: `superagent.${role}`,
+      provider: `super-assistant.${role}`,
       modelId: first.model,
       supportedUrls: {},
       doGenerate: options => attempt(async (model, ref) => {

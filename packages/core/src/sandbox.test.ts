@@ -32,7 +32,7 @@ describe('sandbox', () => {
     const t = ticket('github:o/r#1', dir)
     const run = (command: string, network: 'none' | 'bridge' = 'none') =>
       spawnSync('bash', ['-lc', sandboxCommand({ mode: 'all', image: IMAGE, network }, t, command)], { encoding: 'utf8', timeout: 120_000 })
-    const r = run('node -e "require(\'fs\').writeFileSync(\'made.txt\', process.version)" && ls / | grep -c home && test ! -e /root/.superagent && echo isolated')
+    const r = run('node -e "require(\'fs\').writeFileSync(\'made.txt\', process.version)" && ls / | grep -c home && test ! -e /root/.super-assistant && echo isolated')
     expect(r.status).toBe(0)
     expect(r.stdout).toContain('isolated')
     expect(readFileSync(join(dir, 'made.txt'), 'utf8')).toMatch(/^v22\./)

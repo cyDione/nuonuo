@@ -47,25 +47,25 @@ importers:
       '@napi-rs/keyring':
         specifier: ^2.1.2
         version: 2.1.2
-      '@super-agent/agent-runtime':
+      '@super-assistant/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
-      '@super-agent/core':
+      '@super-assistant/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@super-agent/db':
+      '@super-assistant/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@super-agent/models':
+      '@super-assistant/models':
         specifier: workspace:*
         version: link:../../packages/models
-      '@super-agent/plugin-sdk':
+      '@super-assistant/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
-      '@super-agent/plugins':
+      '@super-assistant/plugins':
         specifier: workspace:*
         version: link:../../packages/plugins
-      '@super-agent/sources':
+      '@super-assistant/sources':
         specifier: workspace:*
         version: link:../../packages/sources
       ai:
@@ -157,10 +157,10 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.2
         version: 1.32.2(zod@4.6.7)
-      '@super-agent/db':
+      '@super-assistant/db':
         specifier: workspace:*
         version: link:../db
-      '@super-agent/models':
+      '@super-assistant/models':
         specifier: workspace:*
         version: link:../models
       ai:
@@ -181,13 +181,13 @@ importers:
       '@ai-sdk/provider':
         specifier: ^4.0.35
         version: 4.0.35
-      '@super-agent/agent-runtime':
+      '@super-assistant/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
-      '@super-agent/db':
+      '@super-assistant/db':
         specifier: workspace:*
         version: link:../db
-      '@super-agent/models':
+      '@super-assistant/models':
         specifier: workspace:*
         version: link:../models
       ai:
@@ -239,7 +239,7 @@ importers:
       '@napi-rs/keyring':
         specifier: ^2.1.2
         version: 2.1.2
-      '@super-agent/db':
+      '@super-assistant/db':
         specifier: workspace:*
         version: link:../db
       ai:
@@ -254,10 +254,10 @@ importers:
 
   packages/plugin-sdk:
     dependencies:
-      '@super-agent/core':
+      '@super-assistant/core':
         specifier: workspace:*
         version: link:../core
-      '@super-agent/sources':
+      '@super-assistant/sources':
         specifier: workspace:*
         version: link:../sources
       ai:
@@ -269,26 +269,26 @@ importers:
 
   packages/plugins:
     dependencies:
-      '@super-agent/plugin-sdk':
+      '@super-assistant/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
     devDependencies:
       '@ai-sdk/provider':
         specifier: ^4.0.35
         version: 4.0.35
-      '@super-agent/agent-runtime':
+      '@super-assistant/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
-      '@super-agent/core':
+      '@super-assistant/core':
         specifier: workspace:*
         version: link:../core
-      '@super-agent/db':
+      '@super-assistant/db':
         specifier: workspace:*
         version: link:../db
-      '@super-agent/models':
+      '@super-assistant/models':
         specifier: workspace:*
         version: link:../models
-      '@super-agent/sources':
+      '@super-assistant/sources':
         specifier: workspace:*
         version: link:../sources
       ai:
@@ -297,13 +297,13 @@ importers:
 
   packages/sources:
     dependencies:
-      '@super-agent/agent-runtime':
+      '@super-assistant/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
-      '@super-agent/core':
+      '@super-assistant/core':
         specifier: workspace:*
         version: link:../core
-      '@super-agent/db':
+      '@super-assistant/db':
         specifier: workspace:*
         version: link:../db
       ai:
@@ -319,7 +319,7 @@ importers:
       '@ai-sdk/provider':
         specifier: ^4.0.35
         version: 4.0.35
-      '@super-agent/models':
+      '@super-assistant/models':
         specifier: workspace:*
         version: link:../models
 

@@ -1,6 +1,6 @@
 node_modules/
 dist/
 *.tsbuildinfo
-.superagent-dev/
+.super-assistant-dev/
 coverage/
 .DS_Store

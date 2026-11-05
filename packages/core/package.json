@@ -1,5 +1,5 @@
 {
-  "name": "@super-agent/core",
+  "name": "@super-assistant/core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,9 +8,9 @@
   "scripts": { "typecheck": "tsc -p tsconfig.json" },
   "dependencies": {
     "@ai-sdk/provider": "^4.0.35",
-    "@super-agent/agent-runtime": "workspace:*",
-    "@super-agent/db": "workspace:*",
-    "@super-agent/models": "workspace:*",
+    "@super-assistant/agent-runtime": "workspace:*",
+    "@super-assistant/db": "workspace:*",
+    "@super-assistant/models": "workspace:*",
     "ai": "^7.0.162",
     "drizzle-orm": "^0.45.4",
     "zod": "^4.6.7"

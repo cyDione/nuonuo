@@ -1,6 +1,6 @@
 import type { LanguageModelV4, LanguageModelV4Usage } from '@ai-sdk/provider'
 import { APICallError } from '@ai-sdk/provider'
-import { openStore, type Store } from '@super-agent/db'
+import { openStore, type Store } from '@super-assistant/db'
 import { generateText, streamText } from 'ai'
 import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 import { mkdtempSync, readFileSync } from 'node:fs'

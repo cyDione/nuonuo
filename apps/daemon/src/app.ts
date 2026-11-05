@@ -1,6 +1,6 @@
 /** HTTP surface of the daemon: the JSON API under /api, the login link under /auth, and the web UI's static files. */
 import { serveStatic } from '@hono/node-server/serve-static'
-import { describeError, ModelError, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type ProviderKind, type RoleId } from '@super-agent/models'
+import { describeError, ModelError, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type ProviderKind, type RoleId } from '@super-assistant/models'
 import { Hono, type Context } from 'hono'
 import { setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
@@ -13,9 +13,9 @@ import { VERSION } from './config'
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
-import { DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-agent/core'
-import { kvGet, kvSet } from '@super-agent/db'
-import { fireRoutine } from '@super-agent/sources'
+import { DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-assistant/core'
+import { kvGet, kvSet } from '@super-assistant/db'
+import { fireRoutine } from '@super-assistant/sources'
 import { runDoctor } from './doctor'
 import type { Runtime } from './runtime'
 
@@ -56,9 +56,9 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     return c.json({ error: { code: 'internal', message: describeError(error) } }, 500)
   })
 
-  /** The link `superagent start` prints: it trades the token for an HttpOnly cookie and goes to the app. */
+  /** The link `super-assistant start` prints: it trades the token for an HttpOnly cookie and goes to the app. */
   app.get('/auth', c => {
-    if (c.req.query('token') !== token) return c.text('令牌无效。运行 superagent token 获取新的登录链接。', 401)
+    if (c.req.query('token') !== token) return c.text('令牌无效。运行 super-assistant token 获取新的登录链接。', 401)
     setCookie(c, COOKIE, token, { httpOnly: true, sameSite: 'Strict', path: '/', maxAge: 60 * 60 * 24 * 400 })
     return c.redirect('/')
   })

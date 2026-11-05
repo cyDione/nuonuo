@@ -1,5 +1,5 @@
 {
-  "name": "@super-agent/plugins",
+  "name": "@super-assistant/plugins",
   "version": "0.1.0",
   "private": true,
   "description": "First-party plugins: Telegram and Gmail",
@@ -7,14 +7,14 @@
   "main": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "tsc -p tsconfig.json" },
-  "dependencies": { "@super-agent/plugin-sdk": "workspace:*" },
+  "dependencies": { "@super-assistant/plugin-sdk": "workspace:*" },
   "devDependencies": {
     "@ai-sdk/provider": "^4.0.35",
-    "@super-agent/agent-runtime": "workspace:*",
-    "@super-agent/core": "workspace:*",
-    "@super-agent/db": "workspace:*",
-    "@super-agent/models": "workspace:*",
-    "@super-agent/sources": "workspace:*",
+    "@super-assistant/agent-runtime": "workspace:*",
+    "@super-assistant/core": "workspace:*",
+    "@super-assistant/db": "workspace:*",
+    "@super-assistant/models": "workspace:*",
+    "@super-assistant/sources": "workspace:*",
     "ai": "^7.0.162"
   }
 }

@@ -16,8 +16,8 @@ export interface DaemonConfig {
 }
 
 export function resolveConfig(opts: { port?: number; dev?: boolean } = {}): DaemonConfig {
-  const home = resolve(process.env.SUPERAGENT_HOME || join(homedir(), '.superagent'))
-  const port = opts.port ?? (Number(process.env.SUPERAGENT_PORT) || DEFAULT_PORT)
+  const home = resolve(process.env.SUPER_ASSISTANT_HOME || join(homedir(), '.super-assistant'))
+  const port = opts.port ?? (Number(process.env.SUPER_ASSISTANT_PORT) || DEFAULT_PORT)
   const dev = Boolean(opts.dev)
   return { home, port, host: '127.0.0.1', dev, devOrigins: dev ? ['http://localhost:5173', 'http://127.0.0.1:5173'] : [] }
 }
