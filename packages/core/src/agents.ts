@@ -1,5 +1,5 @@
 /** The router and worker agent definitions: tool sets (enforced by code, not prompt) and how their inbox items read. */
-import { fsTools, recallTool, shellTools, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type BrowserManager, type InboxItem, type McpManager, type TurnContext } from '@super-assistant/agent-runtime'
+import { fsTools, recallTool, shellTools, today, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type BrowserManager, type InboxItem, type McpManager, type TurnContext } from '@super-assistant/agent-runtime'
 import { schema, type Store } from '@super-assistant/db'
 import { tool, type ToolSet } from 'ai'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
@@ -157,7 +157,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     role: 'router',
     pool: 'router',
     maxSteps: 30,
-    system: () => `${ROUTER_PROMPT}${ext.routerPrompt ? `\n\n${ext.routerPrompt()}` : ''}${ext.sharedPrompt ? `\n\n${ext.sharedPrompt('router')}` : ''}\n\nNow: ${new Date().toString()}`,
+    system: () => `${ROUTER_PROMPT}${ext.routerPrompt ? `\n\n${ext.routerPrompt()}` : ''}${ext.sharedPrompt ? `\n\n${ext.sharedPrompt('router')}` : ''}\n\nToday: ${today()}`,
     formatInbox: async items => {
       if (items.some(i => ANSWERABLE.has(i.payload.type) && (i.payload.type !== 'report' || ['ready', 'blocked', 'failed'].includes(i.payload.status) || i.payload.humanAction))) answerable = true
       // What the router may remember directly depends on whose words this batch carries, decided here in code.
@@ -340,7 +340,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     system: session => {
       const ticket = engine.ticket(session.ticketId!)
       const extra = [isProactive(ticket) ? PROACTIVE_WORKER_PROMPT : '', ext.workerPrompt?.(ticket), ext.sharedPrompt?.('worker', ticket)].filter(Boolean).join('\n\n')
-      return `${WORKER_PROMPT}${extra ? `\n\n${extra}` : ''}\n\n## Environment\n- Working directory: ${ticket.directory}\n- Task id: ${ticket.id}\n- OS: ${process.platform}\n- Now: ${new Date().toString()}`
+      return `${WORKER_PROMPT}${extra ? `\n\n${extra}` : ''}\n\n## Environment\n- Working directory: ${ticket.directory}\n- Task id: ${ticket.id}\n- OS: ${process.platform}\n- Today: ${today()}`
     },
     formatInbox: async (items, session) => {
       const body = items.map(item => renderWorkerItem(item, session.ticketId!, session.id)).join('\n\n')
@@ -503,7 +503,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     maxSteps: 60,
     system: session => {
       const ticket = engine.ticket(session.ticketId!)
-      return `${SUBAGENT_PROMPT}\n\n## Environment\n- Working directory: ${ticket.directory}\n- OS: ${process.platform}\n- Now: ${new Date().toString()}`
+      return `${SUBAGENT_PROMPT}\n\n## Environment\n- Working directory: ${ticket.directory}\n- OS: ${process.platform}\n- Today: ${today()}`
     },
     formatInbox: items => items.map(({ payload: p }) => {
       if (p.type === 'subtask') return `<subtask>\n${p.job}${p.context ? `\n\ncontext:\n${p.context}` : ''}\n</subtask>`
