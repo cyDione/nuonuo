@@ -22,7 +22,7 @@ export function App() {
     <Sidebar route={route} />
     <main className="min-w-0 flex-1">
       {route.page === 'chat' ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
-        : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : <Settings tab={route.tab} />}
+        : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : <Settings tab={route.tab} {...(route.item ? { item: route.item } : {})} />}
     </main>
     <TaskDrawer />
     <ActivityPanel />
