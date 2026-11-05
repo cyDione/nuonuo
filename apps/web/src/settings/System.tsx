@@ -1,9 +1,9 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { CheckCircle2, AlertTriangle, XCircle, RefreshCw } from 'lucide-react'
-import { useState } from 'react'
-import { api, type Check, type Health, type TranscriptItem } from '../api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, Download } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { api, type Check, type Health, type TranscriptItem, type UpdateStatus } from '../api'
 import { notificationsEnabled, setNotifications } from '../live'
-import { Button, Card } from '../ui'
+import { Badge, Button, Card } from '../ui'
 
 export function System() {
   const health = useQuery({ queryKey: ['health'], queryFn: () => api.get<Health>('/health') })
@@ -16,6 +16,7 @@ export function System() {
       <Info label="数据目录" value={h.home} mono />
       <Info label="密钥存储" value={h.secrets === 'keychain' ? '系统钥匙串' : '加密文件'} />
     </Card>}
+    <UpdateCard />
     <NotifyToggle />
     <WatchdogCard />
     <div className="flex items-center justify-between">
@@ -81,5 +82,56 @@ function WatchdogCard() {
     </div>
     <Button size="sm" variant="ghost" onClick={() => run.mutate()} disabled={run.isPending}>立即巡检</Button>
     <Button size="sm" onClick={open}>和它对话</Button>
+  </Card>
+}
+
+/** New releases: checked by the service twice a day; "立即更新" runs install.sh, then the service restarts on the new version. */
+function UpdateCard() {
+  const qc = useQueryClient()
+  const [updating, setUpdating] = useState<{ from: string; target: string } | null>(null)
+  const [lost, setLost] = useState(false)
+  const status = useQuery({ queryKey: ['update'], queryFn: () => api.get<UpdateStatus>('/update'), refetchInterval: updating ? 2000 : false, retry: false })
+  const check = useMutation({ mutationFn: () => api.post<UpdateStatus>('/update/check'), onSuccess: data => qc.setQueryData(['update'], data) })
+  const start = useMutation({
+    mutationFn: () => api.post<UpdateStatus>('/update'),
+    onSuccess: data => { qc.setQueryData(['update'], data); setUpdating({ from: data.current, target: data.run?.target ?? '' }) },
+  })
+  const s = status.data
+  // The service restarts mid-update: requests fail for a moment, then the new version answers.
+  const reloaded = useRef(false)
+  useEffect(() => {
+    if (!updating) return
+    if (status.isError) setLost(true)
+    if (s && s.current !== updating.from && !reloaded.current) { reloaded.current = true; setTimeout(() => location.reload(), 800) }
+    if (s?.run?.state === 'failed') setUpdating(null)
+  }, [status.dataUpdatedAt, status.errorUpdatedAt])
+
+  if (!s) return null
+  const running = Boolean(updating) || s.run?.state === 'running'
+  const done = s && updating && s.current !== updating.from
+  return <Card className="space-y-2 p-4">
+    <div className="flex flex-wrap items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          版本更新
+          {s.available && !running && <Badge tone="accent">新版本 {s.latest?.tag}</Badge>}
+          {!s.available && s.latest && !s.checkError && <Badge tone="ok">已是最新</Badge>}
+        </div>
+        <div className="text-xs text-muted">
+          {done ? `已更新到 ${s.current}，正在刷新页面…`
+            : running ? (lost ? '正在重启服务…' : `正在安装 ${updating?.target || s.run?.target}…`)
+            : s.checkError ? <span className="text-danger">检查失败：{s.checkError}</span>
+            : s.available ? <>当前 {s.current}，最新 {s.latest?.tag}{s.latest?.url && <> · <a className="underline" href={s.latest.url} target="_blank" rel="noreferrer">更新说明</a></>}。{s.hint}。</>
+            : s.checkedAt ? `当前 ${s.current} · 上次检查 ${new Date(s.checkedAt).toLocaleString()}`
+            : `当前 ${s.current} · 还没有检查过`}
+        </div>
+        {!s.canUpdate && <div className="mt-0.5 text-xs text-faint">{s.hint}</div>}
+        {s.run?.state === 'failed' && !running && <div className="mt-0.5 text-xs text-danger">更新失败：{s.run.error}</div>}
+      </div>
+      <Button size="sm" variant="ghost" onClick={() => check.mutate()} disabled={check.isPending || running}><RefreshCw size={13} className={check.isPending ? 'animate-spin' : ''} />检查更新</Button>
+      {s.available && s.canUpdate && <Button size="sm" variant="primary" onClick={() => start.mutate()} disabled={start.isPending || running}><Download size={13} />立即更新</Button>}
+    </div>
+    {start.error && <div className="text-xs text-danger">{(start.error as Error).message}</div>}
+    {(running || s.run?.state === 'failed') && s.run?.log && <pre className="max-h-48 overflow-y-auto rounded-lg bg-sunken p-2 font-mono text-[11px] whitespace-pre-wrap text-muted">{s.run.log}</pre>}
   </Card>
 }

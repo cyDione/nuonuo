@@ -18,6 +18,7 @@ import { kvGet, kvSet } from '@super-assistant/db'
 import { fireRoutine } from '@super-assistant/sources'
 import { runDoctor } from './doctor'
 import type { Runtime } from './runtime'
+import type { Updater } from './update'
 
 const KINDS = ['anthropic', 'openai', 'google', 'deepseek', 'openai-compatible'] as const satisfies readonly ProviderKind[]
 const PricesSchema = z.record(z.string(), z.object({ input: z.number().min(0).optional(), output: z.number().min(0).optional(),
@@ -38,7 +39,7 @@ async function body<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
   return parsed.data
 }
 
-export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
+export function createApp(rt: Runtime, token: string, webRoot?: string, updater?: Updater): Hono {
   const app = new Hono()
   const conversations = new Conversations(rt.store, rt.hub)
 
@@ -71,6 +72,13 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     ok: true, version: VERSION, home: rt.config.home, pid: process.pid, uptimeMs: Date.now() - rt.startedAt,
     secrets: rt.secrets.backend, effects: rt.effects.health(),
   }))
+  // Updates (packaged Linux build): GET is the cached status, POST /check asks GitHub now, POST runs install.sh.
+  const updates = () => { if (!updater) throw new HttpError(404, 'not_found', '更新不可用'); return updater }
+  api.get('/update', c => c.json(updates().status()))
+  api.post('/update/check', async c => c.json(await updates().check()))
+  api.post('/update', async c => {
+    try { return c.json(await updates().update()) } catch (error) { throw error instanceof HttpError ? error : new HttpError(409, 'update_failed', (error as Error).message) }
+  })
   api.get('/doctor', c => c.json({ checks: runDoctor(rt) }))
   api.get('/catalog', c => c.json({ presets: PROVIDER_PRESETS, roles: ROLES, reasoningLevels: REASONING_LEVELS }))
 

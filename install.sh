@@ -77,4 +77,5 @@ esac
 say ""
 say "start it:            super-assistant start --no-open   (prints the login link; web UI on 127.0.0.1:7420)"
 say "start at login:      super-assistant service install"
+say "update later:        super-assistant update   (or Settings → System in the web UI)"
 say "from another machine: ssh -L 7420:127.0.0.1:7420 <this host>, then open the login link locally"

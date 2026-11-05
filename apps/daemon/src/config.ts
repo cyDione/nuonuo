@@ -2,7 +2,10 @@ import { chmodSync, existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-export const VERSION = '0.1.0'
+import pkg from '../package.json' with { type: 'json' }
+
+/** From apps/daemon/package.json; a release tag must match it (the release workflow checks). */
+export const VERSION: string = pkg.version
 export const DEFAULT_PORT = 7420
 
 export interface DaemonConfig {

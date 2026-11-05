@@ -40,6 +40,10 @@ export interface Conversation { id: string; title: string; pinned: boolean; arch
 export interface Message { id: string; conversationId: string; role: 'user' | 'assistant' | 'system' | 'event'; content: string; meta: Record<string, any>; ticketId: string | null; triggerId: string | null; createdAt: number }
 export interface UsageRow { role: RoleId; providerId: string; model: string; calls: number; failures: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number; costUsd: number | null }
 export interface Check { id: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string; fix?: string }
+export interface Release { tag: string; version: string; url: string; notes: string; publishedAt: string | null; hasPackage: boolean }
+export interface UpdateStatus { current: string; install: 'package' | 'source' | 'other'; canUpdate: boolean; checkedAt: number | null; latest: Release | null
+  available: boolean; checkError: string | null; hint: string
+  run: { state: 'running' | 'installed' | 'failed'; target: string; startedAt: number; log: string; error?: string } | null }
 export interface Health { ok: boolean; version: string; home: string; pid: number; uptimeMs: number; secrets: string; effects: { kind: string; pending: number; failing: number }[] }
 
 export type Stage = 'person/approve' | 'person/answer' | 'person/blocked' | 'person/failed' | 'queued' | 'working' | 'idle' | 'ended'
