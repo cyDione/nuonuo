@@ -47,38 +47,61 @@
 >
 > 测试时让所有层都用 DeepSeek V4.1 Flash：启动前设置 `SUPERAGENT_PRESET=deepseek-flash`。
 
-## 快速开始
+## 部署（自己的 Mac 或 Linux 电脑）
 
-需要 Node.js ≥ 22.12 和 pnpm，支持 macOS 或 Linux。
+服务和执行都在你自己的机器上，只监听 `127.0.0.1`，不对外开放端口。
+
+**1. 准备**：Node.js ≥ 22.12、pnpm、git。可选：`gh`（GitHub）、Docker（沙箱）、Chrome/Chromium（浏览器工具）。
 
 ```bash
+git clone https://github.com/cyDione/super-assistant.git ~/super-assistant
+cd ~/super-assistant
 pnpm install
 pnpm build
-pnpm start            # 等同于 superagent start：只监听 127.0.0.1:7420，并自动打开登录链接
 ```
 
-最快的方式是用环境变量提供 key：
+**2. 填 API key**（二选一）：
+- 启动后在网页的「设置 → 模型供应商」里填写，key 存进系统钥匙串；
+- 或写进数据目录的 `env` 文件。开机自启的服务读不到 shell 里的 `export`，用这个文件最稳：
 
 ```bash
-export DEEPSEEK_API_KEY=sk-...      # 也支持 ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY 等
-pnpm start
+mkdir -p ~/.superagent
+printf 'DEEPSEEK_API_KEY=sk-...\n' > ~/.superagent/env   # 每行 KEY=value；也可放 DEEPSEEK_BASE_URL、GITHUB_TOKEN 等
+chmod 600 ~/.superagent/env
 ```
 
-启动时会自动登记供应商；如果检测到 DeepSeek，会套用推荐的分层配置：
-- 主 Agent：`deepseek-flash`，思考强度 high
-- 执行层：`deepseek-v4-pro`，high
-- 其他层：见 设置 → 分层模型
+检测到 DeepSeek 时会自动套用推荐的分层配置（主 Agent 用 Flash，执行层用 V4 Pro）。想让所有层都用 Flash，在 `env` 里加一行 `SUPERAGENT_PRESET=deepseek-flash`；这只在首次启动、还没配置过任何层时生效。
 
-也可以手动配置：
+**3. 启动，检查**：
 
-1. **设置 → 模型供应商**：添加 API key。支持 Anthropic、OpenAI、Gemini、DeepSeek，以及 OpenRouter / 通义 / Kimi / 智谱 / SiliconFlow / Ollama / LM Studio / 任意 OpenAI 兼容接口。
-2. **设置 → 分层模型**：给「主 Agent」选择模型。其余层不配置时，会沿用上一层的模型。
-3. 回到对话页开始使用。简单的问题，主 Agent 直接回答；需要动手的事，它会开成任务（每个任务在 `~/.superagent/work/` 下有独立的工作目录），完成时、或需要你决定时再回来找你。
-4. **GitHub（可选）**：
-   - 准备凭据：设置 `GITHUB_TOKEN`，或者在本机执行 `gh auth login`。
-   - 在「设置 → 来源 → GitHub」填写要监听的仓库并启用。
-   - 之后在 Issue 或 PR 评论里写 `@agent …` 就能派活。
-5. **设置 → 执行**：可以调整同时执行的任务数，以及允许任务直接使用的已有目录（例如 `~/code`）。
+```bash
+node apps/daemon/dist/cli.mjs doctor          # 检查环境
+node apps/daemon/dist/cli.mjs start           # 打印并打开登录链接（http://127.0.0.1:7420/auth?token=…）
+```
+
+可以加个别名：`alias superagent="node ~/super-assistant/apps/daemon/dist/cli.mjs"`。登录链接丢了，用 `superagent token` 重新打印。
+
+**4. 开机自启**（macOS 用 launchd，Linux 用 systemd 用户服务）：
+
+```bash
+superagent service install        # 写入并启动；superagent service uninstall 移除
+loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运行
+```
+
+**5. 可选**：
+- **桌面端**：`cd apps/desktop && pnpm start`，或用 `pnpm dist:mac` / `pnpm dist:linux` 打包。
+- **在外面用**：启用 Telegram 插件，用手机指挥家里的电脑，不需要开放端口。或者用 SSH 端口转发 `ssh -L 7420:127.0.0.1:7420 你的电脑`，再在本地打开登录链接。
+- **GitHub**：`gh auth login`（或在 `env` 里放 `GITHUB_TOKEN`），然后在「设置 → 来源 → GitHub」里填写要监听的仓库。
+
+**升级**：
+
+```bash
+cd ~/super-assistant && git pull && pnpm install && pnpm build
+```
+
+升级后重启服务：`superagent service install`，或者停掉再 `start`。数据目录 `~/.superagent/` 不受影响，数据库会自动迁移。
+
+**安全建议**：任务的命令以运行服务的用户身份执行。建议用一个单独的普通用户运行，或在「设置 → 执行环境」里把 Docker 沙箱设为「全部」。不要以 root 运行。
 
 ## 桌面端
 

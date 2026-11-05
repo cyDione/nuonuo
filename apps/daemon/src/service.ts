@@ -53,7 +53,7 @@ export function installService(entry: string, home: string, dryRun: boolean): st
   writeFileSync(s.file, s.content)
   if (process.platform === 'linux') execFileSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'inherit' })
   execFileSync(s.enable[0], [...s.enable[1]], { stdio: 'inherit' })
-  return `已安装并启动：${s.file}`
+  return `已安装并启动：${s.file}\n提示：开机启动的服务读不到 shell 里 export 的变量。API key 请在网页的「设置 → 模型供应商」里填写（存进钥匙串），或写进 ${join(home, 'env')}（每行 KEY=value，权限 0600）。`
 }
 
 export function uninstallService(entry: string, home: string): string {

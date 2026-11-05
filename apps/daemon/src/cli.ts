@@ -3,11 +3,14 @@ import { Command } from 'commander'
 import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { loadToken, rotateToken } from './auth'
-import { resolveConfig, VERSION } from './config'
+import { loadEnvFile, resolveConfig, VERSION } from './config'
 import { runDoctor } from './doctor'
 import { createRuntime, readLock } from './runtime'
 import { startDaemon } from './server'
 import { installService, uninstallService } from './service'
+
+// Keys in <home>/env reach every command, including a service started at login.
+loadEnvFile(resolveConfig().home)
 
 const program = new Command('superagent').version(VERSION).description('你的个人 Super-agent（本机运行）')
 const entry = fileURLToPath(import.meta.url)
