@@ -35,6 +35,8 @@ dir="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 exec "$dir/runtime/node" "$dir/lib/cli.mjs" "$@"
 SH
 chmod +x "$pkg/bin/super-assistant" "$pkg/runtime/node"
+# The installer, so `super-assistant update` still works when GitHub can't serve the newer one.
+cp "$root/install.sh" "$pkg/install.sh"
 
 cat > "$pkg/README.txt" <<TXT
 Super-assistant $version (Linux $arch, headless: service + web UI)
@@ -44,6 +46,7 @@ Super-assistant $version (Linux $arch, headless: service + web UI)
   ./bin/super-assistant token      print the login link again
   ./bin/super-assistant status     check whether the service is running
   ./bin/super-assistant service install   start it at login (systemd user service)
+  ./bin/super-assistant update     install the latest release (also in the web UI: Settings → System)
 
 The service only listens on 127.0.0.1. From another computer, forward the port over SSH:
   ssh -L 7420:127.0.0.1:7420 <this machine>

@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, MessageCircle, MoreHorizontal, Pencil, Pin, PinOff, Plus, Settings as SettingsIcon, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { api, type Conversation } from './api'
+import { api, type Conversation, type UpdateStatus } from './api'
 import { openActivity, useLive } from './live'
 import { Avatar, statusLine, usePersona } from './persona'
 import { go, type Route } from './route'
@@ -18,6 +18,7 @@ export function Sidebar({ route }: { route: Route }) {
   const { data } = useQuery({ queryKey: ['conversations'], queryFn: () => api.get<{ conversations: Conversation[] }>('/conversations') })
   const conversations = data?.conversations ?? []
   const main = conversations.find(c => c.meta.main)
+  const update = useQuery({ queryKey: ['update'], queryFn: () => api.get<UpdateStatus>('/update'), refetchInterval: 30 * 60_000, retry: false })
   const side = conversations.filter(c => !c.meta.main && c.source === 'webchat')
   const outside = conversations.filter(c => c.source !== 'webchat')
   const activeId = route.page === 'chat' ? (route.id ?? (route.main ? main?.id : undefined)) : undefined
@@ -61,7 +62,10 @@ export function Sidebar({ route }: { route: Route }) {
     </nav>
     <div className="space-y-0.5 border-t border-line p-2">
       <NavButton active={route.page === 'library'} onClick={() => go('/library')} icon={<FolderOpen size={16} />}>成果</NavButton>
-      <NavButton active={route.page === 'settings'} onClick={() => go('/settings/persona')} icon={<SettingsIcon size={16} />}>设置</NavButton>
+      <NavButton active={route.page === 'settings'} onClick={() => go(update.data?.available ? '/settings/system' : '/settings/persona')} icon={<SettingsIcon size={16} />}>
+        <span className="flex-1 text-left">设置</span>
+        {update.data?.available && <span className="rounded-full bg-accent px-1.5 text-[10px] leading-4 font-medium text-accent-fg" title={`新版本 ${update.data.latest?.tag}`}>有更新</span>}
+      </NavButton>
     </div>
   </aside>
 }

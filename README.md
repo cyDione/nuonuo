@@ -101,6 +101,17 @@ loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运�
 
 **升级**：
 
+用安装包（`install.sh`）装的：服务每天检查两次有没有新的 Release，有的话侧栏「设置」旁会显示「有更新」，在「设置 → 系统 → 版本更新」点「立即更新」即可，装完服务自动重启。命令行也可以：
+
+```bash
+super-assistant update --check   # 只检查
+super-assistant update           # 下载并安装最新版本；systemd 服务会自动重启
+```
+
+检查和下载需要 GitHub 访问（已登录的 `gh`，或数据目录 `env` 文件里的 `GITHUB_TOKEN`）。不想后台检查，在 `env` 里写 `SUPER_ASSISTANT_UPDATE_CHECK=0`。
+
+从源码运行的：
+
 ```bash
 cd ~/super-assistant && git pull && pnpm install && pnpm build
 ```
