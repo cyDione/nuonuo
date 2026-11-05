@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Installs (or updates) the headless Linux build of Super-assistant from GitHub Releases.
+# Installs (or updates) the headless Linux build of Super-assistant (service + web UI) from GitHub Releases.
+#
+#   curl -fsSL https://raw.githubusercontent.com/cyDione/super-assistant/main/install.sh | bash
 #
 #   Installs to  ~/.local/share/super-assistant   (SUPER_ASSISTANT_PREFIX to change)
 #   Command      ~/.local/bin/super-assistant     (SUPER_ASSISTANT_BIN_DIR to change)
-#   Version      latest release                   (SUPER_ASSISTANT_VERSION=v0.1.0 to pin)
+#   Version      latest release                   (SUPER_ASSISTANT_VERSION=v0.2.0 to pin)
+#   CPU          x86_64 (amd64) and aarch64 (arm64)
 #
-# The repository is private, so downloads need GitHub access: either the gh CLI signed in
-# (`gh auth login`), or a token with read access to the repository in GITHUB_TOKEN.
+# The repository is public, so nothing needs signing in. GITHUB_TOKEN, if set, is only used to raise the API rate limit.
 set -euo pipefail
 
 repo="cyDione/super-assistant"
@@ -17,34 +19,30 @@ version="${SUPER_ASSISTANT_VERSION:-}"
 say() { printf '%s\n' "$*" >&2; }
 die() { say "error: $*"; exit 1; }
 
-[ "$(uname -s)" = Linux ] || die "this installer is for Linux only"
+[ "$(uname -s)" = Linux ] || die "this installer is for Linux only; the macOS and Windows desktop apps are on https://github.com/$repo/releases"
 case "$(uname -m)" in
   x86_64|amd64) arch=x64 ;;
-  *) die "unsupported CPU $(uname -m); only x86_64 builds are published" ;;
+  aarch64|arm64) arch=arm64 ;;
+  *) die "unsupported CPU $(uname -m); x86_64 and aarch64 builds are published" ;;
 esac
 command -v tar >/dev/null || die "tar is required"
+command -v curl >/dev/null || die "curl is required"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-pattern="super-assistant-*-linux-$arch.tar.gz"
 
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  say "downloading ${version:-the latest release} with gh…"
-  gh release download ${version:+"$version"} -R "$repo" --pattern "$pattern" --dir "$tmp"
-elif [ -n "${GITHUB_TOKEN:-}" ]; then
-  command -v curl >/dev/null || die "curl is required"
-  api="https://api.github.com/repos/$repo/releases/${version:+tags/$version}"
-  [ -n "$version" ] || api="${api}latest"
-  say "downloading ${version:-the latest release}…"
-  curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$api" -o "$tmp/release.json" \
-    || die "could not read the release from GitHub; check that GITHUB_TOKEN can read $repo and that a release exists"
-  # The asset's API url (not browser_download_url) works for private repositories.
-  asset_url="$(tr -d '\n' < "$tmp/release.json" | grep -o '"url": *"[^"]*/releases/assets/[0-9]*"[^}]*"name": *"super-assistant-[^"]*-linux-'"$arch"'\.tar\.gz"' | head -n1 | sed 's/^"url": *"\([^"]*\)".*/\1/')"
-  [ -n "$asset_url" ] || die "the release has no linux-$arch package"
-  curl -fSL --progress-bar -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/octet-stream" "$asset_url" -o "$tmp/super-assistant-linux-$arch.tar.gz"
-else
-  die "no GitHub access: sign in with 'gh auth login', or set GITHUB_TOKEN to a token that can read $repo"
-fi
+# Which release: the pinned tag, or the latest one (read from the API, which also lists the file names).
+auth=()
+[ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+api="https://api.github.com/repos/$repo/releases/${version:+tags/$version}"
+[ -n "$version" ] || api="${api}latest"
+say "looking up ${version:-the latest release}…"
+curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$api" -o "$tmp/release.json" \
+  || die "could not read the release from GitHub (${version:-latest}); check your network, or try again later if the API rate limit was hit"
+asset_url="$(grep -o '"browser_download_url": *"[^"]*/super-assistant-[^"]*-linux-'"$arch"'\.tar\.gz"' "$tmp/release.json" | head -n1 | sed 's/^"browser_download_url": *"\([^"]*\)"$/\1/')"
+[ -n "$asset_url" ] || die "the release has no linux-$arch package"
+say "downloading $(basename "$asset_url")…"
+curl -fSL --progress-bar "$asset_url" -o "$tmp/super-assistant-linux-$arch.tar.gz" || die "download failed: $asset_url"
 
 archive="$(ls "$tmp"/super-assistant-*linux-"$arch".tar.gz | head -n1)"
 mkdir -p "$tmp/x"
@@ -74,10 +72,12 @@ case ":$PATH:" in
   *) say "note: $bin_dir is not on your PATH; add  export PATH=\"$bin_dir:\$PATH\"  to your shell profile" ;;
 esac
 say ""
-say "start it:            super-assistant start --no-open   (prints the login link; web UI on 127.0.0.1:7420)"
-say "start at login:      super-assistant service install"
-say "update later:        super-assistant update   (or Settings → System in the web UI)"
-say "from another machine: ssh -L 7420:127.0.0.1:7420 <this host>, then open the login link locally"
+say "start in background:   super-assistant start -d          (prints the login link; web UI on 127.0.0.1:7420)"
+say "  on the network:      super-assistant start -d --host 0.0.0.0 --port 7420"
+say "  save the address:    super-assistant config --host 0.0.0.0 --port 7420   (or Settings → System)"
+say "stop / restart:         super-assistant stop | restart | status"
+say "start at login:         super-assistant service install"
+say "update later:           super-assistant update   (or Settings → System in the web UI)"
 
 # Restart last, without waiting: when the service itself runs this script (the web UI's update button), stopping the
 # service stops this script too, so everything else has to be done by then.

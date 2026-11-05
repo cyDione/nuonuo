@@ -1,5 +1,6 @@
-import { chmodSync, existsSync, readFileSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { isIP } from 'node:net'
+import { homedir, networkInterfaces } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import pkg from '../package.json' with { type: 'json' }
@@ -8,21 +9,97 @@ import pkg from '../package.json' with { type: 'json' }
 export const VERSION: string = pkg.version
 export const DEFAULT_PORT = 7420
 
+export const DEFAULT_HOST = '127.0.0.1'
+
+export type ConfigSource = 'flag' | 'env' | 'file' | 'default'
+
 export interface DaemonConfig {
   home: string
   port: number
-  /** Always loopback: the daemon drives a real machine and must not listen on the network. */
-  host: '127.0.0.1'
+  /**
+   * The address the service listens on. Loopback (the default) keeps it on this machine; another address (0.0.0.0 for
+   * every interface) opens the web UI to the network, still behind the login token.
+   */
+  host: string
+  /** Started by the desktop app: the window is the main client, and browser access is a setting (`web`). */
+  desktop: boolean
+  /** Whether browsers may open the web UI. Always true for the headless service; off by default for the desktop app. */
+  web: boolean
+  /** Where host and port came from, so the settings page can say when a flag or variable overrides its saved value. */
+  sources: { host: ConfigSource; port: ConfigSource }
   dev: boolean
   /** Extra origins allowed to call the API (the Vite dev server in --dev). */
   devOrigins: string[]
 }
 
-export function resolveConfig(opts: { port?: number; dev?: boolean } = {}): DaemonConfig {
-  const home = resolve(process.env.SUPER_ASSISTANT_HOME || join(homedir(), '.super-assistant'))
-  const port = opts.port ?? (Number(process.env.SUPER_ASSISTANT_PORT) || DEFAULT_PORT)
+/** What the settings page (or `super-assistant config`) saves in `<home>/config.json`; applied on the next start. */
+export interface SavedConfig { host?: string; port?: number; web?: boolean }
+
+export const homeDir = () => resolve(process.env.SUPER_ASSISTANT_HOME || join(homedir(), '.super-assistant'))
+
+export function readSavedConfig(home: string): SavedConfig {
+  try {
+    const raw = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')) as SavedConfig
+    return {
+      ...(typeof raw.host === 'string' && raw.host.trim() ? { host: raw.host.trim() } : {}),
+      ...(validPort(raw.port) ? { port: raw.port } : {}),
+      ...(typeof raw.web === 'boolean' ? { web: raw.web } : {}),
+    }
+  } catch { return {} }
+}
+
+export function writeSavedConfig(home: string, patch: SavedConfig): SavedConfig {
+  if (patch.host !== undefined && !validHost(patch.host)) throw new Error(`无效的监听地址：${patch.host}`)
+  if (patch.port !== undefined && !validPort(patch.port)) throw new Error(`无效的端口：${patch.port}（1–65535）`)
+  const next = { ...readSavedConfig(home), ...patch }
+  mkdirSync(home, { recursive: true })
+  writeFileSync(join(home, 'config.json'), `${JSON.stringify(next, null, 2)}\n`)
+  return next
+}
+
+export const validPort = (port: unknown): port is number => Number.isInteger(port) && (port as number) >= 0 && (port as number) <= 65535
+/** An IPv4/IPv6 literal or a host name; the service binds to it, so anything else would only fail later. */
+export const validHost = (host: string) => isIP(host) !== 0 || /^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/.test(host)
+export const isLoopback = (host: string) => host === 'localhost' || host === '::1' || /^127\./.test(host)
+export const isWildcard = (host: string) => host === '0.0.0.0' || host === '::'
+
+/** The address to reach a service listening on `host` from this machine: loopback for a wildcard bind. */
+export function connectHost(host: string): string {
+  const h = isWildcard(host) ? '127.0.0.1' : host
+  return h.includes(':') ? `[${h}]` : h
+}
+
+/** URLs for a service listening on `host`: the interface addresses for a wildcard bind, else the address itself. */
+export function networkUrls(host: string, port: number): string[] {
+  if (isLoopback(host)) return []
+  if (!isWildcard(host)) return [`http://${connectHost(host)}:${port}`]
+  const v6 = host === '::'
+  return Object.values(networkInterfaces()).flat()
+    .filter(a => a && !a.internal && (a.family === 'IPv4' || (v6 && a.family === 'IPv6' && !a.address.startsWith('fe80'))))
+    .map(a => `http://${a!.family === 'IPv6' ? `[${a!.address}]` : a!.address}:${port}`)
+}
+
+export function resolveConfig(opts: { port?: number; host?: string; dev?: boolean; desktop?: boolean } = {}): DaemonConfig {
+  const home = homeDir()
+  const saved = readSavedConfig(home)
+  const envPort = Number(process.env.SUPER_ASSISTANT_PORT)
+  const envHost = process.env.SUPER_ASSISTANT_HOST?.trim()
+  const [port, portSource]: [number, ConfigSource] = opts.port !== undefined ? [opts.port, 'flag']
+    : validPort(envPort) && process.env.SUPER_ASSISTANT_PORT ? [envPort, 'env']
+    : saved.port !== undefined ? [saved.port, 'file'] : [DEFAULT_PORT, 'default']
+  let [host, hostSource]: [string, ConfigSource] = opts.host ? [opts.host, 'flag']
+    : envHost ? [envHost, 'env'] : saved.host ? [saved.host, 'file'] : [DEFAULT_HOST, 'default']
+  if (!validPort(port)) throw new Error(`无效的端口：${port}（1–65535）`)
+  if (!validHost(host)) throw new Error(`无效的监听地址：${host}`)
+  const desktop = Boolean(opts.desktop)
+  const web = desktop ? saved.web ?? false : true
+  // The desktop app without browser access keeps the service on this machine whatever address was saved.
+  if (desktop && !web && hostSource !== 'flag') host = DEFAULT_HOST
   const dev = Boolean(opts.dev)
-  return { home, port, host: '127.0.0.1', dev, devOrigins: dev ? ['http://localhost:5173', 'http://127.0.0.1:5173'] : [] }
+  return {
+    home, port, host, desktop, web, sources: { host: hostSource, port: portSource }, dev,
+    devOrigins: dev ? ['http://localhost:5173', 'http://127.0.0.1:5173'] : [],
+  }
 }
 
 /**

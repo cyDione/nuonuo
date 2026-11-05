@@ -41,9 +41,16 @@ export interface Message { id: string; conversationId: string; role: 'user' | 'a
 export interface UsageRow { role: RoleId; providerId: string; model: string; calls: number; failures: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number; costUsd: number | null }
 export interface Check { id: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string; fix?: string }
 export interface Release { tag: string; version: string; url: string; notes: string; publishedAt: string | null; hasPackage: boolean }
-export interface UpdateStatus { current: string; install: 'package' | 'source' | 'other'; canUpdate: boolean; checkedAt: number | null; latest: Release | null
+export interface UpdateStatus { current: string; install: 'package' | 'source' | 'desktop' | 'other'; canUpdate: boolean; checkedAt: number | null; latest: Release | null
   available: boolean; checkError: string | null; hint: string
   run: { state: 'running' | 'installed' | 'failed'; target: string; startedAt: number; log: string; error?: string } | null }
+export interface AccessStatus {
+  desktop: boolean
+  running: { host: string; port: number; web: boolean }
+  saved: { host: string; port: number; web: boolean }
+  sources: { host: 'flag' | 'env' | 'file' | 'default'; port: 'flag' | 'env' | 'file' | 'default' }
+  localUrl: string; networkUrls: string[]; restartNeeded: boolean; canRestart: boolean
+}
 export interface Health { ok: boolean; version: string; home: string; pid: number; uptimeMs: number; secrets: string; effects: { kind: string; pending: number; failing: number }[] }
 
 export type Stage = 'person/approve' | 'person/answer' | 'person/blocked' | 'person/failed' | 'queued' | 'working' | 'idle' | 'ended'

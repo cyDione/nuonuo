@@ -19,6 +19,8 @@ fi
 rm -rf "$out"
 mkdir -p "$(dirname "$out")"
 out="$(cd "$(dirname "$out")" && pwd)/$(basename "$out")"
+# Git Bash on Windows: pnpm (Node) needs C:/… paths, not /c/….
+if command -v cygpath >/dev/null 2>&1; then out="$(cygpath -m "$out")"; root="$(cygpath -m "$root")"; fi
 # A flat (hoisted) node_modules without symlinks, so it copies cleanly into a package.
 (cd "$root" && pnpm --filter @super-assistant/daemon deploy --prod --legacy --config.node-linker=hoisted "$out")
 cp -R "$root/apps/daemon/dist/." "$out/"

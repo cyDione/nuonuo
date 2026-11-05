@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { VERSION } from './config'
-import { compareVersions, detectInstall, runsAsService, Updater } from './update'
+import { assetPattern, compareVersions, detectInstall, runsAsService, Updater } from './update'
 
 describe('compareVersions', () => {
   it('orders dotted versions numerically, with or without v, and pre-releases first', () => {
@@ -34,7 +34,7 @@ describe('detectInstall', () => {
 })
 
 describe('Updater', () => {
-  const release = (tag: string, assets = [`super-assistant-${tag.slice(1)}-linux-x64.tar.gz`]) =>
+  const release = (tag: string, assets = [`super-assistant-${tag.slice(1)}-linux-${process.arch}.tar.gz`]) =>
     ({ tag_name: tag, html_url: `https://github.com/x/releases/${tag}`, body: 'notes', published_at: '2026-11-05T00:00:00Z', assets: assets.map(name => ({ name })) })
   const make = (body: unknown, status = 200, env: NodeJS.ProcessEnv = { GITHUB_TOKEN: 't' }) => {
     const calls: string[] = []
@@ -60,10 +60,22 @@ describe('Updater', () => {
     expect((await make(release('v99.0.0', [])).updater.check()).available).toBe(false)
   })
 
-  it('explains missing access and GitHub errors instead of throwing', async () => {
-    const none = make(release('v99.0.0'), 200, { PATH: '/nonexistent' })
-    expect((await none.updater.check()).checkError).toMatch(/GitHub 访问/)
+  it('needs no token (the repository is public) and explains GitHub errors instead of throwing', async () => {
+    const none = make(release('v99.0.0'), 200, {})
+    expect(await none.updater.check()).toMatchObject({ available: true, checkError: null })
+    expect(none.calls[0]).toBe('https://api.github.com/repos/cyDione/super-assistant/releases/latest undefined')
     expect((await make({}, 404).updater.check()).checkError).toMatch(/还没有发布/)
+    expect((await make({}, 403).updater.check()).checkError).toMatch(/频率/)
+  })
+
+  it('only counts the package for this machine, and the desktop app only reports', async () => {
+    const other = process.arch === 'arm64' ? 'x64' : 'arm64'
+    expect((await make(release('v99.0.0', [`super-assistant-99.0.0-linux-${other}.tar.gz`])).updater.check()).available).toBe(false)
+    expect(assetPattern(true, 'darwin', 'arm64').test('super-assistant-1.0.0-mac-arm64.dmg')).toBe(true)
+    expect(assetPattern(true, 'win32', 'x64').test('super-assistant-1.0.0-win-x64-setup.exe')).toBe(true)
+    expect(assetPattern(true, 'win32', 'x64').test('super-assistant-1.0.0-win-arm64-setup.exe')).toBe(false)
+    const desktop = new Updater({ home: mkdtempSync(join(tmpdir(), 'sa-home-')), entry: join(fakePackage(), 'lib/cli.mjs'), env: {}, desktop: true })
+    expect(desktop.status()).toMatchObject({ install: 'desktop', canUpdate: false })
   })
 
   it('prepares install.sh from the release tag with the prefix, version and token', async () => {

@@ -1,0 +1,166 @@
+name: Release
+
+# Builds every release package on its own machine (native modules come from the build machine):
+#   Linux headless (service + web UI, own Node.js)   x64, arm64        super-assistant-<v>-linux-<arch>.tar.gz
+#   macOS desktop app (own Node.js and service)      arm64, x64        super-assistant-<v>-mac-<arch>.dmg / .zip
+#   Windows desktop app (own Node.js and service)    x64, arm64        super-assistant-<v>-win-<arch>-setup.exe / .zip
+# On a v* tag the packages are published as the GitHub Release that install.sh and the update check read.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - scripts/stage-daemon.sh
+      - scripts/stage-desktop.mjs
+      - scripts/package-linux.sh
+      - scripts/set-version.mjs
+      - install.sh
+      - apps/desktop/**
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: linux-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: x64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        # Every package must be at the tag's version (pnpm set-version sets them all); the update check compares them.
+        run: node scripts/set-version.mjs --check "$GITHUB_REF_NAME"
+
+      - name: Build web UI and service
+        run: pnpm build
+
+      - name: Package
+        run: bash scripts/package-linux.sh ${{ matrix.arch }}
+
+      - name: Smoke test the package (background start on all interfaces, stop)
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg"
+          tar -xzf dist/super-assistant-*-linux-${{ matrix.arch }}.tar.gz -C "$RUNNER_TEMP/pkg"
+          bin="$(echo "$RUNNER_TEMP"/pkg/*/bin/super-assistant)"
+          export SUPER_ASSISTANT_HOME="$RUNNER_TEMP/home" SUPER_ASSISTANT_SECRETS=file
+          "$bin" start -d --host 0.0.0.0 --port 7431
+          token="$(cat "$SUPER_ASSISTANT_HOME/token")"
+          curl -fsS -H "authorization: Bearer $token" http://127.0.0.1:7431/api/health
+          lan="$(hostname -I | awk '{print $1}')"
+          curl -fsS -o /dev/null -H "authorization: Bearer $token" "http://$lan:7431/api/health"
+          curl -fsS -o /dev/null http://127.0.0.1:7431/
+          "$bin" status
+          "$bin" stop
+          cat "$SUPER_ASSISTANT_HOME/logs/daemon.log"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/super-assistant-*-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  desktop:
+    name: ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, os: mac, arch: arm64 }
+          - { runner: macos-15-intel, os: mac, arch: x64 }
+          - { runner: windows-2025, os: win, arch: x64 }
+          - { runner: windows-11-arm, os: win, arch: arm64 }
+    defaults:
+      run:
+        shell: bash
+    env:
+      # No Developer ID: the macOS app is ad-hoc signed (mac.identity "-"), also on pull requests.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      CSC_FOR_PULL_REQUEST: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/set-version.mjs --check "$GITHUB_REF_NAME"
+
+      - name: Build web UI and service
+        run: pnpm build
+
+      - name: Stage the service and Node.js
+        run: node scripts/stage-desktop.mjs
+
+      - name: Package the desktop app
+        working-directory: apps/desktop
+        run: pnpm exec electron-builder --${{ matrix.os }} --${{ matrix.arch }} --publish never
+
+      - name: Smoke test the bundled service
+        run: |
+          resources="$(find apps/desktop/dist -type d \( -path '*.app/Contents/Resources' -o -path '*-unpacked/resources' \) | head -n1)"
+          [ -n "$resources" ] || { echo "no unpacked app in apps/desktop/dist"; ls -R apps/desktop/dist | head -50; exit 1; }
+          node_bin="$resources/node/node"; [ -f "$node_bin.exe" ] && node_bin="$node_bin.exe"
+          tmp="$RUNNER_TEMP"; command -v cygpath >/dev/null && tmp="$(cygpath -m "$RUNNER_TEMP")"
+          export SUPER_ASSISTANT_HOME="$tmp/home" SUPER_ASSISTANT_SECRETS=file
+          "$node_bin" --version
+          "$node_bin" "$resources/daemon/cli.mjs" start -d --desktop --port 7432
+          token="$(cat "$SUPER_ASSISTANT_HOME/token")"
+          curl -fsS -H "authorization: Bearer $token" http://127.0.0.1:7432/api/health
+          # Browser access is off by default in the desktop app; its window is let in.
+          test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:7432/auth?token=$token")" = 403
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'x-super-assistant-client: desktop' "http://127.0.0.1:7432/auth?token=$token")" = 302
+          "$node_bin" "$resources/daemon/cli.mjs" stop
+          cat "$SUPER_ASSISTANT_HOME/logs/daemon.log"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            apps/desktop/dist/super-assistant-*.dmg
+            apps/desktop/dist/super-assistant-*.zip
+            apps/desktop/dist/super-assistant-*-setup.exe
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, desktop]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write  # publishes the GitHub Release that install.sh and the update check read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+          fi

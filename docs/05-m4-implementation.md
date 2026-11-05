@@ -50,7 +50,7 @@
 - **系统通知**：订阅服务的事件流，窗口不在前台时，智能体的新消息会弹出系统通知，点击直达对应的对话。网页版检测到运行在桌面端时，不再弹浏览器通知，避免重复。
 - **全局快捷键**：`Cmd/Ctrl+Shift+Space`，呼出窗口或打开新对话。
 - **打包**：`electron-builder` 配置了 macOS（dmg / zip）和 Linux（AppImage / tar.gz）。`pnpm stage`（仓库根目录的 `scripts/stage-daemon.sh`）先把服务的 `cli.mjs`、Web 界面和生产依赖（含 SQLite、钥匙串的原生模块）放到 `.stage/daemon`，打包时放进 `resources/daemon`；electron-builder 不会经 `extraResources` 复制 `node_modules`，所以由 `scripts/after-pack.cjs` 补上。运行仍然需要本机安装 Node 22.12 及以上版本。
-- **Linux 无桌面端包**：`scripts/package-linux.sh` 打出 `dist/super-assistant-<版本>-linux-x64.tar.gz`，内含服务、Web 界面、生产依赖和自带的 Node.js，目标机器什么都不用装，解压后 `./bin/super-assistant start` 即可。GitHub Actions 的 “Package Linux x64” 工作流可以手动触发，推送 `v*` 标签时也会自动打包，产物在运行页面的 Artifacts 里。
+- **Linux 无桌面端包**：`scripts/package-linux.sh` 打出 `dist/super-assistant-<版本>-linux-x64.tar.gz`，内含服务、Web 界面、生产依赖和自带的 Node.js，目标机器什么都不用装，解压后 `./bin/super-assistant start` 即可。GitHub Actions 的 “Release” 工作流在 x64 和 arm64 机器上各打一个（同时打 macOS、Windows 桌面端），推送 `v*` 标签时自动发布到 GitHub Release。
 
 ## 验证
 

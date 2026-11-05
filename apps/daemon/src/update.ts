@@ -1,11 +1,12 @@
 /**
- * Update check and self-update for the packaged Linux build.
+ * Update check and self-update.
  *
- * The check reads the latest GitHub Release. The repository is private, so it needs GitHub access: GITHUB_TOKEN
- * (or GH_TOKEN, e.g. in <home>/env), or the gh CLI signed in. Updating runs install.sh, the same script a fresh install
- * uses, against the installation this process runs from; the data directory is never touched.
+ * The check reads the latest GitHub Release of the public repository; no sign-in is needed (GITHUB_TOKEN or GH_TOKEN,
+ * when set, is sent to get a higher rate limit). The headless Linux package updates itself by running install.sh, the
+ * same script a fresh install uses, against the installation this process runs from; the data directory is never
+ * touched. The desktop app only reports the new version, with a link to its installer.
  */
-import { execFile, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { VERSION } from './config'
@@ -13,10 +14,16 @@ import { VERSION } from './config'
 export const REPO = 'cyDione/super-assistant'
 /** SUPER_ASSISTANT_UPDATE_API points the check at another server with the same API (used by tests). */
 const api = (env: NodeJS.ProcessEnv) => (env.SUPER_ASSISTANT_UPDATE_API || `https://api.github.com/repos/${REPO}`).replace(/\/$/, '')
-const ASSET = /^super-assistant-.+-linux-x64\.tar\.gz$/
+
+/** The release file for this machine: the headless tar.gz on Linux, the installer for the desktop app. */
+export function assetPattern(desktop: boolean, platform: NodeJS.Platform = process.platform, arch: string = process.arch): RegExp {
+  if (!desktop) return new RegExp(`^super-assistant-.+-linux-${arch}\\.tar\\.gz$`)
+  const os = platform === 'darwin' ? 'mac' : platform === 'win32' ? 'win' : 'linux'
+  return new RegExp(`^super-assistant-.+-${os}-${arch}[.-]`)
+}
 
 /** How this process was installed: from the release package (can update itself) or run from a source checkout. */
-export type Install = { kind: 'package'; prefix: string } | { kind: 'source'; root: string } | { kind: 'other' }
+export type Install = { kind: 'package'; prefix: string } | { kind: 'source'; root: string } | { kind: 'desktop' } | { kind: 'other' }
 
 /** `entry` is the running cli.mjs. A package is laid out as <prefix>/{bin/super-assistant,lib/cli.mjs,runtime/node}. */
 export function detectInstall(entry: string): Install {
@@ -56,37 +63,34 @@ export function compareVersions(a: string, b: string): number {
   return x.pre < y.pre ? -1 : 1
 }
 
-/** A GitHub token from the environment, else from the signed-in gh CLI. */
-export async function githubToken(env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
-  const fromEnv = env.GITHUB_TOKEN || env.GH_TOKEN
-  if (fromEnv) return fromEnv
-  return new Promise(done => {
-    execFile('gh', ['auth', 'token', '-h', 'github.com'], { timeout: 10_000, env }, (error, stdout) => done(error ? undefined : stdout.trim() || undefined))
-  })
+/** A GitHub token from the environment, if any. The repository is public, so this only raises the rate limit. */
+export function githubToken(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.GITHUB_TOKEN || env.GH_TOKEN || undefined
 }
+
+const headers = (token: string | undefined, accept: string) =>
+  ({ ...(token ? { authorization: `Bearer ${token}` } : {}), accept, 'user-agent': 'super-assistant-updater' })
 
 export interface Release { tag: string; version: string; url: string; notes: string; publishedAt: string | null; hasPackage: boolean }
 
-export async function fetchLatestRelease(token: string, fetchImpl: typeof fetch = fetch, env: NodeJS.ProcessEnv = process.env): Promise<Release> {
-  const res = await fetchImpl(`${api(env)}/releases/latest`, {
-    headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'user-agent': 'super-assistant-updater' },
-    signal: AbortSignal.timeout(20_000),
-  })
-  if (res.status === 404) throw new Error('还没有发布任何版本（或这个令牌读不到仓库）')
-  if (res.status === 401) throw new Error('GitHub 令牌无效或已过期')
+export async function fetchLatestRelease(token: string | undefined, fetchImpl: typeof fetch = fetch, env: NodeJS.ProcessEnv = process.env,
+  asset: RegExp = assetPattern(false)): Promise<Release> {
+  const res = await fetchImpl(`${api(env)}/releases/latest`, { headers: headers(token, 'application/vnd.github+json'), signal: AbortSignal.timeout(20_000) })
+  if (res.status === 404) throw new Error('还没有发布任何版本')
+  if (res.status === 401) throw new Error('GITHUB_TOKEN 无效或已过期（检查更新不需要令牌，可以删掉它）')
+  if (res.status === 403 || res.status === 429) throw new Error('GitHub 访问频率受限，稍后再试（或在数据目录的 env 文件里设置 GITHUB_TOKEN）')
   if (!res.ok) throw new Error(`GitHub 返回 ${res.status}`)
   const r = await res.json() as { tag_name: string; html_url: string; body?: string | null; published_at?: string | null; assets?: { name: string }[] }
   return {
     tag: r.tag_name, version: r.tag_name.replace(/^v/i, ''), url: r.html_url, notes: (r.body ?? '').slice(0, 4000),
-    publishedAt: r.published_at ?? null, hasPackage: (r.assets ?? []).some(a => ASSET.test(a.name)),
+    publishedAt: r.published_at ?? null, hasPackage: (r.assets ?? []).some(a => asset.test(a.name)),
   }
 }
 
 /** install.sh as published at `tag` (so an update always runs the newest installer). */
-async function fetchInstaller(token: string, tag: string, fetchImpl: typeof fetch, env: NodeJS.ProcessEnv): Promise<string> {
+async function fetchInstaller(token: string | undefined, tag: string, fetchImpl: typeof fetch, env: NodeJS.ProcessEnv): Promise<string> {
   const res = await fetchImpl(`${api(env)}/contents/install.sh?ref=${encodeURIComponent(tag)}`, {
-    headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github.raw', 'user-agent': 'super-assistant-updater' },
-    signal: AbortSignal.timeout(20_000),
+    headers: headers(token, 'application/vnd.github.raw'), signal: AbortSignal.timeout(20_000),
   })
   if (!res.ok) throw new Error(`读取 ${tag} 的 install.sh 失败：GitHub 返回 ${res.status}`)
   return res.text()
@@ -117,6 +121,8 @@ export interface UpdaterOptions {
   restart?: () => void
   /** Run by the systemd service (default: detected with runsAsService). */
   service?: boolean
+  /** Started by the desktop app: report new versions, but the installer is downloaded by hand. */
+  desktop?: boolean
 }
 
 const DAY = 24 * 60 * 60 * 1000
@@ -134,7 +140,7 @@ export class Updater {
   private readonly service: boolean
 
   constructor(private readonly opts: UpdaterOptions) {
-    this.install = detectInstall(opts.entry)
+    this.install = opts.desktop ? { kind: 'desktop' } : detectInstall(opts.entry)
     this.env = opts.env ?? process.env
     this.fetchImpl = opts.fetch ?? fetch
     this.service = opts.service ?? runsAsService(this.env)
@@ -143,7 +149,7 @@ export class Updater {
 
   /** Checks shortly after start and then twice a day. SUPER_ASSISTANT_UPDATE_CHECK=0 turns the background check off. */
   startBackgroundChecks(): void {
-    if (this.env.SUPER_ASSISTANT_UPDATE_CHECK === '0' || this.install.kind !== 'package') return
+    if (this.env.SUPER_ASSISTANT_UPDATE_CHECK === '0' || (this.install.kind !== 'package' && this.install.kind !== 'desktop')) return
     const tick = () => { void this.check().catch(() => { /* recorded in checkError */ }) }
     const first = setTimeout(tick, 15_000)
     first.unref()
@@ -157,6 +163,7 @@ export class Updater {
     const available = Boolean(this.latest && this.latest.hasPackage && compareVersions(this.latest.version, VERSION) > 0)
     const hint = this.install.kind === 'source'
       ? `源码运行：在 ${this.install.root} 里 git pull && pnpm install && pnpm build 后重启`
+      : this.install.kind === 'desktop' ? '桌面版：从发布页下载新版安装包，覆盖安装即可（数据会保留）'
       : this.install.kind === 'other' ? '这种安装方式不支持自动更新'
       : this.service ? '更新后 systemd 服务会自动重启' : '更新后服务会自动重启'
     if (this.run?.state === 'running') this.run = { ...this.run, log: tail(join(this.opts.home, 'logs/update.log')) }
@@ -171,9 +178,7 @@ export class Updater {
     if (!this.checking) {
       this.checking = (async () => {
         try {
-          const token = await githubToken(this.env)
-          if (!token) throw new Error('没有 GitHub 访问权限：运行 gh auth login，或在数据目录的 env 文件里写 GITHUB_TOKEN=…')
-          this.latest = await fetchLatestRelease(token, this.fetchImpl, this.env)
+          this.latest = await fetchLatestRelease(githubToken(this.env), this.fetchImpl, this.env, assetPattern(this.install.kind === 'desktop'))
           this.checkError = null
         } catch (error) {
           this.checkError = (error as Error).message
@@ -199,15 +204,14 @@ export class Updater {
     const status = await this.check()
     if (!status.latest) throw new Error(status.checkError ?? '读不到最新版本')
     if (!status.available) throw new Error(`已是最新版本（${VERSION}）`)
-    const token = await githubToken(this.env)
-    if (!token) throw new Error('没有 GitHub 访问权限')
+    const token = githubToken(this.env)
     const tag = status.latest.tag
     const script = await fetchInstaller(token, tag, this.fetchImpl, this.env).catch(error => {
       const bundled = join(prefix, 'install.sh')
       if (existsSync(bundled)) return readFileSync(bundled, 'utf8')
       throw error
     })
-    return { tag, script, env: { ...this.env, GITHUB_TOKEN: token, SUPER_ASSISTANT_PREFIX: prefix, SUPER_ASSISTANT_VERSION: tag } }
+    return { tag, script, env: { ...this.env, ...(token ? { GITHUB_TOKEN: token } : {}), SUPER_ASSISTANT_PREFIX: prefix, SUPER_ASSISTANT_VERSION: tag } }
   }
 
   /**

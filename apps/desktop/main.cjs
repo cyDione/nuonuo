@@ -1,8 +1,8 @@
 // Super-assistant desktop: the web UI in a window, plus what only a desktop app can do —
 // a tray icon showing what needs you, native notifications, a global shortcut, and starting at login.
-const { app, BrowserWindow, Menu, Notification, Tray, globalShortcut, nativeImage, shell, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, Notification, Tray, globalShortcut, nativeImage, shell, ipcMain, session } = require('electron')
 const { writeFileSync } = require('node:fs')
-const { ensureDaemon, stopDaemon } = require('./lib/daemon.cjs')
+const { ensureDaemon, stopDaemon, readLock } = require('./lib/daemon.cjs')
 const { iconPng } = require('./lib/icon.cjs')
 
 const SHORTCUT = 'CommandOrControl+Shift+Space'
@@ -13,7 +13,7 @@ let quitting = false
 if (!app.requestSingleInstanceLock()) app.quit()
 app.on('second-instance', () => show())
 
-const base = () => `http://127.0.0.1:${daemon.port}`
+const base = () => `http://${daemon.host}:${daemon.port}`
 const api = async (path, init = {}) => {
   const res = await fetch(`${base()}${path}`, { ...init, headers: { authorization: `Bearer ${daemon.token}`, ...(init.headers || {}) } })
   if (!res.ok) throw new Error(`${path} → ${res.status}`)
@@ -75,7 +75,30 @@ async function pollAttention() {
   try {
     const { items } = await api('/api/inbox')
     if (items.length !== attention) { attention = items.length; refreshTray() }
-  } catch { /* daemon restarting */ }
+  } catch { void reconnect() }
+}
+
+/**
+ * The daemon restarted (Settings → System changed its address or port, or it was updated): find it again, starting it if
+ * it stopped, and reload the window on the new address.
+ */
+let reconnecting = false
+async function reconnect() {
+  if (reconnecting) return
+  reconnecting = true
+  try {
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 1_500))
+      const lock = readLock()
+      if (!lock && i < 6) continue
+      const next = await ensureDaemon().catch(() => undefined)
+      if (!next) continue
+      const moved = next.port !== daemon.port || next.host !== daemon.host
+      daemon = next
+      if (moved && win) win.loadURL(`${base()}/auth?token=${daemon.token}`)
+      return
+    }
+  } finally { reconnecting = false }
 }
 
 /** Follows the daemon's event stream; what the agent says while the window is not focused becomes a native notification. */
@@ -130,6 +153,12 @@ app.whenReady().then(async () => {
     app.quit()
     return
   }
+  // Marks the window's requests as the desktop app's: with browser access off, the daemon serves pages only to it.
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, done) => {
+    const headers = details.requestHeaders
+    if (details.url.startsWith(base())) headers['x-super-assistant-client'] = 'desktop'
+    done({ requestHeaders: headers })
+  })
   tray = new Tray(trayImage())
   tray.on('click', () => show())
   refreshTray()

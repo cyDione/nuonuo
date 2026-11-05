@@ -8,8 +8,8 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, relative } from 'node:path'
 import { Readable } from 'node:stream'
 import { z } from 'zod'
-import { COOKIE, hostGuard, requireToken } from './auth'
-import { VERSION } from './config'
+import { COOKIE, hostGuard, requireToken, webGate } from './auth'
+import { connectHost, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, resolveConfig, validHost, VERSION, writeSavedConfig } from './config'
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
@@ -39,12 +39,20 @@ async function body<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
   return parsed.data
 }
 
+export interface AppControl {
+  /** Stops and starts the service again (for settings that apply on start); missing when nothing would start it again. */
+  restart?: () => void
+  /** The port actually listened on (differs from the configured one for port 0). */
+  port?: () => number
+}
+
 /** `closing` aborts on shutdown so long-lived event streams end instead of holding the HTTP server open. */
-export function createApp(rt: Runtime, token: string, webRoot?: string, updater?: Updater, closing?: AbortSignal): Hono {
+export function createApp(rt: Runtime, token: string, webRoot?: string, updater?: Updater, closing?: AbortSignal, control: AppControl = {}): Hono {
   const app = new Hono()
   const conversations = new Conversations(rt.store, rt.hub)
 
   app.use('*', hostGuard(rt.config))
+  app.use('*', webGate(rt.config))
 
   app.onError((error, c) => {
     if (error instanceof HttpError) return c.json({ error: { code: error.code, message: error.message } }, error.status)
@@ -79,6 +87,42 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.post('/update/check', async c => c.json(await updates().check()))
   api.post('/update', async c => {
     try { return c.json(await updates().update()) } catch (error) { throw error instanceof HttpError ? error : new HttpError(409, 'update_failed', (error as Error).message) }
+  })
+
+  // Network access: where the service listens and whether browsers may open it. Saved to <home>/config.json and applied
+  // when the service starts again; a --host/--port flag or SUPER_ASSISTANT_HOST/PORT overrides the saved value.
+  const access = () => {
+    const cfg = rt.config
+    const saved = readSavedConfig(cfg.home)
+    const port = control.port?.() ?? cfg.port
+    const next = resolveConfig({ desktop: cfg.desktop, host: cfg.sources.host === 'flag' ? cfg.host : undefined, port: cfg.sources.port === 'flag' ? cfg.port : undefined })
+    return {
+      desktop: cfg.desktop,
+      running: { host: cfg.host, port, web: cfg.web },
+      saved: { host: saved.host ?? DEFAULT_HOST, port: saved.port ?? DEFAULT_PORT, web: saved.web ?? !cfg.desktop },
+      sources: cfg.sources,
+      localUrl: `http://${connectHost(cfg.host)}:${port}/auth?token=${token}`,
+      networkUrls: cfg.web ? networkUrls(cfg.host, port).map(u => `${u}/auth?token=${token}`) : [],
+      restartNeeded: next.host !== cfg.host || (next.port !== cfg.port && cfg.port !== 0) || next.web !== cfg.web,
+      canRestart: Boolean(control.restart),
+    }
+  }
+  const AccessBody = z.object({
+    host: z.string().trim().refine(validHost, '无效的监听地址').optional(),
+    port: z.number().int().min(1).max(65535).optional(),
+    web: z.boolean().optional(),
+  }).strict()
+  api.get('/system/access', c => c.json(access()))
+  api.put('/system/access', async c => {
+    const input = await body(c, AccessBody)
+    guard(() => writeSavedConfig(rt.config.home, input))
+    return c.json(access())
+  })
+  api.post('/system/restart', c => {
+    if (!control.restart) throw new HttpError(409, 'cannot_restart', '这个进程没有办法自己重启：请手动重启服务')
+    // Answer first; the restart closes this connection.
+    setTimeout(() => control.restart?.(), 300)
+    return c.json({ ok: true })
   })
   api.get('/doctor', c => c.json({ checks: runDoctor(rt) }))
   api.get('/catalog', c => c.json({ presets: PROVIDER_PRESETS, roles: ROLES, reasoningLevels: REASONING_LEVELS }))
