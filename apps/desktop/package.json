@@ -21,32 +21,9 @@
     "productName": "Super-assistant",
     "publish": null,
     "afterPack": "scripts/after-pack.cjs",
-    "files": [
-      "main.cjs",
-      "preload.cjs",
-      "lib/**"
-    ],
-    "extraResources": [
-      {
-        "from": ".stage/daemon",
-        "to": "daemon"
-      }
-    ],
-    "mac": {
-      "category": "public.app-category.productivity",
-      "target": [
-        "dmg",
-        "zip"
-      ]
-    },
-    "linux": {
-      "executableName": "super-assistant",
-      "target": [
-        "AppImage",
-        "tar.gz"
-      ],
-      "category": "Utility",
-      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
-    }
+    "files": ["main.cjs", "preload.cjs", "lib/**"],
+    "extraResources": [{ "from": ".stage/daemon", "to": "daemon" }],
+    "mac": { "category": "public.app-category.productivity", "target": ["dmg", "zip"] },
+    "linux": { "executableName": "super-assistant", "target": ["AppImage", "tar.gz"], "category": "Utility", "artifactName": "${productName}-${version}-linux-${arch}.${ext}" }
   }
 }

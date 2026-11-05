@@ -5,12 +5,8 @@
   "description": "Types and helpers for writing Super-assistant plugins",
   "type": "module",
   "main": "./src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "scripts": {
-    "typecheck": "tsc -p tsconfig.json"
-  },
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p tsconfig.json" },
   "dependencies": {
     "@super-assistant/core": "workspace:*",
     "@super-assistant/sources": "workspace:*",
