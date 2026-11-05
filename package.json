@@ -23,9 +23,11 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "@napi-rs/keyring",
-      "better-sqlite3",
       "electron",
       "esbuild"
+    ],
+    "ignoredBuiltDependencies": [
+      "better-sqlite3"
     ]
   }
 }

@@ -6,7 +6,7 @@
 
 **跑在你自己电脑上的个人助理。你说一句话，它在后台把事办完，再用一句话告诉你结果。**
 
-[快速开始](#快速开始) · [设计理念](#设计理念) · [参考了什么](#参考了什么) · [架构](#架构) · [部署](#部署自己的-mac-或-linux-电脑) · [文档](docs/)
+[快速开始](#快速开始) · [设计理念](#设计理念) · [参考了什么](#参考了什么) · [架构](#架构) · [部署](#部署自己的电脑或服务器) · [文档](docs/)
 
 <img src="docs/assets/demo.gif" alt="Super-assistant 运行演示：说一句话，它接下任务、在后台做完，把成果交给你" width="860" />
 
@@ -171,12 +171,12 @@ packages/db             SQLite + Drizzle、迁移、持久化副作用队列
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cyDione/super-assistant/main/install.sh | bash
-super-assistant start
+super-assistant start -d        # 后台运行；局域网访问加 --host 0.0.0.0 --port 7420
 ```
 
 **macOS / Windows 桌面端**：从 [Releases](https://github.com/cyDione/super-assistant/releases) 下载对应系统和芯片的安装包。
 
-启动后打开打印出来的登录链接，在「设置 → 模型供应商」里填上你自己的 API key，就可以开始说话了。从源码运行、开机自启、远程访问等见下面的[部署](#部署自己的-mac-或-linux-电脑)。
+启动后打开打印出来的登录链接，在「设置 → 模型供应商」里填上你自己的 API key，就可以开始说话了。后台运行、监听地址和端口、从源码运行、开机自启、远程访问等见下面的[部署](#部署自己的电脑或服务器)。
 
 ## 功能一览
 
@@ -192,9 +192,47 @@ super-assistant start
 
 各阶段的设计与实现记录：[01-m1](docs/01-m1-implementation.md) · [02-m2](docs/02-m2-implementation.md) · [03-m3](docs/03-m3-implementation.md) · [04-plugin-sdk](docs/04-plugin-sdk.md) · [05-m4](docs/05-m4-implementation.md) · [06-audit](docs/06-audit.md) · [07-architecture](docs/07-architecture.md) · [08-industry-review](docs/08-industry-review.md) · [09-m6](docs/09-m6-muse-and-memory.md) · [10-oauth](docs/10-oauth.md)
 
-## 部署（自己的 Mac 或 Linux 电脑）
+## 部署（自己的电脑或服务器）
 
-服务和执行都在你自己的机器上，只监听 `127.0.0.1`，不对外开放端口。
+服务和执行都在你自己的机器上。默认只监听 `127.0.0.1`，不对外开放端口；需要时可以改成监听局域网地址。
+
+### 安装包（推荐）
+
+每个 [Release](https://github.com/cyDione/super-assistant/releases) 都有下面这些包，都自带 Node.js，不用另装运行环境：
+
+| 平台 | CPU | 文件 | 形态 |
+|---|---|---|---|
+| Linux（服务器 / 无桌面） | x64（amd64）、arm64 | `super-assistant-<版本>-linux-<x64\|arm64>.tar.gz` | 后台服务 + 网页界面 |
+| macOS | Apple 芯片（arm64）、Intel（x64） | `super-assistant-<版本>-mac-<arm64\|x64>.dmg`（或 `.zip`） | 桌面应用，网页访问可在设置里开启 |
+| Windows | x64、arm64 | `super-assistant-<版本>-win-<x64\|arm64>-setup.exe`（或免安装 `.zip`） | 桌面应用，网页访问可在设置里开启 |
+
+**Linux 一键安装**（x64 和 arm64 自动识别，不需要登录 GitHub）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cyDione/super-assistant/main/install.sh | bash
+```
+
+装到 `~/.local/share/super-assistant`，命令链接到 `~/.local/bin/super-assistant`；重复运行即升级，数据目录 `~/.super-assistant` 不受影响。指定版本：`SUPER_ASSISTANT_VERSION=v0.2.0`（放在 `bash` 前面）。
+
+**Linux 后台运行、地址和端口**：
+
+```bash
+super-assistant start -d                                # 后台启动，打印登录链接（http://127.0.0.1:7420/auth?token=…）
+super-assistant start -d --host 0.0.0.0 --port 8080     # 监听所有网卡的 8080 端口，局域网里的设备也能打开
+super-assistant config --host 0.0.0.0 --port 8080       # 保存为默认值（写入 ~/.super-assistant/config.json），以后每次启动都用
+super-assistant status | stop | restart                 # 查看 / 停止 / 用保存的设置重启
+super-assistant service install                         # 开机自启（systemd 用户服务，同样读取保存的地址和端口）
+```
+
+地址和端口的优先级：命令行参数 `--host/--port` > 环境变量 `SUPER_ASSISTANT_HOST/SUPER_ASSISTANT_PORT`（也可以写进 `~/.super-assistant/env`）> `config.json` > 默认 `127.0.0.1:7420`。网页的「设置 → 系统 → 监听地址」也能改，改完点「重启服务」生效。监听非本机地址时登录链接就是密码，而且是明文 HTTP：只在可信的局域网里这样用，远程访问请放在 HTTPS 反向代理后面，或用 `ssh -L 7420:127.0.0.1:7420 <服务器>`。
+
+**macOS / Windows 桌面端**：下载对应的安装包安装即可。应用自带服务，关掉窗口后留在托盘里继续工作。默认只有应用窗口能用；想在浏览器（或手机等局域网设备）里打开，到「设置 → 系统 → 网页访问」勾选「允许在浏览器里打开」，选「仅本机」或「局域网」并设置端口，点「重启服务」，再复制登录链接。
+
+- macOS 包没有 Apple 开发者签名（只做了 ad-hoc 签名）。第一次打开如果提示「已损坏」或「无法验证开发者」，运行 `xattr -dr com.apple.quarantine /Applications/Super-assistant.app`，或在 Finder 里右键 →「打开」。
+- Windows 包没有代码签名，SmartScreen 提示时点「更多信息 → 仍要运行」。
+- 桌面端有新版本时，「设置 → 系统 → 版本更新」会提示并给出下载链接，下载新安装包覆盖安装即可。
+
+### 从源码部署
 
 **1. 准备**：Node.js ≥ 22.12、pnpm、git。可选：`gh`（GitHub）、Docker（沙箱）、Chrome/Chromium（浏览器工具）。
 
@@ -234,16 +272,8 @@ loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运�
 ```
 
 **5. 可选**：
-- **桌面端**：`cd apps/desktop && pnpm start`，或先在仓库根目录 `pnpm build`，再用 `pnpm dist:mac` / `pnpm dist:linux` 打包。Linux 服务器可以用不带桌面端的包：`pnpm build && bash scripts/package-linux.sh`，或在 GitHub Actions 里手动运行 “Package Linux x64” 工作流；包里自带 Node.js，解压后运行 `./bin/super-assistant start`。
-
-  一键安装到 Linux x64（仓库是私有的，需要已登录的 `gh`，或在 `GITHUB_TOKEN` 里放一个能读本仓库的令牌）：
-
-  ```sh
-  gh api repos/cyDione/super-assistant/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
-  ```
-
-  会从最新的 GitHub Release 下载包，装到 `~/.local/share/super-assistant`，命令链接到 `~/.local/bin/super-assistant`；重复运行即升级。推送 `v*` 标签时工作流会自动发布 Release。发版前先用 `pnpm set-version 0.1.4` 把所有包改成同一个版本号并提交，再打 `v0.1.4` 标签；标签和版本号不一致时，工作流会报错并且不发布。
-- **在外面用**：启用 Telegram 插件，用手机指挥家里的电脑，不需要开放端口。或者用 SSH 端口转发 `ssh -L 7420:127.0.0.1:7420 你的电脑`，再在本地打开登录链接。
+- **自己打包**：Linux 无桌面包 `pnpm build && bash scripts/package-linux.sh`（打的是本机 CPU 的包）；桌面端 `pnpm build`，再在 `apps/desktop` 里运行 `pnpm dist:mac` / `pnpm dist:win`（同样只能打本机系统和 CPU 的包）。GitHub Actions 的 “Release” 工作流在 6 台对应的机器上打全部的包；推送 `v*` 标签时自动发布 Release。发版前先用 `pnpm set-version 0.2.0` 把所有包改成同一个版本号并提交，再打 `v0.2.0` 标签；标签和版本号不一致时，工作流会报错并且不发布。
+- **在外面用**：启用 Telegram 插件，用手机指挥家里的电脑，不需要开放端口。或者用 SSH 端口转发 `ssh -L 7420:127.0.0.1:7420 你的电脑`，再在本地打开登录链接；在同一个局域网里，也可以让服务监听局域网地址（见上面的「地址和端口」）。
 - **GitHub**：在「设置 → 来源 → GitHub」点「授权 GitHub」，页面会给出一个验证码，在 github.com/login/device 输入并同意即可（设备码授权，不需要回调地址，通过 SSH 端口转发访问也能用）；再填写要监听的仓库。授权后智能体的 `gh` 和 git 也用这个授权。没有授权时仍会退回到 `env` 里的 `GITHUB_TOKEN` 或本机 `gh auth login`。
 - **Gmail**：启用 Gmail 插件，在「设置 → 来源 → Gmail」点「授权 Gmail」，用 Google 账号登录并同意，浏览器会跳回本机服务（经 `ssh -L` 转发也可以）。随时可以点「断开授权」，会同时在 Google 那边撤销。
 - 两个授权用到的 OAuth 应用怎么建，见 [docs/10-oauth.md](docs/10-oauth.md)。
@@ -257,7 +287,7 @@ super-assistant update --check   # 只检查
 super-assistant update           # 下载并安装最新版本；systemd 服务会自动重启
 ```
 
-检查和下载需要 GitHub 访问（已登录的 `gh`，或数据目录 `env` 文件里的 `GITHUB_TOKEN`）。不想后台检查，在 `env` 里写 `SUPER_ASSISTANT_UPDATE_CHECK=0`。
+仓库是公开的，检查和下载不需要登录 GitHub（`env` 里有 `GITHUB_TOKEN` 时会带上，只为提高 API 频率上限）。不想后台检查，在 `env` 里写 `SUPER_ASSISTANT_UPDATE_CHECK=0`。
 
 v0.1.0 还没有自动更新功能：从 v0.1.0 升级，需要手动再运行一次上面的 `install.sh` 安装命令，之后的版本就可以用「立即更新」或 `super-assistant update` 了。
 
@@ -290,6 +320,8 @@ super-assistant service install
 
 ## 桌面端
 
+macOS 和 Windows 直接用 Release 里的安装包（见上面「安装包」）。从源码运行：
+
 ```bash
 pnpm build                      # 先构建服务和网页
 cd apps/desktop && pnpm start   # 已有服务时直接连接；没有的话用系统 Node 启动它
@@ -297,16 +329,20 @@ cd apps/desktop && pnpm start   # 已有服务时直接连接；没有的话用�
 
 - 关闭窗口时，应用会留在托盘里。
 - 按 `Cmd/Ctrl+Shift+Space` 随时呼出窗口或打开新对话。
-- 打包：`pnpm dist:mac` 或 `pnpm dist:linux`（需要本机安装 Node 22 及以上版本）。
+- 网页访问默认关闭，在「设置 → 系统 → 网页访问」开启（可选仅本机或局域网，以及端口）。
+- 打包：`pnpm dist:mac` 或 `pnpm dist:win`，打出本机系统和 CPU 的安装包，里面带着服务和 Node.js。
 
 ## 命令行
 
 | 命令 | 作用 |
 |---|---|
-| `super-assistant start [-p 端口] [--no-open]` | 启动本机服务 |
-| `super-assistant status` | 查看是否在运行，以及后台队列是否健康 |
+| `super-assistant start [-d] [-H 地址] [-p 端口] [--no-open]` | 启动服务；`-d` 在后台运行（日志在 `~/.super-assistant/logs/daemon.log`），`-H 0.0.0.0` 让局域网可访问 |
+| `super-assistant stop` / `restart` | 停止 / 重启服务（`restart` 在后台启动，用保存的地址和端口） |
+| `super-assistant config [-H 地址] [-p 端口]` | 查看或保存监听地址和端口（下次启动生效） |
+| `super-assistant status` | 查看是否在运行、监听地址，以及后台队列是否健康 |
 | `super-assistant doctor` | 检查运行环境（Node、钥匙串、模型配置、git/gh/Docker） |
 | `super-assistant token [--rotate]` | 打印登录链接；加 `--rotate` 时轮换访问令牌 |
+| `super-assistant update [--check]` | 检查并安装新版本（Linux 安装包） |
 | `super-assistant service install / uninstall` | 开机自启（macOS 用 launchd，Linux 用 systemd 用户服务） |
 
 在仓库内开发时，可以用 `node apps/daemon/dist/cli.mjs <命令>` 代替 `super-assistant`。

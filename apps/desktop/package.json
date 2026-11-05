@@ -3,13 +3,14 @@
   "productName": "Super-assistant",
   "version": "0.1.10",
   "private": true,
-  "description": "Super-assistant desktop client: window, tray, notifications, global shortcut",
+  "description": "Super-assistant desktop app for macOS and Windows: window, tray, notifications, global shortcut, with its own Node.js and service",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
-    "stage": "bash ../../scripts/stage-daemon.sh",
-    "dist:mac": "pnpm stage && electron-builder --mac",
-    "dist:linux": "pnpm stage && electron-builder --linux"
+    "stage": "node ../../scripts/stage-desktop.mjs",
+    "dist:mac": "pnpm stage && electron-builder --mac --publish never",
+    "dist:win": "pnpm stage && electron-builder --win --publish never",
+    "dist:linux": "pnpm stage && electron-builder --linux --publish never"
   },
   "devDependencies": {
     "electron": "45.2.2",
@@ -20,9 +21,57 @@
     "productName": "Super-assistant",
     "publish": null,
     "afterPack": "scripts/after-pack.cjs",
-    "files": ["main.cjs", "preload.cjs", "lib/**"],
-    "extraResources": [{ "from": ".stage/daemon", "to": "daemon" }],
-    "mac": { "category": "public.app-category.productivity", "target": ["dmg", "zip"] },
-    "linux": { "executableName": "super-assistant", "target": ["AppImage", "tar.gz"], "category": "Utility", "artifactName": "${productName}-${version}-linux-${arch}.${ext}" }
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "lib/**"
+    ],
+    "extraResources": [
+      {
+        "from": ".stage/daemon",
+        "to": "daemon"
+      },
+      {
+        "from": ".stage/node",
+        "to": "node"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "artifactName": "super-assistant-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "executableName": "super-assistant",
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "category": "Utility",
+      "artifactName": "super-assistant-${version}-linux-desktop-${arch}.${ext}"
+    },
+    "artifactName": "super-assistant-${version}-${os}-${arch}.${ext}",
+    "dmg": {
+      "artifactName": "super-assistant-${version}-mac-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "artifactName": "super-assistant-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "super-assistant-${version}-win-${arch}-setup.${ext}",
+      "shortcutName": "Super-assistant"
+    }
   }
 }

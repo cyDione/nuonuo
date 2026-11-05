@@ -43,6 +43,34 @@ describe('access control', () => {
     expect((await call('/api/health', { headers: { origin: 'https://evil.example' } })).status).toBe(403)
     expect((await call('/api/health')).status).toBe(200)
   })
+  it('accepts any Host when listening on the network, but still wants the token and a same-origin page', async () => {
+    const open = createApp(rt, TOKEN, undefined, undefined, undefined)
+    ;(rt.config as any).host = '0.0.0.0'
+    const lan = createApp(rt, TOKEN)
+    ;(rt.config as any).host = '127.0.0.1'
+    const h = { host: '192.168.1.5:7420', authorization: `Bearer ${TOKEN}` }
+    expect((await open.request('http://192.168.1.5:7420/api/health', { headers: h })).status).toBe(403)
+    expect((await lan.request('http://192.168.1.5:7420/api/health', { headers: h })).status).toBe(200)
+    expect((await lan.request('http://192.168.1.5:7420/api/health', { headers: { host: h.host } })).status).toBe(401)
+    expect((await lan.request('http://192.168.1.5:7420/api/health', { headers: { ...h, origin: 'http://192.168.1.5:7420' } })).status).toBe(200)
+    expect((await lan.request('http://192.168.1.5:7420/api/health', { headers: { ...h, origin: 'http://evil.example' } })).status).toBe(403)
+  })
+  it('serves the desktop app only its window while browser access is off', async () => {
+    ;(rt.config as any).desktop = true
+    ;(rt.config as any).web = false
+    const desktop = createApp(rt, TOKEN)
+    expect((await desktop.request(`${base}/auth?token=${TOKEN}`, { headers: { host: '127.0.0.1:7420' } })).status).toBe(403)
+    expect((await desktop.request(`${base}/auth?token=${TOKEN}`, { headers: { host: '127.0.0.1:7420', 'x-super-assistant-client': 'desktop' } })).status).toBe(302)
+    expect((await desktop.request(`${base}/api/health`, { headers })).status).toBe(200)
+  })
+  it('saves the listening address for the next start and says a restart is needed', async () => {
+    const before = await (await call('/api/system/access')).json() as any
+    expect(before).toMatchObject({ running: { host: '127.0.0.1', port: 7420, web: true }, restartNeeded: false, canRestart: false })
+    const after = await (await call('/api/system/access', { method: 'PUT', body: JSON.stringify({ host: '0.0.0.0', port: 7500 }) })).json() as any
+    expect(after).toMatchObject({ saved: { host: '0.0.0.0', port: 7500 }, restartNeeded: true })
+    expect((await call('/api/system/access', { method: 'PUT', body: JSON.stringify({ host: 'not a host' }) })).status).toBe(400)
+    expect((await call('/api/system/restart', { method: 'POST' })).status).toBe(409)
+  })
   it('trades the login link for an HttpOnly cookie', async () => {
     const res = await app.request(`${base}/auth?token=${TOKEN}`, { headers: { host: '127.0.0.1:7420' } })
     expect(res.status).toBe(302)

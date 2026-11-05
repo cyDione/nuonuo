@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Builds the headless Linux package: the daemon (which serves the web UI) with its dependencies
 # and its own Node.js runtime, so the target machine needs nothing installed.
-# Usage: scripts/package-linux.sh [arch]   (arch: x64, default x64; must match the build machine)
+# Usage: scripts/package-linux.sh [arch]   (x64 or arm64, default this machine's; native modules come from the build
+#        machine, so build each CPU on its own machine)
 # Output: dist/super-assistant-<version>-linux-<arch>.tar.gz
 # Run `pnpm build` at the repository root first.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${1:-x64}"
+arch="${1:-$(node -p process.arch)}"
 version="$(node -p "require('$root/apps/daemon/package.json').version")"
 node_version="${NODE_VERSION:-$(node -p 'process.versions.node')}"
 name="super-assistant-$version-linux-$arch"
@@ -41,16 +42,19 @@ cp "$root/install.sh" "$pkg/install.sh"
 cat > "$pkg/README.txt" <<TXT
 Super-assistant $version (Linux $arch, headless: service + web UI)
 
-  ./bin/super-assistant start      start the service; the web UI is served on 127.0.0.1:7420
-                                   (prints a login link; add --no-open on a machine without a desktop)
+  ./bin/super-assistant start -d   start the service in the background; prints the login link
+                                   (web UI on 127.0.0.1:7420; without -d it runs in this terminal)
+  ./bin/super-assistant start -d --host 0.0.0.0 --port 8080
+                                   listen on every interface (other devices on the network can log in) and port 8080
+  ./bin/super-assistant config --host 0.0.0.0 --port 8080
+                                   save the address for every later start (also in the web UI: Settings → System)
+  ./bin/super-assistant stop | restart | status
   ./bin/super-assistant token      print the login link again
-  ./bin/super-assistant status     check whether the service is running
   ./bin/super-assistant service install   start it at login (systemd user service)
   ./bin/super-assistant update     install the latest release (also in the web UI: Settings → System)
 
-The service only listens on 127.0.0.1. From another computer, forward the port over SSH:
-  ssh -L 7420:127.0.0.1:7420 <this machine>
-then open the login link in your local browser.
+The login link is the password. Listening on the network is plain HTTP: keep it on a trusted network, and put an
+HTTPS reverse proxy in front (or use ssh -L 7420:127.0.0.1:7420 <this machine>) for remote access.
 
 Data and API keys live in ~/.super-assistant (override with SUPER_ASSISTANT_HOME).
 Node.js $node_version is bundled in runtime/; nothing else needs to be installed.

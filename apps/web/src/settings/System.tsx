@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, Download } from 'lucide-react'
+import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, Download, Copy, Check as CheckIcon, Globe } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { api, type Check, type Health, type TranscriptItem, type UpdateStatus } from '../api'
+import { api, type AccessStatus, type Check, type Health, type TranscriptItem, type UpdateStatus } from '../api'
 import { notificationsEnabled, setNotifications } from '../live'
-import { Badge, Button, Card } from '../ui'
+import { Badge, Button, Card, Input, Select } from '../ui'
 
 export function System() {
   const health = useQuery({ queryKey: ['health'], queryFn: () => api.get<Health>('/health') })
@@ -17,6 +17,7 @@ export function System() {
       <Info label="密钥存储" value={h.secrets === 'keychain' ? '系统钥匙串' : '加密文件'} />
     </Card>}
     <UpdateCard />
+    <AccessCard />
     <NotifyToggle />
     <WatchdogCard />
     <div className="flex items-center justify-between">
@@ -147,4 +148,103 @@ function UpdateCard() {
     {start.error && <div className="text-xs text-danger">{(start.error as Error).message}</div>}
     {(running || s.run?.state === 'failed') && s.run?.log && <pre className="max-h-48 overflow-y-auto rounded-lg bg-sunken p-2 font-mono text-[11px] whitespace-pre-wrap text-muted">{s.run.log}</pre>}
   </Card>
+}
+
+const SOURCE = { flag: '启动命令里的参数', env: '环境变量', file: '', default: '' } as const
+
+/**
+ * Where the service listens, and (desktop app) whether browsers may open it. Saved for the next start; "重启服务" applies
+ * it now. On the network the login link is the password, so it is shown with the addresses other devices use.
+ */
+function AccessCard() {
+  const qc = useQueryClient()
+  const status = useQuery({ queryKey: ['access'], queryFn: () => api.get<AccessStatus>('/system/access'), retry: false })
+  const s = status.data
+  const [form, setForm] = useState<{ web: boolean; mode: 'local' | 'lan' | 'custom'; host: string; port: string } | null>(null)
+  useEffect(() => {
+    if (!s || form) return
+    const mode = s.saved.host === '127.0.0.1' ? 'local' : s.saved.host === '0.0.0.0' ? 'lan' : 'custom'
+    setForm({ web: s.saved.web, mode, host: mode === 'custom' ? s.saved.host : '', port: String(s.saved.port) })
+  }, [s])
+  const save = useMutation({
+    mutationFn: () => {
+      const host = form!.mode === 'local' ? '127.0.0.1' : form!.mode === 'lan' ? '0.0.0.0' : form!.host.trim()
+      return api.put<AccessStatus>('/system/access', { host, port: Number(form!.port), ...(s?.desktop ? { web: form!.web } : {}) })
+    },
+    onSuccess: data => qc.setQueryData(['access'], data),
+  })
+  const [restarting, setRestarting] = useState(false)
+  const restart = useMutation({
+    mutationFn: () => api.post('/system/restart'),
+    onSuccess: () => {
+      setRestarting(true)
+      // Come back on the address the service will listen on: same page if it is unchanged.
+      const target = s!.saved
+      const host = target.host === '0.0.0.0' || target.host === '::' ? location.hostname : target.host
+      const moved = String(target.port) !== location.port || (host !== location.hostname && !['127.0.0.1', 'localhost'].includes(host))
+      const isDesktop = Boolean((window as { superAssistantDesktop?: unknown }).superAssistantDesktop)
+      setTimeout(() => {
+        if (moved && !isDesktop) location.href = `http://${host.includes(':') ? `[${host}]` : host}:${target.port}/`
+        else location.reload()
+      }, 4000)
+    },
+  })
+  if (!s || !form) return null
+  const overridden = (['host', 'port'] as const).filter(k => s.sources[k] === 'flag' || s.sources[k] === 'env')
+  const showLinks = s.running.web
+  return <Card className="space-y-3 p-4">
+    <div className="flex items-center gap-2 text-sm font-medium">
+      <Globe size={15} className="text-muted" />{s.desktop ? '网页访问' : '监听地址'}
+      <Badge tone={s.running.web && s.running.host !== '127.0.0.1' ? 'warn' : 'neutral'}>{s.desktop && !s.running.web ? '仅桌面应用' : `${s.running.host}:${s.running.port}`}</Badge>
+    </div>
+    <div className="text-xs text-muted">
+      {s.desktop
+        ? '开启后可以在浏览器里打开 Super-assistant；选「局域网」时，手机等同一网络的设备也能用登录链接打开。'
+        : '默认只监听本机。选「局域网」后，同一网络的设备可以用登录链接打开；登录链接就是密码，不要直接暴露到公网（远程访问请用 HTTPS 反向代理或 SSH 隧道）。'}
+    </div>
+    {s.desktop && <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={form.web} onChange={e => setForm({ ...form, web: e.target.checked })} />允许在浏览器里打开
+    </label>}
+    {(!s.desktop || form.web) && <div className="grid gap-2 sm:grid-cols-[1fr_1fr_7rem]">
+      <Select value={form.mode} onChange={e => setForm({ ...form, mode: e.target.value as typeof form.mode })}>
+        <option value="local">仅本机（127.0.0.1）</option>
+        <option value="lan">局域网（0.0.0.0，所有网卡）</option>
+        <option value="custom">指定 IP</option>
+      </Select>
+      <Input value={form.mode === 'custom' ? form.host : form.mode === 'lan' ? '0.0.0.0' : '127.0.0.1'} disabled={form.mode !== 'custom'}
+        placeholder="例如 192.168.1.20" onChange={e => setForm({ ...form, host: e.target.value })} />
+      <Input value={form.port} inputMode="numeric" placeholder="7420" onChange={e => setForm({ ...form, port: e.target.value.replace(/\D/g, '') })} />
+    </div>}
+    {overridden.length > 0 && <div className="text-xs text-warn">
+      {overridden.length === 2 && s.sources.host === s.sources.port
+        ? `地址和端口由${SOURCE[s.sources.host]}指定`
+        : overridden.map(k => `${k === 'host' ? '地址' : '端口'}由${SOURCE[s.sources[k]]}指定`).join('，')}，这里保存的值要在去掉它之后才生效。
+    </div>}
+    <div className="flex flex-wrap items-center gap-2">
+      <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending || !form.port || (form.mode === 'custom' && !form.host.trim())}>保存</Button>
+      {s.restartNeeded && <>
+        <span className="text-xs text-muted">{restarting ? '正在重启…' : '已保存，重启服务后生效'}</span>
+        {s.canRestart
+          ? <Button size="sm" variant="primary" onClick={() => restart.mutate()} disabled={restart.isPending || restarting}><RefreshCw size={13} className={restarting ? 'animate-spin' : ''} />重启服务</Button>
+          : <span className="text-xs text-faint">请手动重启：super-assistant restart</span>}
+      </>}
+    </div>
+    {save.error && <div className="text-xs text-danger">{(save.error as Error).message}</div>}
+    {restart.error && <div className="text-xs text-danger">{(restart.error as Error).message}</div>}
+    {showLinks && <div className="space-y-1">
+      <LinkRow label="本机" url={s.localUrl} />
+      {s.networkUrls.map(u => <LinkRow key={u} label="局域网" url={u} />)}
+    </div>}
+  </Card>
+}
+
+function LinkRow({ label, url }: { label: string; url: string }) {
+  const [copied, setCopied] = useState(false)
+  return <div className="flex items-center gap-2 text-xs">
+    <span className="w-12 shrink-0 text-muted">{label}</span>
+    <span className="min-w-0 flex-1 truncate font-mono text-faint">{url.replace(/token=.*/, 'token=••••••')}</span>
+    <Button size="sm" variant="ghost" onClick={async () => { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
+      {copied ? <CheckIcon size={13} /> : <Copy size={13} />}{copied ? '已复制' : '复制登录链接'}
+    </Button>
+  </div>
 }

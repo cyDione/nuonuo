@@ -38,7 +38,7 @@ export interface Runtime {
   close(): Promise<void>
 }
 
-export interface LockInfo { pid: number; port: number; startedAt: number }
+export interface LockInfo { pid: number; port: number; startedAt: number; host?: string; desktop?: boolean }
 
 export function readLock(home: string): LockInfo | undefined {
   const file = join(home, 'daemon.json')
@@ -59,7 +59,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
   if (options.lock !== false) {
     const running = readLock(config.home)
     if (running && running.pid !== process.pid) throw new Error(`另一个 super-assistant 正在运行（pid ${running.pid}，端口 ${running.port}）`)
-    writeFileSync(lockFile, JSON.stringify({ pid: process.pid, port: config.port, startedAt: Date.now() }))
+    writeFileSync(lockFile, JSON.stringify({ pid: process.pid, port: config.port, host: config.host, desktop: config.desktop, startedAt: Date.now() }))
   }
   const store = openStore(join(config.home, 'state.db'))
   try {
