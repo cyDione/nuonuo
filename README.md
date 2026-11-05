@@ -6,7 +6,7 @@
 
 **跑在你自己电脑上的个人助理。你说一句话，它在后台把事办完，再用一句话告诉你结果。**
 
-[快速开始](#快速开始) · [设计理念](#设计理念) · [参考了什么](#参考了什么) · [架构](#架构) · [部署](#部署自己的-mac-或-linux-电脑) · [文档](docs/)
+[快速开始](#快速开始) · [设计理念](#设计理念) · [参考了什么](#参考了什么) · [架构](#架构) · [部署](#部署自己的电脑或服务器) · [文档](docs/)
 
 <img src="docs/assets/demo.gif" alt="Super-assistant 运行演示：说一句话，它接下任务、在后台做完，把成果交给你" width="860" />
 
@@ -171,12 +171,12 @@ packages/db             SQLite + Drizzle、迁移、持久化副作用队列
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cyDione/super-assistant/main/install.sh | bash
-super-assistant start
+super-assistant start -d        # 后台运行；局域网访问加 --host 0.0.0.0 --port 7420
 ```
 
 **macOS / Windows 桌面端**：从 [Releases](https://github.com/cyDione/super-assistant/releases) 下载对应系统和芯片的安装包。
 
-启动后打开打印出来的登录链接，在「设置 → 模型供应商」里填上你自己的 API key，就可以开始说话了。从源码运行、开机自启、远程访问等见下面的[部署](#部署自己的-mac-或-linux-电脑)。
+启动后打开打印出来的登录链接，在「设置 → 模型供应商」里填上你自己的 API key，就可以开始说话了。后台运行、监听地址和端口、从源码运行、开机自启、远程访问等见下面的[部署](#部署自己的电脑或服务器)。
 
 ## 功能一览
 
