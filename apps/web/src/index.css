@@ -44,8 +44,8 @@
 }
 
 :root {
-  /* Neutral chrome, colour in the cards (Figma "v4 · 主题色" → 学 Muse): cool neutral greys with no yellow cast; one coral accent for actions. */
-  --bg: #f5f5f7; --panel: #ffffff; --card: #ffffff; --bubble: #f0f0f3; --hero: #f0f0f3; --hero-2: #e5e5ea; --sunken: #ececf0; --line: #e5e5ea;
+  /* Neutral chrome, colour in the cards (Figma "v4 · 主题色" → 学 Muse): pure white / pure black base, untinted greys only for inset surfaces; one coral accent for actions. */
+  --bg: #ffffff; --panel: #ffffff; --card: #ffffff; --bubble: #f4f4f4; --hero: #f5f5f5; --hero-2: #ebebeb; --sunken: #f4f4f4; --line: #ebebeb;
   --fg: #141414; --muted: #636363; --faint: #9a9a9a;
   --ink: #141414; --ink-fg: #ffffff;
   --accent: #c9442e; --accent-fg: #ffffff; --accent-soft: #fbe9e5;
@@ -55,12 +55,12 @@
   --lime: #2f9e6e; --coral: #d2535a; --sun: #f6c04e; --sky: #3d86e0; --grape: #8a7fc0;
   --glow: rgb(233 132 90 / 0.12);
   --scrim: rgb(10 10 10 / 0.3);
-  --shadow-sheet: 0 1px 0 rgb(0 0 0 / 0.03), 0 10px 30px -14px rgb(0 0 0 / 0.14);
+  --shadow-sheet: 0 0 0 1px var(--line), 0 10px 30px -14px rgb(0 0 0 / 0.1);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0a0a0a; --panel: #141414; --card: #1a1a1a; --bubble: #222222; --hero: #1a1a1a; --hero-2: #262626; --sunken: #1f1f1f; --line: #2a2a2a;
+    --bg: #000000; --panel: #000000; --card: #111111; --bubble: #1a1a1a; --hero: #111111; --hero-2: #1f1f1f; --sunken: #141414; --line: #232323;
     --fg: #f2f2f2; --muted: #9a9a9a; --faint: #666666;
     --ink: #f2f2f2; --ink-fg: #141414;
     --accent: #f07a5e; --accent-fg: #1a0f0b; --accent-soft: #3a1f18;
@@ -70,12 +70,12 @@
     --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #6fa8ef; --grape: #b1a8dc;
     --glow: rgb(233 132 90 / 0.1);
     --scrim: rgb(0 0 0 / 0.6);
-    --shadow-sheet: 0 0 0 1px rgb(255 255 255 / 0.04), 0 12px 32px -16px rgb(0 0 0 / 0.7);
+    --shadow-sheet: 0 0 0 1px var(--line);
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0a0a0a; --panel: #141414; --card: #1a1a1a; --bubble: #222222; --hero: #1a1a1a; --hero-2: #262626; --sunken: #1f1f1f; --line: #2a2a2a;
+  --bg: #000000; --panel: #000000; --card: #111111; --bubble: #1a1a1a; --hero: #111111; --hero-2: #1f1f1f; --sunken: #141414; --line: #232323;
   --fg: #f2f2f2; --muted: #9a9a9a; --faint: #666666;
   --ink: #f2f2f2; --ink-fg: #141414;
   --accent: #f07a5e; --accent-fg: #1a0f0b; --accent-soft: #3a1f18;
@@ -85,7 +85,7 @@
   --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #6fa8ef; --grape: #b1a8dc;
   --glow: rgb(233 132 90 / 0.1);
   --scrim: rgb(0 0 0 / 0.6);
-  --shadow-sheet: 0 0 0 1px rgb(255 255 255 / 0.04), 0 12px 32px -16px rgb(0 0 0 / 0.7);
+  --shadow-sheet: 0 0 0 1px var(--line);
   color-scheme: dark;
 }
 
