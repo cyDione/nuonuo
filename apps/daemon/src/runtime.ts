@@ -1,10 +1,10 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-assistant/agent-runtime'
-import { browserExtension, combineExtensions, Distiller, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, Watchdog } from '@super-assistant/core'
+import { browserExtension, combineExtensions, Distiller, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@super-assistant/db'
 import { gmailPlugin, telegramPlugin } from '@super-assistant/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-assistant/sources'
-import { EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-assistant/models'
+import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-assistant/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolSet } from 'ai'
@@ -82,8 +82,10 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const screener = new Screener(store, hub, engine)
     effects.handle<{ triggerId: string }>('proactive.screen', async ({ triggerId }) => {
       try { await screener.screen(triggerId) } catch (error) {
-        // Without a usable filter model there is nothing to retry; record it so the activity log says why.
+        // Without a usable filter model, or with a reply that cannot be read, a retry would not help (and would be billed
+        // again); record it so the activity log says why. Failed calls (network, provider errors) are retried.
         if (error instanceof ModelError) { engine.proactiveDecision(triggerId, { act: false, reason: `没有可用的过滤模型：${error.message}` }, 'off'); return }
+        if (error instanceof StructuredCallError && error.kind !== 'call') { engine.proactiveDecision(triggerId, { act: false, reason: error.message }, 'off'); return }
         throw error
       }
     }, { concurrency: 2, baseDelayMs: 10_000, maxDelayMs: 600_000 })
@@ -97,7 +99,11 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     memory.importLegacy()
     const distiller = new Distiller(store, hub, memory, cnv => engine.scopeOfThread(`webchat:${cnv}`))
     effects.handle<{ conversationId: string }>('memory.distill', async ({ conversationId }) => {
-      try { await distiller.distill(conversationId) } catch (error) { if (!(error instanceof ModelError)) throw error }
+      try { await distiller.distill(conversationId) } catch (error) {
+        // Not configured, out of budget, or an unreadable reply: retrying the same transcript would fail (and bill) again.
+        if (error instanceof StructuredCallError && error.kind !== 'call') console.warn(`[memory.distill] ${error.message}`)
+        else if (!(error instanceof ModelError)) throw error
+      }
       await memory.embedPending().catch(() => 0)
     }, { concurrency: 1, baseDelayMs: 30_000, maxDelayMs: 900_000 })
     // The memory side path: once a conversation has been quiet for a while, distil what the owner said (debounced).
@@ -199,7 +205,7 @@ function announced(tools: ToolSet, after: (name: string, result: unknown) => voi
 export async function bootstrapModels(hub: ModelHub, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   hub.syncEnvProviders()
   const model = env.SUPER_ASSISTANT_MODEL?.trim()
-  const provider = hub.listProviders().find(p => p.keyEnv && p.hasKey)
+  const provider = hub.listProviders().find(p => p.keyEnv && p.hasKey && !DECISION_KINDS.includes(p.kind))
   if (!model || !provider) return
   if (hub.applyDefaultModel(provider.id, model)) console.log(`已将各层模型设为 ${provider.name} 的 ${model}（SUPER_ASSISTANT_MODEL）`)
 }

@@ -29,10 +29,11 @@ describe('classifyShell', () => {
 
 let store: Store
 let runtime: AgentRuntime
-afterEach(async () => { await runtime?.shutdown(); store?.close() })
+let jevRequests: any[] = []
+afterEach(async () => { await runtime?.shutdown(); store?.close(); jevRequests = [] })
 
 /** Worker wants `git push`; the reviewer's verdict is scripted per test. */
-function setup(verdict: () => Scripted) {
+function setup(verdict: () => Scripted, jev?: (request: any) => any) {
   store = openStore(':memory:')
   const script = (opts: any): Scripted => {
     const system = systemText(opts)
@@ -45,8 +46,10 @@ function setup(verdict: () => Scripted) {
     return { calls: [{ name: 'shell', input: { command: 'touch pushed.txt && git push origin feature' } }] }
   }
   const model = new MockLanguageModelV4({ doStream: async o => streamOf(script(o)), doGenerate: async o => generateOf(script(o)) })
-  const hub = new ModelHub(store, new MemorySecrets(), { language: () => model, embedding: () => { throw new Error('x') } })
+  const hub = new ModelHub(store, new MemorySecrets(), { language: () => model, embedding: () => { throw new Error('x') },
+    systemOne: () => async request => { jevRequests.push(request); return { model: 'jev-1', answers: { decision: jev!(request) }, usage: { input_tokens: 120, output_tokens: 0 } } } })
   hub.saveRole('router', { chain: [{ providerId: hub.createProvider({ kind: 'openai', name: 'm', apiKey: 'k' }).id, model: 'm' }] })
+  if (jev) hub.saveRole('reviewer', { chain: [{ providerId: hub.createProvider({ kind: 'typesafe', name: 'TypeSafe', apiKey: 'k' }).id, model: 'jev-latest' }] })
   const bus = new Bus()
   runtime = new AgentRuntime(store, hub, bus)
   const engine = new Engine(store, runtime, bus, { home: mkdtempSync(join(tmpdir(), 'sa-rv-')) })
@@ -69,6 +72,42 @@ describe('Reviewer', () => {
     expect(existsSync(join(ticket.directory, 'pushed.txt'))).toBe(true)
     expect(audit()).toEqual([['reviewer', 'allow']])
     expect(engine.stage(engine.ticket(ticket.id))).not.toBe('person/approve')
+  })
+
+  it('reads a verdict wrapped in prose and a code fence', async () => {
+    const { start } = setup(() => ({ text: '审核结论：\n```json\n{"decision":"allow","reason":"推送任务分支"}\n```' }))
+    const ticket = start()
+    await settle()
+    expect(existsSync(join(ticket.directory, 'pushed.txt'))).toBe(true)
+    expect(audit()).toEqual([['reviewer', 'allow']])
+  })
+
+  it('says the reply was unreadable, not that no review model is configured', async () => {
+    const { reviewer, start } = setup(() => ({ text: '我觉得可以放行。' }))
+    start()
+    await settle()
+    const [approval] = reviewer.pending()
+    expect(approval!.reason).toContain('审核模型有回复，但不是约定格式的 JSON')
+    expect(approval!.reason).not.toContain('不可用')
+  })
+
+  it('uses a decision model (Jev) on the review layer instead of the main model', async () => {
+    const llm = () => { throw new Error('the main model must not review') }
+    const { start } = setup(llm, () => ({ type: 'choice', choice: 'allow', confidence: 0.93, probabilities: { allow: 0.93, block: 0.02, ask_owner: 0.05 } }))
+    const ticket = start()
+    await settle()
+    expect(existsSync(join(ticket.directory, 'pushed.txt'))).toBe(true)
+    expect(jevRequests[0]).toMatchObject({ model: 'jev-latest', questions: { decision: { type: 'choice', criteria: { allow: expect.any(String), block: expect.any(String), ask_owner: expect.any(String) } } } })
+    expect(jevRequests[0].state).toContain('git push origin feature')
+    expect(store.db.select().from(schema.auditLog).all().map(a => a.reason)).toEqual(['判断符合主人的请求和规则（Jev，置信度 0.93）'])
+    expect(store.db.select().from(schema.usageLedger).all().filter(r => r.role === 'reviewer')).toEqual([expect.objectContaining({ role: 'reviewer', model: 'jev-latest', inputTokens: 120, ok: true })])
+  })
+
+  it('asks the owner when Jev is not confident', async () => {
+    const { reviewer, start } = setup(() => ({ text: 'unused' }), () => ({ type: 'choice', choice: 'allow', confidence: 0.55, probabilities: { allow: 0.55, block: 0.1, ask_owner: 0.35 } }))
+    start()
+    await settle()
+    expect(reviewer.pending()[0]!.reason).toContain('Jev 倾向放行，但置信度只有 0.55，转给你决定')
   })
 
   it('blocks on the reviewer\'s word and tells the worker why', async () => {

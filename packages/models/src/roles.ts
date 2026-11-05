@@ -21,12 +21,15 @@ export const ROLES: readonly RoleSpec[] = [
   { id: 'worker', label: '执行（Worker）', duty: '执行具体任务（编码、调研、操作）', advice: '最强的模型', inherits: 'router', kind: 'language' },
   { id: 'subagent', label: '子任务（Subagent）', duty: 'Worker 内部派生的子任务', advice: '默认继承 Worker', inherits: 'worker', kind: 'language' },
   { id: 'filter', label: '过滤（Filter）', duty: 'Slow Path：外部事件是否值得处理', advice: '最便宜，可用本地模型；关闭时由主 Agent 兼做', optional: true, kind: 'language' },
-  { id: 'reviewer', label: '审核（Reviewer）', duty: '审核高风险动作：放行 / 拦截 / 上交', advice: '中等 + 推理；建议与 Worker 不同供应商', inherits: 'router', kind: 'language' },
+  { id: 'reviewer', label: '审核（Reviewer）', duty: '审核高风险动作：放行 / 拦截 / 上交', advice: '专门的审核模型，建议与 Worker 不同供应商；为空时用主 Agent', inherits: 'router', kind: 'language' },
   { id: 'watchdog', label: '看门狗（Watchdog）', duty: '判断任务有无实质进展、诊断故障', advice: '中等', inherits: 'router', kind: 'language' },
   { id: 'summarizer', label: '摘要（Summarizer）', duty: '上下文压缩、日报与摘要', advice: '便宜、长上下文', inherits: 'router', kind: 'language' },
   { id: 'embedding', label: '向量（Embedding）', duty: '记忆检索', advice: '本地或云端 embedding 模型', optional: true, kind: 'embedding' },
   { id: 'vision', label: '视觉（Vision）', duty: '截图与网页理解', advice: '多模态；为空时用 Worker', inherits: 'worker', kind: 'language' },
 ]
+
+/** Layers that may use a decision model (TypeSafe Jev) instead of a language model. */
+export const DECISION_ROLES: readonly RoleId[] = ['reviewer']
 
 export const roleSpec = (id: RoleId): RoleSpec => ROLES.find(r => r.id === id)!
 

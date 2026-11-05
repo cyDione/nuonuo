@@ -8,12 +8,13 @@ import { APICallError } from '@ai-sdk/provider'
 import { newId, schema, type Store } from '@super-assistant/db'
 import { embed, generateText } from 'ai'
 import { and, eq, gte, sql } from 'drizzle-orm'
-import type { ProviderKind } from './catalog'
+import { DECISION_KINDS, type ProviderKind } from './catalog'
 import type { EmbeddingModelV4 } from '@ai-sdk/provider'
 import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOptions, type ProviderRecord } from './factory'
 import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
-import { resolveRole, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId } from './roles'
+import { DECISION_ROLES, resolveRole, roleSpec, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId } from './roles'
 import type { SecretStore } from './secrets'
+import { systemOneClient, type SystemOneRequest, type SystemOneResponse } from './systemone'
 
 export class ModelError extends Error {
   constructor(readonly code: 'no_model' | 'budget' | 'unknown_provider' | 'invalid', message: string) { super(message) }
@@ -140,6 +141,12 @@ export class ModelHub {
     const started = this.now()
     try {
       const p = this.getProvider(ref.providerId)
+      if (DECISION_KINDS.includes(p.kind)) {
+        const result = await this.systemOneClient(p)({ model: ref.model, state: 'The owner asked to list the files in the project directory.',
+          questions: { ok: { type: 'noul', instructions: 'This is a harmless request.' } } }, { abortSignal: AbortSignal.timeout(30_000) })
+        const answer = result.answers?.ok
+        return { ok: true, latencyMs: this.now() - started, text: `${result.model ?? ref.model}${answer?.type === 'noul' ? ` · noul ${answer.noul.toFixed(2)}` : ''}` }
+      }
       if (kind === 'embedding') {
         const result = await embed({ model: this.factory.embedding(p, this.key(p), ref.model), value: 'ping', maxRetries: 0,
           abortSignal: AbortSignal.timeout(30_000) })
@@ -167,7 +174,12 @@ export class ModelHub {
     if (!ROLE_IDS.includes(role)) throw new ModelError('invalid', `unknown layer ${role}`)
     const parsed = RoleConfigSchema.safeParse(input)
     if (!parsed.success) throw new ModelError('invalid', parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '))
-    for (const ref of parsed.data.chain) this.getProvider(ref.providerId)
+    for (const ref of parsed.data.chain) {
+      const p = this.getProvider(ref.providerId)
+      if (DECISION_KINDS.includes(p.kind) && !DECISION_ROLES.includes(role)) {
+        throw new ModelError('invalid', `${p.name} 是决策模型，只能用于${DECISION_ROLES.map(r => roleSpec(r).label).join('、')}，不能用于${roleSpec(role).label}`)
+      }
+    }
     this.store.db.insert(schema.modelRoles).values({ role, config: parsed.data, updatedAt: this.now() })
       .onConflictDoUpdate({ target: schema.modelRoles.role, set: { config: parsed.data, updatedAt: this.now() } }).run()
     return parsed.data
@@ -239,6 +251,44 @@ export class ModelHub {
         return { ...result, stream }
       }),
     }
+  }
+
+  /** Whether a layer's primary model is a decision model (TypeSafe Jev) rather than a language model. */
+  usesDecisionModel(role: RoleId): boolean {
+    const ref = this.resolve(role)?.config.chain[0]
+    if (!ref) return false
+    try { return DECISION_KINDS.includes(this.getProvider(ref.providerId).kind) } catch { return false }
+  }
+
+  /**
+   * Asks a layer's decision model (System One API). Like `model()`, it enforces the daily budget, tries the layer's
+   * decision-model entries in order on retryable failures, and writes one ledger row per attempt.
+   */
+  async systemOne(role: RoleId, request: Omit<SystemOneRequest, 'model'>, context: CallContext = {}): Promise<SystemOneResponse> {
+    const resolved = this.resolve(role)
+    if (!resolved) throw new ModelError('no_model', `layer ${role} has no model configured`)
+    const chain = resolved.config.chain.filter(ref => { try { return DECISION_KINDS.includes(this.getProvider(ref.providerId).kind) } catch { return false } })
+    if (!chain.length) throw new ModelError('no_model', `layer ${role} has no decision model configured`)
+    this.checkBudget(role, resolved.config)
+    let lastError: unknown
+    for (const [index, ref] of chain.entries()) {
+      try {
+        const result = await this.systemOneClient(this.getProvider(ref.providerId))({ ...request, model: ref.model })
+        const input = result.usage?.input_tokens ?? 0
+        const output = result.usage?.output_tokens ?? 0
+        this.record(role, ref, { inputTokens: { total: input, noCache: input, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: output, text: output, reasoning: 0 } }, context)
+        return result
+      } catch (error) {
+        lastError = error
+        this.record(role, ref, undefined, context, error)
+        if (index === chain.length - 1 || !isRetryable(error)) throw error
+      }
+    }
+    throw lastError
+  }
+
+  private systemOneClient(p: ProviderRecord) {
+    return this.factory.systemOne?.(p, this.key(p)) ?? systemOneClient(p.baseUrl, this.key(p), p.options.headers)
   }
 
   // ── Usage ────────────────────────────────────────────────────────────────

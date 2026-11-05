@@ -20,7 +20,7 @@ import { runDoctor } from './doctor'
 import type { Runtime } from './runtime'
 import type { Updater } from './update'
 
-const KINDS = ['anthropic', 'openai', 'google', 'deepseek', 'openai-compatible'] as const satisfies readonly ProviderKind[]
+const KINDS = ['anthropic', 'openai', 'google', 'deepseek', 'openai-compatible', 'typesafe'] as const satisfies readonly ProviderKind[]
 const PricesSchema = z.record(z.string(), z.object({ input: z.number().min(0).optional(), output: z.number().min(0).optional(),
   cacheRead: z.number().min(0).optional(), cacheWrite: z.number().min(0).optional() }).strict())
 const ProviderBody = z.object({

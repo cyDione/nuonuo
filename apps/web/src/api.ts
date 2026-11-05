@@ -24,7 +24,7 @@ export const api = {
 }
 
 // ── Shapes returned by the daemon ────────────────────────────────────────────
-export type ProviderKind = 'anthropic' | 'openai' | 'google' | 'deepseek' | 'openai-compatible'
+export type ProviderKind = 'anthropic' | 'openai' | 'google' | 'deepseek' | 'openai-compatible' | 'typesafe'
 export interface Preset { id: string; kind: ProviderKind; label: string; baseUrl?: string; keyRequired: boolean; suggestedModels: string[]; docsUrl?: string }
 export type RoleId = 'router' | 'worker' | 'subagent' | 'filter' | 'reviewer' | 'watchdog' | 'summarizer' | 'embedding' | 'vision'
 export interface RoleSpec { id: RoleId; label: string; duty: string; advice: string; inherits?: RoleId; optional?: boolean; kind: 'language' | 'embedding' }

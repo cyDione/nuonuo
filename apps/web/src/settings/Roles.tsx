@@ -14,7 +14,7 @@ export function Roles({ item }: { item?: string }) {
   if (!catalog.data || !roles.data || !providers.data) return null
   if (providers.data.providers.length === 0) return <Card className="p-5 text-sm text-muted">先在「模型供应商」中添加至少一个供应商。</Card>
   const specs = catalog.data.roles
-  const props = (spec: RoleSpec) => ({ spec, specs, config: roles.data!.configs[spec.id] ?? EMPTY, resolved: roles.data!.resolved[spec.id], providers: providers.data!.providers })
+  const props = (spec: RoleSpec) => ({ spec, specs, config: roles.data!.configs[spec.id] ?? EMPTY, resolved: roles.data!.resolved[spec.id], providers: providers.data!.providers.filter(p => p.kind !== 'typesafe' || spec.id === 'reviewer') })
   if (item) {
     const spec = specs.find(s => s.id === item)
     return spec ? <RoleDetail key={spec.id} {...props(spec)} levels={catalog.data.reasoningLevels} />
@@ -62,7 +62,7 @@ function RoleDetail({ spec, specs, levels, config, resolved, providers }: RolePr
         {draft.chain.map((ref, i) => <ChainRow key={i} index={i} value={ref} kind={spec.kind} providers={providers}
           onChange={v => setChain(draft.chain.map((r, j) => (j === i ? v : r)))} onRemove={() => setChain(draft.chain.filter((_, j) => j !== i))} />)}
         {draft.chain.length === 0 && <p className="text-xs text-faint">{spec.inherits && !spec.optional ? `未单独配置时沿用「${labelOf(spec.inherits)}」。` : spec.optional ? '可选层：配置模型后启用。' : '请选择模型。'}</p>}
-        {draft.chain.length < 5 && <Button size="sm" variant="ghost" onClick={() => setChain([...draft.chain, { providerId: providers[0]!.id, model: '' }])}>
+        {draft.chain.length < 5 && providers.length > 0 && <Button size="sm" variant="ghost" onClick={() => setChain([...draft.chain, { providerId: providers[0]!.id, model: '' }])}>
           <Plus size={13} />{draft.chain.length === 0 ? '选择模型' : '添加备用模型'}</Button>}
       </div>
     </Card>
