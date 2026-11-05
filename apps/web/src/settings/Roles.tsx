@@ -59,7 +59,7 @@ function RoleDetail({ spec, specs, levels, config, resolved, providers }: RolePr
       <h3 className="text-sm font-medium">模型</h3>
       <p className="mt-0.5 text-xs text-muted">主模型失败时依次尝试备用模型。</p>
       <div className="mt-3 space-y-2">
-        {draft.chain.map((ref, i) => <ChainRow key={i} index={i} value={ref} providers={providers}
+        {draft.chain.map((ref, i) => <ChainRow key={i} index={i} value={ref} kind={spec.kind} providers={providers}
           onChange={v => setChain(draft.chain.map((r, j) => (j === i ? v : r)))} onRemove={() => setChain(draft.chain.filter((_, j) => j !== i))} />)}
         {draft.chain.length === 0 && <p className="text-xs text-faint">{spec.inherits && !spec.optional ? `未单独配置时沿用「${labelOf(spec.inherits)}」。` : spec.optional ? '可选层：配置模型后启用。' : '请选择模型。'}</p>}
         {draft.chain.length < 5 && <Button size="sm" variant="ghost" onClick={() => setChain([...draft.chain, { providerId: providers[0]!.id, model: '' }])}>
@@ -95,10 +95,10 @@ function RoleDetail({ spec, specs, levels, config, resolved, providers }: RolePr
   </div>
 }
 
-function ChainRow({ index, value, providers, onChange, onRemove }: { index: number; value: ModelRef; providers: Provider[]; onChange(v: ModelRef): void; onRemove(): void }) {
+function ChainRow({ index, value, kind, providers, onChange, onRemove }: { index: number; value: ModelRef; kind: RoleSpec['kind']; providers: Provider[]; onChange(v: ModelRef): void; onRemove(): void }) {
   const provider = providers.find(p => p.id === value.providerId)
   const { models } = useModelOptions(provider)
-  const test = useMutation({ mutationFn: () => api.post<{ ok: boolean; latencyMs: number; error?: string }>('/models/test', value) })
+  const test = useMutation({ mutationFn: () => api.post<{ ok: boolean; latencyMs: number; error?: string }>('/models/test', { ...value, kind }) })
   const listId = `chain-${value.providerId}`
   return <div className="flex flex-wrap items-center gap-2">
     <span className="w-10 shrink-0 text-[11px] text-faint">{index === 0 ? '主模型' : `备用 ${index}`}</span>
@@ -111,7 +111,7 @@ function ChainRow({ index, value, providers, onChange, onRemove }: { index: numb
       {test.isPending ? <Loader2 size={13} className="animate-spin" /> : test.data ? (test.data.ok ? <CheckCircle2 size={13} className="text-ok" /> : <XCircle size={13} className="text-danger" />) : '测试'}
     </Button>
     <button onClick={onRemove} className="text-faint hover:text-danger" aria-label="移除"><Trash2 size={14} /></button>
-    {test.data && !test.data.ok && <div className="basis-full pl-12 text-xs text-danger">{test.data.error?.slice(0, 200)}</div>}
+    {test.data && !test.data.ok && <div className="basis-full whitespace-pre-line pl-12 text-xs text-danger">{test.data.error?.slice(0, 400)}</div>}
   </div>
 }
 

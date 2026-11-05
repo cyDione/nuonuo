@@ -94,8 +94,8 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     }
   })
   api.post('/models/test', async c => {
-    const ref = await body(c, z.object({ providerId: z.string(), model: z.string().trim().min(1) }))
-    return c.json(await rt.hub.testModel(ref))
+    const { kind, ...ref } = await body(c, z.object({ providerId: z.string(), model: z.string().trim().min(1), kind: z.enum(['language', 'embedding']).optional() }))
+    return c.json(await rt.hub.testModel(ref, kind))
   })
 
   // Layers
