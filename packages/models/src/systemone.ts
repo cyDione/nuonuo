@@ -38,12 +38,28 @@ export type SystemOneClient = (request: SystemOneRequest, options?: { abortSigna
  */
 export function decisionEndpoints(baseUrl: string | null, kind: string, pinned?: unknown): string[] {
   if (typeof pinned === 'string' && pinned.trim()) return [pinned.trim()]
-  const base = (baseUrl || SYSTEM_ONE_BASE).replace(/\/+$/, '')
+  const base = decisionBase(baseUrl)
   if (kind === 'typesafe') return [`${base}/systemone`]
   const urls = [`${base}/systemone`, `${base}/decisions`]
   // OpenRouter: https://openrouter.ai/api/v1 → https://openrouter.ai/api/alpha/decisions
   if (/\/v1$/.test(base)) urls.push(`${base.replace(/\/v1$/, '')}/alpha/decisions`, `${base.replace(/\/v1$/, '')}/v1/alpha/decisions`)
   return [...new Set(urls)]
+}
+
+/**
+ * The API root a decision endpoint hangs off. People often paste a gateway's bare host (`https://gw.example`) or the full
+ * endpoint (`…/v1/systemone`); on a gateway the bare host's `/systemone` is its web console, which answers 401 asking for a
+ * sign-in cookie. So a trailing endpoint is dropped and a missing version segment becomes `/v1`.
+ */
+export function decisionBase(baseUrl: string | null): string {
+  let base = (baseUrl?.trim() || SYSTEM_ONE_BASE).replace(/\/+$/, '')
+  base = base.replace(/\/(systemone|decisions|alpha\/decisions)$/, '')
+  if (!/\/v\d+(alpha|beta)?\d*$/.test(base)) base += '/v1'
+  return base
+}
+
+function looksLikeApiError(text: string): boolean {
+  try { return typeof JSON.parse(text) === 'object' } catch { return false }
 }
 
 const working = new Map<string, string>()
@@ -68,7 +84,11 @@ export function systemOneClient(endpoints: string | string[], apiKey: string | u
       })
       const text = await response.text()
       if (!response.ok) {
-        lastError = new APICallError({ message: `${response.status} ${response.statusText}`.trim(), url, requestBodyValues: { model: request.model },
+        const status = `${response.status} ${response.statusText}`.trim()
+        const hint = !looksLikeApiError(text)
+          ? `：${url} 回的不是 API 的 JSON，Base URL 可能指向了网页而不是 API（网关一般要以 /v1 结尾）`
+          : response.status === 401 || response.status === 403 ? '：密钥无效或没有权限，检查 API Key' : ''
+        lastError = new APICallError({ message: status + hint, url, requestBodyValues: { model: request.model },
           statusCode: response.status, responseBody: text, isRetryable: response.status === 429 || response.status >= 500 })
         if ((response.status === 404 || response.status === 405) && url !== order.at(-1)) continue
         if (response.status === 404 || response.status === 405) {
