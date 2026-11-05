@@ -114,7 +114,15 @@ jobs:
 
       - name: Package the desktop app
         working-directory: apps/desktop
-        run: pnpm exec electron-builder --${{ matrix.os }} --${{ matrix.arch }} --publish never
+        # electron-builder downloads Electron and its helper tools from GitHub, which sometimes answers 504; the
+        # downloads are cached, so another attempt picks up where the failed one stopped.
+        run: |
+          for attempt in 1 2 3; do
+            pnpm exec electron-builder --${{ matrix.os }} --${{ matrix.arch }} --publish never && exit 0
+            echo "::warning::electron-builder attempt $attempt failed"
+            sleep $((attempt * 20))
+          done
+          exit 1
 
       - name: Smoke test the bundled service
         run: |
