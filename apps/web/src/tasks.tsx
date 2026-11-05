@@ -56,7 +56,7 @@ export function NeedsYou({ t, onAnswer }: { t: Ticket; onAnswer(text: string, ti
   const [handoff, setHandoff] = useState<string | null>(null)
   const [detail, setDetail] = useState(false)
 
-  const shell = (children: React.ReactNode) => <div className="rounded-[22px] border border-line bg-panel px-4 py-3.5">{children}</div>
+  const shell = (children: React.ReactNode) => <div className="max-w-xl rounded-[20px] border border-warn/25 bg-card px-4 py-3.5 shadow-[var(--shadow-sheet)]">{children}</div>
 
   if (t.approvals.length) {
     const a = t.approvals[0]!
@@ -92,15 +92,17 @@ export function NeedsYou({ t, onAnswer }: { t: Ticket; onAnswer(text: string, ti
   return null
 }
 
-const Tile = ({ children }: { children: React.ReactNode }) => <span className="shrink-0 text-warn">{children}</span>
+const Tile = ({ children }: { children: React.ReactNode }) => <span className="flex size-7 shrink-0 items-center justify-center rounded-[10px] bg-warn-soft text-warn">{children}</span>
 
-/** The quiet line under the conversation while work goes on; it opens what was done. */
+/** Work going on for this conversation, as small chips above the composer; each opens what was done. */
 export function WorkingLine({ tickets }: { tickets: Ticket[] }) {
   if (!tickets.length) return null
-  return <div className="flex flex-wrap gap-x-3 gap-y-1">
-    {tickets.map(t => <button key={t.id} onClick={() => openTask(t.id)} className="press anim-fade flex min-w-0 items-center gap-2 rounded-full bg-accent-soft py-1 pr-3 pl-2.5 text-xs text-accent" title="看看我做了什么">
-      <span className="relative flex size-2"><span className="ping-soft absolute inset-0 rounded-full bg-accent" /><span className="relative size-2 rounded-full bg-accent" /></span>
-      <span className="truncate">{t.stage === 'queued' ? '马上开始' : '正在处理'}：{t.title}</span>
+  return <div className="flex flex-wrap gap-2">
+    {tickets.map(t => <button key={t.id} onClick={() => openTask(t.id)} className="press anim-rise group flex max-w-full min-w-0 items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-2.5 pl-2.5 text-xs text-muted shadow-[var(--shadow-sheet)] hover:text-fg">
+      {t.stage === 'queued' ? <Clock size={14} className="shrink-0 text-accent" /> : <Loader2 size={14} className="shrink-0 animate-spin text-accent" />}
+      <span className="truncate font-medium">{t.title}</span>
+      <span className="progress hidden h-1 w-10 shrink-0 sm:block" />
+      <ChevronRight size={13} className="shrink-0 text-faint transition-transform duration-200 ease-out group-hover:translate-x-0.5" />
     </button>)}
   </div>
 }
@@ -153,7 +155,7 @@ export function TaskDrawer() {
   const steps = d ? toSteps(d.transcript, d.ticket.directory) : []
   const report = t?.latestReport
   return <div className="anim-fade fixed inset-0 z-40 flex justify-end bg-[var(--scrim)]" onMouseDown={e => { if (e.target === e.currentTarget) openTask(null) }}>
-    <div role="dialog" aria-modal="true" aria-label={t?.title ?? '任务'} className="anim-drawer-r flex h-full w-full max-w-xl flex-col bg-panel shadow-2xl md:my-2 md:mr-2 md:h-[calc(100%-1rem)] md:rounded-[24px]">
+    <div role="dialog" aria-modal="true" aria-label={t?.title ?? '任务'} className="anim-drawer-r flex h-full w-full max-w-xl flex-col bg-card shadow-2xl md:my-2 md:mr-2 md:h-[calc(100%-1rem)] md:rounded-[24px]">
       <div className="flex items-start gap-3 border-b border-line px-5 py-4">
         {t && <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-sunken"><StateIcon t={t} size={16} /></div>}
         <div className="min-w-0 flex-1">

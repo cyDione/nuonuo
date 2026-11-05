@@ -14,7 +14,7 @@ export const usePersona = () => {
 
 export const isMascot = (p: Persona) => !p.avatar || p.avatar === MASCOT || p.avatar === '✨'
 
-export type Mood = 'idle' | 'working' | 'waiting' | 'thinking' | 'happy' | 'sleepy'
+export type Mood = 'idle' | 'working' | 'waiting' | 'thinking' | 'happy' | 'sleepy' | 'listening'
 export const moodOf = (tone: 'idle' | 'working' | 'waiting'): Mood => tone
 
 export function Avatar({ persona, size = 28, className, mood = 'idle', track }: { persona: Persona; size?: number; className?: string; mood?: Mood; track?: boolean }) {
@@ -69,7 +69,7 @@ export function Mascot({ color, size = 28, mood = 'idle', className, track }: { 
       {closed ? <g {...line}>
         {mood === 'happy' ? <><path d="M38 57 Q42 51 46 57" /><path d="M54 57 Q58 51 62 57" /></>
           : <><path d="M38 56 Q42 60 46 56" /><path d="M54 56 Q58 60 62 56" /></>}
-      </g> : <g className="m-look"><g ref={eyes} className="m-pupils" style={mood === 'thinking' ? { transform: 'translate(3px, -3px)' } : undefined}>
+      </g> : <g className="m-look"><g ref={eyes} className="m-pupils" style={mood === 'thinking' ? { transform: 'translate(3px, -3px)' } : mood === 'listening' ? { transform: 'translate(-2px, 3px)' } : undefined}>
         <g className="m-eye"><ellipse cx="43" cy="55" rx="3" ry="4.6" fill={INK} /></g>
         <g className="m-eye"><ellipse cx="57" cy="55" rx="3" ry="4.6" fill={INK} /></g>
       </g></g>}
@@ -77,6 +77,7 @@ export function Mascot({ color, size = 28, mood = 'idle', className, track }: { 
         : mood === 'waiting' ? <ellipse cx="50" cy="68" rx="3.2" ry="3.8" fill={INK} />
         : mood === 'thinking' ? <path d="M47 68 Q51 66 55 68" {...line} />
         : mood === 'sleepy' ? <path d="M46 68 L54 68" {...line} />
+        : mood === 'listening' ? <ellipse cx="50" cy="67.5" rx="4" ry="2.6" fill={INK} />
         : <path d="M43 65 Q50 72 57 64 M57 64 L59 62.5" {...line} />}
     </g>
     {mood === 'waiting' && <g className="anim-pop">
@@ -95,7 +96,7 @@ export function statusLine(tickets: Ticket[]): { text: string; tone: 'idle' | 'w
   const parts: string[] = []
   if (working.length) parts.push(working.length === 1 ? `正在做：${working[0]!.title}` : `正在做 ${working.length} 件事`)
   if (waiting.length) parts.push(`${waiting.length} 件事等你`)
-  return { text: parts.join(' · ') || '空闲，随时可以找我', tone: waiting.length ? 'waiting' : working.length ? 'working' : 'idle' }
+  return { text: parts.join(' · ') || '随时可以找我', tone: waiting.length ? 'waiting' : working.length ? 'working' : 'idle' }
 }
 
 /** 早上好 / 下午好 …, for the greeting on the main conversation's empty screen. */

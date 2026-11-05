@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Menu } from 'lucide-react'
+import { Inbox, Menu } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, ApiError, type Health } from './api'
 import { Chat } from './Chat'
@@ -7,10 +7,11 @@ import { useRoute } from './route'
 import { Settings } from './settings/Settings'
 import { Sidebar, StatusDot } from './Sidebar'
 import { openActivity, openTask, useLive, useLiveEvents } from './live'
-import { TaskDrawer, useTickets } from './tasks'
-import { Activity, ActivityPanel, Library } from './Activity'
+import { needsOwner, TaskDrawer, useTickets } from './tasks'
+import { Activity, Library } from './Activity'
+import { setTodayCollapsed, TodayDrawer, TodayPanel, TodayToggle, useTodayCollapsed } from './Today'
 import { Avatar, Mascot, statusLine, usePersona } from './persona'
-import { IconButton } from './ui'
+import { cx, IconButton } from './ui'
 
 export function App() {
   const route = useRoute()
@@ -24,35 +25,50 @@ export function App() {
   if (health.isPending) return <Splash />
   if (health.error) return <Offline message={health.error.message} />
 
-  return <Shell authed={authed}><div className="flex h-dvh">
+  return <Shell authed={authed}><Layout route={route} nav={nav} setNav={setNav} /></Shell>
+}
+
+function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; nav: boolean; setNav(v: boolean): void }) {
+  const collapsed = useTodayCollapsed()
+  const chat = route.page === 'chat'
+  return <div className="flex h-dvh">
     <Sidebar route={route} open={nav} onClose={() => setNav(false)} />
-    <main className="min-w-0 flex-1 md:py-2 md:pr-2">
-      <div className="sheet flex h-full flex-col overflow-hidden md:rounded-[24px]">
+    <main className="flex min-w-0 flex-1 gap-2 md:py-2 md:pr-2">
+      <div className="sheet relative flex min-w-0 flex-1 flex-col overflow-hidden md:rounded-[24px]">
         <MobileBar onMenu={() => setNav(true)} />
+        {chat && <TodayToggle className="absolute top-3 right-3 z-10 max-md:hidden" />}
         <div className="min-h-0 flex-1">
-          {route.page === 'chat' ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
+          {chat ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
             : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : <Settings tab={route.tab} {...(route.item ? { item: route.item } : {})} />}
         </div>
       </div>
+      {chat && !collapsed && <aside className="anim-fade w-[344px] shrink-0 overflow-hidden rounded-[24px] bg-card shadow-[var(--shadow-sheet)] max-xl:hidden">
+        <TodayPanel onClose={() => setTodayCollapsed(true)} />
+      </aside>}
     </main>
     <TaskDrawer />
-    <ActivityPanel />
-  </div></Shell>
+    <TodayDrawer />
+  </div>
 }
 
-/** Phones: the menu button and the assistant's face, since the sidebar is folded away. */
+/** Phones: the menu, the assistant's face and status, and what waits for you (opens the "today" sheet). */
 function MobileBar({ onMenu }: { onMenu(): void }) {
   const persona = usePersona()
   const connected = useLive(s => s.connected)
-  const status = statusLine((useTickets().data?.tickets ?? []).filter(t => t.stage !== 'ended'))
-  return <div className="flex h-14 shrink-0 items-center gap-1 border-b border-line px-2 pt-[env(safe-area-inset-top)] md:hidden">
-    <IconButton label="打开菜单" onClick={onMenu} className="size-10"><Menu size={20} /></IconButton>
-    <button onClick={() => openActivity(true)} className="press flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1.5 py-1 text-left">
+  const tickets = (useTickets().data?.tickets ?? []).filter(t => t.stage !== 'ended')
+  const status = statusLine(tickets)
+  const waiting = tickets.filter(needsOwner).length
+  return <div className="flex h-14 shrink-0 items-center gap-1 px-2 pt-[env(safe-area-inset-top)] md:hidden">
+    <IconButton label="打开菜单" onClick={onMenu} className="size-10 text-fg"><Menu size={20} /></IconButton>
+    <button onClick={() => openActivity(true)} className="press flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1 py-1 text-left">
       <Avatar persona={persona} size={30} mood={connected ? status.tone : 'sleepy'} />
       <span className="min-w-0">
-        <span className="block truncate font-display text-sm font-semibold">{persona.name}</span>
-        <span className="flex items-center gap-1.5 truncate text-[11px] text-muted"><StatusDot tone={connected ? status.tone : 'offline'} /><span className="truncate">{connected ? status.text : '重连中…'}</span></span>
+        <span className="block truncate font-display text-[15px] leading-tight font-semibold">{persona.name}</span>
+        <span className="flex items-center gap-1.5 truncate text-[11px] text-faint"><StatusDot tone={connected ? status.tone : 'offline'} /><span className="truncate">{connected ? status.text : '重连中…'}</span></span>
       </span>
+    </button>
+    <button onClick={() => openActivity(true)} aria-label="今天" className={cx('press mr-1 flex h-9 items-center gap-1 rounded-full px-3 text-[13px] font-semibold tabular-nums', waiting ? 'bg-warn-soft text-warn' : 'text-muted')}>
+      <Inbox size={16} />{waiting > 0 && <span key={waiting} className="bump">{waiting}</span>}
     </button>
   </div>
 }

@@ -42,7 +42,7 @@ export function Badge({ tone = 'neutral', children }: { tone?: 'neutral' | 'ok' 
 }
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx('rounded-2xl border border-line bg-panel', className)}>{children}</div>
+  return <div className={cx('rounded-[20px] border border-line bg-card', className)}>{children}</div>
 }
 
 export function Modal({ title, onClose, children, footer }: { title: string; onClose(): void; children: ReactNode; footer?: ReactNode }) {
