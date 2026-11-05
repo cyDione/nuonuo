@@ -4,3 +4,4 @@ dist/
 .super-assistant-dev/
 coverage/
 .DS_Store
+.stage/

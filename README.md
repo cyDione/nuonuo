@@ -87,7 +87,7 @@ loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运�
 ```
 
 **5. 可选**：
-- **桌面端**：`cd apps/desktop && pnpm start`，或用 `pnpm dist:mac` / `pnpm dist:linux` 打包。
+- **桌面端**：`cd apps/desktop && pnpm start`，或先在仓库根目录 `pnpm build`，再用 `pnpm dist:mac` / `pnpm dist:linux` 打包。Linux x64 包也可以在 GitHub Actions 里手动运行 “Package Linux x64” 工作流获得。
 - **在外面用**：启用 Telegram 插件，用手机指挥家里的电脑，不需要开放端口。或者用 SSH 端口转发 `ssh -L 7420:127.0.0.1:7420 你的电脑`，再在本地打开登录链接。
 - **GitHub**：`gh auth login`（或在 `env` 里放 `GITHUB_TOKEN`），然后在「设置 → 来源 → GitHub」里填写要监听的仓库。
 
