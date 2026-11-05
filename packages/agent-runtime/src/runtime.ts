@@ -236,7 +236,9 @@ export class AgentRuntime {
         if (controller.signal.aborted) break
         const items = this.take(session.id)
         if (items.length) {
-          this.appendEvent(session.id, 'message', { role: 'user', content: await def.formatInbox(items, session) })
+          // The current time rides on the new input, not the system prompt: a clock in the system prompt changes the
+          // prompt prefix on every step and defeats the provider's prompt cache.
+          this.appendEvent(session.id, 'message', { role: 'user', content: `${await def.formatInbox(items, session)}\n<now>${new Date().toString()}</now>` })
           this.emit(session, { type: 'session.message' })
         } else if (steps === 0) break
         if (steps >= maxSteps) { stepLimit = true; break }
@@ -296,6 +298,9 @@ export class AgentRuntime {
       stopWhen: stepCountIs(1),
       abortSignal: signal,
       maxRetries: 2,
+      // Anthropic caches only where asked; this request-level breakpoint caches the prefix up to the last block.
+      // Other providers cache prefixes on their own and ignore this option.
+      providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
     })
     this.emit(session, { type: 'session.part', part: { kind: 'step-start' } })
     let text = ''
@@ -401,4 +406,11 @@ function renderForSummary(m: ModelMessage): string {
 export function transient(error: unknown): boolean {
   const text = `${describeError(error)} ${(error as { cause?: unknown })?.cause ?? ''}`
   return /Failed to process successful response|ECONNRESET|socket hang up|terminated|other side closed|fetch failed|ETIMEDOUT|EPIPE|premature close/i.test(text)
+}
+
+/** Today's date and time zone for system prompts: stable all day, so the prompt prefix stays cacheable. */
+export function today(at = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} (${zone}); each new input ends with <now> giving the exact time`
 }

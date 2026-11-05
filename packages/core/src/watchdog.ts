@@ -3,7 +3,7 @@
  * the watchdog agent reads the task's recent transcript and decides: nudge the worker, restart it, tell the owner, or let it be.
  * The owner can also talk to it in its own conversation ("为什么 tkt_x 卡住了？").
  */
-import { recallTool, type AgentDefinition, type AgentRuntime, type InboxItem } from '@super-assistant/agent-runtime'
+import { recallTool, today, type AgentDefinition, type AgentRuntime, type InboxItem } from '@super-assistant/agent-runtime'
 import { kvGet, kvSet, schema, type Store } from '@super-assistant/db'
 import { tool, type ToolSet } from 'ai'
 import { desc, eq } from 'drizzle-orm'
@@ -140,7 +140,7 @@ export class Watchdog {
       role: 'watchdog',
       pool: 'router',
       maxSteps: 12,
-      system: () => `${WATCHDOG_PROMPT}\n\nNow: ${new Date().toString()}`,
+      system: () => `${WATCHDOG_PROMPT}\n\nToday: ${today()}`,
       formatInbox: (items: InboxItem[]) => items.map(({ payload: p }) => {
         if (p.type === 'finding') {
           let body = ''

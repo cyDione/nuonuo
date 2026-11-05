@@ -38,7 +38,7 @@ describe('AgentRuntime', () => {
   it('injects inbox items that arrive mid-turn before the next step', async () => {
     const seen: string[] = []
     setup((opts, call) => {
-      seen.push(lastUserText(opts))
+      seen.push(lastUserText(opts).replace(/\n<now>.*<\/now>$/, ''))
       return call === 0 ? { calls: [{ name: 'poke', input: {} }] } : { text: 'done' }
     })
     let sessionId = ''
