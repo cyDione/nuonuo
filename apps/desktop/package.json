@@ -7,8 +7,9 @@
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
-    "dist:mac": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux"
+    "stage": "bash ../../scripts/stage-daemon.sh",
+    "dist:mac": "pnpm stage && electron-builder --mac",
+    "dist:linux": "pnpm stage && electron-builder --linux"
   },
   "devDependencies": {
     "electron": "45.2.2",
@@ -17,9 +18,11 @@
   "build": {
     "appId": "dev.super-assistant.desktop",
     "productName": "Super-assistant",
+    "publish": null,
+    "afterPack": "scripts/after-pack.cjs",
     "files": ["main.cjs", "preload.cjs", "lib/**"],
-    "extraResources": [{ "from": "../daemon/dist", "to": "daemon" }],
+    "extraResources": [{ "from": ".stage/daemon", "to": "daemon" }],
     "mac": { "category": "public.app-category.productivity", "target": ["dmg", "zip"] },
-    "linux": { "target": ["AppImage"], "category": "Utility" }
+    "linux": { "executableName": "super-assistant", "target": ["AppImage", "tar.gz"], "category": "Utility", "artifactName": "${productName}-${version}-linux-${arch}.${ext}" }
   }
 }
