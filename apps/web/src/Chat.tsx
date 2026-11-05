@@ -9,18 +9,21 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, ApiError, type Conversation, type Delivery, type Message, type RolesResponse } from './api'
-import { openTask, useLive } from './live'
+import { openActivity, openTask, useLive } from './live'
+import { Avatar, statusLine, usePersona } from './persona'
 import { go } from './route'
 import { FileChip, NeedsYou, needsOwner, useTickets, WorkingLine } from './tasks'
 import { SOURCE_LABEL, SourceIcon } from './icons'
+import { cx } from './ui'
 
 /** A message typed on the empty screen, sent once the new conversation's page mounts. */
 let pendingSend: { id: string; content: string } | undefined
 
 const SUGGESTIONS = ['帮我写个脚本统计当前目录的代码行数', '调研一下 SQLite WAL 模式的优缺点', '你能帮我做些什么？', '每天早上 9 点给我整理一下 Hacker News 热门']
 
-export function Chat({ id }: { id?: string }) {
+export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const qc = useQueryClient()
+  const persona = usePersona()
   const roles = useQuery({ queryKey: ['roles'], queryFn: () => api.get<RolesResponse>('/roles') })
   const thread = useQuery({
     queryKey: ['messages', id], enabled: Boolean(id),
@@ -77,11 +80,24 @@ export function Chat({ id }: { id?: string }) {
   }, [id])
 
   const empty = !id || (thread.isSuccess && messages.length === 0)
+  const status = statusLine((tickets.data?.tickets ?? []).filter(t => t.stage !== 'ended'))
+  const external = current && current.source !== 'webchat'
 
   return <div className="flex h-full flex-col">
-    {thread.data && <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-5">
-      {current && current.source !== 'webchat' && <SourceIcon source={current.source} className="shrink-0 text-muted" />}
-      <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h1>
+    {main ? <header className="flex h-14 shrink-0 items-center border-b border-line px-5">
+      {/* Muse: the assistant's face, with a line of what it is doing; tap for the activity log. */}
+      <button onClick={() => openActivity(true)} className="flex min-w-0 items-center gap-2.5 rounded-xl py-1 pr-3 text-left hover:bg-sunken" title="看看我在做什么">
+        <Avatar persona={persona} size={32} />
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-semibold">{persona.name}</span>
+          <span className={cx('flex items-center gap-1 truncate text-xs', status.tone === 'waiting' ? 'text-warn' : 'text-faint')}>
+            {status.tone === 'working' && <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent" />}{status.text}
+          </span>
+        </span>
+      </button>
+    </header> : thread.data && <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-5">
+      {external && <SourceIcon source={current!.source} className="shrink-0 text-muted" />}
+      <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{title}{!external && <span className="ml-2 text-xs font-normal text-faint">侧聊</span>}</h1>
       {current?.meta.url && <a href={current.meta.url} target="_blank" rel="noreferrer" className="flex shrink-0 items-center gap-1 text-xs text-accent">
         在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>}
     </header>}
@@ -91,16 +107,17 @@ export function Chat({ id }: { id?: string }) {
       <a className="font-medium text-accent" href="#/settings/providers">去设置</a>
     </div>}
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-      {empty ? <Welcome onPick={t => send(t)} disabled={Boolean(noRouter)} /> :
-        <div className="mx-auto max-w-3xl space-y-5 px-5 py-6">
-          {messages.map(m => <Item key={m.id} m={m} />)}
-          {draft && <div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.text}</ReactMarkdown><span className="caret" /></div>}
-          {thinking && <Typing />}
+      {empty ? <Welcome onPick={t => send(t)} disabled={Boolean(noRouter)} main={Boolean(main)} name={persona.name} /> :
+        <div className="mx-auto max-w-3xl space-y-3 px-5 py-6">
+          {messages.map((m, i) => <Item key={m.id} m={m} first={messages[i - 1]?.role !== m.role || Boolean(messages[i - 1]?.meta.source && messages[i - 1]!.meta.source !== 'webchat')} />)}
+          {draft && <Bubble first={last?.role !== 'assistant'}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.text}</ReactMarkdown><span className="caret" /></div></Bubble>}
+          {thinking && <Bubble first><Typing /></Bubble>}
           {asks.map(t => <NeedsYou key={t.id} t={t} onAnswer={(text, ticketId) => send(text, ticketId)} />)}
         </div>}
     </div>
     {error && <div className="mx-auto w-full max-w-3xl px-5"><div className="rounded-lg border border-line bg-panel px-3 py-2 text-sm text-danger">{error}</div></div>}
-    <Composer onSend={text => send(text)} disabled={Boolean(noRouter)} status={<WorkingLine tickets={working} />} />
+    <Composer onSend={text => send(text)} disabled={Boolean(noRouter)} status={main ? undefined : <WorkingLine tickets={working} />}
+      placeholder={main ? `跟${persona.name}说…（可以连着交代好几件事）` : '在这个侧聊里说…'} />
   </div>
 }
 
@@ -110,11 +127,14 @@ function Typing() {
   </div>
 }
 
-function Welcome({ onPick, disabled }: { onPick(text: string): void; disabled: boolean }) {
+function Welcome({ onPick, disabled, main, name }: { onPick(text: string): void; disabled: boolean; main: boolean; name: string }) {
+  const persona = usePersona()
   return <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center px-5 text-center">
-    <Sparkles className="mb-4 text-accent" size={28} />
-    <h2 className="text-xl font-semibold">有什么可以帮你？</h2>
-    <p className="mt-2 text-sm text-muted">交给我就行。需要动手的事我在后台做，做完或者要你拿主意的时候再来找你；你可以同时交代好几件事。</p>
+    {main ? <Avatar persona={persona} size={56} className="mb-4" /> : <Sparkles className="mb-4 text-accent" size={28} />}
+    <h2 className="text-xl font-semibold">{main ? `嗨，我是${name}` : '新侧聊'}</h2>
+    <p className="mt-2 text-sm text-muted">{main
+      ? '有事直接跟我说，可以连着交代好几件。需要动手的我在后台做，做完或者要你拿主意时再来找你。'
+      : '单独聊一个话题或项目。我会记住这个侧聊里定下的约定，只在这里用。'}</p>
     <div className="mt-6 grid w-full gap-2 sm:grid-cols-2">
       {SUGGESTIONS.map(s => <button key={s} disabled={disabled} onClick={() => onPick(s)}
         className="rounded-xl border border-line bg-panel px-4 py-3 text-left text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50">{s}</button>)}
@@ -122,8 +142,21 @@ function Welcome({ onPick, disabled }: { onPick(text: string): void; disabled: b
   </div>
 }
 
-function Item({ m }: { m: Message }) {
+/** The assistant's messages are bubbles with its avatar on the first of a run (Muse), so back-to-back messages stay readable. */
+function Bubble({ first, children }: { first: boolean; children: React.ReactNode }) {
+  const persona = usePersona()
+  return <div className={cx('flex items-start gap-2.5', first && 'pt-2')}>
+    {first ? <Avatar persona={persona} size={28} className="mt-0.5" /> : <span className="w-7 shrink-0" />}
+    <div className="min-w-0 max-w-[85%] rounded-2xl rounded-tl-md border border-line bg-panel px-4 py-2.5 shadow-sm">{children}</div>
+  </div>
+}
+
+function Item({ m, first }: { m: Message; first: boolean }) {
   const external = m.role === 'user' && m.meta.source && m.meta.source !== 'webchat'
+  // A routine firing is the owner's own standing request: a quiet line, not a message from someone.
+  if (external && m.meta.source === 'cron') return <div className="flex items-center gap-2 py-1 text-xs text-faint">
+    <span className="h-px flex-1 bg-line" /><span>⏰ {m.content.split('\n')[0]!.replace(/^⏰\s*/, '').replace(/（.*?）：?$/, '')}</span><span className="h-px flex-1 bg-line" />
+  </div>
   if (external) return <div className="flex gap-2.5">
     <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-sunken text-muted"><SourceIcon source={m.meta.source} size={14} /></div>
     <div className="min-w-0 flex-1">
@@ -141,10 +174,10 @@ function Item({ m }: { m: Message }) {
   </div>
   const result = m.meta.result as Delivery | undefined
   return <div className="space-y-2">
-    <div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
-    {result && <Result result={result} />}
-    {m.meta.error && <div className="text-xs text-danger">⚠ {m.meta.error}</div>}
-    {m.meta.via && <div className="flex items-center gap-1 text-[11px] text-faint">
+    <Bubble first={first}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div></Bubble>
+    {result && <div className="pl-[38px]"><Result result={result} /></div>}
+    {m.meta.error && <div className="pl-[38px] text-xs text-danger">⚠ {m.meta.error}</div>}
+    {m.meta.via && <div className="flex items-center gap-1 pl-[38px] text-[11px] text-faint">
       <SourceIcon source={m.meta.via} size={11} />
       {m.meta.delivery === 'sent' ? <>已发到 {SOURCE_LABEL[m.meta.via] ?? m.meta.via}{m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent"> ↗</a>}</>
         : m.meta.delivery === 'pending' ? '发送中…'
@@ -158,7 +191,7 @@ function Result({ result }: { result: Delivery }) {
   const [open, setOpen] = useState(false)
   const long = result.summary.length > 160
   return <div className="space-y-2">
-    {result.files.length > 0 && <div className="flex flex-wrap gap-2">{result.files.map(f => <FileChip key={f.id} {...f} />)}</div>}
+    {result.files.length > 0 && <div className="flex flex-wrap items-start gap-2">{result.files.map(f => <FileChip key={f.id} {...f} />)}</div>}
     {long && <div className="rounded-xl border border-line bg-panel">
       <div className="flex items-center">
         <button onClick={() => setOpen(v => !v)} className="flex min-w-0 flex-1 items-center gap-1.5 px-3.5 py-2.5 text-left text-sm">
@@ -173,7 +206,7 @@ function Result({ result }: { result: Delivery }) {
 }
 
 /** Never blocks on a message in flight: each message is independent, and the owner may type several in a row. */
-function Composer({ onSend, disabled, status }: { onSend(text: string): void; disabled: boolean; status?: React.ReactNode }) {
+function Composer({ onSend, disabled, status, placeholder }: { onSend(text: string): void; disabled: boolean; status?: React.ReactNode; placeholder: string }) {
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
   useLayoutEffect(() => {
@@ -191,7 +224,7 @@ function Composer({ onSend, disabled, status }: { onSend(text: string): void; di
   return <div className="mx-auto w-full max-w-3xl px-5 pt-2 pb-5">
     {status && <div className="mb-2 px-1">{status}</div>}
     <div className="flex items-end gap-2 rounded-2xl border border-line bg-panel p-2 pl-4 focus-within:border-accent">
-      <textarea ref={ref} value={text} rows={1} autoFocus placeholder={disabled ? '请先在设置中配置模型' : '发消息…（Enter 发送，Shift+Enter 换行）'}
+      <textarea ref={ref} value={text} rows={1} autoFocus placeholder={disabled ? '请先在设置中配置模型' : placeholder}
         disabled={disabled} onChange={e => setText(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
         className="max-h-60 min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[15px] outline-none placeholder:text-faint" />

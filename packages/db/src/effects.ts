@@ -31,11 +31,17 @@ export class Effects {
   constructor(private store: Store, private now: () => number = Date.now, private pollMs = 500) {}
 
   /** Queues work; an existing waiting row with the same kind/key gets the new payload and becomes due now, keeping its place. */
-  enqueue(kind: string, key: string, payload: unknown): void {
-    const at = this.now()
+  enqueue(kind: string, key: string, payload: unknown, delayMs = 0): void {
+    // With a delay, enqueueing again pushes the due time back: a debounce (e.g. distil a conversation once it goes quiet).
+    const at = this.now() + delayMs
     this.store.db.insert(effects).values({ kind, key, payload, dueAt: at })
       .onConflictDoUpdate({ target: [effects.kind, effects.key], set: { payload, dueAt: at } }).run()
-    this.store.afterCommit(() => this.kick())
+    this.store.afterCommit(() => (delayMs ? this.kickLater(delayMs) : this.kick()))
+  }
+
+  private kickLater(ms: number): void {
+    if (!this.running) return
+    setTimeout(() => this.kick(), ms + 20).unref?.()
   }
 
   cancel(kind: string, key: string): void {

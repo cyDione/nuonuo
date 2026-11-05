@@ -13,7 +13,7 @@ import { VERSION } from './config'
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
-import { DEFAULT_PROACTIVE, DomainError, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-agent/core'
+import { DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-agent/core'
 import { kvGet, kvSet } from '@super-agent/db'
 import { fireRoutine } from '@super-agent/sources'
 import { runDoctor } from './doctor'
@@ -140,8 +140,17 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
     if (!updated) throw new HttpError(404, 'missing', 'no such conversation')
     return c.json({ conversation: updated })
   })
+  api.get('/conversations/main', c => c.json({ id: rt.engine.mainConversation() }))
+  api.get('/persona', c => c.json({ persona: persona(rt.store), defaults: DEFAULT_PERSONA }))
+  api.put('/persona', async c => {
+    const input = await body(c, z.object({ name: z.string().max(40), avatar: z.string().max(16), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), personality: z.string().max(2_000) }).partial())
+    const next = savePersona(rt.store, input)
+    rt.bus.emit({ type: 'persona.updated' })
+    return c.json({ persona: next })
+  })
   api.delete('/conversations/:id', c => {
     const id = c.req.param('id')
+    if (id === rt.engine.mainConversation()) throw new HttpError(409, 'conflict', '主对话不能删除')
     if (conversations.get(id)) for (const t of rt.engine.tickets({ threadId: rt.engine.threadOf(id), open: true })) rt.engine.stopTask(t.id, 'person', '对话已删除')
     conversations.delete(id)
     return c.body(null, 204)
@@ -294,19 +303,32 @@ export function createApp(rt: Runtime, token: string, webRoot?: string): Hono {
   })
   api.get('/approvals', c => c.json({ approvals: rt.reviewer.pending() }))
   api.post('/approvals/:id', async c => {
-    const { approve, note } = await body(c, z.object({ approve: z.boolean(), note: z.string().max(500).optional() }))
-    return c.json({ approval: guard(() => rt.reviewer.decide(c.req.param('id'), approve, note)) })
+    const { approve, note, scope } = await body(c, z.object({ approve: z.boolean(), note: z.string().max(500).optional(), scope: z.enum(['once', 'task']).optional() }))
+    return c.json({ approval: guard(() => rt.reviewer.decide(c.req.param('id'), approve, note, scope)) })
   })
+  api.get('/grants', c => c.json({ grants: rt.reviewer.grants() }))
+  api.delete('/grants/:id', c => { rt.reviewer.revokeGrant(c.req.param('id')); rt.bus.emit({ type: 'activity.updated' }); return c.body(null, 204) })
   api.get('/audit', c => c.json({ entries: rt.reviewer.auditLog(Math.min(Number(c.req.query('limit')) || 200, 1000)) }))
 
   // Memory
-  api.get('/memory', c => c.json({ user: rt.memory.read('user'), agent: rt.memory.read('agent'),
-    projects: rt.memory.projects().map(name => ({ name, content: rt.memory.read('project', name) })) }))
-  api.put('/memory', async c => {
-    const { layer, project, content } = await body(c, z.object({ layer: z.enum(['user', 'agent', 'project']), project: z.string().optional(), content: z.string().max(200_000) }))
-    guard(() => rt.memory.write(layer, content, project))
-    return c.json({ ok: true })
+  api.get('/memories', c => {
+    const status = (c.req.query('status') ?? 'active,pending').split(',') as MemoryStatus[]
+    const rows = rt.memory.list({ status })
+    const scopes = [...new Set(rows.map(r => r.scope).filter(Boolean))] as string[]
+    return c.json({ memories: rows.map(({ embedding: _e, ...m }) => m), scopes: Object.fromEntries(scopes.map(s => [s, rt.memory.scopeName(s)])),
+      kinds: MEMORY_KINDS.map(id => ({ id, label: KIND_LABEL[id] })) })
   })
+  api.post('/memories', async c => {
+    const input = await body(c, z.object({ kind: z.enum(MEMORY_KINDS), text: z.string().trim().min(2).max(500), scope: z.string().trim().max(200).optional(), ttlDays: z.number().int().min(1).max(365).optional() }))
+    return c.json(guard(() => rt.memory.add({ ...input, trust: 'user', createdBy: 'owner' })), 201)
+  })
+  api.patch('/memories/:id', async c => {
+    const { action, text } = await body(c, z.object({ action: z.enum(['confirm', 'reject', 'edit']), text: z.string().trim().min(2).max(500).optional() }))
+    guard(() => action === 'confirm' ? rt.memory.confirm(c.req.param('id'), text) : action === 'reject' ? rt.memory.reject(c.req.param('id')) : rt.memory.edit(c.req.param('id'), text ?? ''))
+    return c.json({ memory: rt.memory.get(c.req.param('id')) })
+  })
+  api.delete('/memories/:id', c => { rt.memory.remove(c.req.param('id')); return c.body(null, 204) })
+  api.post('/memories/consolidate', c => c.json(rt.memory.consolidate()))
 
   // Watchdog
   api.get('/watchdog', c => c.json({ conversationId: rt.watchdog.conversation(), state: rt.agents.session(WATCHDOG_SESSION)?.state ?? 'idle' }))

@@ -4,9 +4,9 @@ import { api, type ProactiveSettings, type SourceInfo } from '../api'
 import { Button, Card, cx, Field, Input } from '../ui'
 
 const MODES: { id: ProactiveSettings['mode']; label: string; hint: string }[] = [
-  { id: 'off', label: '关闭', hint: '只处理找我的事（@ 我、私信、你在网页上说的话）。' },
-  { id: 'observe', label: '观察', hint: '按策略判断，但只记下「本来会做」的事，在「活动」里由你决定要不要做。适合先试一段时间。' },
-  { id: 'auto', label: '自动', hint: '值得做的事在后台悄悄做（只在本地调查、复现、准备方案，不对外发任何东西），有价值才告诉你。' },
+  { id: 'off', label: '关', hint: '只处理找我的事（@ 我、私信、你在网页上说的话）。' },
+  { id: 'observe', label: '只留意', hint: '按策略判断，但只记下「本来会做」的事，在「活动」里由你决定要不要做。适合先试一段时间。' },
+  { id: 'auto', label: '主动去做', hint: '值得做的事在后台悄悄做（只在本地调查、复现、准备方案，不对外发任何东西），有价值才告诉你。' },
 ]
 
 export function ProactivePage() {
@@ -20,7 +20,7 @@ export function ProactivePage() {
   const dirty = JSON.stringify(form) !== JSON.stringify(data.settings)
   return <div className="space-y-3">
     <Card className="p-4">
-      <div className="text-sm font-medium">模式</div>
+      <div className="text-sm font-medium">主动程度</div>
       <div className="mt-2 grid gap-2 sm:grid-cols-3">
         {MODES.map(m => <button key={m.id} onClick={() => setForm({ ...form, mode: m.id })}
           className={cx('rounded-xl border px-3 py-2.5 text-left', form.mode === m.id ? 'border-accent bg-accent-soft' : 'border-line hover:bg-sunken')}>

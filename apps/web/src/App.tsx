@@ -7,7 +7,7 @@ import { Settings } from './settings/Settings'
 import { Sidebar } from './Sidebar'
 import { useLiveEvents } from './live'
 import { TaskDrawer } from './tasks'
-import { Activity, Library } from './Activity'
+import { Activity, ActivityPanel, Library } from './Activity'
 
 export function App() {
   const route = useRoute()
@@ -21,10 +21,18 @@ export function App() {
   return <Shell authed={authed}><div className="flex h-full">
     <Sidebar route={route} />
     <main className="min-w-0 flex-1">
-      {route.page === 'chat' ? <Chat key={route.id ?? 'new'} id={route.id} /> : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : <Settings tab={route.tab} />}
+      {route.page === 'chat' ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
+        : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : <Settings tab={route.tab} />}
     </main>
     <TaskDrawer />
+    <ActivityPanel />
   </div></Shell>
+}
+
+/** The main conversation (Muse): where the app opens, one long chat with the assistant. */
+function MainChat() {
+  const main = useQuery({ queryKey: ['main-conversation'], queryFn: () => api.get<{ id: string }>('/conversations/main'), staleTime: Infinity })
+  return main.data ? <Chat key={main.data.id} id={main.data.id} main /> : null
 }
 
 /** Mounted only once logged in, so the event stream never opens without the session cookie. */

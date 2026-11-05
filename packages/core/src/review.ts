@@ -8,7 +8,7 @@ import type { AgentRuntime, Bus } from '@super-agent/agent-runtime'
 import { kvGet, newId, schema, type Store } from '@super-agent/db'
 import type { ModelHub } from '@super-agent/models'
 import { generateText, Output } from 'ai'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { ROUTER_SESSION, type Engine } from './engine'
 import type { Ticket } from './model'
@@ -134,6 +134,11 @@ export class Reviewer {
       return { action: 'block', by: 'rule', reason }
     }
     if (risk === 'normal') return { action: 'allow', by: 'normal' }
+    const granted = risk !== 'destructive' ? this.granted(ticket.id, 'shell', grantKey('shell', command)) : undefined
+    if (granted) {
+      this.audit({ ticketId: ticket.id, actor: 'owner', action: 'review', tool: 'shell', input: command, risk, decision: 'allow', reason: `你已允许这件事里：${granted.label}` })
+      return { action: 'allow', by: 'rule' }
+    }
     const allowed = matches(settings.allow)
     if (allowed) {
       this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk, decision: 'allow', reason: `命中放行规则 /${allowed}/` })
@@ -172,6 +177,20 @@ export class Reviewer {
     return this.escalate(ticket, sessionId, command, cwd, risk, verdict.reason)
   }
 
+  /** What the owner allowed for the rest of a task, while that task is open. */
+  grants(): (typeof schema.grants.$inferSelect & { title: string })[] {
+    const rows = this.store.db.select().from(schema.grants).where(isNull(schema.grants.revokedAt)).orderBy(desc(schema.grants.createdAt)).all()
+    return rows.flatMap(g => { try { const t = this.engine.ticket(g.ticketId); return t.ended ? [] : [{ ...g, title: t.title }] } catch { return [] } })
+  }
+
+  revokeGrant(id: string): void {
+    this.store.db.update(schema.grants).set({ revokedAt: this.now() }).where(eq(schema.grants.id, id)).run()
+  }
+
+  private granted(ticketId: string, tool: string, key: string) {
+    return this.store.db.select().from(schema.grants).where(and(eq(schema.grants.ticketId, ticketId), eq(schema.grants.tool, tool), eq(schema.grants.key, key), isNull(schema.grants.revokedAt))).get()
+  }
+
   pending(ticketId?: string): Approval[] {
     return this.store.db.select().from(schema.approvals)
       .where(and(eq(schema.approvals.status, 'pending'), ...(ticketId ? [eq(schema.approvals.ticketId, ticketId)] : []))).orderBy(desc(schema.approvals.createdAt)).all()
@@ -185,13 +204,22 @@ export class Reviewer {
    * The owner decides. Approving runs the command in the background in the task's working directory; its result reaches the
    * worker as a finished job. Denying tells the worker why. Either way the worker wakes.
    */
-  decide(id: string, approve: boolean, note?: string): Approval {
+  /**
+   * The owner's answer to an approval. `scope: 'task'` (Muse's "allow for this task") also allows the same kind of action
+   * for the rest of this task — never for destructive ones, which are asked every time.
+   */
+  decide(id: string, approve: boolean, note?: string, scope: 'once' | 'task' = 'once'): Approval {
     const approval = this.get(id)
     if (!approval) throw new Error(`没有审批 ${id}`)
     if (approval.status !== 'pending') throw new Error('这个审批已经处理过了')
     const ticket = this.engine.ticket(approval.ticketId)
     const at = this.now()
     const command = String(approval.input.command)
+    if (approve && scope === 'task' && approval.risk !== 'destructive') {
+      const key = grantKey(approval.tool, command, approval.input)
+      this.store.db.insert(schema.grants).values({ id: newId('grt'), ticketId: ticket.id, tool: approval.tool, key, label: grantLabel(approval.tool, command, approval.input), createdAt: at })
+        .onConflictDoUpdate({ target: [schema.grants.ticketId, schema.grants.tool, schema.grants.key], set: { revokedAt: null, createdAt: at } }).run()
+    }
     this.store.atomic(() => {
       this.store.db.update(schema.approvals).set({ status: approve ? 'approved' : 'denied', decidedBy: 'owner', decidedAt: at, note: note ?? null })
         .where(eq(schema.approvals.id, id)).run()
@@ -271,6 +299,11 @@ export class Reviewer {
       this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool, input: display, risk, decision: 'block', reason: `命中禁止规则 /${denied}/` })
       return { action: 'block', by: 'rule', reason: `命中禁止规则 /${denied}/` }
     }
+    const granted = this.granted(ticket.id, tool, grantKey(tool, display, input))
+    if (granted) {
+      this.audit({ ticketId: ticket.id, actor: 'owner', action: 'review', tool, input: display, risk, decision: 'allow', reason: `你已允许这件事里：${granted.label}` })
+      return { action: 'allow', by: 'rule' }
+    }
     const allowed = matches(settings.allow)
     if (allowed || settings.threshold === 'off') {
       this.audit({ ticketId: ticket.id, actor: allowed ? 'rule' : 'system', action: 'review', tool, input: display, risk, decision: 'allow', reason: allowed ? `命中放行规则 /${allowed}/` : '审核已关闭' })
@@ -302,4 +335,17 @@ export class Reviewer {
       'Decide.',
     ].join('\n\n')
   }
+}
+
+/** What "the same kind of action" means for a task-wide grant: the shell heuristics' categories, or one MCP tool. */
+export function grantKey(tool: string, display: string, input: Record<string, unknown> = {}): string {
+  if (tool === 'shell') return classifyShell(display).reasons.slice().sort().join('+') || 'shell'
+  if (tool === 'mcp') return `${String(input.server ?? '')}.${String(input.tool ?? '')}`
+  return tool
+}
+
+export function grantLabel(tool: string, display: string, input: Record<string, unknown> = {}): string {
+  if (tool === 'shell') return classifyShell(display).reasons.join('、') || '运行命令'
+  if (tool === 'mcp') return `调用 ${String(input.server ?? '')} 的 ${String(input.tool ?? '')}`
+  return tool
 }

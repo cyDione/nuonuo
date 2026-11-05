@@ -78,6 +78,6 @@ describe('kv and migrations', () => {
     store = openStore(':memory:')
     kvSet(store, 'a', { x: 1 })
     expect(kvGet(store, 'a')).toEqual({ x: 1 })
-    expect(store.sqlite.pragma("user_version", { simple: true })).toBe(5)
+    expect(store.sqlite.pragma("user_version", { simple: true })).toBe(6)
   })
 })

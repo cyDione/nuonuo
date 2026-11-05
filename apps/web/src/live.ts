@@ -64,6 +64,9 @@ export function useLiveEvents() {
         case 'conversation.updated':
           qc.invalidateQueries({ queryKey: ['conversations'] })
           break
+        case 'persona.updated':
+          qc.invalidateQueries({ queryKey: ['persona'] })
+          break
         case 'activity.updated':
           soon('activity', () => qc.invalidateQueries({ queryKey: ['activity'] }), 500)
           break
@@ -77,6 +80,7 @@ export function useLiveEvents() {
             qc.invalidateQueries({ queryKey: ['inbox'] })
             qc.invalidateQueries({ queryKey: ['activity'] })
             qc.invalidateQueries({ queryKey: ['artifacts'] })
+            qc.invalidateQueries({ queryKey: ['grants'] })
           }, 150)
           break
         case 'session.state':
@@ -107,6 +111,14 @@ export function useLiveEvents() {
 }
 
 // ── UI state shared across components ──────────────────────────────────────
+let activityOpen = false
+const activityListeners = new Set<() => void>()
+/** The activity panel (Muse: tap the avatar to see what it is doing and what you allowed). */
+export function openActivity(open: boolean) { activityOpen = open; for (const l of activityListeners) l() }
+export function useActivityOpen(): boolean {
+  return useSyncExternalStore(l => { activityListeners.add(l); return () => activityListeners.delete(l) }, () => activityOpen)
+}
+
 let openTaskId: string | null = null
 const uiListeners = new Set<() => void>()
 export function openTask(id: string | null) { openTaskId = id; for (const l of uiListeners) l() }

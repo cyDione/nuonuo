@@ -73,7 +73,7 @@ export interface SandboxSettings { mode: 'off' | 'external' | 'all'; image: stri
 export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: number; timeoutMinutes: number; blockedCommands: string[]; workspaceRoots: string[]; sandbox: SandboxSettings }
 export interface ReviewSettings { threshold: 'off' | 'destructive' | 'external'; mode: 'model' | 'ask'; destructive: 'ask' | 'review'; rules: string[]; allow: string[]; deny: string[] }
 export interface AuditEntry { id: number; at: number; ticketId: string | null; actor: string; action: string; tool: string | null; input: string | null; risk: string | null; decision: string; reason: string | null }
-export interface MemoryState { user: string; agent: string; projects: { name: string; content: string }[] }
+export interface Persona { name: string; avatar: string; color: string; personality: string }
 
 export type ServerEvent =
   | { type: 'message.created'; conversationId: string; messageId: string }
@@ -83,6 +83,7 @@ export type ServerEvent =
   | { type: 'worker.part'; ticketId: string; part: { kind: string; delta?: string; tool?: string; id?: string } }
   | { type: 'conversation.updated'; conversationId: string }
   | { type: 'activity.updated' }
+  | { type: 'persona.updated' }
 
 export type FieldSpec =
   | { key: string; label: string; hint?: string; advanced?: true; type: 'switch' }

@@ -112,7 +112,8 @@ async function notifyMessage({ conversationId, messageId }) {
     const { message } = await api(`/api/messages/${messageId}`)
     const fromOwner = message.role === 'user' && (message.meta.source || 'webchat') === 'webchat'
     if (fromOwner || message.role === 'event' || message.meta.delivery) return
-    const n = new Notification({ title: message.role === 'assistant' ? 'Super-agent' : String(message.meta.actor || message.meta.source || 'Super-agent'), body: message.content.slice(0, 200), silent: false })
+    const name = await api('/api/persona').then(r => r.persona.name).catch(() => 'Super-agent')
+    const n = new Notification({ title: message.role === 'assistant' ? name : String(message.meta.actor || message.meta.source || name), body: message.content.slice(0, 200), silent: false })
     n.on('click', () => show(`/c/${conversationId}`))
     n.show()
   } catch { /* best effort */ }

@@ -9,6 +9,7 @@ import { newId, schema, type Store } from '@super-agent/db'
 import { generateText } from 'ai'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import type { ProviderKind } from './catalog'
+import type { EmbeddingModelV4 } from '@ai-sdk/provider'
 import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOptions, type ProviderRecord } from './factory'
 import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
 import { LAYER_PRESETS, resolvePresetModel } from './presets'
@@ -291,6 +292,14 @@ export class ModelHub {
       cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite, reasoningTokens: usage?.outputTokens.reasoning ?? 0,
       costUsd: cost, ref: context.ref ?? null, ok: !error, error: error ? describeError(error).slice(0, 500) : null,
     }).run()
+  }
+
+  /** The embedding layer's model, when one is configured (memory search falls back to keywords without it). */
+  embeddingModel(): EmbeddingModelV4 | undefined {
+    const resolved = this.resolve('embedding')
+    const ref = resolved?.config.chain[0]
+    if (!resolved || !ref) return undefined
+    try { const p = this.getProvider(ref.providerId); return this.factory.embedding(p, this.key(p), ref.model) } catch { return undefined }
   }
 
   private key(p: ProviderRecord): string | undefined {

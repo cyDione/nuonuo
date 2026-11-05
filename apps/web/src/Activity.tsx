@@ -3,10 +3,12 @@
  * what is going on, what comes next, what I noticed on my own, and where every event went.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlarmClock, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, FolderOpen, Inbox, Sparkles } from 'lucide-react'
+import { AlarmClock, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, FolderOpen, Inbox, KeyRound, Sparkles, X } from 'lucide-react'
+import { useEffect } from 'react'
 import { useState } from 'react'
 import { api, type ActivityEvent, type Artifact, type AttentionStats, type Routine, type Ticket } from './api'
-import { openTask } from './live'
+import { openActivity, openTask, useActivityOpen } from './live'
+import { Avatar, statusLine, usePersona } from './persona'
 import { endedText, FileChip, fmtSize, NeedsYou, needsOwner, STATE_TEXT, StateIcon, useTickets } from './tasks'
 import { SourceIcon, SOURCE_LABEL } from './icons'
 import { Button, cx, Empty } from './ui'
@@ -20,7 +22,35 @@ const ago = (at: number) => {
   return new Date(at).toLocaleDateString()
 }
 
+/** Muse: tap the assistant's avatar to see what it is doing, what waits for you, and what you allowed. */
+export function ActivityPanel() {
+  const open = useActivityOpen()
+  const persona = usePersona()
+  const tickets = useTickets().data?.tickets ?? []
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') openActivity(false) }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [])
+  if (!open) return null
+  const status = statusLine(tickets.filter(t => t.stage !== 'ended'))
+  return <div className="fixed inset-0 z-30 flex justify-end bg-black/20" onMouseDown={e => { if (e.target === e.currentTarget) openActivity(false) }}>
+    <div className="flex h-full w-full max-w-lg flex-col border-l border-line bg-bg shadow-2xl">
+      <div className="flex items-center gap-3 border-b border-line bg-panel px-5 py-4">
+        <Avatar persona={persona} size={40} />
+        <div className="min-w-0 flex-1"><div className="font-semibold">{persona.name}</div><div className="truncate text-xs text-muted">{status.text}</div></div>
+        <button onClick={() => openActivity(false)} className="text-faint hover:text-fg" aria-label="关闭"><X size={18} /></button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4"><ActivityBody compact /></div>
+    </div>
+  </div>
+}
+
 export function Activity() {
+  return <Page title="活动" intro="对话里只放结果和需要你拿主意的事；这里是背后在发生的一切。"><ActivityBody /></Page>
+}
+
+function ActivityBody({ compact }: { compact?: boolean }) {
   const tickets = useTickets().data?.tickets ?? []
   const routines = useQuery({ queryKey: ['routines'], queryFn: () => api.get<{ routines: Routine[] }>('/routines') }).data?.routines ?? []
   const activity = useQuery({ queryKey: ['activity'], queryFn: () => api.get<{ proactive: string; stats: AttentionStats; events: ActivityEvent[] }>('/activity') }).data
@@ -31,7 +61,7 @@ export function Activity() {
   const noticed = (activity?.events ?? []).filter(e => e.proactive?.act)
   const [log, setLog] = useState(false)
 
-  return <Page title="活动" intro="对话里只放结果和需要你拿主意的事；这里是背后在发生的一切。">
+  return <div className="space-y-6">
     <Section title="需要你" tone="warn" count={person.length}>
       {person.length ? <div className="space-y-2">{person.map(t => <div key={t.id} className="space-y-1.5">
         <Row t={t} />
@@ -39,6 +69,7 @@ export function Activity() {
       </div>)}</div> : <p className="px-1 text-sm text-faint">没有需要你处理的事。</p>}
     </Section>
     {going.length > 0 && <Section title="正在做" count={going.length}>{going.map(t => <Row key={t.id} t={t} />)}</Section>}
+    <Grants />
     {upcoming.length > 0 && <Section title="接下来">
       {upcoming.map(r => <a key={r.id} href={r.conversationId ? `#/c/${r.conversationId}` : '#/settings/routines'} className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-sm hover:bg-sunken">
         <AlarmClock size={14} className="shrink-0 text-muted" /><span className="min-w-0 flex-1 truncate">{r.name}</span>
@@ -59,7 +90,7 @@ export function Activity() {
         {!activity?.events.length && <p className="px-4 py-3 text-sm text-faint">没有外部事件。</p>}
       </div>}
     </section>
-  </Page>
+  </div>
 }
 
 /** How much attention the agent took, and how its initiative went — the numbers the article's critics ask for. */
@@ -70,6 +101,21 @@ function Stats({ s }: { s: AttentionStats }) {
     最近 {s.days} 天：找你拿主意 {asked} 次（批准 {s.approvals}、提问 {s.questions}）
     {s.screened > 0 && <>；主动判断 {s.screened} 件，留意到 {s.picked} 件，悄悄做了 {s.silent} 件，告诉你 {s.told} 件{s.useful + s.useless > 0 ? `，你标记有用 ${s.useful}、没用 ${s.useless}` : ''}</>}。
   </p>
+}
+
+/** What the owner allowed for the rest of a task ("这件事里都允许"); revocable. Healthy state takes no space. */
+function Grants() {
+  const qc = useQueryClient()
+  const grants = useQuery({ queryKey: ['grants'], queryFn: () => api.get<{ grants: { id: string; ticketId: string; label: string; title: string; createdAt: number }[] }>('/grants') }).data?.grants ?? []
+  const revoke = useMutation({ mutationFn: (id: string) => api.del(`/grants/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['grants'] }) })
+  if (!grants.length) return null
+  return <Section title="你允许过的" count={grants.length} intro="这件事做完后自动失效。">
+    {grants.map(g => <div key={g.id} className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-sm">
+      <KeyRound size={14} className="shrink-0 text-muted" />
+      <span className="min-w-0 flex-1 truncate">{g.label}<span className="text-faint"> · {g.title}</span></span>
+      <Button size="sm" variant="ghost" onClick={() => revoke.mutate(g.id)} disabled={revoke.isPending}>撤回</Button>
+    </div>)}
+  </Section>
 }
 
 function Row({ t }: { t: Ticket }) {

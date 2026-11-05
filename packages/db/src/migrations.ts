@@ -246,4 +246,35 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE UNIQUE INDEX artifacts_path ON artifacts(ticket_id, path);
   `,
+  /* 6: M6 memory runtime (entries with provenance, trust, confidence, TTL) and task-scoped grants */ `
+  CREATE TABLE memories (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    scope TEXT,
+    text TEXT NOT NULL,
+    status TEXT NOT NULL,
+    trust TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 1,
+    source_refs TEXT NOT NULL DEFAULT '[]',
+    supersedes TEXT NOT NULL DEFAULT '[]',
+    created_by TEXT NOT NULL,
+    valid_from INTEGER NOT NULL,
+    expires_at INTEGER,
+    superseded_by TEXT,
+    embedding TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX memories_status ON memories(status, kind, scope);
+  CREATE TABLE grants (
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    tool TEXT NOT NULL,
+    key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    revoked_at INTEGER
+  );
+  CREATE UNIQUE INDEX grants_key ON grants(ticket_id, tool, key);
+  `,
 ]

@@ -1,32 +1,106 @@
+/** Memory: what the assistant keeps about you, entry by entry — with where it came from, and a queue of what waits for your OK. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
-import { api, type MemoryState } from '../api'
-import { Button, Card } from '../ui'
+import { Check, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { useState } from 'react'
+import { api } from '../api'
+import { Badge, Button, Card, cx, Empty, Input, Select } from '../ui'
+
+type Kind = 'profile' | 'project' | 'episodic' | 'lesson'
+interface Entry { id: string; kind: Kind; scope: string | null; text: string; status: 'active' | 'pending'; trust: 'user' | 'system' | 'external'; confidence: number
+  sourceRefs: string[]; createdBy: string; expiresAt: number | null; createdAt: number; updatedAt: number }
+interface MemoriesResponse { memories: Entry[]; scopes: Record<string, string>; kinds: { id: Kind; label: string }[] }
+
+const BY = (e: Entry) => e.createdBy === 'owner' ? '你添加的' : e.createdBy === 'distiller' ? '从对话里整理' : e.createdBy === 'import' ? '旧版导入' : e.createdBy === 'router' ? '对话中记下' : '做事时记下'
+const HINT: Record<Kind, string> = {
+  profile: '你的事实与偏好，每次对话都会带上。',
+  project: '某个项目（一个仓库，或一个侧聊）的约定和决定，只在这个项目里用到。',
+  episodic: '近期发生、一段时间内有用的事，到期后自动淡出。',
+  lesson: '它在做事过程中验证过的经验。',
+}
 
 export function MemoryPage() {
-  const memory = useQuery({ queryKey: ['memory'], queryFn: () => api.get<MemoryState>('/memory') })
-  if (!memory.data) return null
-  return <div className="space-y-3">
-    <Editor title="关于你" hint="智能体记住的你的事实与偏好，每次对话都会带上。" layer="user" content={memory.data.user} />
-    <Editor title="智能体的经验" hint="做事过程中验证过、以后用得上的经验。" layer="agent" content={memory.data.agent} />
-    {memory.data.projects.map(p => <Editor key={p.name} title={`项目：${p.name}`} hint="属于这个项目的任务会带上它。" layer="project" project={p.name} content={p.content} />)}
-    {!memory.data.projects.length && <p className="px-1 text-xs text-faint">还没有项目记忆。GitHub 任务按仓库自动归入项目；也可以对智能体说「记住，在 X 项目里……」。</p>}
+  const qc = useQueryClient()
+  const data = useQuery({ queryKey: ['memories'], queryFn: () => api.get<MemoriesResponse>('/memories') }).data
+  const [kind, setKind] = useState<Kind>('profile')
+  const refresh = () => qc.invalidateQueries({ queryKey: ['memories'] })
+  const consolidate = useMutation({ mutationFn: () => api.post<{ expired: number; merged: number }>('/memories/consolidate'), onSuccess: refresh })
+  if (!data) return null
+  const pending = data.memories.filter(m => m.status === 'pending')
+  const active = data.memories.filter(m => m.status === 'active')
+  const shown = active.filter(m => m.kind === kind)
+  const scopes = [...new Set(shown.map(m => m.scope ?? ''))]
+  return <div className="space-y-4">
+    {pending.length > 0 && <Card className="p-4">
+      <div className="text-sm font-medium">等你确认 · {pending.length}</div>
+      <p className="mt-0.5 text-xs text-muted">从别人的消息、外部来源里看到的，或者它不太确定的，不会直接记住，先在这里等你点头。</p>
+      <div className="mt-3 divide-y divide-line">{pending.map(m => <PendingRow key={m.id} m={m} scopes={data.scopes} onDone={refresh} />)}</div>
+    </Card>}
+    <div className="flex flex-wrap items-center gap-1">
+      {data.kinds.map(k => <button key={k.id} onClick={() => setKind(k.id)} className={cx('rounded-lg px-3 py-1.5 text-sm', kind === k.id ? 'bg-accent-soft text-fg' : 'text-muted hover:bg-sunken')}>
+        {k.label}<span className="ml-1 text-xs text-faint">{active.filter(m => m.kind === k.id).length}</span></button>)}
+      <span className="flex-1" />
+      <Button size="sm" variant="ghost" onClick={() => consolidate.mutate()} disabled={consolidate.isPending}>整理（去重、清理过期）</Button>
+    </div>
+    <p className="px-1 text-xs text-faint">{HINT[kind]}</p>
+    <AddRow kind={kind} onDone={refresh} />
+    {!shown.length ? <Empty title="还没有" /> : scopes.map(scope => <Card key={scope} className="p-1">
+      {kind === 'project' && <div className="px-3 pt-2.5 pb-1 text-xs font-medium text-muted">{data.scopes[scope] ?? scope}</div>}
+      <div className="divide-y divide-line">{shown.filter(m => (m.scope ?? '') === scope).map(m => <EntryRow key={m.id} m={m} onDone={refresh} />)}</div>
+    </Card>)}
+    <p className="px-1 text-xs text-faint">数据目录的 memory/MEMORY.md 是这些记忆的只读副本，方便查看和备份。</p>
   </div>
 }
 
-function Editor({ title, hint, layer, project, content }: { title: string; hint: string; layer: 'user' | 'agent' | 'project'; project?: string; content: string }) {
-  const qc = useQueryClient()
-  const [text, setText] = useState(content)
-  useEffect(() => setText(content), [content])
-  const save = useMutation({ mutationFn: () => api.put('/memory', { layer, ...(project ? { project } : {}), content: text }), onSuccess: () => qc.invalidateQueries({ queryKey: ['memory'] }) })
-  return <Card className="p-4">
-    <div className="text-sm font-medium">{title}</div>
-    <div className="mt-0.5 text-xs text-muted">{hint}</div>
-    <textarea className="mt-3 min-h-40 w-full rounded-lg border border-line bg-panel px-3 py-2 font-mono text-xs leading-5 outline-none focus:border-accent"
-      value={text} placeholder="（空）" onChange={e => setText(e.target.value)} />
-    {text !== content && <div className="mt-2 flex justify-end gap-2">
-      <Button size="sm" variant="ghost" onClick={() => setText(content)}>还原</Button>
-      <Button size="sm" variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>保存</Button>
-    </div>}
-  </Card>
+function Meta({ m }: { m: Entry }) {
+  return <span className="text-[11px] text-faint">{BY(m)}{m.confidence < 1 ? ` · 把握 ${Math.round(m.confidence * 100)}%` : ''}{m.expiresAt ? ` · 到 ${new Date(m.expiresAt).toLocaleDateString()}` : ''} · {new Date(m.updatedAt).toLocaleDateString()}</span>
+}
+
+function PendingRow({ m, scopes, onDone }: { m: Entry; scopes: Record<string, string>; onDone(): void }) {
+  const [text, setText] = useState(m.text)
+  const act = useMutation({ mutationFn: (action: 'confirm' | 'reject') => api.patch(`/memories/${m.id}`, { action, ...(action === 'confirm' && text !== m.text ? { text } : {}) }), onSuccess: onDone })
+  return <div className="flex items-start gap-2 py-2.5">
+    <div className="min-w-0 flex-1 space-y-1">
+      <Input value={text} onChange={e => setText(e.target.value)} className="h-8" />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge tone={m.trust === 'external' ? 'warn' : 'neutral'}>{m.trust === 'external' ? '来自外部' : '不太确定'}</Badge>
+        <Badge>{({ profile: '关于你', project: `项目 ${scopes[m.scope ?? ''] ?? m.scope ?? ''}`, episodic: '近期', lesson: '经验' } as Record<Kind, string>)[m.kind]}</Badge>
+        <Meta m={m} />
+      </div>
+    </div>
+    <Button size="sm" variant="primary" onClick={() => act.mutate('confirm')} disabled={act.isPending}><Check size={13} />记住</Button>
+    <Button size="sm" variant="ghost" onClick={() => act.mutate('reject')} disabled={act.isPending}><X size={13} />不要</Button>
+  </div>
+}
+
+function EntryRow({ m, onDone }: { m: Entry; onDone(): void }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(m.text)
+  const save = useMutation({ mutationFn: () => api.patch(`/memories/${m.id}`, { action: 'edit', text }), onSuccess: () => { setEditing(false); onDone() } })
+  const remove = useMutation({ mutationFn: () => api.del(`/memories/${m.id}`), onSuccess: onDone })
+  return <div className="group flex items-start gap-2 px-3 py-2">
+    <div className="min-w-0 flex-1">
+      {editing ? <Input value={text} onChange={e => setText(e.target.value)} className="h-8" autoFocus onKeyDown={e => { if (e.key === 'Enter') save.mutate(); if (e.key === 'Escape') setEditing(false) }} />
+        : <div className="text-sm">{m.text}</div>}
+      <Meta m={m} />
+    </div>
+    {editing ? <Button size="sm" variant="primary" onClick={() => save.mutate()} disabled={save.isPending}>保存</Button> : <>
+      <button onClick={() => setEditing(true)} className="mt-0.5 rounded p-1 text-faint opacity-0 group-hover:opacity-100 hover:text-fg" aria-label="修改"><Pencil size={13} /></button>
+      <button onClick={() => remove.mutate()} className="mt-0.5 rounded p-1 text-faint opacity-0 group-hover:opacity-100 hover:text-danger" aria-label="删除"><Trash2 size={13} /></button>
+    </>}
+  </div>
+}
+
+function AddRow({ kind, onDone }: { kind: Kind; onDone(): void }) {
+  const [text, setText] = useState('')
+  const [scope, setScope] = useState('')
+  const [days, setDays] = useState('30')
+  const add = useMutation({ mutationFn: () => api.post('/memories', { kind, text, ...(kind === 'project' ? { scope } : {}), ...(kind === 'episodic' ? { ttlDays: Number(days) || 30 } : {}) }),
+    onSuccess: () => { setText(''); onDone() } })
+  return <form className="flex gap-2" onSubmit={e => { e.preventDefault(); if (text.trim().length >= 2) add.mutate() }}>
+    <Input value={text} onChange={e => setText(e.target.value)} placeholder="添加一条…" />
+    {kind === 'project' && <div className="w-48 shrink-0"><Input value={scope} onChange={e => setScope(e.target.value)} placeholder="项目（如 owner/repo）" /></div>}
+    {kind === 'episodic' && <div className="w-28 shrink-0"><Select value={days} onChange={e => setDays(e.target.value)}>{['7', '14', '30', '90'].map(d => <option key={d} value={d}>{d} 天</option>)}</Select></div>}
+    <Button type="submit" disabled={add.isPending || text.trim().length < 2 || (kind === 'project' && !scope.trim())}><Plus size={14} />添加</Button>
+    {add.error && <span className="self-center text-xs text-danger">{(add.error as Error).message}</span>}
+  </form>
 }

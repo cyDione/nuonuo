@@ -39,7 +39,7 @@ export interface AgentDefinition {
   system(session: SessionRecord): string
   tools(ctx: TurnContext): ToolSet
   /** Renders drained inbox items as the text of one user message. */
-  formatInbox(items: InboxItem[], session: SessionRecord): string
+  formatInbox(items: InboxItem[], session: SessionRecord): string | Promise<string>
   /** Workers queue behind `maxWorkers`; the router never waits for a slot. */
   pool: 'router' | 'worker'
   maxSteps?: number
@@ -236,11 +236,11 @@ export class AgentRuntime {
         if (controller.signal.aborted) break
         const items = this.take(session.id)
         if (items.length) {
-          this.appendEvent(session.id, 'message', { role: 'user', content: def.formatInbox(items, session) })
+          this.appendEvent(session.id, 'message', { role: 'user', content: await def.formatInbox(items, session) })
           this.emit(session, { type: 'session.message' })
         } else if (steps === 0) break
         if (steps >= maxSteps) { stepLimit = true; break }
-        const step = await this.step(session, def, controller.signal)
+        const step = await this.stepWithRetry(session, def, controller.signal)
         steps++
         if (step.text) lastText = step.text
         if (step.inputTokens > this.options.compactAtTokens) await this.compact(session).catch(() => { /* retried next step */ })
@@ -269,6 +269,20 @@ export class AgentRuntime {
       // Input that arrived after the last check (e.g. while onTurnEnd ran) starts a new turn.
       if (!this.stopped) this.wake(session.id)
       if (this.running.size === 0 && this.queue.length === 0) for (const resolve of this.idleWaiters.splice(0)) resolve()
+    }
+  }
+
+  /**
+   * A step whose response broke off mid-stream (a gateway hiccup: "Failed to process successful response", a reset
+   * connection) is retried: nothing of it was recorded yet, so running it again is safe.
+   */
+  private async stepWithRetry(session: SessionRecord, def: AgentDefinition, signal: AbortSignal) {
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.step(session, def, signal) } catch (error) {
+        if (signal.aborted || attempt >= 2 || !transient(error)) throw error
+        this.appendEvent(session.id, 'marker', { type: 'retry', message: describeError(error), attempt: attempt + 1 })
+        await new Promise(r => setTimeout(r, 1_500 * (attempt + 1)))
+      }
     }
   }
 
@@ -381,4 +395,10 @@ function renderForSummary(m: ModelMessage): string {
     return ''
   }).filter(Boolean).join('\n')
   return `${m.role}: ${content}`
+}
+
+/** Errors worth one more try: the response broke off, or the connection dropped. */
+export function transient(error: unknown): boolean {
+  const text = `${describeError(error)} ${(error as { cause?: unknown })?.cause ?? ''}`
+  return /Failed to process successful response|ECONNRESET|socket hang up|terminated|other side closed|fetch failed|ETIMEDOUT|EPIPE|premature close/i.test(text)
 }

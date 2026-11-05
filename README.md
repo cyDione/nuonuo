@@ -37,7 +37,13 @@
 >   - **子任务**：Worker 可以异步分出子任务并行做（`subagent_start` / `subagent_stop`）。
 >   - **链式召回**：可以从线程追到上面的工作，再追到它的执行记录。
 >
-> 设计和实现细节见 docs/ 下的 [01-m1](docs/01-m1-implementation.md)、[02-m2](docs/02-m2-implementation.md)、[03-m3](docs/03-m3-implementation.md)、[04-plugin-sdk](docs/04-plugin-sdk.md)、[05-m4](docs/05-m4-implementation.md)、[06-audit](docs/06-audit.md)、[07-architecture](docs/07-architecture.md)（论文架构逐节对照）、[08-industry-review](docs/08-industry-review.md)（业界解读查漏补缺）。
+> - **M6：Muse 式交互 + Grok Bot 式记忆**（见 [09](docs/09-m6-muse-and-memory.md)）：
+>   - **主对话**：一个长对话加侧聊；助手有自己的名字、头像和性格；头像下显示它在做什么，点开是活动面板。
+>   - **批准**：可以选"这件事里都同意"；成果在对话里直接预览，HTML 可以交互。
+>   - **记忆**：重做成带来源、信任级别、置信度和有效期的记忆系统。后台自动整理；外部来源的内容只能进"等你确认"；记忆按侧聊或仓库绑定到项目。
+>   - **设置**：按组归类。
+>
+> 设计和实现细节见 docs/ 下的 [01-m1](docs/01-m1-implementation.md)、[02-m2](docs/02-m2-implementation.md)、[03-m3](docs/03-m3-implementation.md)、[04-plugin-sdk](docs/04-plugin-sdk.md)、[05-m4](docs/05-m4-implementation.md)、[06-audit](docs/06-audit.md)、[07-architecture](docs/07-architecture.md)（论文架构逐节对照）、[08-industry-review](docs/08-industry-review.md)（业界解读查漏补缺）、[09-m6](docs/09-m6-muse-and-memory.md)。
 >
 > 测试时让所有层都用 DeepSeek V4.1 Flash：启动前设置 `SUPERAGENT_PRESET=deepseek-flash`。
 
@@ -136,6 +142,7 @@ docs/           调研与设计文档
 - ~~M3~~：Reviewer 审核与规则、三层记忆、Watchdog、浏览器接管、Docker 沙箱（已完成）
 - ~~M4~~：插件 SDK、MCP、Gmail / Telegram、Electron（已完成）
 - ~~M5~~：按文章重新对齐——对话体验、主动处理、说明版本、子任务、链式召回（已完成）
+- ~~M6~~：Muse 式主对话与个性、任务内授权、成果预览、记忆系统重做、设置归类（已完成）
 
 ## 许可
 

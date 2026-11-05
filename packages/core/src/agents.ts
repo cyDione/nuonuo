@@ -9,7 +9,7 @@ import { sourceOfThread, STAGE_LABEL, type Mandate, type Ticket } from './model'
 import { PROACTIVE_WORKER_PROMPT, ROUTER_PROMPT, SUBAGENT_PROMPT, WORKER_PROMPT } from './prompts'
 import type { Instructions } from './instructions'
 import { proactiveSettings, saveProactiveSettings } from './proactive'
-import type { Memory } from './memory'
+import type { Memory, MemoryTrust } from './memory'
 import { sandboxApplies, sandboxCommand } from './sandbox'
 import type { Reviewer } from './review'
 
@@ -47,6 +47,8 @@ export interface AgentExtensions {
   wrapShell?(ticket: Ticket): ((command: string) => string) | undefined
   /** Text added to every agent's system prompt (memory). */
   sharedPrompt?(role: 'router' | 'worker', ticket?: Ticket): string
+  /** Context recalled for new input (memory): appended to the input it was recalled for. */
+  inlineContext?(text: string, scope: string | undefined): Promise<string>
 }
 
 export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engine, ext: AgentExtensions = {}): { reportedThisTurn: Set<string> } {
@@ -145,7 +147,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
   // ── Router ────────────────────────────────────────────────────────────────
   // Models sometimes answer in plain text, which nobody sees. A turn that had something to answer and ended with text but
   // no message gets one reminder carrying that text, so it is sent properly (or dropped) instead of lost.
-  const SPEAKING = new Set(['reply', 'new_conversation', 'start_task', 'attach', 'ignore', 'stop_task'])
+  const SPEAKING = new Set(['reply', 'message_owner', 'start_task', 'attach', 'ignore', 'stop_task'])
   const ANSWERABLE = new Set(['trigger', 'handback', 'report', 'approval', 'unsent'])
   SPEAKING.add('start_silent_task')
   let spoke = false
@@ -156,9 +158,18 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     pool: 'router',
     maxSteps: 30,
     system: () => `${ROUTER_PROMPT}${ext.routerPrompt ? `\n\n${ext.routerPrompt()}` : ''}${ext.sharedPrompt ? `\n\n${ext.sharedPrompt('router')}` : ''}\n\nNow: ${new Date().toString()}`,
-    formatInbox: items => {
+    formatInbox: async items => {
       if (items.some(i => ANSWERABLE.has(i.payload.type) && (i.payload.type !== 'report' || ['ready', 'blocked', 'failed'].includes(i.payload.status) || i.payload.humanAction))) answerable = true
-      return items.map(item => renderRouterItem(item)).join('\n\n')
+      // What the router may remember directly depends on whose words this batch carries, decided here in code.
+      const requests = items.filter(i => i.payload.type === 'trigger' || i.payload.type === 'handback' || i.payload.type === 'proactive').map(i => String(i.payload.triggerId))
+      if (requests.length) {
+        routerContext.trust = requests.every(id => engine.isOwnerChat(id)) ? 'user' : 'external'
+        routerContext.source = requests.at(-1)!
+        const last = store.db.select({ threadId: schema.triggers.threadId }).from(schema.triggers).where(eq(schema.triggers.id, requests.at(-1)!)).get()
+        routerContext.scope = last ? engine.scopeOfThread(last.threadId) : undefined
+      }
+      const body = items.map(item => renderRouterItem(item)).join('\n\n')
+      return `${body}${await recallFor(requests)}`
     },
     onTurnEnd: (_session, info) => {
       const remind = answerable && !spoke && !reminded && !info.cancelled && info.lastText.trim().length > 0
@@ -207,13 +218,12 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         inputSchema: z.object({ trigger_ids: z.array(z.string()).min(1), reason: z.string().min(1).max(200) }),
         execute: async ({ trigger_ids, reason }) => { engine.ignore(trigger_ids, reason); return { ok: true } },
       }),
-      new_conversation: tool({
-        description: 'Open a new conversation on your own initiative and post the first message (a notification, a heads-up about something you noticed). Use sparingly.',
-        inputSchema: z.object({ title: z.string().min(1).max(40), text: z.string().min(1) }),
-        execute: async ({ title, text }, { toolCallId }) => {
-          const id = engine.openConversation(title)
-          engine.reply({ conversationId: id, text, callId: toolCallId })
-          return { ok: true, conversation_id: id }
+      message_owner: tool({
+        description: 'Say something to the owner on your own initiative, in the main conversation (a heads-up, a follow-up, a reminder). Only when it is worth an interruption.',
+        inputSchema: z.object({ text: z.string().min(1), ticket_id: z.string().optional().describe('The work it is about, so its result is attached') }),
+        execute: async ({ text, ticket_id }, { toolCallId }) => {
+          if (chatLength(text) > CHAT_LIMIT) return { ok: false, error: `Not sent: chat messages must stay under ${CHAT_LIMIT} words.` }
+          return { ok: true, message_id: engine.reply({ conversationId: engine.mainConversation(), text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}) }) }
         },
       }),
       start_task: tool({
@@ -278,6 +288,17 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     return tools
   }
 
+  /** Memories relevant to the requests in a batch, recalled within their project (Inline & Spill). */
+  async function recallFor(triggerIds: string[]): Promise<string> {
+    if (!ext.inlineContext || !triggerIds.length) return ''
+    const rows = store.db.select().from(schema.triggers).where(inArray(schema.triggers.id, triggerIds)).all()
+    if (!rows.length) return ''
+    try {
+      const block = await ext.inlineContext(rows.map(r => r.text).join('\n').slice(0, 4_000), engine.scopeOfThread(rows.at(-1)!.threadId))
+      return block ? `\n\n${block}` : ''
+    } catch { return '' }
+  }
+
   function conversationSource(id: string): string {
     return store.db.select({ s: schema.conversations.source }).from(schema.conversations).where(eq(schema.conversations.id, id)).get()?.s ?? 'webchat'
   }
@@ -321,7 +342,17 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       const extra = [isProactive(ticket) ? PROACTIVE_WORKER_PROMPT : '', ext.workerPrompt?.(ticket), ext.sharedPrompt?.('worker', ticket)].filter(Boolean).join('\n\n')
       return `${WORKER_PROMPT}${extra ? `\n\n${extra}` : ''}\n\n## Environment\n- Working directory: ${ticket.directory}\n- Task id: ${ticket.id}\n- OS: ${process.platform}\n- Now: ${new Date().toString()}`
     },
-    formatInbox: (items, session) => items.map(item => renderWorkerItem(item, session.ticketId!)).join('\n\n'),
+    formatInbox: async (items, session) => {
+      const body = items.map(item => renderWorkerItem(item, session.ticketId!, session.id)).join('\n\n')
+      const start = items.find(i => i.payload.type === 'assignment' && i.payload.reason === 'start')
+      if (!start || !ext.inlineContext) return body
+      try {
+        const t = engine.ticket(session.ticketId!)
+        const origin = store.db.select().from(schema.triggers).where(inArray(schema.triggers.id, t.origin.triggerIds)).all()
+        const block = await ext.inlineContext(`${t.title}\n${origin.map(o => o.text).join('\n')}`.slice(0, 4_000), engine.projectOf(t))
+        return block ? `${body}\n\n${block}` : body
+      } catch { return body }
+    },
     tools: ctx => {
       const ticket = engine.ticket(ctx.session.ticketId!)
       const exec = engine.execution()
@@ -406,7 +437,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     return others.length ? `other open work on this thread (coordinate; do not duplicate or overwrite it): ${others.map(x => `${x.id} "${x.title}"`).join(', ')}` : ''
   }
 
-  function renderWorkerItem(item: InboxItem, ticketId: string): string {
+  function renderWorkerItem(item: InboxItem, ticketId: string, sessionId: string): string {
     const p = item.payload
     switch (p.type) {
       case 'assignment': {
@@ -440,6 +471,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       case 'trigger': {
         const trigger = store.db.select().from(schema.triggers).where(eq(schema.triggers.id, p.triggerId)).get()
         if (trigger && (trigger.source !== 'webchat' || trigger.actor !== 'owner')) {
+          if (!engine.isOwnerTrigger(trigger.id)) engine.taint(sessionId)
           const url = (trigger.meta as { url?: string }).url
           return `<message trigger_id="${p.triggerId}" source="${trigger.source}" from="${trigger.actor}"${trigger.human ? '' : ' bot="true"'}${url ? ` url="${url}"` : ''}${p.note ? ` routing_note="${String(p.note).replace(/"/g, "'")}"` : ''}>\n${trigger.text}\n</message>`
         }
@@ -536,17 +568,35 @@ export function combineExtensions(...exts: AgentExtensions[]): AgentExtensions {
     workerEnv: t => Object.assign({}, ...exts.map(e => e.workerEnv?.(t) ?? {})),
     threadInfo: id => exts.map(e => e.threadInfo?.(id)).find(Boolean),
     sharedPrompt: (role, t) => join(exts.map(e => e.sharedPrompt?.(role, t))),
+    inlineContext: async (text, scope) => join(await Promise.all(exts.map(e => e.inlineContext?.(text, scope) ?? Promise.resolve('')))),
     ...(gate ? { gateShell: gate } : {}),
     ...(wrap ? { wrapShell: wrap } : {}),
   }
 }
 
-/** Memory for both agents: the prompt section and remember / forget / search_memory. */
+/** What the router is answering right now; set per batch in code, read by the memory tools. */
+const routerContext: { trust: MemoryTrust; source: string; scope: string | undefined } = { trust: 'external', source: '', scope: undefined }
+
+/**
+ * Memory for both agents: the prompt section, recall into each input, and remember / forget / search_memory.
+ * Trust comes from code, never from the model: the router writes directly only while answering the owner's own words;
+ * a worker only while its work came from the owner and no one else's words have reached it; silent work never does.
+ */
 export function memoryExtension(memory: Memory, engine: Engine): AgentExtensions {
   return {
-    sharedPrompt: (_role, ticket) => memory.prompt(ticket ? engine.projectOf(ticket) : undefined),
-    routerTools: () => memory.tools(() => 'router'),
-    workerTools: ticket => memory.tools(() => ticket.id, () => engine.projectOf(ticket)),
+    sharedPrompt: (role, ticket) => memory.prompt(role, ticket ? engine.projectOf(ticket) : undefined),
+    inlineContext: (text, scope) => memory.inline(text, scope),
+    routerTools: () => memory.tools({ by: 'router', trust: () => routerContext.trust, scope: () => routerContext.scope, source: () => routerContext.source }),
+    workerTools: (ticket, ctx) => memory.tools({
+      by: ticket.id,
+      trust: () => {
+        const t = engine.ticket(ticket.id)
+        const fromOwner = (t.mandate as Mandate).strength === 'explicit' && t.origin.triggerIds.every(id => engine.isOwnerTrigger(id))
+        return fromOwner && !engine.tainted(ctx.session.id) ? 'system' : 'external'
+      },
+      scope: () => engine.projectOf(ticket),
+      source: () => ticket.id,
+    }),
   }
 }
 

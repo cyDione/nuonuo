@@ -125,9 +125,9 @@ describe('proactive intake', () => {
     const [ticket] = engine.tickets()
     expect(ticket!.mandate).toMatchObject({ by: 'policy', strength: 'proactive' })
     expect(ticket!.ended?.outcome).toBe('completed')
-    const [conversation] = store.db.select().from(schema.conversations).all()
-    expect(conversation).toMatchObject({ threadId: 'github:me/repo#9', source: 'github' })
+    // What it noticed on its own is told in the main conversation (Muse), not in a mirror of the GitHub thread.
     const msgs = store.db.select().from(schema.messages).all().filter(m => m.role === 'assistant')
+    expect(msgs[0]!.conversationId).toBe(engine.mainConversation())
     expect(msgs).toHaveLength(1)
     expect((msgs[0]!.meta as any).result.summary).toContain('复现了')
     // Silent work never goes out to GitHub on its own.

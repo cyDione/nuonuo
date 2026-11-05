@@ -86,13 +86,56 @@ export class Engine {
     return this.store.db.select().from(schema.tickets).where(inArray(schema.tickets.id, ids)).orderBy(asc(schema.tickets.createdAt)).all() as unknown as Ticket[]
   }
 
-  /** The project a task belongs to: set when it was started, else its GitHub repository. Drives project memory. */
+  /** The project a task belongs to: set when it was started, else its thread's (a repository, or a side chat). Drives project memory. */
   projectOf(ticket: Ticket): string | undefined {
-    const explicit = kvGet<string>(this.store, `ticket:project:${ticket.id}`)
-    if (explicit) return explicit
-    const m = /^github:([\w.-]+\/[\w.-]+)#/.exec(ticket.threadId)
-    return m?.[1]
+    return kvGet<string>(this.store, `ticket:project:${ticket.id}`) ?? this.scopeOfThread(ticket.threadId)
   }
+
+  /**
+   * Memory is bound to the project a thread belongs to (Grok Bot: "it always understands this project"): a GitHub
+   * repository, or a side chat. The main conversation has no project; it sees the owner's profile and recalls broadly.
+   */
+  scopeOfThread(threadId: string): string | undefined {
+    const gh = /^github:([\w.-]+\/[\w.-]+)#/.exec(threadId)
+    if (gh) return gh[1]
+    const cnv = threadId.startsWith('webchat:') ? threadId.slice('webchat:'.length) : undefined
+    if (!cnv || cnv === this.mainConversation()) return undefined
+    const row = this.store.db.select({ source: schema.conversations.source }).from(schema.conversations).where(eq(schema.conversations.id, cnv)).get()
+    return row?.source === 'webchat' ? cnv : undefined
+  }
+
+  /** The owner's main conversation (Muse): where the assistant talks to them by default. Created on first use. */
+  mainConversation(): string {
+    const id = kvGet<string>(this.store, 'conversation:main')
+    if (id && this.store.db.select({ id: schema.conversations.id }).from(schema.conversations).where(eq(schema.conversations.id, id)).get()) return id
+    const at = this.stamp()
+    const created = newId('cnv')
+    this.store.db.insert(schema.conversations).values({ id: created, title: '主对话', source: 'webchat', origin: 'owner', meta: { main: true }, pinned: true, createdAt: at, updatedAt: at }).run()
+    kvSet(this.store, 'conversation:main', created)
+    return created
+  }
+
+  /** Whether a trigger comes from someone allowed to ask for work (the owner, or an allowlisted account). */
+  isOwnerTrigger(triggerId: string): boolean {
+    const t = this.store.db.select().from(schema.triggers).where(eq(schema.triggers.id, triggerId)).get()
+    return Boolean(t && t.human && this.allowed(t.source, t.actor))
+  }
+
+  /**
+   * Whether a trigger is the owner talking to the assistant in a chat channel (the web, a routine, the owner's own
+   * Telegram): only those words may write memory directly. A comment on GitHub or an email — even the owner's — is
+   * about work in a shared space; what it suggests remembering goes to the review queue.
+   */
+  isOwnerChat(triggerId: string): boolean {
+    const t = this.store.db.select().from(schema.triggers).where(eq(schema.triggers.id, triggerId)).get()
+    if (!t || !t.human) return false
+    if (t.source === 'webchat' || t.source === 'cron') return t.actor === 'owner'
+    return t.source === 'telegram' && this.allowed(t.source, t.actor)
+  }
+
+  /** A session that has read other people's words is tainted: what it remembers goes to the owner's review queue. */
+  taint(sessionId: string): void { if (!this.tainted(sessionId)) kvSet(this.store, `taint:${sessionId}`, true) }
+  tainted(sessionId: string): boolean { return kvGet<boolean>(this.store, `taint:${sessionId}`) === true }
 
   setProject(ticketId: string, project: string): void {
     kvSet(this.store, `ticket:project:${ticketId}`, project.trim())
@@ -200,7 +243,8 @@ export class Engine {
       this.store.db.insert(schema.triggers).values({ id: t.id, threadId: t.threadId, source: t.source, actor: t.actor, human: t.human, text: t.text,
         meta: { ...(t.meta ?? {}), ...(t.url ? { url: t.url } : {}), addressed: t.addressed }, at: t.at }).run()
       const allowed = t.human && this.allowed(t.source, t.actor)
-      const targets = this.subscribers(t.threadId).filter(ticket => ticket.ended?.by !== 'person' && (!ticket.ended || allowed))
+      // A web chat thread (a routine speaking in the main conversation) has no fan-out: the router decides.
+      const targets = t.threadId.startsWith('webchat:') ? [] : this.subscribers(t.threadId).filter(ticket => ticket.ended?.by !== 'person' && (!ticket.ended || allowed))
       const explicit = allowed && t.addressed
       if (!targets.length && !explicit) {
         const ignored = !t.human ? 'bot' : !allowed ? 'not_allowed' : 'not_addressed'
@@ -304,7 +348,9 @@ export class Engine {
         if (!t) throw new DomainError('invalid', `任务 ${opts.replyTo} 不属于这个对话`)
         if (t.ended?.by === 'person') throw new DomainError('conflict', '这个任务已被你停止；要继续请发起新任务')
         targets = [t]
-      } else {
+      } else if (conversationId !== this.mainConversation()) {
+        // The main conversation is one long chat about many things (Muse): the router keeps it coherent, so there is
+        // no shortcut to "the" open task there. A side chat is one topic, so its single open task gets the message.
         const open = subscribed.filter(t => !t.ended)
         if (open.length === 1) targets = open
       }
@@ -353,6 +399,8 @@ export class Engine {
   /** The conversation that shows a task; a silent task's thread gets its mirror conversation when it first has something to say. */
   conversationOfTicket(ticketId: string): string {
     const ticket = this.ticket(ticketId)
+    // What the assistant noticed on its own is told in the main conversation, like a person mentioning it (Muse).
+    if ((ticket.mandate as Mandate).strength === 'proactive') return this.mainConversation()
     const existing = this.conversationOfThread(ticket.threadId)
     if (existing) return existing
     const thread = this.store.db.select().from(schema.threads).where(eq(schema.threads.id, ticket.threadId)).get()

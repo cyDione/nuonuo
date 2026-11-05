@@ -251,3 +251,34 @@ export const artifacts = sqliteTable('artifacts', {
   size: integer('size').notNull(),
   createdAt: integer('created_at').notNull(),
 })
+
+/** One long-term memory entry: what it says, where it came from, how far it is trusted, and how long it holds. */
+export const memories = sqliteTable('memories', {
+  id: text('id').primaryKey(),
+  kind: text('kind', { enum: ['profile', 'project', 'episodic', 'lesson'] }).notNull(),
+  scope: text('scope'),
+  text: text('text').notNull(),
+  status: text('status', { enum: ['active', 'pending', 'superseded', 'expired', 'rejected', 'deleted'] }).notNull(),
+  trust: text('trust', { enum: ['user', 'system', 'external'] }).notNull(),
+  confidence: real('confidence').notNull().default(1),
+  sourceRefs: json<string[]>('source_refs').notNull().default([]),
+  supersedes: json<string[]>('supersedes').notNull().default([]),
+  createdBy: text('created_by').notNull(),
+  validFrom: integer('valid_from').notNull(),
+  expiresAt: integer('expires_at'),
+  supersededBy: text('superseded_by'),
+  embedding: json<number[] | null>('embedding'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+/** "Allow for this task": an approval the owner extended to the rest of one task. */
+export const grants = sqliteTable('grants', {
+  id: text('id').primaryKey(),
+  ticketId: text('ticket_id').notNull(),
+  tool: text('tool').notNull(),
+  key: text('key').notNull(),
+  label: text('label').notNull(),
+  createdAt: integer('created_at').notNull(),
+  revokedAt: integer('revoked_at'),
+})

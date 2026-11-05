@@ -1,7 +1,7 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-agent/agent-runtime'
-import { browserExtension, combineExtensions, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, Watchdog } from '@super-agent/core'
-import { Effects, kvGet, openStore, type Store } from '@super-agent/db'
+import { browserExtension, combineExtensions, Distiller, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, Watchdog } from '@super-agent/core'
+import { Effects, kvGet, kvSet, openStore, type Store } from '@super-agent/db'
 import { gmailPlugin, telegramPlugin } from '@super-agent/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-agent/sources'
 import { EnvAwareSecrets, LAYER_PRESETS, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
@@ -24,6 +24,7 @@ export interface Runtime {
   routines: Routines
   reviewer: Reviewer
   memory: Memory
+  distiller: Distiller
   instructions: Instructions
   screener: Screener
   watchdog: Watchdog
@@ -91,7 +92,20 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     agents.options.maxWorkers = engine.execution().maxWorkers
     const reviewer = new Reviewer(store, hub, engine, agents, bus)
     reviewer.envFor = ticket => workerEnv({ SUPERAGENT_TICKET: ticket.id, SUPERAGENT_DIR: ticket.directory })
-    const memory = new Memory(config.home)
+    const conversationTitle = (id: string) => store.sqlite.prepare('SELECT title FROM conversations WHERE id = ?').get(id) as { title: string } | undefined
+    const memory = new Memory(store, config.home, { embedder: () => hub.embeddingModel(), label: scope => (scope.startsWith('cnv_') ? conversationTitle(scope)?.title : undefined) })
+    memory.importLegacy()
+    const distiller = new Distiller(store, hub, memory, cnv => engine.scopeOfThread(`webchat:${cnv}`))
+    effects.handle<{ conversationId: string }>('memory.distill', async ({ conversationId }) => {
+      try { await distiller.distill(conversationId) } catch (error) { if (!(error instanceof ModelError)) throw error }
+      await memory.embedPending().catch(() => 0)
+    }, { concurrency: 1, baseDelayMs: 30_000, maxDelayMs: 900_000 })
+    // The memory side path: once a conversation has been quiet for a while, distil what the owner said (debounced).
+    bus.on(event => {
+      if (event.type !== 'message.created') return
+      const row = store.sqlite.prepare("SELECT conversation_id AS c, role, json_extract(meta, '$.source') AS s FROM messages WHERE id = ?").get(String(event.messageId)) as { c: string; role: string; s: string | null } | undefined
+      if (row?.role === 'user' && (row.s ?? 'webchat') === 'webchat') store.atomic(() => effects.enqueue('memory.distill', row.c, { conversationId: row.c }, DISTILL_QUIET_MS))
+    })
     const browser = new BrowserManager(join(config.home, 'browser-profile'))
     const watchdog = new Watchdog(store, agents, engine, {
       systemProblems: () => [
@@ -110,6 +124,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     registerAgents(store, agents, engine, combineExtensions(
       sources.agentExtensions(),
       memoryExtension(memory, engine),
+      { routerPrompt: () => personaPrompt(store) },
       instructionsExtension(instructions),
       proactiveExtension(store, engine),
       browserExtension(browser, engine, agents),
@@ -124,18 +139,26 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       try { if (engine.ticket(String(event.ticketId)).ended) void browser.closePage(String(event.ticketId)) } catch { /* deleted */ }
     })
     let watchdogTimer: NodeJS.Timeout | undefined
+    let memoryTimer: NodeJS.Timeout | undefined
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, instructions, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
+      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
       startAgents() {
+        engine.mainConversation()
         agents.recover(session => engine.recoveryNote(session.id, session.role))
         void plugins.loadEnabled().finally(() => sources.startAll())
         void mcp.sync()
         watchdogTimer = setInterval(() => { try { if (hub.resolve('watchdog')) watchdog.tick() } catch (e) { console.error('[watchdog]', e) } }, 60_000)
+        // Nightly memory upkeep (expire episodes, merge duplicates); also on start when the last run is over a day old.
+        const upkeep = () => { try { if (Date.now() - (kvGet<number>(store, 'memory:consolidated') ?? 0) > 20 * 3_600_000) { memory.consolidate(); kvSet(store, 'memory:consolidated', Date.now()) } } catch (e) { console.error('[memory]', e) } }
+        upkeep()
+        memoryTimer = setInterval(upkeep, 3_600_000)
+        void memory.embedPending().catch(() => 0)
       },
       async close() {
         clearInterval(watchdogTimer)
+        clearInterval(memoryTimer)
         await mcp.close()
         await browser.close()
         await sources.stopAll()
@@ -151,6 +174,9 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     throw error
   }
 }
+
+/** How long a conversation stays quiet before its new messages are distilled into memory. */
+const DISTILL_QUIET_MS = Number(process.env.SUPERAGENT_DISTILL_DELAY_MS) || 120_000
 
 /** Calls `after` once a tool succeeded (ok !== false). */
 function announced(tools: ToolSet, after: (name: string, result: unknown) => void): ToolSet {

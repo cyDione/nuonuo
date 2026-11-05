@@ -88,6 +88,22 @@ describe('AgentRuntime', () => {
     runtime.jobs.stopAll('s')
   })
 
+  it('retries a step whose response broke off mid-stream, without recording the broken attempt', async () => {
+    let broke = false
+    setup(() => {
+      if (!broke) { broke = true; throw Object.assign(new Error('Failed to process successful response'), { statusCode: 200 }) }
+      return { text: 'ok after retry' }
+    })
+    const ends: string[] = []
+    runtime.register(def({ onTurnEnd: (_s, info) => ends.push(info.lastText) }))
+    const id = runtime.createSession('test', 'router')
+    store.atomic(() => runtime.push(id, { text: 'go' }))
+    await new Promise(r => setTimeout(r, 2_000)); await runtime.idle()
+    expect(ends).toEqual(['ok after retry'])
+    expect(runtime.events(id).filter(e => e.kind === 'marker').map(e => e.payload.type)).toEqual(['retry'])
+    expect(runtime.history(id).filter(m => m.role === 'assistant')).toHaveLength(1)
+  }, 10_000)
+
   it('keeps one extra worker slot for a person and queues other work', async () => {
     let release!: () => void
     const gate = new Promise<void>(r => { release = r })

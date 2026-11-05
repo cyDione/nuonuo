@@ -60,7 +60,8 @@ export class Routines {
 }
 
 export function fireRoutine(ctx: Pick<SourceContext<unknown>, 'engine' | 'store'>, routine: Routine, at: Date): void {
-  const threadId = `cron:${routine.id}`
+  // Routines speak in the main conversation (Muse): their results arrive like any other message from the assistant.
+  const threadId = `webchat:${ctx.engine.mainConversation()}`
   const result = ctx.engine.receive({
     id: `cron:${routine.id}:${at.toISOString()}`, source: 'cron', threadId, actor: 'owner', human: true, addressed: true, at: Date.now(),
     text: `⏰ 定时任务「${routine.name}」到点了（${routine.schedule}）：\n${routine.prompt}`,
@@ -89,7 +90,7 @@ export function routinesKind(routines: Routines): SourceKind<Record<string, neve
     },
     allowed: (_ctx, actor) => actor === 'owner',
     routerPrompt: () => `## Routines
-The owner can ask for work on a schedule ("每天早上 9 点给我简报", "每周一提醒我…"). Create it with schedule_routine (5-field cron, local time, e.g. "0 9 * * *"), confirm the schedule in one sentence, and list or change routines with list_routines / update_routine. When a routine fires you receive a <message source="cron"> in that routine's conversation: treat it as the owner's request (usually start_task) and answer there.`,
+The owner can ask for work on a schedule ("每天早上 9 点给我简报", "每周一提醒我…"). Create it with schedule_routine (5-field cron, local time, e.g. "0 9 * * *"), confirm the schedule in one sentence, and list or change routines with list_routines / update_routine. When a routine fires you receive a <message source="cron"> in the main conversation: treat it as the owner's request (usually start_task) and answer there.`,
     routerTools: ctx => ({
       schedule_routine: tool({
         description: 'Create a routine: the prompt is delivered to you as the owner\'s request at every matching time (5-field cron, local time).',

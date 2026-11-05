@@ -4,7 +4,7 @@
  * - everything else — what was done, step by step — is one click away in the activity view, never in the conversation.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, CircleDot, Clock, FileText, Globe, Hand, Loader2, MessageCircleQuestion, OctagonX, RotateCcw, ShieldAlert, Sparkles, Square, X } from 'lucide-react'
+import { AlertTriangle, AppWindow, CheckCircle2, Image as ImageIcon, Table2, ChevronDown, ChevronRight, CircleDot, Clock, FileText, Globe, Hand, Loader2, MessageCircleQuestion, OctagonX, RotateCcw, ShieldAlert, Sparkles, Square, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -13,6 +13,7 @@ import { openTask, useLive, useOpenTask } from './live'
 import { go } from './route'
 import { Button, cx } from './ui'
 import { HandoffModal } from './handoff'
+import { ArtifactModal, previewKind } from './preview'
 
 export const useTickets = () => useQuery({ queryKey: ['tickets'], queryFn: () => api.get<{ tickets: Ticket[] }>('/tickets') })
 
@@ -48,7 +49,8 @@ export function StateIcon({ t, size = 14 }: { t: Ticket; size?: number }) {
 export function NeedsYou({ t, onAnswer }: { t: Ticket; onAnswer(text: string, ticketId: string): void }) {
   const qc = useQueryClient()
   const refresh = () => qc.invalidateQueries({ queryKey: ['tickets'] })
-  const decide = useMutation({ mutationFn: (v: { id: string; approve: boolean; note?: string }) => api.post(`/approvals/${v.id}`, { approve: v.approve, ...(v.note ? { note: v.note } : {}) }), onSuccess: refresh })
+  const decide = useMutation({ mutationFn: (v: { id: string; approve: boolean; note?: string; scope?: 'task' }) => api.post(`/approvals/${v.id}`, { approve: v.approve, ...(v.note ? { note: v.note } : {}), ...(v.scope ? { scope: v.scope } : {}) }),
+    onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ['grants'] }) } })
   const retry = useMutation({ mutationFn: () => api.post(`/tickets/${t.id}/retry`), onSuccess: refresh })
   const stop = useMutation({ mutationFn: () => api.post(`/tickets/${t.id}/stop`), onSuccess: refresh })
   const [handoff, setHandoff] = useState<string | null>(null)
@@ -64,7 +66,8 @@ export function NeedsYou({ t, onAnswer }: { t: Ticket; onAnswer(text: string, ti
       <button onClick={() => setDetail(v => !v)} className="mt-1.5 flex items-center gap-0.5 text-xs text-faint hover:text-muted">{detail ? <ChevronDown size={12} /> : <ChevronRight size={12} />}具体操作</button>
       {detail && <pre className="mt-1 overflow-x-auto rounded-lg bg-sunken px-3 py-2 font-mono text-xs whitespace-pre-wrap">{a.command}</pre>}
       <div className="mt-2.5 flex gap-1.5">
-        <Button size="sm" variant="primary" disabled={decide.isPending} onClick={() => decide.mutate({ id: a.id, approve: true })}>同意</Button>
+        <Button size="sm" variant="primary" disabled={decide.isPending} onClick={() => decide.mutate({ id: a.id, approve: true })}>同意这一次</Button>
+        {a.risk !== 'destructive' && <Button size="sm" disabled={decide.isPending} title="这件事做完之前，同类操作不再问你" onClick={() => decide.mutate({ id: a.id, approve: true, scope: 'task' })}>这件事里都同意</Button>}
         <Button size="sm" disabled={decide.isPending} onClick={() => { const note = prompt('不同意的原因（可留空）') ?? undefined; decide.mutate({ id: a.id, approve: false, ...(note ? { note } : {}) }) }}>不同意</Button>
       </div>
       {t.approvals.length > 1 && <div className="mt-1.5 text-xs text-faint">还有 {t.approvals.length - 1} 步也在等你</div>}
@@ -206,13 +209,22 @@ function Step({ step }: { step: StepItem }) {
   </li>
 }
 
+/** A delivered file: images show as themselves; anything else opens a preview in place. */
 export function FileChip({ id, name, size }: { id: string; name: string; size: number }) {
-  return <a href={`/api/artifacts/${id}`} target="_blank" rel="noreferrer"
-    className="flex max-w-full min-w-0 items-center gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-sm hover:border-accent">
-    <FileText size={16} className="shrink-0 text-accent" />
-    <span className="min-w-0 truncate">{name}</span>
-    <span className="shrink-0 text-xs text-faint">{fmtSize(size)}</span>
-  </a>
+  const [open, setOpen] = useState(false)
+  const kind = previewKind(name)
+  const Icon = kind === 'html' ? AppWindow : kind === 'csv' ? Table2 : kind === 'image' ? ImageIcon : FileText
+  return <>
+    {kind === 'image' ? <button onClick={() => setOpen(true)} className="block overflow-hidden rounded-xl border border-line hover:border-accent" title={name}>
+      <img src={`/api/artifacts/${id}`} alt={name} className="max-h-48 max-w-72 object-cover" />
+    </button> : <button onClick={() => setOpen(true)}
+      className="flex max-w-full min-w-0 items-center gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-left text-sm hover:border-accent">
+      <Icon size={16} className="shrink-0 text-accent" />
+      <span className="min-w-0 truncate">{name}</span>
+      <span className="shrink-0 text-xs text-faint">{kind === 'html' ? '可交互' : fmtSize(size)}</span>
+    </button>}
+    {open && <ArtifactModal id={id} name={name} onClose={() => setOpen(false)} />}
+  </>
 }
 
 const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n))

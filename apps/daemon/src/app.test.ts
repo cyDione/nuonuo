@@ -88,7 +88,7 @@ describe('conversations', () => {
     const usage = await (await call('/api/usage?days=1')).json() as any
     expect(usage.rows[0]).toMatchObject({ role: 'router' })
     const list = await (await call('/api/conversations')).json() as any
-    expect(list.conversations[0]).toMatchObject({ title: '问候' })
+    expect(list.conversations.find((c: any) => c.id === conversation.id)).toMatchObject({ title: '问候' })
     expect((await (await call('/api/tickets')).json() as any).tickets).toEqual([])
     expect((await call('/api/tickets/tkt_nope')).status).toBe(404)
   })
