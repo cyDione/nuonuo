@@ -7,11 +7,11 @@
 import type { AgentRuntime, Bus } from '@super-assistant/agent-runtime'
 import { kvGet, newId, schema, type Store } from '@super-assistant/db'
 import type { ModelHub } from '@super-assistant/models'
-import { generateText, Output } from 'ai'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { ROUTER_SESSION, type Engine } from './engine'
 import type { Ticket } from './model'
+import { generateStructured } from './structured'
 
 export type Risk = 'normal' | 'external' | 'destructive'
 const RANK: Record<Risk, number> = { normal: 0, external: 1, destructive: 2 }
@@ -102,8 +102,13 @@ export type Approval = typeof schema.approvals.$inferSelect
 
 const VerdictSchema = z.object({
   decision: z.enum(['allow', 'block', 'ask_owner']),
-  reason: z.string().describe('One sentence, in Chinese, for the audit log and the owner'),
+  reason: z.string().min(1).describe('One sentence, in Chinese, for the audit log and the owner'),
 })
+type Verdict = z.infer<typeof VerdictSchema>
+
+const VERDICT_FIELDS = `- decision: one of "allow", "block", "ask_owner"
+- reason: one sentence in Chinese saying why, for the audit log and the owner`
+const VERDICT_EXAMPLE: Verdict = { decision: 'ask_owner', reason: '推送到默认分支，规则要求先问主人。' }
 
 const REVIEWER_PROMPT = `You review one action an autonomous worker agent wants to take on the owner's own computer and accounts.
 Decide: allow (clearly within what the owner asked and the rules allow), block (clearly against the rules or the request, or harmful), or ask_owner (consequential and not clearly authorized, or you are unsure).
@@ -153,18 +158,11 @@ export class Reviewer {
     // The most dangerous class is never left to a model's judgement by default, even when the request names the action.
     if (risk === 'destructive' && settings.destructive === 'ask') return this.escalate(ticket, sessionId, command, cwd, risk, `${heuristics}：高风险操作，需要你在执行前确认`)
 
-    let verdict: z.infer<typeof VerdictSchema>
+    let verdict: Verdict
     try {
-      const { output } = await generateText({
-        model: this.hub.model('reviewer', { ref: ticket.id }),
-        system: REVIEWER_PROMPT,
-        prompt: this.reviewPrompt(ticket, command, cwd, risk, heuristics, settings),
-        output: Output.object({ schema: VerdictSchema }),
-        maxRetries: 1,
-      })
-      verdict = output
+      verdict = await this.verdict(ticket.id, this.reviewPrompt(ticket, command, cwd, risk, heuristics, settings))
     } catch (error) {
-      return this.escalate(ticket, sessionId, command, cwd, risk, `${heuristics}；审核模型不可用（${error instanceof Error ? error.message.slice(0, 120) : String(error)}），转给你决定`)
+      return this.escalate(ticket, sessionId, command, cwd, risk, `${heuristics}；${failure(error)}，转给你决定`)
     }
     if (verdict.decision === 'allow') {
       this.audit({ ticketId: ticket.id, actor: 'reviewer', action: 'review', tool: 'shell', input: command, risk, decision: 'allow', reason: verdict.reason })
@@ -311,19 +309,23 @@ export class Reviewer {
     }
     if (settings.threshold === 'destructive') return { action: 'allow', by: 'threshold' }
     if (settings.mode === 'ask') return this.escalateAction(ticket, sessionId, tool, display, input, risk, '调用外部工具，按设置需要你批准')
-    let verdict: z.infer<typeof VerdictSchema>
+    let verdict: Verdict
     try {
-      const { output } = await generateText({
-        model: this.hub.model('reviewer', { ref: ticket.id }), system: REVIEWER_PROMPT, maxRetries: 1, output: Output.object({ schema: VerdictSchema }),
-        prompt: this.reviewPrompt(ticket, display, '', risk, '调用外部工具（MCP）', settings, 'External tool call (MCP)'),
-      })
-      verdict = output
+      verdict = await this.verdict(ticket.id, this.reviewPrompt(ticket, display, '', risk, '调用外部工具（MCP）', settings, 'External tool call (MCP)'))
     } catch (error) {
-      return this.escalateAction(ticket, sessionId, tool, display, input, risk, `审核模型不可用（${error instanceof Error ? error.message.slice(0, 120) : String(error)}），转给你决定`)
+      return this.escalateAction(ticket, sessionId, tool, display, input, risk, `${failure(error)}，转给你决定`)
     }
     if (verdict.decision === 'ask_owner') return this.escalateAction(ticket, sessionId, tool, display, input, risk, verdict.reason)
     this.audit({ ticketId: ticket.id, actor: 'reviewer', action: 'review', tool, input: display, risk, decision: verdict.decision, reason: verdict.reason })
     return verdict.decision === 'allow' ? { action: 'allow', by: 'reviewer' } : { action: 'block', by: 'reviewer', reason: verdict.reason }
+  }
+
+  /**
+   * The reviewer layer's verdict. That layer inherits the main agent's model until it has its own (Settings → Models),
+   * so a dedicated review model is used when configured and the main model otherwise.
+   */
+  private verdict(ref: string, prompt: string): Promise<Verdict> {
+    return generateStructured(this.hub, 'reviewer', { system: REVIEWER_PROMPT, prompt, schema: VerdictSchema, fields: VERDICT_FIELDS, example: VERDICT_EXAMPLE, ref, maxOutputTokens: 2_048 })
   }
 
   private reviewPrompt(ticket: Ticket, command: string, cwd: string, risk: Risk, heuristics: string, settings: ReviewSettings, kind = `shell, in ${cwd}`): string {
@@ -332,9 +334,14 @@ export class Reviewer {
       `## Owner's rules\n${settings.rules.map(r => `- ${r}`).join('\n') || '- (none)'}`,
       `## Task\n${ticket.title}${ticket.note ? ` — ${ticket.note}` : ''}\nOriginal request from the owner:\n${origin.map(t => `> ${t.text.slice(0, 1_500)}`).join('\n')}`,
       `## Action\n${kind}:\n\`\`\`\n${command.slice(0, 4_000)}\n\`\`\`\nFlagged as ${risk}: ${heuristics}`,
-      'Decide.',
+      'Decide, and answer in the JSON format described above.',
     ].join('\n\n')
   }
+}
+
+/** Why the reviewer model gave no verdict, in the owner's words: not configured, out of budget, call failed, or unreadable reply. */
+function failure(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /** What "the same kind of action" means for a task-wide grant: the shell heuristics' categories, or one MCP tool. */

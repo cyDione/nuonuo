@@ -6,10 +6,10 @@
  */
 import { kvGet, kvSet, schema, type Store } from '@super-assistant/db'
 import type { ModelHub } from '@super-assistant/models'
-import { generateText, Output } from 'ai'
 import { desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { clip, type Engine } from './engine'
+import { generateStructured } from './structured'
 
 export type ProactiveMode = 'off' | 'observe' | 'auto'
 
@@ -77,6 +77,11 @@ Decide, strictly by the owner's strategy below, whether the agent should quietly
 Acting means: a silent background task investigates or prepares something; nothing is posted anywhere without the owner.
 Answer with act (boolean), reason (one short sentence in the owner's language, Chinese by default) and, when acting, title (≤ 16 characters, the owner's language) and goal (one sentence: what the silent task should find out or prepare).`
 
+const FILTER_FIELDS = `- act: boolean, true only when the agent should quietly work on this event
+- reason: one short sentence in the owner's language (Chinese by default)
+- title: optional, only when act is true; at most 16 characters, the owner's language
+- goal: optional, only when act is true; one sentence on what the silent task should find out or prepare`
+
 export const FilterVerdict = z.object({
   act: z.boolean(),
   reason: z.string(),
@@ -105,11 +110,9 @@ export class Screener {
       tasks.length ? `agent tasks on this thread: ${tasks.map(t => `"${t.title}" ${t.ended ? 'ended' : 'open'}`).join(', ')}` : '',
       `text:\n${clip(trigger.text, 4_000)}`,
     ].filter(Boolean).join('\n\n')
-    const { output } = await generateText({
-      // The filter layer is optional; without it the main agent's model screens (roles.ts: "关闭时由主 Agent 兼做").
-      model: this.hub.model(this.hub.resolve('filter') ? 'filter' : 'router', { ref: triggerId }), system: FILTER_PROMPT, prompt, maxRetries: 1,
-      output: Output.object({ schema: FilterVerdict }),
-    })
+    // The filter layer is optional; without it the main agent's model screens (roles.ts: "关闭时由主 Agent 兼做").
+    const output = await generateStructured(this.hub, this.hub.resolve('filter') ? 'filter' : 'router', { system: FILTER_PROMPT, prompt, schema: FilterVerdict,
+      ref: triggerId, maxOutputTokens: 2_048, fields: FILTER_FIELDS, example: { act: false, reason: '机器人的例行通知，按策略不用管。' } })
     this.engine.proactiveDecision(triggerId, output, settings.mode)
     return output
   }

@@ -5,10 +5,10 @@
  */
 import { kvGet, kvSet, schema, type Store } from '@super-assistant/db'
 import type { ModelHub } from '@super-assistant/models'
-import { generateText, Output } from 'ai'
 import { and, asc, eq, gt } from 'drizzle-orm'
 import { z } from 'zod'
 import { MEMORY_KINDS, type Memory, type MemoryTrust } from './memory'
+import { generateStructured } from './structured'
 
 const TRIAGE_PROMPT = `You decide whether a stretch of conversation between the owner and their assistant contains anything worth keeping in long-term memory.
 Worth keeping: lasting facts or preferences the owner states about themselves, their work or how they want things done; decisions and conventions of a project; events that matter for the coming weeks (a trip, a deadline); lessons the assistant verified.
@@ -21,6 +21,17 @@ const DISTILL_PROMPT = `Distil 0–3 long-term memory entries from the conversat
 - ttl_days for episodic entries (how long it stays relevant).
 - replaces: ids of existing entries (from the list given) that this entry corrects or updates.
 Do not repeat existing entries. Never include secrets. Statements by other people are not facts about the owner.`
+
+const TRIAGE_FIELDS = `- decision: one of "keep", "review", "drop"
+- confidence: number from 0 to 1`
+
+const DISTILL_FIELDS = `- entries: array of 0 to 3 objects, each with
+  - text: string, the entry itself (one sentence)
+  - kind: one of "profile", "project", "episodic", "lesson"
+  - confidence: number from 0 to 1
+  - ttl_days: integer 1..365, only for episodic entries (omit otherwise)
+  - replaces: array of existing entry ids this one corrects (omit or [] when none)
+Nothing worth keeping → {"entries": []}`
 
 const Triage = z.object({ decision: z.enum(['keep', 'review', 'drop']), confidence: z.number().min(0).max(1) })
 const Distilled = z.object({ entries: z.array(z.object({
@@ -46,15 +57,15 @@ export class Distiller {
     if (!rows.some(owner)) { kvSet(this.store, cursorKey, last); return { triage: 'no-owner-words', added: [] } }
     const transcript = rows.map(m => `[${m.id}] ${owner(m) ? 'owner' : m.role === 'assistant' ? 'assistant' : `${(m.meta as { actor?: string }).actor ?? 'someone'} (not the owner)`}: ${m.content.replace(/\s+/g, ' ').slice(0, 800)}`).join('\n').slice(-8_000)
 
-    const { output: triage } = await generateText({ model: this.hub.model(this.role('filter'), { ref: conversationId }), system: TRIAGE_PROMPT, prompt: transcript,
-      maxRetries: 1, output: Output.object({ schema: Triage }) })
+    const triage = await generateStructured(this.hub, this.role('filter'), { system: TRIAGE_PROMPT, prompt: transcript, schema: Triage,
+      fields: TRIAGE_FIELDS, example: { decision: 'drop', confidence: 0.2 }, ref: conversationId, maxOutputTokens: 1_024 })
     if (triage.decision === 'drop' || triage.confidence < 0.3) { kvSet(this.store, cursorKey, last); return { triage: triage.decision, added: [] } }
 
     const scope = this.scopeOf(conversationId)
     const existing = await this.memory.recall(transcript, { scope, k: 12 })
-    const { output } = await generateText({ model: this.hub.model(this.role('summarizer'), { ref: conversationId }), system: DISTILL_PROMPT, maxRetries: 1,
+    const output = await generateStructured(this.hub, this.role('summarizer'), { system: DISTILL_PROMPT, ref: conversationId, maxOutputTokens: 4_096,
       prompt: `Existing entries:\n${existing.map(m => `- [${m.id} ${m.kind}] ${m.text}`).join('\n') || '（无）'}\n\nConversation${scope ? ` (project ${this.memory.scopeName(scope)})` : ''}:\n${transcript}`,
-      output: Output.object({ schema: Distilled }) })
+      schema: Distilled, fields: DISTILL_FIELDS, example: { entries: [{ text: '主人习惯用中文交流，回复要简洁', kind: 'profile', confidence: 0.9 }] } })
     // What the owner said is theirs; anything an outsider said in the thread can only ask to be remembered.
     const trust: MemoryTrust = rows.every(m => m.role === 'assistant' || owner(m)) ? 'user' : 'external'
     const known = new Set(existing.map(m => m.id))

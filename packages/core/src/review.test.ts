@@ -71,6 +71,23 @@ describe('Reviewer', () => {
     expect(engine.stage(engine.ticket(ticket.id))).not.toBe('person/approve')
   })
 
+  it('reads a verdict wrapped in prose and a code fence', async () => {
+    const { start } = setup(() => ({ text: '审核结论：\n```json\n{"decision":"allow","reason":"推送任务分支"}\n```' }))
+    const ticket = start()
+    await settle()
+    expect(existsSync(join(ticket.directory, 'pushed.txt'))).toBe(true)
+    expect(audit()).toEqual([['reviewer', 'allow']])
+  })
+
+  it('says the reply was unreadable, not that no review model is configured', async () => {
+    const { reviewer, start } = setup(() => ({ text: '我觉得可以放行。' }))
+    start()
+    await settle()
+    const [approval] = reviewer.pending()
+    expect(approval!.reason).toContain('审核模型有回复，但不是约定格式的 JSON')
+    expect(approval!.reason).not.toContain('不可用')
+  })
+
   it('blocks on the reviewer\'s word and tells the worker why', async () => {
     const { start } = setup(() => ({ text: JSON.stringify({ decision: 'block', reason: '主人没有要求推送' }) }))
     const ticket = start()
