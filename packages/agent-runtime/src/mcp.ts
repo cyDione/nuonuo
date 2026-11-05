@@ -8,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { jsonSchema, tool, type ToolSet } from 'ai'
+import pkg from '../package.json' with { type: 'json' }
 import type { Blobs } from './blobs'
 
 export interface McpServerConfig {
@@ -99,7 +100,7 @@ export class McpManager {
     const conn: Connection = { config, key: JSON.stringify(config), status: { name: config.name, state: 'connecting', tools: [] } }
     this.connections.set(config.name, conn)
     try {
-      const client = new Client({ name: 'super-assistant', version: '0.1.3' })
+      const client = new Client({ name: 'super-assistant', version: pkg.version })
       if (config.transport === 'stdio') {
         if (!config.command) throw new Error('stdio 服务需要 command')
         const env = { ...getDefaultEnvironment(), ...Object.fromEntries(Object.entries(config.env ?? {}).map(([k, v]) => [k, resolveEnv(v, this.env)])) }

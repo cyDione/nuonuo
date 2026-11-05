@@ -8,7 +8,7 @@ import { runDoctor } from './doctor'
 import { createRuntime, readLock } from './runtime'
 import { startDaemon } from './server'
 import { installService, uninstallService } from './service'
-import { Updater } from './update'
+import { runsAsService, Updater } from './update'
 
 // Keys in <home>/env reach every command, including a service started at login.
 loadEnvFile(resolveConfig().home)
@@ -128,7 +128,9 @@ program.command('update').description('检查并安装新版本（Linux 安装�
     child.stdin.end(script)
     const code = await new Promise<number>(done => child.on('exit', c => done(c ?? 1)))
     if (code !== 0) { console.error('更新失败'); process.exitCode = code; return }
-    if (readLock(config.home) && !process.env.INVOCATION_ID) console.log('提示：如果服务在终端里运行（不是 systemd 服务），请重启它以使用新版本')
+    // install.sh restarts the systemd service itself; a service started in a terminal has to be restarted by hand.
+    const lock = readLock(config.home)
+    if (lock && !runsAsService({}, `/proc/${lock.pid}/cgroup`)) console.log('提示：如果服务在终端里运行（不是 systemd 服务），请重启它以使用新版本')
   })
 
 const service = program.command('service').description('开机自启（macOS launchd / Linux systemd 用户服务）')

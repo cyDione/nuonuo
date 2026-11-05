@@ -28,6 +28,17 @@ export function detectInstall(entry: string): Install {
   return existsSync(join(root, 'pnpm-workspace.yaml')) ? { kind: 'source', root } : { kind: 'other' }
 }
 
+/**
+ * Whether this process is the super-assistant systemd user service, so that install.sh's `systemctl restart` brings it
+ * back on the new version. INVOCATION_ID is not enough: GNOME Terminal runs as a systemd user service itself, so every
+ * shell in it carries one. The unit sets SUPER_ASSISTANT_SERVICE=1; units written by older versions don't, so the cgroup
+ * name is checked too.
+ */
+export function runsAsService(env: NodeJS.ProcessEnv = process.env, cgroupFile = '/proc/self/cgroup'): boolean {
+  if (env.SUPER_ASSISTANT_SERVICE === '1') return true
+  try { return /\/super-assistant\.service(\/|$)/m.test(readFileSync(cgroupFile, 'utf8')) } catch { return false }
+}
+
 /** Compares dotted versions ("v0.2.0", "0.10.1"); a pre-release ("1.0.0-rc.1") sorts before its release. */
 export function compareVersions(a: string, b: string): number {
   const parse = (v: string) => {
@@ -104,6 +115,8 @@ export interface UpdaterOptions {
   fetch?: typeof fetch
   /** Called after an update installed, when nothing else (systemd) will restart this process. */
   restart?: () => void
+  /** Run by the systemd service (default: detected with runsAsService). */
+  service?: boolean
 }
 
 const DAY = 24 * 60 * 60 * 1000
@@ -118,11 +131,13 @@ export class Updater {
   private timer: NodeJS.Timeout | null = null
   private readonly env: NodeJS.ProcessEnv
   private readonly fetchImpl: typeof fetch
+  private readonly service: boolean
 
   constructor(private readonly opts: UpdaterOptions) {
     this.install = detectInstall(opts.entry)
     this.env = opts.env ?? process.env
     this.fetchImpl = opts.fetch ?? fetch
+    this.service = opts.service ?? runsAsService(this.env)
     this.restore()
   }
 
@@ -143,7 +158,7 @@ export class Updater {
     const hint = this.install.kind === 'source'
       ? `源码运行：在 ${this.install.root} 里 git pull && pnpm install && pnpm build 后重启`
       : this.install.kind === 'other' ? '这种安装方式不支持自动更新'
-      : this.env.INVOCATION_ID ? '更新后 systemd 服务会自动重启' : '更新后服务会自动重启'
+      : this.service ? '更新后 systemd 服务会自动重启' : '更新后服务会自动重启'
     if (this.run?.state === 'running') this.run = { ...this.run, log: tail(join(this.opts.home, 'logs/update.log')) }
     return {
       current: VERSION, install: this.install.kind, canUpdate: this.install.kind === 'package' && process.platform === 'linux',
@@ -219,8 +234,8 @@ export class Updater {
     child.on('exit', code => {
       if (code === 0) {
         this.run = { ...run, state: 'installed', log: tail(logFile) }
-        // Under systemd install.sh has already asked for a restart; otherwise restart ourselves on the new code.
-        if (!this.env.INVOCATION_ID) setTimeout(() => this.opts.restart?.(), 500)
+        // As the systemd service, install.sh has already asked systemd for a restart; otherwise restart ourselves on the new code.
+        if (!this.service) setTimeout(() => this.opts.restart?.(), 500)
       } else {
         this.run = { ...run, state: 'failed', error: `install.sh 退出码 ${code}`, log: tail(logFile) }
       }

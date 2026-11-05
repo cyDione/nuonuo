@@ -4,6 +4,7 @@
  * Private chats always address the agent; in groups, mention the bot or reply to it. `/new` starts a fresh topic.
  */
 import { definePlugin, z, type SourceContext, type SourceKind } from '@super-assistant/plugin-sdk'
+import pkg from '../package.json' with { type: 'json' }
 
 export const TelegramConfig = z.object({
   token: z.string().default(''),
@@ -155,4 +156,4 @@ export function telegramKind(deps: { fetch?: typeof fetch } = {}): SourceKind<Co
   }
 }
 
-export const telegramPlugin = definePlugin({ id: 'telegram', name: 'Telegram', version: '0.1.3', description: '用 Telegram 远程对话', sources: [telegramKind()] })
+export const telegramPlugin = definePlugin({ id: 'telegram', name: 'Telegram', version: pkg.version, description: '用 Telegram 远程对话', sources: [telegramKind()] })

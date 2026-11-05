@@ -9,6 +9,7 @@
  * - Workers get gmail_search / gmail_read / gmail_draft.
  */
 import { randomBytes } from 'node:crypto'
+import pkg from '../package.json' with { type: 'json' }
 import { definePlugin, tool, z, type SourceContext, type SourceKind } from '@super-assistant/plugin-sdk'
 
 export const GmailConfig = z.object({
@@ -264,4 +265,4 @@ You can search and read the owner's mail (gmail_search, gmail_read) and write dr
   }
 }
 
-export const gmailPlugin = definePlugin({ id: 'gmail', name: 'Gmail', version: '0.1.3', description: '读邮件、写草稿', sources: [gmailKind()] })
+export const gmailPlugin = definePlugin({ id: 'gmail', name: 'Gmail', version: pkg.version, description: '读邮件、写草稿', sources: [gmailKind()] })

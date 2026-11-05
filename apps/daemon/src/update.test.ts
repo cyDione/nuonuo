@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { VERSION } from './config'
-import { compareVersions, detectInstall, Updater } from './update'
+import { compareVersions, detectInstall, runsAsService, Updater } from './update'
 
 describe('compareVersions', () => {
   it('orders dotted versions numerically, with or without v, and pre-releases first', () => {
@@ -73,5 +73,18 @@ describe('Updater', () => {
     expect(p.script).toBe('echo hi')
     expect(p.env).toMatchObject({ GITHUB_TOKEN: 't', SUPER_ASSISTANT_VERSION: 'v99.0.0', SUPER_ASSISTANT_PREFIX: updater.install.kind === 'package' ? updater.install.prefix : '' })
     await expect(make(release(`v${VERSION}`)).updater.prepare()).rejects.toThrow(/已是最新/)
+  })
+})
+
+describe('runsAsService', () => {
+  const cgroup = (text: string) => { const f = join(mkdtempSync(join(tmpdir(), 'sa-cg-')), 'cgroup'); writeFileSync(f, text); return f }
+  it('is true for the unit (by its variable, or by its cgroup for units from older versions)', () => {
+    expect(runsAsService({ SUPER_ASSISTANT_SERVICE: '1' }, '/nonexistent')).toBe(true)
+    expect(runsAsService({}, cgroup('0::/user.slice/user-1000.slice/user@1000.service/app.slice/super-assistant.service\n'))).toBe(true)
+  })
+  it('is false in a terminal, even one GNOME Terminal runs as a systemd service (INVOCATION_ID set)', () => {
+    const terminal = cgroup('0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-org.gnome.Terminal.slice/vte-spawn-1.scope\n')
+    expect(runsAsService({ INVOCATION_ID: 'abc' }, terminal)).toBe(false)
+    expect(runsAsService({}, '/nonexistent')).toBe(false)
   })
 })

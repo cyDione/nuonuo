@@ -33,6 +33,8 @@ After=network-online.target
 [Service]
 ExecStart=${args.map(a => (a.includes(' ') ? `"${a}"` : a)).join(' ')}
 Environment=SUPER_ASSISTANT_HOME=${home}
+# Tells the updater that systemd restarts this process after an update.
+Environment=SUPER_ASSISTANT_SERVICE=1
 Environment=PATH=${process.env.PATH}
 Restart=on-failure
 RestartSec=5
