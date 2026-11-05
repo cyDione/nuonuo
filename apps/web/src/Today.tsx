@@ -40,15 +40,15 @@ export function TodayPanel({ onClose, variant = 'side' }: { onClose?(): void; va
   const hero = useTilt<HTMLDivElement>(2)
 
   return <div className="flex h-full flex-col">
-    <div ref={hero} className={cx('flow tilt px-4 pt-3.5 pb-5', variant === 'sheet' ? 'mx-2.5 rounded-[22px]' : 'm-2.5 rounded-[18px]')}>
+    <div ref={hero} data-tone="teal" className={cx('flow tilt px-4 pt-3.5 pb-5', variant === 'sheet' ? 'mx-2.5 rounded-[22px]' : 'm-2.5 rounded-[18px]')}>
       <div className="relative flex items-center">
         <span className="flex-1 text-xs font-medium tabular-nums opacity-65">{now.getMonth() + 1}月{now.getDate()}日 · {WEEK[now.getDay()]}</span>
-        {onClose && <IconButton label={variant === 'side' ? '收起' : '关闭'} onClick={onClose} className="-mr-1.5">{variant === 'side' ? <PanelRightClose size={17} /> : <X size={18} />}</IconButton>}
+        {onClose && <IconButton label={variant === 'side' ? '收起' : '关闭'} onClick={onClose} className="-mr-1.5 text-white/75 hover:bg-white/15 hover:text-white">{variant === 'side' ? <PanelRightClose size={17} /> : <X size={18} />}</IconButton>}
       </div>
       <div className="relative mt-3 flex items-center gap-3.5">
         <Avatar persona={persona} size={76} mood={connected ? status.tone : 'sleepy'} track />
         <div className="min-w-0">
-          <div className="truncate font-display text-[22px] leading-tight font-semibold">{persona.name}</div>
+          <div className="truncate font-display text-[22px] leading-tight font-semibold text-white">{persona.name}</div>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {!connected ? <Chip dot="bg-faint">重连中</Chip> : <>
               {going.length > 0 && <Chip dot="bg-accent" key={`g${going.length}`}>正在做 {going.length}</Chip>}
@@ -105,7 +105,7 @@ function GoingCard({ t }: { t: Ticket }) {
 }
 
 function Chip({ dot, children }: { dot: string; children: React.ReactNode }) {
-  return <span className="bump inline-flex items-center gap-1.5 rounded-full bg-card/90 px-2.5 py-1 text-xs font-medium tabular-nums">
+  return <span className="bump inline-flex items-center gap-1.5 rounded-full bg-card/90 px-2.5 py-1 text-xs font-medium text-fg tabular-nums">
     <span className={cx('size-1.5 rounded-full', dot)} />{children}
   </span>
 }

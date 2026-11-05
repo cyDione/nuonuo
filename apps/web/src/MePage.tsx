@@ -33,30 +33,30 @@ export function MePage({ tab }: { tab: MeTab }) {
 
   return <div className="h-full overflow-y-auto">
     <div className="mx-auto max-w-4xl space-y-5 px-4 pt-2 pb-10 md:px-8">
-      <div ref={stage} className="flow tilt anim-rise flex items-center gap-7 rounded-[28px] px-8 py-8 max-sm:flex-col max-sm:items-start max-sm:gap-4 max-sm:px-5">
+      <div ref={stage} className="tilt anim-rise flex items-center gap-7 rounded-[28px] bg-sunken px-8 py-8 max-sm:flex-col max-sm:items-start max-sm:gap-4 max-sm:px-5">
         <span className="relative shrink-0"><Avatar persona={persona} size={132} mood="happy" track /></span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
             <h1 className="truncate font-display text-[34px] leading-tight font-semibold">{persona.name}</h1>
-            <a href="#/me/persona" aria-label="编辑名字和样子" title="编辑" className="press flex size-8 items-center justify-center rounded-full bg-card/70 text-fg/70 hover:bg-card hover:text-fg"><Pencil size={14} /></a>
+            <a href="#/me/persona" aria-label="编辑名字和样子" title="编辑" className="press flex size-8 items-center justify-center rounded-full bg-card text-muted hover:text-fg"><Pencil size={14} /></a>
           </div>
-          <p className="mt-1.5 text-sm tabular-nums opacity-70">
+          <p className="mt-1.5 text-sm text-muted tabular-nums">
             记得 {active.length} 件事{instructions?.current.version ? ` · 说明第 ${instructions.current.version} 版` : ''}{pending ? ` · ${pending} 条等你确认` : ''}
           </p>
           {tags.length > 0 && <div className="mt-4 flex flex-wrap gap-2">
-            {tags.map((t, i) => <span key={t} className="tag rounded-xl bg-card/80 px-3 py-1.5 text-[13px] font-medium text-fg shadow-[var(--shadow-sheet)] backdrop-blur" style={{ ['--r' as string]: `${TILTS[i]}deg`, ['--i' as string]: i }}>{t}</span>)}
+            {tags.map((t, i) => <span key={t} className="tag rounded-xl bg-card px-3 py-1.5 text-[13px] font-medium text-fg shadow-[var(--shadow-sheet)]" style={{ ['--r' as string]: `${TILTS[i]}deg`, ['--i' as string]: i }}>{t}</span>)}
           </div>}
         </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <MeCard tab="persona" active={tab === 'persona'} icon={Heart} title="个性" tone="a" date={day(Date.now())}>
+        <MeCard tab="persona" active={tab === 'persona'} icon={Heart} title="个性" tone="coral" date={day(Date.now())}>
           <p className="line-clamp-3">{persona.personality || '还没写它的性格。点开告诉它该怎么说话。'}</p>
         </MeCard>
-        <MeCard tab="soul" active={tab === 'soul'} icon={Sparkles} title="灵魂" tone="b" date={instructions?.current.version ? `第 ${instructions.current.version} 版 · ${day(instructions.current.at)}` : '还没写'}>
+        <MeCard tab="soul" active={tab === 'soul'} icon={Sparkles} title="灵魂" tone="sage" date={instructions?.current.version ? `第 ${instructions.current.version} 版 · ${day(instructions.current.at)}` : '还没写'}>
           {rules.length ? <ol className="list-decimal space-y-0.5 pl-4">{rules.slice(0, 3).map((r, i) => <li key={i} className="truncate">{r}</li>)}</ol> : <p>做事的规矩：怎么沟通、能做什么、交付什么。</p>}
         </MeCard>
-        <MeCard tab="memory" active={tab === 'memory'} icon={Brain} title="记忆" tone="c" date={`${active.length} 条`} badge={pending ? `${pending} 条等你确认` : undefined}>
+        <MeCard tab="memory" active={tab === 'memory'} icon={Brain} title="记忆" tone="teal" date={`${active.length} 条`} badge={pending ? `${pending} 条等你确认` : undefined}>
           <p className="leading-6">{memories?.kinds.map(k => `${k.label} ${active.filter(m => m.kind === k.id).length}`).join(' · ') || '它记住的关于你的事'}</p>
         </MeCard>
       </div>
@@ -68,11 +68,11 @@ export function MePage({ tab }: { tab: MeTab }) {
   </div>
 }
 
-function MeCard({ tab, active, icon: Icon, title, tone, date, badge, children }: { tab: MeTab; active: boolean; icon: LucideIcon; title: string; tone: 'a' | 'b' | 'c'; date: string; badge?: string | undefined; children: React.ReactNode }) {
+function MeCard({ tab, active, icon: Icon, title, tone, date, badge, children }: { tab: MeTab; active: boolean; icon: LucideIcon; title: string; tone: 'coral' | 'sage' | 'teal'; date: string; badge?: string | undefined; children: React.ReactNode }) {
   const ref = useTilt<HTMLAnchorElement>(4)
   return <a ref={ref} href={`#/me/${tab}`} data-tone={tone} aria-current={active ? 'page' : undefined}
     className={cx('flow tilt anim-rise group flex min-h-40 flex-col rounded-[22px] p-4 text-[13px] transition-[box-shadow,outline-color] outline-2 -outline-offset-2',
-      active ? 'outline-accent/60' : 'outline-transparent')}>
+      active ? 'outline-white/70' : 'outline-transparent')}>
     <span className="flex items-center gap-2">
       <Icon size={16} className="opacity-80" />
       <span className="font-display text-lg font-semibold">{title}</span>
