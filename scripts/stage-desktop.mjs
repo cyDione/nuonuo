@@ -2,12 +2,11 @@
 // Stages everything the desktop app packs besides its own code, for the platform and CPU this runs on:
 //   apps/desktop/.stage/daemon   the service (bundled CLI, web UI, production node_modules)
 //   apps/desktop/.stage/node     a Node.js runtime (node or node.exe), so the app needs nothing installed
-//   apps/desktop/build/icon.png  the app icon, drawn by lib/icon.cjs (electron-builder makes .icns/.ico from it)
+//   apps/desktop/build/icon.png  the app icon, Mochi from assets/icon.png (electron-builder makes .icns/.ico from it)
 // Usage: node scripts/stage-desktop.mjs   (run `pnpm build` at the repository root first)
 // Native modules are installed for the machine running this, so build each platform/CPU on its own machine.
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -54,8 +53,7 @@ copyFileSync(join(work, dist, 'LICENSE'), join(nodeOut, 'LICENSE.node'))
 rmSync(work, { recursive: true, force: true })
 
 // 3. The icon.
-const { iconPng } = createRequire(import.meta.url)(join(desktop, 'lib/icon.cjs'))
 mkdirSync(join(desktop, 'build'), { recursive: true })
-writeFileSync(join(desktop, 'build/icon.png'), iconPng(1024))
+copyFileSync(join(desktop, 'assets/icon.png'), join(desktop, 'build/icon.png'))
 
 console.log(`staged the desktop app for ${platform}-${arch} (Node.js ${nodeVersion})`)

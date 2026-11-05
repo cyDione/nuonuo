@@ -9,12 +9,16 @@ import { Sidebar, StatusDot } from './Sidebar'
 import { openActivity, openTask, useLive, useLiveEvents } from './live'
 import { needsOwner, TaskDrawer, useTickets } from './tasks'
 import { Activity, Library } from './Activity'
-import { setTodayCollapsed, TodayDrawer, TodayPanel, TodayToggle, useTodayCollapsed } from './Today'
-import { Avatar, Mascot, statusLine, usePersona } from './persona'
+import { TodayDrawer, TodayPanel } from './Today'
+import { MePage } from './MePage'
+import { QuickAsk } from './QuickAsk'
+import { Pane, Resizer, togglePane, TopBar, useDesktopChrome, usePaneShortcuts, useScrollingClass } from './shell'
+import { Avatar, BRAND, Mascot, statusLine, usePersona } from './persona'
 import { cx, IconButton } from './ui'
 
 export function App() {
   const route = useRoute()
+  useDesktopChrome()
   const health = useQuery({ queryKey: ['health'], queryFn: () => api.get<Health>('/health'), refetchInterval: 30_000 })
   const [nav, setNav] = useState(false)
   // Going somewhere else closes the activity panel and any open task.
@@ -25,26 +29,32 @@ export function App() {
   if (health.isPending) return <Splash />
   if (health.error) return <Offline message={health.error.message} />
 
-  return <Shell authed={authed}><Layout route={route} nav={nav} setNav={setNav} /></Shell>
+  return <Shell authed={authed}>{route.page === 'quick' ? <QuickAsk /> : <Layout route={route} nav={nav} setNav={setNav} />}</Shell>
 }
 
 function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; nav: boolean; setNav(v: boolean): void }) {
-  const collapsed = useTodayCollapsed()
+  usePaneShortcuts()
+  useScrollingClass()
   const chat = route.page === 'chat'
   return <div className="flex h-dvh">
     <Sidebar route={route} open={nav} onClose={() => setNav(false)} />
-    <main className="flex min-w-0 flex-1 gap-2 md:py-2 md:pr-2">
-      <div className="sheet relative flex min-w-0 flex-1 flex-col overflow-hidden md:rounded-[24px]">
+    <main className="flex min-w-0 flex-1 md:py-2 md:pr-2">
+      <div className="sheet relative flex min-w-0 flex-1 flex-col overflow-hidden md:rounded-[22px]">
         <MobileBar onMenu={() => setNav(true)} />
-        {chat && <TodayToggle className="absolute top-3 right-3 z-10 max-md:hidden" />}
-        <div className="min-h-0 flex-1">
+        {!chat && <TopBar className="max-md:hidden" />}
+        <div key={route.page === 'chat' ? `c${route.id ?? (route.main ? 'main' : 'new')}` : route.page} className="min-h-0 flex-1">
           {chat ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
-            : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : <Settings tab={route.tab} {...(route.item ? { item: route.item } : {})} />}
+            : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library />
+            : route.page === 'me' ? <MePage tab={route.tab} />
+            : route.page === 'settings' ? <Settings tab={route.tab} {...(route.item ? { item: route.item } : {})} /> : null}
         </div>
       </div>
-      {chat && !collapsed && <aside className="anim-fade w-[344px] shrink-0 overflow-hidden rounded-[24px] bg-card shadow-[var(--shadow-sheet)] max-xl:hidden">
-        <TodayPanel onClose={() => setTodayCollapsed(true)} />
-      </aside>}
+      {chat && <div className="contents max-xl:hidden">
+        <Resizer side="right" />
+        <Pane side="right"><aside className="h-full w-full overflow-hidden rounded-[22px] bg-card shadow-[var(--shadow-sheet)]">
+          <TodayPanel onClose={() => togglePane('right', false)} />
+        </aside></Pane>
+      </div>}
     </main>
     <TaskDrawer />
     <TodayDrawer />
@@ -85,7 +95,6 @@ function Shell({ authed, children }: { authed: boolean; children: React.ReactNod
   return <>{authed && children}</>
 }
 
-const BRAND = '#2b3cff'
 
 function Splash() {
   return <div className="flex h-dvh flex-col items-center justify-center gap-4 text-sm text-muted">

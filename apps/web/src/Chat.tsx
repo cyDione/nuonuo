@@ -5,7 +5,7 @@
  * panel's task details, never in the timeline.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlarmClock, AlertTriangle, ArrowUp, ArrowUpRight, ExternalLink } from 'lucide-react'
+import { AlarmClock, AlertTriangle, ArrowDown, ArrowUp, ArrowUpRight, Check, Copy, ExternalLink } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -17,6 +17,8 @@ import { go } from './route'
 import { NeedsYou, needsOwner, useTickets, WorkingLine } from './tasks'
 import { SOURCE_LABEL, SourceIcon } from './icons'
 import { cx } from './ui'
+import { TopBar } from './shell'
+import { TodayToggle } from './Today'
 
 /** A message typed on the empty screen, sent once the new conversation's page mounts. */
 let pendingSend: { id: string; content: string } | undefined
@@ -50,7 +52,13 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const last = messages.at(-1)
   const thinking = routerBusy && last?.role === 'user' && !draft
 
-  useLayoutEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }) }, [messages.length, draft?.text, thinking, asks.length])
+  // Follows new messages while you are at the bottom; if you scrolled up to read, a 新消息 button appears instead.
+  const atBottom = useRef(true)
+  const [behind, setBehind] = useState(false)
+  const toBottom = (smooth?: boolean) => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' }); setBehind(false) }
+  useLayoutEffect(() => { if (atBottom.current || last?.role === 'user') toBottom(); else setBehind(true) }, [messages.length, draft?.text, thinking, asks.length])
+  useEffect(() => { atBottom.current = true; toBottom() }, [id])
+  const onScroll = () => { const el = scrollRef.current; if (!el) return; atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; if (atBottom.current) setBehind(false) }
 
   async function send(content: string, replyTo?: string) {
     setError(null)
@@ -88,19 +96,22 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const external = current && current.source !== 'webchat'
 
   return <div className="flex h-full flex-col">
-    {!main && thread.data && <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-5 md:pr-20 md:pl-6">
-      {external ? <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-sunken text-muted"><SourceIcon source={current!.source} size={15} /></span>
-        : <span className="size-2.5 shrink-0 rounded-full" style={{ background: topicColor(id!) }} />}
-      <h1 className="min-w-0 flex-1 truncate font-display text-[15px] font-semibold">{title}</h1>
-      {current?.meta.url && <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg">
-        在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>}
-    </header>}
+    <TopBar className={cx('md:px-4', !main && thread.data ? 'border-b border-line' : 'max-md:hidden')} right={<TodayToggle className="max-md:hidden" />}>
+      {!main && thread.data && <>
+        {external ? <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-sunken text-muted"><SourceIcon source={current!.source} size={14} /></span>
+          : <span className="size-2.5 shrink-0 rounded-full" style={{ background: topicColor(id!) }} />}
+        <h1 className="min-w-0 flex-1 truncate font-display text-[15px] font-semibold">{title}</h1>
+        {current?.meta.url && <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg">
+          在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>}
+      </>}
+    </TopBar>
     {noRouter && <div className="mx-auto mt-4 w-full max-w-3xl px-4 md:px-6"><div className="anim-rise flex items-center gap-3 rounded-2xl bg-warn-soft px-4 py-3 text-sm">
       <AlertTriangle size={16} className="shrink-0 text-warn" />
       <span className="flex-1">还没有配置模型</span>
       <a className="press shrink-0 rounded-full bg-ink px-3 py-1.5 text-xs font-medium text-ink-fg" href="#/settings/providers">去设置</a>
     </div></div>}
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+    <div className="relative min-h-0 flex-1">
+    <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
       {empty ? <Welcome onPick={t => { setText(t); requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(t.length, t.length) } }) }} disabled={Boolean(noRouter)} main={Boolean(main)} mood={status.tone} /> :
         <div className="mx-auto max-w-3xl space-y-3.5 px-4 pt-6 pb-4 md:px-8 md:pt-8">
           {messages.map((m, i) => <Item key={m.id} m={m} fresh={m.createdAt > mountedAt} first={messages[i - 1]?.role !== m.role || Boolean(messages[i - 1]?.meta.source && messages[i - 1]!.meta.source !== 'webchat')} />)}
@@ -108,6 +119,8 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
           {thinking && <Bubble first fresh mood="thinking"><Typing /></Bubble>}
           {asks.map(t => <div key={t.id} className="anim-rise pl-[42px]"><NeedsYou t={t} onAnswer={(text, ticketId) => send(text, ticketId)} /></div>)}
         </div>}
+    </div>
+    {behind && <button onClick={() => toBottom(true)} className="anim-pop press absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-ink-fg shadow-lg"><ArrowDown size={13} />新消息</button>}
     </div>
     {error && <div className="mx-auto w-full max-w-3xl px-4 md:px-6"><div className="anim-rise rounded-2xl bg-danger/10 px-4 py-2.5 text-sm text-danger">{error}</div></div>}
     <Composer text={text} setText={setText} inputRef={inputRef} onSend={value => send(value)} disabled={Boolean(noRouter)} status={<WorkingLine tickets={working} />}
@@ -121,7 +134,7 @@ function Typing() {
   </div>
 }
 
-const SUGGESTIONS: [string, string][] = [['每天 9 点整理 HN 热门', '#1fb37a'], ['周五下午提醒我交周报', '#ef6aa8'], ['比较几款降噪耳机', '#f2b632'], ['起草一封请假邮件', '#2f6bff'], ['总结今天的未读消息', '#7b4fe0']]
+const SUGGESTIONS: [string, string][] = [['每天 9 点整理 HN 热门', '#13857a'], ['周五下午提醒我交周报', '#d2535a'], ['比较几款降噪耳机', '#f2b632'], ['起草一封请假邮件', '#7e8a6e'], ['总结今天的未读消息', '#d9772e']]
 const TILT = [-3, 2, -1.5, 1.5, -2]
 
 function Welcome({ onPick, disabled, main, mood }: { onPick(text: string): void; disabled: boolean; main: boolean; mood: 'idle' | 'working' | 'waiting' }) {
@@ -176,11 +189,13 @@ function Item({ m, first, fresh }: { m: Message; first: boolean; fresh: boolean 
       <div className="prose-chat text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
     </div>
   </div>
-  if (m.role === 'user') return <div className={cx('flex justify-end', fresh && 'anim-send')}>
-    <div className="max-w-[85%] rounded-[22px] rounded-br-md bg-accent px-4 py-2.5 text-[15px] whitespace-pre-wrap text-accent-fg">{m.content}</div>
+  if (m.role === 'user') return <div className={cx('msg flex flex-col items-end', fresh && 'anim-send')}>
+    <div className="selectable max-w-[85%] rounded-[22px] rounded-br-md bg-accent px-4 py-2.5 text-[15px] whitespace-pre-wrap text-accent-fg">{m.content}</div>
+    <MsgActions m={m} />
   </div>
-  return <div className="space-y-1.5">
+  return <div className="msg space-y-1.5">
     <Bubble first={first} fresh={fresh}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div></Bubble>
+    <div className="pl-[42px]"><MsgActions m={m} /></div>
     {m.meta.error && <div className="flex items-center gap-1 pl-[42px] text-xs text-danger"><AlertTriangle size={12} />{m.meta.error}</div>}
     {m.meta.via && <div className="flex items-center gap-1 pl-[42px] text-[11px] text-faint">
       <SourceIcon source={m.meta.via} size={11} />
@@ -188,6 +203,16 @@ function Item({ m, first, fresh }: { m: Message; first: boolean; fresh: boolean 
         : m.meta.delivery === 'pending' ? '发送中…'
         : <span className="text-danger">{m.meta.delivery === 'dropped' ? '没能发出去' : '发送失败，稍后重试'}{m.meta.deliveryError ? `：${m.meta.deliveryError}` : ''}</span>}
     </div>}
+  </div>
+}
+
+/** Under a message on hover: copy it, and when it was sent. */
+function MsgActions({ m }: { m: Message }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => { void navigator.clipboard?.writeText(m.content).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) }) }
+  return <div className="msg-actions -mb-2 flex h-6 items-center gap-1 text-[11px] text-faint">
+    <button onClick={copy} aria-label="复制" title="复制" className="press flex size-6 items-center justify-center rounded-md hover:bg-sunken hover:text-fg">{copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />}</button>
+    <span className="tabular-nums">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
   </div>
 }
 

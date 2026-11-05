@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
 
-export type Route = { page: 'chat'; id?: string; main?: boolean } | { page: 'activity' } | { page: 'library' } | { page: 'settings'; tab: SettingsTab; item?: string }
+export type MeTab = 'persona' | 'soul' | 'memory'
+export type Route = { page: 'chat'; id?: string; main?: boolean } | { page: 'activity' } | { page: 'library' } | { page: 'settings'; tab: SettingsTab; item?: string } | { page: 'me'; tab: MeTab } | { page: 'quick' }
 export type SettingsTab = 'persona' | 'providers' | 'roles' | 'instructions' | 'proactive' | 'sources' | 'plugins' | 'mcp' | 'routines' | 'review' | 'memory' | 'execution' | 'usage' | 'system'
 
 function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/')
+  if (parts[0] === 'me') return { page: 'me', tab: (['persona', 'soul', 'memory'] as const).find(t => t === parts[1]) ?? 'persona' }
+  if (parts[0] === 'quick') return { page: 'quick' }
+  // Who the assistant is moved out of settings into its own page.
+  if (parts[0] === 'settings' && (parts[1] === 'persona' || parts[1] === 'instructions' || parts[1] === 'memory')) return { page: 'me', tab: parts[1] === 'instructions' ? 'soul' : parts[1] }
   if (parts[0] === 'settings') {
     const tab = (['persona', 'providers', 'roles', 'instructions', 'proactive', 'sources', 'plugins', 'mcp', 'routines', 'review', 'memory', 'execution', 'usage', 'system'] as const).find(t => t === parts[1]) ?? 'persona'
     return parts[2] ? { page: 'settings', tab, item: decodeURIComponent(parts[2]) } : { page: 'settings', tab }

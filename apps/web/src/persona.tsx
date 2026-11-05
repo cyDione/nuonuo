@@ -1,15 +1,21 @@
 /** The assistant's name, face and status line. */
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, type Persona, type Ticket } from './api'
 import { cx } from './ui'
 
 export const MASCOT = 'mascot'
-const FALLBACK: Persona = { name: '小助', avatar: MASCOT, color: '#2f6bff', personality: '' }
+/** Mochi's own colour (暖杏 Apricot): reads on both the light and the dark window (Figma "v4 · 主题色"). */
+export const BRAND = '#e9845a'
+const FALLBACK: Persona = { name: '小助', avatar: MASCOT, color: BRAND, personality: '' }
+// Earlier default colours, which read too dark on the dark theme: shown as the current brand blue.
+const OLD_DEFAULTS = new Set(['#4f46e5', '#2f6bff', '#2b4bff', '#2b3cff', '#5c7bff', '#7d8bf0'])
 
 export const usePersona = () => {
   const p = useQuery({ queryKey: ['persona'], queryFn: () => api.get<{ persona: Persona }>('/persona'), staleTime: 60_000 }).data?.persona
-  return !p ? FALLBACK : p.avatar === '✨' && p.color === '#4f46e5' ? { ...p, avatar: MASCOT, color: FALLBACK.color } : p
+  if (!p) return FALLBACK
+  const avatar = p.avatar === '✨' ? MASCOT : p.avatar
+  return avatar !== p.avatar || OLD_DEFAULTS.has(p.color.toLowerCase()) ? { ...p, avatar, color: OLD_DEFAULTS.has(p.color.toLowerCase()) ? BRAND : p.color } : p
 }
 
 export const isMascot = (p: Persona) => !p.avatar || p.avatar === MASCOT || p.avatar === '✨'
@@ -25,12 +31,29 @@ export function Avatar({ persona, size = 28, className, mood = 'idle', track }: 
   </span>
 }
 
-const INK = '#121212'
+const INK = '#14152B'
+const SUN = '#FFC23D'
+const BLUSH = '#FF7A9C'
+const BODY = 'M50 18 C72 18 86 31 86 55 C86 75 71 85 50 85 C29 85 14 75 14 55 C14 31 28 18 50 18 Z'
+const STAR = 'M74 9 C75.6 16.4 75.6 16.4 83 18 C75.6 19.6 75.6 19.6 74 27 C72.4 19.6 72.4 19.6 65 18 C72.4 16.4 72.4 16.4 74 9 Z'
 
-/** The default face: a small cloud whose expression follows its mood. */
+/**
+ * The assistant: a soft mochi with a star tucked on its head (Figma "v4 · 标志与角色", option A). Its face follows its mood;
+ * with `track` its eyes follow the pointer. A mood change blinks first, so the new face never just snaps in.
+ */
 export function Mascot({ color, size = 28, mood = 'idle', className, track }: { color: string; size?: number; mood?: Mood; className?: string; track?: boolean }) {
   const eyes = useRef<SVGGElement>(null)
   const root = useRef<SVGSVGElement>(null)
+  const [shown, setShown] = useState(mood)
+  const [blink, setBlink] = useState(false)
+  useEffect(() => {
+    if (mood === shown) return
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { setShown(mood); return }
+    setBlink(true)
+    const t1 = setTimeout(() => setShown(mood), 90)
+    const t2 = setTimeout(() => setBlink(false), 180)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [mood])
   useEffect(() => {
     if (!track || matchMedia('(prefers-reduced-motion: reduce)').matches) return
     let frame = 0
@@ -43,49 +66,46 @@ export function Mascot({ color, size = 28, mood = 'idle', className, track }: { 
         const dx = e.clientX - (box.left + box.width / 2), dy = e.clientY - (box.top + box.height * 0.55)
         const d = Math.hypot(dx, dy) || 1
         const k = Math.min(1, d / 260)
-        eyes.current.style.transform = `translate(${(dx / d) * 4 * k}px, ${(dy / d) * 3.2 * k}px)`
+        eyes.current.style.transform = `translate(${(dx / d) * 3.4 * k}px, ${(dy / d) * 2.6 * k}px)`
       })
     }
     addEventListener('pointermove', onMove)
     return () => { removeEventListener('pointermove', onMove); cancelAnimationFrame(frame) }
   }, [track])
 
-  const closed = mood === 'happy' || mood === 'sleepy'
+  const m = shown
+  const closed = m === 'happy' || m === 'sleepy'
   const line = { stroke: INK, strokeWidth: 2.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' }
-  return <svg ref={root} viewBox="0 0 100 100" width={size} height={size} className={cx('mascot shrink-0 overflow-visible', className)} data-mood={mood} aria-hidden>
-    <ellipse cx="50" cy="94" rx="27" ry="3.2" fill="currentColor" opacity="0.08" />
-    {mood === 'working' && <g className="m-orbit"><circle cx="50" cy="8" r="3.6" fill="var(--sun)" /></g>}
+  const look = m === 'thinking' ? 'translate(2.2px, -2.4px)' : m === 'listening' ? 'translate(-1px, 1.5px)' : undefined
+  return <svg ref={root} viewBox="0 0 100 100" width={size} height={size} className={cx('mascot shrink-0 overflow-visible', className)} data-mood={m} data-blink={blink || undefined} aria-hidden>
+    <ellipse className="m-shadow" cx="50" cy="93" rx="28" ry="3.4" fill="currentColor" opacity="0.08" />
     <g className="m-body">
-      <g className="m-sprout"><path d="M55 27 C53 19 56 12 62 12 C68 12 68 19 63 20 C58 21 58 13 64 8 C67 6 71 6 73 8" {...line} strokeWidth={2.4} /></g>
-      <g fill={color}>
-        <ellipse cx="50" cy="64" rx="35" ry="27" />
-        <circle cx="31" cy="48" r="17" /><circle cx="52" cy="38" r="19" /><circle cx="71" cy="49" r="16" />
-      </g>
-      <g style={{ fill: `color-mix(in oklab, ${color} 78%, #000)` }}>
-        <ellipse cx="20" cy="73" rx="6.5" ry="9" transform="rotate(28 20 73)" />
-        {mood === 'waiting' ? <g className="m-wave"><ellipse cx="85" cy="52" rx="6" ry="10" transform="rotate(-30 85 52)" /></g>
-          : <ellipse cx="80" cy="73" rx="6.5" ry="9" transform="rotate(-28 80 73)" />}
-      </g>
-      {closed ? <g {...line}>
-        {mood === 'happy' ? <><path d="M38 57 Q42 51 46 57" /><path d="M54 57 Q58 51 62 57" /></>
-          : <><path d="M38 56 Q42 60 46 56" /><path d="M54 56 Q58 60 62 56" /></>}
-      </g> : <g className="m-look"><g ref={eyes} className="m-pupils" style={mood === 'thinking' ? { transform: 'translate(3px, -3px)' } : mood === 'listening' ? { transform: 'translate(-2px, 3px)' } : undefined}>
-        <g className="m-eye"><ellipse cx="43" cy="55" rx="3" ry="4.6" fill={INK} /></g>
-        <g className="m-eye"><ellipse cx="57" cy="55" rx="3" ry="4.6" fill={INK} /></g>
-      </g></g>}
-      {mood === 'happy' ? <path d="M42 65 Q50 75 58 65 Z" fill={INK} stroke={INK} strokeWidth="1.6" strokeLinejoin="round" />
-        : mood === 'waiting' ? <ellipse cx="50" cy="68" rx="3.2" ry="3.8" fill={INK} />
-        : mood === 'thinking' ? <path d="M47 68 Q51 66 55 68" {...line} />
-        : mood === 'sleepy' ? <path d="M46 68 L54 68" {...line} />
-        : mood === 'listening' ? <ellipse cx="50" cy="67.5" rx="4" ry="2.6" fill={INK} />
-        : <path d="M43 65 Q50 72 57 64 M57 64 L59 62.5" {...line} />}
+      <path d={BODY} fill={color} />
+      <path d="M16 60 C17 76 31 85 50 85 C69 85 83 76 84 60 C80 74 67 80 50 80 C33 80 20 74 16 60 Z" fill="#000" opacity="0.12" />
+      <ellipse cx="33" cy="33" rx="9" ry="5" transform="rotate(-28 33 33)" fill="#fff" opacity="0.28" />
+      {closed ? <g {...line} strokeWidth={3.3}>
+        {m === 'happy' ? <><path d="M35 56 Q39.5 49.4 44 56" /><path d="M56 56 Q60.5 49.4 65 56" /></>
+          : <><path d="M35 55 Q39.5 59.5 44 55" /><path d="M56 55 Q60.5 59.5 65 55" /></>}
+      </g> : <g className="m-look"><g ref={eyes} className="m-pupils"><g style={look ? { transform: look } : undefined} className="m-pupils">
+        <g className="m-eye"><ellipse cx="39.5" cy="55" rx="3.8" ry="5.6" fill={INK} /><circle cx="40.7" cy="53" r="1.2" fill="#fff" /></g>
+        <g className="m-eye"><ellipse cx="60.5" cy="55" rx="3.8" ry="5.6" fill={INK} /><circle cx="61.7" cy="53" r="1.2" fill="#fff" /></g>
+      </g></g></g>}
+      {m === 'happy' ? <path d="M45 65.5 Q50 72.5 55 65.5 Z" fill={INK} />
+        : m === 'waiting' ? <ellipse cx="50" cy="67.5" rx="2.4" ry="3" fill={INK} />
+        : m === 'thinking' ? <path d="M47 67.5 Q51 65.5 54 67.5" {...line} />
+        : m === 'sleepy' ? <path d="M47.5 67.5 L52.5 67.5" {...line} />
+        : m === 'listening' ? <ellipse cx="50" cy="67" rx="3.4" ry="2.4" fill={INK} />
+        : <path d="M46 65.5 Q50 70 54 65.5" {...line} />}
+      <ellipse cx="29" cy="65" rx="5" ry="3" fill={BLUSH} opacity="0.55" />
+      <ellipse cx="71" cy="65" rx="5" ry="3" fill={BLUSH} opacity="0.55" />
     </g>
-    {mood === 'waiting' && <g className="anim-pop">
-      <circle cx="86" cy="24" r="10" fill="var(--sun)" />
-      <path d="M86 18 L86 25" stroke={INK} strokeWidth="3" strokeLinecap="round" /><circle cx="86" cy="29.6" r="1.8" fill={INK} />
+    {(m === 'idle' || m === 'happy' || m === 'working') && <path className="m-star" d={STAR} fill={SUN} />}
+    {m === 'waiting' && <g className="anim-pop">
+      <circle cx="82" cy="22" r="8.5" fill={SUN} />
+      <path d="M82 17.5 L82 23" stroke={INK} strokeWidth="2.6" strokeLinecap="round" /><circle cx="82" cy="26.4" r="1.5" fill={INK} />
     </g>}
-    {mood === 'thinking' && <g fill="currentColor"><circle className="m-dot" cx="82" cy="26" r="3" /><circle className="m-dot" cx="89" cy="18" r="3.6" /><circle className="m-dot" cx="97" cy="9" r="4.2" /></g>}
-    {mood === 'sleepy' && <text x="80" y="22" fontSize="16" fontWeight="700" fill="currentColor" opacity="0.55" fontFamily="var(--font-display)">z</text>}
+    {m === 'thinking' && <g fill="currentColor"><circle className="m-dot" cx="76" cy="28" r="2.2" /><circle className="m-dot" cx="82" cy="22" r="3" /><circle className="m-dot" cx="89" cy="15" r="3.8" /></g>}
+    {m === 'sleepy' && <path className="m-z" d="M78 14 H86 L78 22 H86" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.5" />}
   </svg>
 }
 

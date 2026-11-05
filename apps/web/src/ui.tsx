@@ -1,6 +1,6 @@
 /** Small shared controls built on the theme tokens in index.css. */
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
 
 const cx = (...parts: (string | false | undefined | null)[]) => parts.filter(Boolean).join(' ')
 export { cx }
@@ -45,14 +45,23 @@ export function Card({ className, children }: { className?: string; children: Re
   return <div className={cx('rounded-[20px] border border-line bg-card', className)}>{children}</div>
 }
 
-export function Modal({ title, onClose, children, footer }: { title: string; onClose(): void; children: ReactNode; footer?: ReactNode }) {
+export function Modal({ title, onClose: done, children, footer }: { title: string; onClose(): void; children: ReactNode; footer?: ReactNode }) {
+  // Dismissing (Esc, the backdrop, ✕) shrinks the dialog away before it unmounts.
+  const [leaving, setLeaving] = useState(false)
+  const latest = useRef(done)
+  latest.current = done
+  const onClose = () => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return latest.current()
+    setLeaving(true)
+    setTimeout(() => latest.current(), 150)
+  }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
-  }, [onClose])
-  return <div className="anim-fade fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4 " onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-    <div role="dialog" aria-modal="true" aria-label={title} className="anim-pop w-full max-w-lg rounded-3xl border border-line bg-panel shadow-2xl">
+  }, [])
+  return <div className={cx('anim-fade fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4', leaving && 'out-fade')} onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+    <div role="dialog" aria-modal="true" aria-label={title} className={cx('anim-pop w-full max-w-lg rounded-3xl border border-line bg-panel shadow-2xl', leaving && 'out-pop')}>
       <div className="flex items-center justify-between px-6 pt-5 pb-3">
         <h2 className="font-display text-lg font-semibold">{title}</h2>
         <IconButton label="关闭" onClick={onClose}><X size={18} /></IconButton>

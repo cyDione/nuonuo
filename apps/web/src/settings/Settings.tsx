@@ -1,4 +1,6 @@
-import { Activity, AlarmClock, Brain, Cpu, KeyRound, NotebookPen, Play, Plug, Puzzle, Server, ShieldCheck, Smile, Sparkles, Stethoscope } from 'lucide-react'
+import { Activity, AlarmClock, Cpu, KeyRound, Play, Plug, Puzzle, Server, ShieldCheck, Sparkles, Stethoscope } from 'lucide-react'
+import { Heart } from 'lucide-react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { SettingsTab } from '../route'
 import { cx } from '../ui'
 import { Providers } from './Providers'
@@ -8,21 +10,15 @@ import { Usage } from './Usage'
 import { Execution } from './Execution'
 import { Routines } from './Routines'
 import { Review } from './Review'
-import { MemoryPage } from './MemoryPage'
 import { Plugins } from './Plugins'
 import { Mcp } from './Mcp'
 import { Sources } from './Sources'
-import { InstructionsPage } from './Instructions'
 import { ProactivePage } from './Proactive'
-import { PersonaPage } from './PersonaPage'
 
 type Tab = { id: SettingsTab; label: string; icon: React.ReactNode; intro: string }
 /** Settings grouped by what they are about: the assistant itself, what it does on a schedule, what it connects to, how it is kept safe, which models it runs on. */
 const GROUPS: { title: string; tabs: Tab[] }[] = [
   { title: '助手', tabs: [
-    { id: 'persona', label: '个性', icon: <Smile size={15} />, intro: '它的名字、头像和说话的样子。' },
-    { id: 'instructions', label: '说明', icon: <NotebookPen size={15} />, intro: '你给它的长期说明：怎么跟你说话、哪些事可以自己做、交付时要带上什么。每次修改都存成新版本，可以随时恢复。对它说「以后……」它也会自己记到这里。' },
-    { id: 'memory', label: '记忆', icon: <Brain size={15} />, intro: '它记住的关于你、关于各个项目的事。你的原话直接记住；从别人那里看到的、或者它不太确定的，先放进「等你确认」。对话安静一会儿后，它会自动从对话里整理值得记住的事。' },
     { id: 'proactive', label: '主动', icon: <Sparkles size={15} />, intro: '没人找它的事件（GitHub 上的新 issue、CI 失败、群里的消息……）先过程序规则，再由过滤层模型按你写的策略判断值不值得做。值得做的在后台悄悄做，有价值才在主对话里告诉你。' },
   ] },
   { title: '自动化', tabs: [
@@ -49,16 +45,26 @@ const GROUPS: { title: string; tabs: Tab[] }[] = [
 const TABS = GROUPS.flatMap(g => g.tabs)
 
 export function Settings({ tab, item }: { tab: SettingsTab; item?: string }) {
-  const current = TABS.find(t => t.id === tab) ?? TABS[0]!
+  const current = TABS.find(t => t.id === tab) ?? TABS.find(t => t.id === 'providers')!
+  // The block that slides to the open section, like the sidebar's.
+  const navRef = useRef<HTMLElement>(null)
+  const [mark, setMark] = useState<{ y: number; h: number } | null>(null)
+  useLayoutEffect(() => {
+    const nav = navRef.current, el = nav?.querySelector<HTMLElement>('[aria-current="page"]')
+    setMark(nav && el ? { y: el.getBoundingClientRect().top - nav.getBoundingClientRect().top + nav.scrollTop, h: el.offsetHeight } : null)
+  }, [current.id])
   return <div className="flex h-full">
-    <nav className="w-56 shrink-0 space-y-5 overflow-y-auto border-r border-line px-3 py-6 max-md:hidden" aria-label="设置">
+    <nav ref={navRef} className="relative w-56 shrink-0 space-y-5 overflow-y-auto border-r border-line px-3 pt-4 pb-6 max-md:hidden" aria-label="设置">
+      {mark && <span className="nav-indicator pointer-events-none absolute right-3 left-3 top-0 rounded-xl bg-sunken" style={{ transform: `translateY(${mark.y}px)`, height: mark.h }} aria-hidden />}
       <h1 className="px-2 font-display text-2xl font-semibold">设置</h1>
-      {GROUPS.map(g => <div key={g.title}>
+      {GROUPS.map(g => <div key={g.title} className="relative">
         <div className="eyebrow px-2 pb-1.5">{g.title}</div>
-        {g.tabs.map(t => <a key={t.id} href={`#/settings/${t.id}`} aria-current={t.id === current.id ? 'page' : undefined} className={cx('press flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm',
-          t.id === current.id ? 'bg-sunken font-medium text-fg' : 'text-muted hover:bg-sunken/60 hover:text-fg')}>
-          <span className={cx('shrink-0', t.id === current.id && 'text-accent')}>{t.icon}</span>{t.label}</a>)}
+        {g.tabs.map(t => <a key={t.id} href={`#/settings/${t.id}`} aria-current={t.id === current.id ? 'page' : undefined} className={cx('press relative flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm',
+          t.id === current.id ? 'font-medium text-fg' : 'text-muted hover:bg-sunken/60 hover:text-fg')}>
+          <span className={cx('shrink-0 transition-colors duration-200', t.id === current.id && 'text-accent')}>{t.icon}</span>{t.label}</a>)}
       </div>)}
+      <div className="relative"><div className="eyebrow px-2 pb-1.5">它</div>
+        <a href="#/me" className="press flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm text-muted hover:bg-sunken/60 hover:text-fg"><Heart size={15} />个性、灵魂和记忆</a></div>
     </nav>
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-4xl space-y-5 px-4 py-6 md:px-8 md:py-8">
@@ -69,9 +75,6 @@ export function Settings({ tab, item }: { tab: SettingsTab; item?: string }) {
           <h2 className="font-display text-3xl font-semibold text-balance">{current.label}</h2>
         </header>}
         <div key={`${current.id}/${item ?? ''}`} className="anim-rise space-y-4 [animation-delay:40ms]">
-          {tab === 'persona' && <PersonaPage />}
-          {tab === 'instructions' && <InstructionsPage />}
-          {tab === 'memory' && <MemoryPage />}
           {tab === 'proactive' && <ProactivePage />}
           {tab === 'routines' && <Routines />}
           {tab === 'sources' && <Sources {...(item ? { item } : {})} />}
