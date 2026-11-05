@@ -74,13 +74,13 @@ export function ArtifactModal({ id, name, onClose }: { id: string; name: string;
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
   }, [onClose])
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-    <div className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-2xl border border-line bg-panel shadow-xl">
+  return <div className="anim-fade fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4 " onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+    <div role="dialog" aria-modal="true" aria-label={name} className="anim-pop flex max-h-[92vh] w-full max-w-4xl flex-col rounded-3xl border border-line bg-panel shadow-2xl">
       <div className="flex items-center gap-2 border-b border-line px-5 py-3">
-        <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
-        <a href={url(id)} target="_blank" rel="noreferrer" className="rounded p-1 text-faint hover:text-fg" title="新窗口打开"><ExternalLink size={16} /></a>
-        <a href={`${url(id)}?download=1`} className="rounded p-1 text-faint hover:text-fg" title="下载"><Download size={16} /></a>
-        <button onClick={onClose} className="rounded p-1 text-faint hover:text-fg" aria-label="关闭"><X size={18} /></button>
+        <span className="min-w-0 flex-1 truncate font-display font-semibold">{name}</span>
+        <a href={url(id)} target="_blank" rel="noreferrer" className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title="新窗口打开" aria-label="新窗口打开"><ExternalLink size={16} /></a>
+        <a href={`${url(id)}?download=1`} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title="下载" aria-label="下载"><Download size={16} /></a>
+        <button onClick={onClose} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" aria-label="关闭"><X size={18} /></button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-5"><ArtifactBody id={id} name={name} /></div>
     </div>

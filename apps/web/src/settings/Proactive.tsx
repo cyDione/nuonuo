@@ -30,7 +30,7 @@ export function ProactivePage() {
     </Card>
     <Card className="space-y-3 p-4">
       <Field label="策略（用你自己的话写：什么值得做、什么别管）" hint="过滤层模型照着它判断每一个没人找我的事件。对智能体说「以后 CI 挂了你先看看」也会更新这里。">
-        <textarea className="min-h-36 w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm leading-6 outline-none focus:border-accent"
+        <textarea className="min-h-36 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm leading-6 outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none"
           value={form.strategy} onChange={e => setForm({ ...form, strategy: e.target.value })} />
       </Field>
       <div className="space-y-1.5">

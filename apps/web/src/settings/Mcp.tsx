@@ -40,7 +40,7 @@ export function Mcp() {
           </> : <Field label="URL"><Input className="font-mono text-xs" value={s.url ?? ''} onChange={e => set(i, { url: e.target.value })} placeholder="https://…/mcp" /></Field>}
         </div>
         <Field label={s.transport === 'stdio' ? '环境变量（每行 KEY=VALUE）' : '请求头（每行 Name=Value）'} hint="值可以写成 ${NAME}，从本机服务的环境变量读取，不必把密钥写进设置。">
-          <textarea className="min-h-16 w-full rounded-lg border border-line bg-panel px-3 py-2 font-mono text-xs outline-none focus:border-accent"
+          <textarea className="min-h-16 w-full rounded-xl border border-line bg-panel px-3 py-2 font-mono text-xs outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none"
             value={kv(s.transport === 'stdio' ? s.env : s.headers)} onChange={e => set(i, s.transport === 'stdio' ? { env: parseKv(e.target.value) } : { headers: parseKv(e.target.value) })} />
         </Field>
         <div className="flex flex-wrap gap-4 text-sm">

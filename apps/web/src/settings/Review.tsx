@@ -5,7 +5,7 @@ import { Badge, Button, Card, Field, Select, cx } from '../ui'
 
 const lines = (v: string) => v.split('\n').map(s => s.trim()).filter(Boolean)
 const Area = ({ value, onChange, placeholder, mono }: { value: string[]; onChange(v: string[]): void; placeholder?: string; mono?: boolean }) =>
-  <textarea className={cx('min-h-24 w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm outline-none focus:border-accent', mono && 'font-mono text-xs')}
+  <textarea className={cx('min-h-24 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none', mono && 'font-mono text-xs')}
     value={value.join('\n')} placeholder={placeholder} onChange={e => onChange(lines(e.target.value))} />
 
 export function Review() {

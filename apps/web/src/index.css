@@ -1,9 +1,15 @@
 @import "tailwindcss";
+@import "@fontsource-variable/geist";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * Visual language: a clean, quiet workspace (neutral #FAFAFA sheets, ink type, one cobalt accent) with a friendly
+ * character for the assistant, drawn in the owner's chosen colour.
+ */
 @theme {
-  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  --font-sans: "Geist Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  --font-display: "Geist Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, "JetBrains Mono", monospace;
   --color-bg: var(--bg);
   --color-panel: var(--panel);
@@ -12,50 +18,159 @@
   --color-fg: var(--fg);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
+  --color-ink: var(--ink);
+  --color-ink-fg: var(--ink-fg);
   --color-accent: var(--accent);
   --color-accent-fg: var(--accent-fg);
   --color-accent-soft: var(--accent-soft);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
   --color-danger: var(--danger);
+  --color-lime: var(--lime);
+  --color-coral: var(--coral);
+  --color-sun: var(--sun);
+  --color-sky: var(--sky);
+  --color-grape: var(--grape);
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 :root {
-  --bg: #f7f7f8; --panel: #ffffff; --sunken: #f0f0f2; --line: #e4e4e8;
-  --fg: #18181b; --muted: #52525b; --faint: #a1a1aa;
-  --accent: #4f46e5; --accent-fg: #ffffff; --accent-soft: #eef2ff;
-  --ok: #15803d; --warn: #b45309; --danger: #dc2626;
+  --bg: #ececec; --panel: #fafafa; --sunken: #f0f0f0; --line: #e4e4e4;
+  --fg: #121212; --muted: #555555; --faint: #8e8e8e;
+  --ink: #121212; --ink-fg: #fafafa;
+  --accent: #012fda; --accent-fg: #ffffff; --accent-soft: #e6ebfd;
+  --ok: #15803d; --warn: #b45309; --warn-soft: #fdf1dc; --danger: #d12c2c;
+  --lime: #1fb37a; --coral: #ef6aa8; --sun: #f2b632; --sky: #2f7cf6; --grape: #7b4fe0;
+  --glow: rgb(1 47 218 / 0.16);
+  --scrim: rgb(18 18 18 / 0.28);
+  --shadow-sheet: 0 1px 0 rgb(18 18 18 / 0.03), 0 10px 30px -14px rgb(18 18 18 / 0.14);
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f0f12; --panel: #17171b; --sunken: #1e1e23; --line: #2a2a31;
-    --fg: #ececf1; --muted: #a1a1aa; --faint: #63636e;
-    --accent: #818cf8; --accent-fg: #0f0f12; --accent-soft: #1e1b4b;
-    --ok: #4ade80; --warn: #fbbf24; --danger: #f87171;
+    --bg: #0a0a0a; --panel: #141414; --sunken: #1c1c1c; --line: #2a2a2a;
+    --fg: #f2f2f2; --muted: #a8a8a8; --faint: #6e6e6e;
+    --ink: #f2f2f2; --ink-fg: #121212;
+    --accent: #6f8bff; --accent-fg: #0a0a0a; --accent-soft: #141d45;
+    --ok: #4ade80; --warn: #fbbf24; --warn-soft: #2e2410; --danger: #f87171;
+    --lime: #2fc58b; --coral: #f17db3; --sun: #f2b632; --sky: #5b97f8; --grape: #9b77f0;
+    --glow: rgb(80 110 255 / 0.18);
+    --scrim: rgb(0 0 0 / 0.6);
+    --shadow-sheet: 0 0 0 1px rgb(255 255 255 / 0.03), 0 12px 32px -16px rgb(0 0 0 / 0.6);
+    color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f0f12; --panel: #17171b; --sunken: #1e1e23; --line: #2a2a31;
-  --fg: #ececf1; --muted: #a1a1aa; --faint: #63636e;
-  --accent: #818cf8; --accent-fg: #0f0f12; --accent-soft: #1e1b4b;
-  --ok: #4ade80; --warn: #fbbf24; --danger: #f87171;
+  --bg: #0a0a0a; --panel: #141414; --sunken: #1c1c1c; --line: #2a2a2a;
+  --fg: #f2f2f2; --muted: #a8a8a8; --faint: #6e6e6e;
+  --ink: #f2f2f2; --ink-fg: #121212;
+  --accent: #6f8bff; --accent-fg: #0a0a0a; --accent-soft: #141d45;
+  --ok: #4ade80; --warn: #fbbf24; --warn-soft: #2e2410; --danger: #f87171;
+  --lime: #2fc58b; --coral: #f17db3; --sun: #f2b632; --sky: #5b97f8; --grape: #9b77f0;
+  --glow: rgb(80 110 255 / 0.18);
+  --scrim: rgb(0 0 0 / 0.6);
+  --shadow-sheet: 0 0 0 1px rgb(255 255 255 / 0.03), 0 12px 32px -16px rgb(0 0 0 / 0.6);
+  color-scheme: dark;
 }
 
-html, body, #root { height: 100%; }
-body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+@layer base {
+  html, body, #root { height: 100%; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--accent-soft); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+}
 
-.prose-chat { line-height: 1.7; word-break: break-word; }
+.sheet { background: var(--panel); box-shadow: var(--shadow-sheet); }
+
+.eyebrow { font-family: var(--font-display); font-size: 11px; font-weight: 500; text-transform: uppercase; color: var(--faint); }
+.dot-grid {
+  background-image: radial-gradient(circle at 1px 1px, color-mix(in oklab, var(--fg) 9%, transparent) 1px, transparent 0);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 30%, transparent 75%);
+}
+
+.press { transition: transform 160ms var(--ease-out-strong), background-color 150ms ease, color 150ms ease, border-color 150ms ease, opacity 150ms ease; }
+.press:active:not(:disabled) { transform: scale(0.97); }
+
+.prose-chat { line-height: 1.7; word-break: break-word; text-wrap: pretty; }
 .prose-chat > * + * { margin-top: 0.6em; }
 .prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin-top: 1em; }
 .prose-chat h1 { font-size: 1.25em } .prose-chat h2 { font-size: 1.12em } .prose-chat h3 { font-size: 1em }
 .prose-chat ul { list-style: disc; padding-left: 1.4em } .prose-chat ol { list-style: decimal; padding-left: 1.4em }
+.prose-chat li::marker { color: var(--faint) }
 .prose-chat a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px }
+.prose-chat strong { font-weight: 600 }
 .prose-chat code { font-family: var(--font-mono); font-size: 0.88em; background: var(--sunken); padding: 0.1em 0.35em; border-radius: 4px }
-.prose-chat pre { background: var(--sunken); border: 1px solid var(--line); padding: 0.8em 1em; border-radius: 8px; overflow-x: auto }
+.prose-chat pre { background: var(--sunken); border: 1px solid var(--line); padding: 0.8em 1em; border-radius: 10px; overflow-x: auto }
 .prose-chat pre code { background: none; padding: 0 }
-.prose-chat blockquote { border-left: 3px solid var(--line); padding-left: 0.9em; color: var(--muted) }
+.prose-chat blockquote { border-left: 3px solid var(--accent); padding-left: 0.9em; color: var(--muted) }
 .prose-chat table { border-collapse: collapse; display: block; overflow-x: auto }
 .prose-chat th, .prose-chat td { border: 1px solid var(--line); padding: 0.3em 0.6em }
 
 @keyframes blink { 50% { opacity: 0 } }
 .caret::after { content: "▍"; animation: blink 1s steps(1) infinite; color: var(--accent); margin-left: 1px }
+
+/* Motion: transform and opacity only. */
+@keyframes rise { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+@keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes pop { from { opacity: 0; transform: scale(0.96) } to { opacity: 1; transform: none } }
+@keyframes slide-in-right { from { transform: translateX(100%) } to { transform: none } }
+@keyframes slide-in-left { from { transform: translateX(-100%) } to { transform: none } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.97) } to { opacity: 1; transform: none } }
+
+.anim-rise { animation: rise 260ms var(--ease-out-strong) both; }
+.anim-fade { animation: fade 200ms ease-out both; }
+.anim-pop { animation: pop 220ms var(--ease-out-strong) both; }
+.anim-menu { animation: menu-in 160ms var(--ease-out-strong) both; transform-origin: top right; }
+.anim-drawer-r { animation: slide-in-right 320ms var(--ease-drawer) both; }
+.anim-drawer-l { animation: slide-in-left 280ms var(--ease-drawer) both; }
+.stagger > * { animation: rise 320ms var(--ease-out-strong) both; }
+.stagger > :nth-child(2) { animation-delay: 50ms } .stagger > :nth-child(3) { animation-delay: 100ms }
+.stagger > :nth-child(4) { animation-delay: 150ms } .stagger > :nth-child(5) { animation-delay: 200ms } .stagger > :nth-child(6) { animation-delay: 250ms }
+
+@keyframes ping-soft { 0% { transform: scale(1); opacity: 0.55 } 80%, 100% { transform: scale(2.4); opacity: 0 } }
+.ping-soft { animation: ping-soft 1.6s var(--ease-out-strong) infinite; }
+
+/* ── The assistant (mascot) ─────────────────────────────────────────────── */
+@keyframes m-breathe { 0%, 100% { transform: translateY(0) scale(1, 1) } 50% { transform: translateY(-1.5%) scale(1.012, 0.988) } }
+@keyframes m-bob { 0%, 100% { transform: translateY(0) rotate(0) } 25% { transform: translateY(-4%) rotate(-3deg) } 75% { transform: translateY(-2%) rotate(3deg) } }
+@keyframes m-hop { 0%, 60%, 100% { transform: translateY(0) } 70% { transform: translateY(-9%) } 80% { transform: translateY(0) } 88% { transform: translateY(-3%) } }
+@keyframes m-blink { 0%, 92%, 100% { transform: scaleY(1) } 95% { transform: scaleY(0.1) } }
+@keyframes m-look { 0%, 100% { transform: translateX(0) } 30% { transform: translateX(-16%) } 65% { transform: translateX(16%) } }
+@keyframes m-orbit { from { transform: rotate(0) } to { transform: rotate(360deg) } }
+@keyframes m-sway { 0%, 100% { transform: rotate(-8deg) } 50% { transform: rotate(8deg) } }
+@keyframes m-wave { 0%, 100% { transform: rotate(0) } 50% { transform: rotate(-18deg) } }
+@keyframes m-dots { 0%, 100% { opacity: 0.25 } 50% { opacity: 1 } }
+
+.mascot { transform-box: fill-box; }
+.mascot .m-body { transform-origin: 50% 100%; transform-box: fill-box; }
+.mascot .m-eye { transform-origin: center; transform-box: fill-box; }
+.mascot .m-pupils { transition: transform 260ms var(--ease-out-strong); }
+.mascot .m-sprout { transform-origin: 0% 100%; transform-box: fill-box; }
+.mascot .m-orbit { transform-origin: 50px 56px; }
+.mascot .m-wave { transform-origin: 30% 90%; transform-box: fill-box; }
+.mascot[data-mood="waiting"] .m-wave { animation: m-wave 0.9s ease-in-out infinite; }
+
+.mascot[data-mood="idle"] .m-body, .mascot[data-mood="happy"] .m-body { animation: m-breathe 4.2s ease-in-out infinite; }
+.mascot[data-mood="idle"] .m-eye { animation: m-blink 5s ease-in-out infinite; }
+.mascot[data-mood="idle"] .m-sprout { animation: m-sway 5s ease-in-out infinite; }
+.mascot[data-mood="working"] .m-body { animation: m-bob 1.4s ease-in-out infinite; }
+.mascot[data-mood="working"] .m-look { animation: m-look 2.8s ease-in-out infinite; }
+.mascot[data-mood="working"] .m-sprout { animation: m-sway 0.7s ease-in-out infinite; }
+.mascot[data-mood="working"] .m-orbit { animation: m-orbit 2.2s linear infinite; }
+.mascot[data-mood="thinking"] .m-body { animation: m-breathe 2.4s ease-in-out infinite; }
+.mascot[data-mood="thinking"] .m-dot { animation: m-dots 1.2s ease-in-out infinite; }
+.mascot[data-mood="thinking"] .m-dot:nth-child(2) { animation-delay: 0.2s } .mascot[data-mood="thinking"] .m-dot:nth-child(3) { animation-delay: 0.4s }
+.mascot[data-mood="waiting"] .m-body { animation: m-hop 2.6s var(--ease-out-strong) infinite; }
+.mascot[data-mood="waiting"] .m-eye { animation: m-blink 3.5s ease-in-out infinite; }
+.mascot[data-mood="sleepy"] .m-body { animation: m-breathe 6s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-rise, .anim-pop, .anim-menu, .stagger > * { animation-name: fade; }
+  .anim-drawer-r, .anim-drawer-l { animation: fade 200ms ease-out both; }
+  .press:active:not(:disabled) { transform: none; }
+  .mascot *, .ping-soft { animation: none !important; transition: none !important; }
+}

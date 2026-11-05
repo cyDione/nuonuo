@@ -11,13 +11,6 @@ interface Entry { id: string; kind: Kind; scope: string | null; text: string; st
 interface MemoriesResponse { memories: Entry[]; scopes: Record<string, string>; kinds: { id: Kind; label: string }[] }
 
 const BY = (e: Entry) => e.createdBy === 'owner' ? '你添加的' : e.createdBy === 'distiller' ? '从对话里整理' : e.createdBy === 'import' ? '旧版导入' : e.createdBy === 'router' ? '对话中记下' : '做事时记下'
-const HINT: Record<Kind, string> = {
-  profile: '你的事实与偏好，每次对话都会带上。',
-  project: '某个项目（一个仓库，或一个侧聊）的约定和决定，只在这个项目里用到。',
-  episodic: '近期发生、一段时间内有用的事，到期后自动淡出。',
-  lesson: '它在做事过程中验证过的经验。',
-}
-
 export function MemoryPage() {
   const qc = useQueryClient()
   const data = useQuery({ queryKey: ['memories'], queryFn: () => api.get<MemoriesResponse>('/memories') }).data
@@ -32,7 +25,6 @@ export function MemoryPage() {
   return <div className="space-y-4">
     {pending.length > 0 && <Card className="p-4">
       <div className="text-sm font-medium">等你确认 · {pending.length}</div>
-      <p className="mt-0.5 text-xs text-muted">从别人的消息、外部来源里看到的，或者它不太确定的，不会直接记住，先在这里等你点头。</p>
       <div className="mt-3 divide-y divide-line">{pending.map(m => <PendingRow key={m.id} m={m} scopes={data.scopes} onDone={refresh} />)}</div>
     </Card>}
     <div className="flex flex-wrap items-center gap-1">
@@ -41,13 +33,11 @@ export function MemoryPage() {
       <span className="flex-1" />
       <Button size="sm" variant="ghost" onClick={() => consolidate.mutate()} disabled={consolidate.isPending}>整理（去重、清理过期）</Button>
     </div>
-    <p className="px-1 text-xs text-faint">{HINT[kind]}</p>
     <AddRow kind={kind} onDone={refresh} />
     {!shown.length ? <Empty title="还没有" /> : scopes.map(scope => <Card key={scope} className="p-1">
       {kind === 'project' && <div className="px-3 pt-2.5 pb-1 text-xs font-medium text-muted">{data.scopes[scope] ?? scope}</div>}
       <div className="divide-y divide-line">{shown.filter(m => (m.scope ?? '') === scope).map(m => <EntryRow key={m.id} m={m} onDone={refresh} />)}</div>
     </Card>)}
-    <p className="px-1 text-xs text-faint">数据目录的 memory/MEMORY.md 是这些记忆的只读副本，方便查看和备份。</p>
   </div>
 }
 

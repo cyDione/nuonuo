@@ -59,7 +59,7 @@ function RoutineModal({ routine, onClose, onSaved }: { routine?: Routine; onClos
       <Field label="cron（分 时 日 月 周，本地时间）"><Input className="font-mono" value={schedule} onChange={e => setSchedule(e.target.value)} /></Field>
     </div>
     <Field label="要做的事" hint="到点时，这段话会以你的名义发给主 Agent。">
-      <textarea className="min-h-28 w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm outline-none focus:border-accent" value={prompt}
+      <textarea className="min-h-28 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none" value={prompt}
         onChange={e => setPrompt(e.target.value)} placeholder="汇总我关注的仓库昨天的新 Issue 和 PR，挑出需要我处理的" />
     </Field>
     {save.error && <p className="text-sm text-danger">{(save.error as Error).message}</p>}
