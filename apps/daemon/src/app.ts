@@ -190,7 +190,8 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const ticket = rt.engine.ticket(c.req.param('id'))
     return c.json({ ticket: ticketView(rt.engine, ticket, rt.reviewer.pending(ticket.id)), reports: reportsOf(rt.store, ticket.id), transcript: transcript(rt.agents, ticket.sessionId),
       running: rt.agents.isRunning(ticket.sessionId), jobs: rt.agents.jobs.running(ticket.sessionId), approvals: rt.reviewer.pending(ticket.id),
-      browser: rt.browser.hasPage(ticket.id), project: rt.engine.projectOf(ticket) ?? null, usage: rt.engine.usageOf(ticket.id) })
+      browser: rt.browser.hasPage(ticket.id), project: rt.engine.projectOf(ticket) ?? null, usage: rt.engine.usageOf(ticket.id),
+      files: rt.engine.artifacts({ ticketId: ticket.id }).map(a => ({ id: a.id, name: a.name, size: a.size })) })
   })
   api.post('/tickets/:id/stop', c => { rt.engine.stopTask(c.req.param('id'), 'person', '主人在界面上停止'); return c.json({ ok: true }) })
   api.post('/tickets/:id/retry', c => { rt.engine.retry(c.req.param('id')); return c.json({ ok: true }) })
@@ -200,7 +201,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   })
   api.get('/router', c => c.json({ state: rt.agents.session(ROUTER_SESSION)?.state ?? 'idle', transcript: transcript(rt.agents, ROUTER_SESSION).slice(-200) }))
 
-  // Deliverables: files tasks produced, shown as attachments and in the library.
+  // Deliverables: files tasks produced, shown in the task details and in the library.
   const MIME: Record<string, string> = { '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.json': 'application/json; charset=utf-8',
     '.csv': 'text/csv; charset=utf-8', '.html': 'text/plain; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
     '.webp': 'image/webp', '.svg': 'text/plain; charset=utf-8', '.pdf': 'application/pdf' }

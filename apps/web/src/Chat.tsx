@@ -1,18 +1,19 @@
 /**
  * A conversation, the way a chat app shows one: the owner's messages and the assistant's. The work behind it stays out of
- * sight — only a quiet "working on…" line, finished results as attachments, and what needs the owner (a yes/no, a
- * question, the browser) appear here. What was done step by step is one click away, never in the timeline.
+ * sight — only a quiet "working on…" line, the assistant's own words about a result, and what needs the owner (a yes/no,
+ * a question, the browser) appear here. Files, the full write-up and what was done step by step live in the activity
+ * panel's task details, never in the timeline.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowUp, ChevronDown, ChevronRight, ExternalLink, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowUp, ExternalLink, Sparkles } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, ApiError, type Conversation, type Delivery, type Message, type RolesResponse } from './api'
-import { openActivity, openTask, useLive } from './live'
+import { api, ApiError, type Conversation, type Message, type RolesResponse } from './api'
+import { openActivity, useLive } from './live'
 import { Avatar, statusLine, usePersona } from './persona'
 import { go } from './route'
-import { FileChip, NeedsYou, needsOwner, useTickets, WorkingLine } from './tasks'
+import { NeedsYou, needsOwner, useTickets, WorkingLine } from './tasks'
 import { SOURCE_LABEL, SourceIcon } from './icons'
 import { cx } from './ui'
 
@@ -172,35 +173,14 @@ function Item({ m, first }: { m: Message; first: boolean }) {
   if (m.role === 'user') return <div className="flex justify-end">
     <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent-soft px-4 py-2.5 text-[15px] whitespace-pre-wrap">{m.content}</div>
   </div>
-  const result = m.meta.result as Delivery | undefined
   return <div className="space-y-2">
     <Bubble first={first}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div></Bubble>
-    {result && <div className="pl-[38px]"><Result result={result} /></div>}
     {m.meta.error && <div className="pl-[38px] text-xs text-danger">⚠ {m.meta.error}</div>}
     {m.meta.via && <div className="flex items-center gap-1 pl-[38px] text-[11px] text-faint">
       <SourceIcon source={m.meta.via} size={11} />
       {m.meta.delivery === 'sent' ? <>已发到 {SOURCE_LABEL[m.meta.via] ?? m.meta.via}{m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent"> ↗</a>}</>
         : m.meta.delivery === 'pending' ? '发送中…'
         : <span className="text-danger">{m.meta.delivery === 'dropped' ? '没能发出去' : '发送失败，稍后重试'}{m.meta.deliveryError ? `：${m.meta.deliveryError}` : ''}</span>}
-    </div>}
-  </div>
-}
-
-/** A finished piece of work: its files, and the full write-up folded under the message. */
-function Result({ result }: { result: Delivery }) {
-  const [open, setOpen] = useState(false)
-  const long = result.summary.length > 160
-  return <div className="space-y-2">
-    {result.files.length > 0 && <div className="flex flex-wrap items-start gap-2">{result.files.map(f => <FileChip key={f.id} {...f} />)}</div>}
-    {long && <div className="rounded-xl border border-line bg-panel">
-      <div className="flex items-center">
-        <button onClick={() => setOpen(v => !v)} className="flex min-w-0 flex-1 items-center gap-1.5 px-3.5 py-2.5 text-left text-sm">
-          {open ? <ChevronDown size={14} className="shrink-0 text-faint" /> : <ChevronRight size={14} className="shrink-0 text-faint" />}
-          <span className="truncate font-medium">{result.title}</span><span className="shrink-0 text-xs text-faint">· 完整结果</span>
-        </button>
-        <button onClick={() => openTask(result.ticketId)} className="shrink-0 px-3.5 text-xs text-faint hover:text-muted">我是怎么做的</button>
-      </div>
-      {open && <div className="prose-chat border-t border-line px-4 py-3 text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown></div>}
     </div>}
   </div>
 }

@@ -166,6 +166,10 @@ export function TaskDrawer() {
           <h3 className="mb-1.5 text-xs font-medium text-muted">{report.status === 'ready' ? '结果' : '最新情况'}</h3>
           <div className="prose-chat rounded-xl border border-line px-4 py-3 text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{report.summary}</ReactMarkdown></div>
         </section>}
+        {d?.files && d.files.length > 0 && <section className="mb-5">
+          <h3 className="mb-1.5 text-xs font-medium text-muted">文件</h3>
+          <div className="flex flex-wrap items-start gap-2">{d.files.map(f => <FileChip key={f.id} {...f} />)}</div>
+        </section>}
         <h3 className="mb-2 text-xs font-medium text-muted">我做了什么</h3>
         {!steps.length && <div className="text-sm text-faint">{working ? '刚开始…' : '还没有步骤'}</div>}
         <ol className="space-y-1">{steps.map(s => <Step key={s.id} step={s} />)}</ol>

@@ -55,7 +55,6 @@ export interface Ticket {
   ended: { at: number; by: string; outcome: 'completed' | 'stopped' | 'dropped'; reason?: string } | null; createdAt: number; updatedAt: number
   proactive: boolean; why: string | null
 }
-export interface Delivery { ticketId: string; title: string; summary: string; files: { id: string; name: string; size: number }[] }
 export interface Artifact { id: string; ticketId: string; path: string; name: string; size: number; createdAt: number; title: string; conversationId: string | null; text: boolean }
 export interface ActivityEvent { id: string; source: string; actor: string; human: boolean; at: number; text: string; url: string | null; conversationId: string | null; thread: string
   proactive: { act: boolean; reason: string; mode: string; title?: string; goal?: string } | null; feedback: { useful: boolean } | null; ticketId: string | null; outcome: { tone: 'ok' | 'muted' | 'warn' | 'accent'; text: string } }
@@ -71,7 +70,7 @@ export type TranscriptItem =
   | { id: string; kind: 'tool-result'; callId: string; tool: string; output: string; at: number }
   | { id: string; kind: 'marker'; type: string; message?: string; at: number }
   | { id: string; kind: 'compaction'; summary: string; at: number }
-export interface TicketDetail { ticket: Ticket; reports: (Report & { id: number; humanAction: Report['humanAction'] | null })[]; transcript: TranscriptItem[]; running: boolean; jobs: { jobId: string; command: string; startedAt: number }[]; browser: boolean; project: string | null; usage: { tokens: number; costUsd: number | null } }
+export interface TicketDetail { ticket: Ticket; reports: (Report & { id: number; humanAction: Report['humanAction'] | null })[]; transcript: TranscriptItem[]; running: boolean; jobs: { jobId: string; command: string; startedAt: number }[]; browser: boolean; project: string | null; usage: { tokens: number; costUsd: number | null }; files?: { id: string; name: string; size: number }[] }
 export interface SandboxSettings { mode: 'off' | 'external' | 'all'; image: string; network: 'bridge' | 'none' }
 export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: number; timeoutMinutes: number; blockedCommands: string[]; workspaceRoots: string[]; sandbox: SandboxSettings }
 export interface ReviewSettings { threshold: 'off' | 'destructive' | 'external'; mode: 'model' | 'ask'; destructive: 'ask' | 'review'; rules: string[]; allow: string[]; deny: string[] }
