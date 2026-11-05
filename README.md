@@ -88,6 +88,14 @@ loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运�
 
 **5. 可选**：
 - **桌面端**：`cd apps/desktop && pnpm start`，或先在仓库根目录 `pnpm build`，再用 `pnpm dist:mac` / `pnpm dist:linux` 打包。Linux 服务器可以用不带桌面端的包：`pnpm build && bash scripts/package-linux.sh`，或在 GitHub Actions 里手动运行 “Package Linux x64” 工作流；包里自带 Node.js，解压后运行 `./bin/super-assistant start`。
+
+  一键安装到 Linux x64（仓库是私有的，需要已登录的 `gh`，或在 `GITHUB_TOKEN` 里放一个能读本仓库的令牌）：
+
+  ```sh
+  gh api repos/cyDione/super-assistant/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
+  ```
+
+  会从最新的 GitHub Release 下载包，装到 `~/.local/share/super-assistant`，命令链接到 `~/.local/bin/super-assistant`；重复运行即升级。推送 `v*` 标签时工作流会自动发布 Release。
 - **在外面用**：启用 Telegram 插件，用手机指挥家里的电脑，不需要开放端口。或者用 SSH 端口转发 `ssh -L 7420:127.0.0.1:7420 你的电脑`，再在本地打开登录链接。
 - **GitHub**：`gh auth login`（或在 `env` 里放 `GITHUB_TOKEN`），然后在「设置 → 来源 → GitHub」里填写要监听的仓库。
 

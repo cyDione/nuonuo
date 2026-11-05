@@ -10,10 +10,11 @@ on:
     paths:
       - scripts/stage-daemon.sh
       - scripts/package-linux.sh
+      - install.sh
       - .github/workflows/package-linux.yml
 
 permissions:
-  contents: read
+  contents: write  # only used on v* tags, to publish the GitHub Release that install.sh downloads from
 
 jobs:
   linux-x64:
@@ -56,3 +57,14 @@ jobs:
           name: super-assistant-linux-x64
           path: dist/super-assistant-*-linux-x64.tar.gz
           if-no-files-found: error
+
+      - name: Publish the GitHub Release (v* tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/super-assistant-*-linux-x64.tar.gz --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/super-assistant-*-linux-x64.tar.gz --title "$GITHUB_REF_NAME" --generate-notes
+          fi
