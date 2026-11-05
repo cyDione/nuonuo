@@ -6,7 +6,7 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions, LanguageModelV4StreamPart, LanguageModelV4Usage } from '@ai-sdk/provider'
 import { APICallError } from '@ai-sdk/provider'
 import { newId, schema, type Store } from '@super-assistant/db'
-import { generateText } from 'ai'
+import { embed, generateText } from 'ai'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import type { ProviderKind } from './catalog'
 import type { EmbeddingModelV4 } from '@ai-sdk/provider'
@@ -131,16 +131,24 @@ export class ModelHub {
     return listProviderModels(p, this.key(p))
   }
 
-  /** Sends a tiny request through one provider/model, bypassing layers, budgets and the ledger. */
-  async testModel(ref: ModelRef): Promise<{ ok: true; latencyMs: number; text: string } | { ok: false; latencyMs: number; error: string }> {
+  /**
+   * Sends a tiny request through one provider/model, bypassing layers, budgets and the ledger. `kind: 'embedding'` calls the
+   * embeddings endpoint: an embedding model sent to the chat endpoint is rejected by most providers as a missing model.
+   */
+  async testModel(ref: ModelRef, kind: 'language' | 'embedding' = 'language'): Promise<{ ok: true; latencyMs: number; text: string } | { ok: false; latencyMs: number; error: string }> {
     const started = this.now()
     try {
       const p = this.getProvider(ref.providerId)
+      if (kind === 'embedding') {
+        const result = await embed({ model: this.factory.embedding(p, this.key(p), ref.model), value: 'ping', maxRetries: 0,
+          abortSignal: AbortSignal.timeout(30_000) })
+        return { ok: true, latencyMs: this.now() - started, text: `${result.embedding.length} 维向量` }
+      }
       const result = await generateText({ model: this.factory.language(p, this.key(p), ref.model), prompt: 'Reply with the single word: OK',
         maxOutputTokens: 256, maxRetries: 0, abortSignal: AbortSignal.timeout(30_000) })
       return { ok: true, latencyMs: this.now() - started, text: result.text.trim().slice(0, 200) }
     } catch (error) {
-      return { ok: false, latencyMs: this.now() - started, error: describeError(error) }
+      return { ok: false, latencyMs: this.now() - started, error: withHint(describeError(error), kind) }
     }
   }
 
@@ -307,4 +315,12 @@ export function describeError(error: unknown): string {
     return `${error.statusCode ?? ''} ${error.message}${body ? ` — ${body}` : ''}`.trim()
   }
   return error instanceof Error ? error.message : String(error)
+}
+
+/** Adds a hint to "model does not exist" style failures, the usual sign of a chat model on the embedding layer or the reverse. */
+function withHint(message: string, kind: 'language' | 'embedding'): string {
+  if (!/(model[^.]*(not exist|not found|does not exist)|unknown model|invalid model|模型不存在)/i.test(message)) return message
+  return kind === 'embedding'
+    ? `${message}\n提示：向量层需要 embedding 模型（例如 SiliconFlow 的 BAAI/bge-m3），对话模型不能用于向量；请核对模型 id 与供应商模型列表一致。`
+    : `${message}\n提示：请核对模型 id 与供应商模型列表一致；embedding 模型只能用于向量层。`
 }
