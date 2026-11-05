@@ -5,7 +5,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlarmClock, AlertTriangle, CheckCircle2, ChevronRight, Globe, Hand, MessageCircleQuestion, PanelRightClose, PanelRightOpen, ShieldAlert, X } from 'lucide-react'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useState } from 'react'
 import { api, type Routine, type Ticket } from './api'
 import { HandoffModal } from './handoff'
 import { openActivity, openTask, useActivityOpen, useLive } from './live'
@@ -13,16 +13,7 @@ import { Avatar, statusLine, usePersona } from './persona'
 import { go } from './route'
 import { StateIcon, needsOwner, useTickets } from './tasks'
 import { cx, IconButton } from './ui'
-
-// Whether the desktop panel is folded away; remembered per browser.
-let collapsed = (() => { try { return localStorage.getItem('sa-today') === 'hidden' } catch { return false } })()
-const listeners = new Set<() => void>()
-export function setTodayCollapsed(v: boolean) {
-  collapsed = v
-  try { localStorage.setItem('sa-today', v ? 'hidden' : 'shown') } catch { /* private mode */ }
-  for (const l of listeners) l()
-}
-export const useTodayCollapsed = () => useSyncExternalStore(l => { listeners.add(l); return () => listeners.delete(l) }, () => collapsed)
+import { togglePane, usePanes, usePresence, useTilt } from './shell'
 
 const time = (at: number) => new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -46,16 +37,16 @@ export function TodayPanel({ onClose, variant = 'side' }: { onClose?(): void; va
   const upcoming = routines.filter(r => r.enabled && r.next).sort((a, b) => a.next! - b.next!).slice(0, 4)
   const status = statusLine(live)
   const now = new Date()
+  const hero = useTilt<HTMLDivElement>(2)
 
   return <div className="flex h-full flex-col">
-    <div className={cx('relative overflow-hidden bg-hero px-4 pt-3.5 pb-5', variant === 'sheet' ? 'mx-2.5 rounded-[22px]' : 'm-2.5 rounded-[18px]')}>
-      <div className="glow-corner pointer-events-none absolute -right-16 -bottom-24 size-64 rounded-full" aria-hidden />
+    <div ref={hero} className={cx('flow tilt px-4 pt-3.5 pb-5', variant === 'sheet' ? 'mx-2.5 rounded-[22px]' : 'm-2.5 rounded-[18px]')}>
       <div className="relative flex items-center">
-        <span className="flex-1 text-xs font-medium text-muted tabular-nums">{now.getMonth() + 1}月{now.getDate()}日 · {WEEK[now.getDay()]}</span>
+        <span className="flex-1 text-xs font-medium tabular-nums opacity-65">{now.getMonth() + 1}月{now.getDate()}日 · {WEEK[now.getDay()]}</span>
         {onClose && <IconButton label={variant === 'side' ? '收起' : '关闭'} onClick={onClose} className="-mr-1.5">{variant === 'side' ? <PanelRightClose size={17} /> : <X size={18} />}</IconButton>}
       </div>
       <div className="relative mt-3 flex items-center gap-3.5">
-        <Avatar persona={persona} size={76} mood={connected ? status.tone : 'sleepy'} className="text-fg" />
+        <Avatar persona={persona} size={76} mood={connected ? status.tone : 'sleepy'} track />
         <div className="min-w-0">
           <div className="truncate font-display text-[22px] leading-tight font-semibold">{persona.name}</div>
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -74,14 +65,7 @@ export function TodayPanel({ onClose, variant = 'side' }: { onClose?(): void; va
         <div className="space-y-2">{person.map(t => <NeedCard key={t.id} t={t} />)}</div>
       </Section>}
       {going.length > 0 && <Section title="正在做">
-        <div className="space-y-1.5">{going.map(t => <button key={t.id} onClick={() => openTask(t.id)} className="press block w-full rounded-2xl bg-accent-soft/50 px-3.5 py-3 text-left hover:bg-accent-soft">
-          <span className="flex items-center gap-2.5 text-sm">
-            <StateIcon t={t} size={15} />
-            <span className="min-w-0 flex-1 truncate">{t.title}</span>
-            <span className="shrink-0 text-xs text-faint tabular-nums">{since(t.createdAt)}</span>
-          </span>
-          {t.stage === 'working' && <span className="progress mt-2.5 block h-1" />}
-        </button>)}</div>
+        <div className="space-y-1.5">{going.map(t => <GoingCard key={t.id} t={t} />)}</div>
       </Section>}
       {upcoming.length > 0 && <Section title="接下来">
         {upcoming.map(r => <a key={r.id} href={r.conversationId ? `#/c/${r.conversationId}` : '#/settings/routines'} className="press flex items-center gap-2.5 rounded-xl px-1.5 py-1.5 text-sm hover:bg-sunken">
@@ -106,6 +90,18 @@ export function TodayPanel({ onClose, variant = 'side' }: { onClose?(): void; va
       全部动态<ChevronRight size={14} className="transition-transform duration-200 ease-out group-hover:translate-x-0.5" />
     </a>
   </div>
+}
+
+function GoingCard({ t }: { t: Ticket }) {
+  const tilt = useTilt<HTMLButtonElement>(2)
+  return <button ref={tilt} onClick={() => openTask(t.id)} className="tilt anim-drop press block w-full rounded-2xl bg-accent-soft/50 px-3.5 py-3 text-left hover:bg-accent-soft">
+    <span className="flex items-center gap-2.5 text-sm">
+      <StateIcon t={t} size={15} />
+      <span className="min-w-0 flex-1 truncate">{t.title}</span>
+      <span className="shrink-0 text-xs text-faint tabular-nums">{since(t.createdAt)}</span>
+    </span>
+    {t.stage === 'working' && <span className="progress mt-2.5 block h-1" />}
+  </button>
 }
 
 function Chip({ dot, children }: { dot: string; children: React.ReactNode }) {
@@ -142,8 +138,9 @@ export function NeedCard({ t }: { t: Ticket }) {
   const Icon = { approve: ShieldAlert, handoff: Globe, failed: AlertTriangle, blocked: Hand, answer: MessageCircleQuestion }[kind]
   const tone = kind === 'answer' ? 'bg-accent-soft text-accent' : kind === 'failed' ? 'bg-danger/10 text-danger' : 'bg-warn-soft text-warn'
   const detail = a ? a.reason : t.attention?.question
+  const tilt = useTilt<HTMLDivElement>()
 
-  return <div className={cx('rounded-2xl border border-line bg-card p-3.5', leaving && 'leaving')}>
+  return <div ref={tilt} className={cx('tilt anim-drop rounded-2xl border border-line bg-card p-3.5', leaving && 'leaving')}>
     <button onClick={() => openTask(t.id)} className="flex w-full items-start gap-2.5 text-left">
       <span className={cx('flex size-7 shrink-0 items-center justify-center rounded-[10px]', tone)}><Icon size={15} /></span>
       <span className="min-w-0 flex-1">
@@ -177,10 +174,10 @@ function Act({ primary, ghost, children, ...props }: React.ButtonHTMLAttributes<
 
 /** The button that brings the panel back: in the chat's corner when it is folded away or the screen is too narrow for it. */
 export function TodayToggle({ className }: { className?: string }) {
-  const isCollapsed = useTodayCollapsed()
+  const isCollapsed = !usePanes().rightOpen
   const waiting = (useTickets().data?.tickets ?? []).filter(needsOwner).length
-  const open = () => { if (matchMedia('(min-width: 1280px)').matches) setTodayCollapsed(false); else openActivity(true) }
-  return <button onClick={open} aria-label="今天" title="今天" className={cx('press flex items-center gap-1.5 rounded-full border border-line bg-card px-2.5 py-1.5 text-muted shadow-[var(--shadow-sheet)] hover:text-fg',
+  const open = () => { if (matchMedia('(min-width: 1280px)').matches) togglePane('right', true); else openActivity(true) }
+  return <button onClick={open} aria-label="今天" title="今天 (⌘.)" className={cx('press no-drag flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-muted hover:bg-sunken hover:text-fg',
     isCollapsed ? '' : 'xl:hidden', className)}>
     <PanelRightOpen size={16} />
     {waiting > 0 && <span key={waiting} className="bump rounded-full bg-sun px-1.5 text-[11px] leading-[18px] font-semibold text-[#121212] tabular-nums">{waiting}</span>}
@@ -199,12 +196,13 @@ export function TodayDrawer() {
     addEventListener('keydown', onKey)
     return () => { mq.removeEventListener('change', on); removeEventListener('keydown', onKey) }
   }, [])
-  if (!open) return null
+  const { shown, leaving } = usePresence(open)
+  if (!shown) return null
   const close = () => openActivity(false)
-  return <div className={cx('anim-fade fixed inset-0 z-30 flex bg-[var(--scrim)]', phone ? 'items-end' : 'justify-end')} onMouseDown={e => { if (e.target === e.currentTarget) close() }}>
+  return <div className={cx('anim-fade fixed inset-0 z-30 flex bg-[var(--scrim)]', phone ? 'items-end' : 'justify-end', leaving && 'out-fade pointer-events-none')} onMouseDown={e => { if (e.target === e.currentTarget) close() }}>
     <div role="dialog" aria-modal="true" aria-label="今天" className={phone
-      ? 'anim-sheet flex h-[86dvh] w-full flex-col overflow-hidden rounded-t-[28px] bg-card pt-2 pb-[env(safe-area-inset-bottom)] shadow-2xl'
-      : 'anim-drawer-r my-2 mr-2 flex h-[calc(100%-1rem)] w-[360px] flex-col overflow-hidden rounded-[24px] bg-card shadow-2xl'}>
+      ? cx('anim-sheet flex h-[86dvh] w-full flex-col overflow-hidden rounded-t-[28px] bg-card pt-2 pb-[env(safe-area-inset-bottom)] shadow-2xl', leaving && 'out-sheet')
+      : cx('anim-drawer-r my-2 mr-2 flex h-[calc(100%-1rem)] w-[360px] flex-col overflow-hidden rounded-[24px] bg-card shadow-2xl', leaving && 'out-r')}>
       {phone && <span className="mx-auto mb-2 h-1.5 w-10 shrink-0 rounded-full bg-line" aria-hidden />}
       <TodayPanel onClose={close} variant={phone ? 'sheet' : 'drawer'} />
     </div>

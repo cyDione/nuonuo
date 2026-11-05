@@ -14,6 +14,7 @@ import { go } from './route'
 import { Button, cx, IconButton } from './ui'
 import { HandoffModal } from './handoff'
 import { ArtifactModal, previewKind } from './preview'
+import { usePresence } from './shell'
 
 export const useTickets = () => useQuery({ queryKey: ['tickets'], queryFn: () => api.get<{ tickets: Ticket[] }>('/tickets') })
 
@@ -137,7 +138,8 @@ function describeStep(tool: string, input: any): { icon: LucideIcon; text: strin
 }
 
 export function TaskDrawer() {
-  const id = useOpenTask()
+  // Keeps the last task on screen while the drawer slides away.
+  const { shown: id, leaving } = usePresence(useOpenTask())
   const qc = useQueryClient()
   const detail = useQuery({ queryKey: ['ticket', id], enabled: Boolean(id), queryFn: () => api.get<TicketDetail>(`/tickets/${id}`) })
   const working = useLive(s => (id ? s.workerState[id] === 'running' : false))
@@ -154,8 +156,8 @@ export function TaskDrawer() {
   const t = d?.ticket
   const steps = d ? toSteps(d.transcript, d.ticket.directory) : []
   const report = t?.latestReport
-  return <div className="anim-fade fixed inset-0 z-40 flex justify-end bg-[var(--scrim)]" onMouseDown={e => { if (e.target === e.currentTarget) openTask(null) }}>
-    <div role="dialog" aria-modal="true" aria-label={t?.title ?? '任务'} className="anim-drawer-r flex h-full w-full max-w-xl flex-col bg-card shadow-2xl md:my-2 md:mr-2 md:h-[calc(100%-1rem)] md:rounded-[24px]">
+  return <div className={cx('anim-fade fixed inset-0 z-40 flex justify-end bg-[var(--scrim)]', leaving && 'out-fade')} onMouseDown={e => { if (e.target === e.currentTarget) openTask(null) }}>
+    <div role="dialog" aria-modal="true" aria-label={t?.title ?? '任务'} className={cx('anim-drawer-r flex h-full w-full max-w-xl flex-col bg-card shadow-2xl md:my-2 md:mr-2 md:h-[calc(100%-1rem)] md:rounded-[24px]', leaving && 'out-r')}>
       <div className="flex items-start gap-3 border-b border-line px-5 py-4">
         {t && <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-sunken"><StateIcon t={t} size={16} /></div>}
         <div className="min-w-0 flex-1">

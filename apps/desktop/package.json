@@ -25,7 +25,8 @@
     "files": [
       "main.cjs",
       "preload.cjs",
-      "lib/**"
+      "lib/**",
+      "assets/**"
     ],
     "extraResources": [
       {
