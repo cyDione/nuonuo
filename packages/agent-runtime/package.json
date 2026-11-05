@@ -1,6 +1,7 @@
 {
   "name": "@super-assistant/agent-runtime",
   "version": "0.1.10",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",

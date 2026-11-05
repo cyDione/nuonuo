@@ -2,6 +2,7 @@
   "name": "@super-assistant/desktop",
   "productName": "Super-assistant",
   "version": "0.1.10",
+  "license": "MIT",
   "private": true,
   "description": "Super-assistant desktop app for macOS and Windows: window, tray, notifications, global shortcut, with its own Node.js and service",
   "main": "main.cjs",
