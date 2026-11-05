@@ -156,3 +156,39 @@ describe('environment providers', () => {
     expect(seen).toEqual(['sk-env-openai-5678'])
   })
 })
+
+describe('testModel', () => {
+  it('tests embedding models through the embeddings endpoint, not chat', async () => {
+    store = openStore(':memory:')
+    const languageCalls: string[] = []
+    const embedded: string[][] = []
+    const hub = new ModelHub(store, new MemorySecrets(), {
+      language: (_p, _k, model) => { languageCalls.push(model); throw new Error('chat endpoint used') },
+      embedding: (_p, _k, model) => ({
+        specificationVersion: 'v4', provider: 'mock', modelId: model, maxEmbeddingsPerCall: 8, supportsParallelCalls: true,
+        doEmbed: async ({ values }) => { embedded.push(values); return { embeddings: values.map(() => [0.1, 0.2, 0.3]), warnings: [] } },
+      }),
+    })
+    const p = hub.createProvider({ kind: 'openai-compatible', name: 'SF', baseUrl: 'https://api.siliconflow.cn/v1', apiKey: 'k' })
+    const result = await hub.testModel({ providerId: p.id, model: 'BAAI/bge-m3' }, 'embedding')
+    expect(result).toMatchObject({ ok: true, text: '3 维向量' })
+    expect(embedded).toEqual([['ping']])
+    expect(languageCalls).toEqual([])
+  })
+
+  it('explains a missing model on the embedding layer', async () => {
+    store = openStore(':memory:')
+    const missing = new APICallError({ message: 'SiliconFlow: Model does not exist. Please check it carefully.', url: 'x', requestBodyValues: {}, statusCode: 400 })
+    const hub = new ModelHub(store, new MemorySecrets(), {
+      language: () => { throw new Error('unused') },
+      embedding: (_p, _k, model) => ({
+        specificationVersion: 'v4', provider: 'mock', modelId: model, maxEmbeddingsPerCall: 8, supportsParallelCalls: true,
+        doEmbed: async () => { throw missing },
+      }),
+    })
+    const p = hub.createProvider({ kind: 'openai-compatible', name: 'SF', baseUrl: 'https://api.siliconflow.cn/v1', apiKey: 'k' })
+    const result = await hub.testModel({ providerId: p.id, model: 'Qwen/Qwen3-8B' }, 'embedding')
+    expect(result.ok).toBe(false)
+    expect(!result.ok && result.error).toMatch(/400 .*Model does not exist[\s\S]*向量层需要 embedding 模型/)
+  })
+})
