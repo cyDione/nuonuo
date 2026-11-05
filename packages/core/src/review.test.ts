@@ -103,6 +103,15 @@ describe('Reviewer', () => {
     expect(store.db.select().from(schema.usageLedger).all().filter(r => r.role === 'reviewer')).toEqual([expect.objectContaining({ role: 'reviewer', model: 'jev-latest', inputTokens: 120, ok: true })])
   })
 
+  it('falls back to the main model when Jev cannot be reached', async () => {
+    const { start } = setup(() => ({ text: '{"decision":"allow","reason":"推送任务分支"}' }), () => { throw new Error('没有找到决策接口') })
+    const ticket = start()
+    await settle()
+    expect(existsSync(join(ticket.directory, 'pushed.txt'))).toBe(true)
+    const [reason] = store.db.select().from(schema.auditLog).all().map(a => a.reason)
+    expect(reason).toContain('推送任务分支（Jev 不可用，由主 Agent 模型审核：调用审核模型失败：没有找到决策接口')
+  })
+
   it('asks the owner when Jev is not confident', async () => {
     const { reviewer, start } = setup(() => ({ text: 'unused' }), () => ({ type: 'choice', choice: 'allow', confidence: 0.55, probabilities: { allow: 0.55, block: 0.1, ask_owner: 0.35 } }))
     start()

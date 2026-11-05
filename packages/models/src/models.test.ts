@@ -231,9 +231,9 @@ describe('decision models (TypeSafe Jev)', () => {
   })
 
   it('posts state and questions to /systemone with the key, and surfaces HTTP errors as API errors', async () => {
-    const { systemOneClient } = await import('./systemone')
+    const { decisionEndpoints, systemOneClient } = await import('./systemone')
     const seen: { url: string; init: RequestInit }[] = []
-    const ok = systemOneClient(null, 'sk-1', {}, (async (url: string, init: RequestInit) => {
+    const ok = systemOneClient(decisionEndpoints(null, 'typesafe'), 'sk-1', {}, (async (url: string, init: RequestInit) => {
       seen.push({ url, init })
       return new Response(JSON.stringify({ model: 'jev-1', answers: { d: { type: 'noul', noul: 0.9 } } }), { status: 200 })
     }) as any)
@@ -243,5 +243,47 @@ describe('decision models (TypeSafe Jev)', () => {
     const busy = systemOneClient('https://example.test/v1/', 'k', {}, (async () => new Response('{"error":"overloaded"}', { status: 529 })) as any)
     const error = await busy({ model: 'jev-latest', state: 's', questions: { d: { type: 'noul' } } }).catch(e => e)
     expect(APICallError.isInstance(error) && error.statusCode === 529 && error.isRetryable).toBe(true)
+  })
+})
+
+describe('Jev through a multi-provider gateway', () => {
+  it('recognises Jev model names, but not the chat router', async () => {
+    const { isDecisionModel } = await import('./catalog')
+    for (const id of ['jev-latest', 'typesafe/jev-1.13', 'group/jev', 'JEV-preview']) expect(isDecisionModel('openai-compatible', id)).toBe(true)
+    for (const id of ['typesafe/jev-router', 'deepseek-v4.1-flash', 'group/jevons-7b']) expect(isDecisionModel('openai-compatible', id)).toBe(false)
+    expect(isDecisionModel('typesafe', 'anything')).toBe(true)
+  })
+
+  it('lets the review layer use a gateway\'s Jev model, and only the review layer', () => {
+    store = openStore(':memory:')
+    const hub = new ModelHub(store, new MemorySecrets(), { language: () => { throw new Error('x') }, embedding: () => { throw new Error('x') } })
+    const gw = hub.createProvider({ kind: 'openai-compatible', name: '聚合网关', baseUrl: 'https://gw.example/v1', apiKey: 'k' })
+    hub.saveRole('router', { chain: [{ providerId: gw.id, model: 'group/deepseek-v4.1-flash' }] })
+    expect(() => hub.saveRole('worker', { chain: [{ providerId: gw.id, model: 'typesafe/jev-1.13' }] })).toThrow(/决策模型/)
+    expect(hub.usesDecisionModel('reviewer')).toBe(false)
+    hub.saveRole('reviewer', { chain: [{ providerId: gw.id, model: 'typesafe/jev-1.13' }] })
+    expect(hub.usesDecisionModel('reviewer')).toBe(true)
+  })
+
+  it('finds the gateway\'s decisions endpoint and remembers it', async () => {
+    const { decisionEndpoints, systemOneClient } = await import('./systemone')
+    expect(decisionEndpoints('https://openrouter.ai/api/v1', 'openai-compatible')).toContain('https://openrouter.ai/api/alpha/decisions')
+    expect(decisionEndpoints('https://gw.example/v1', 'openai-compatible', 'https://gw.example/custom/decide')).toEqual(['https://gw.example/custom/decide'])
+    const hits: string[] = []
+    const fetchImpl = (async (url: string) => {
+      hits.push(url)
+      return url.endsWith('/v1/decisions')
+        ? new Response(JSON.stringify({ model: 'typesafe/jev-1.13', answers: { d: { type: 'choice', choice: 'allow', confidence: 0.9, probabilities: {} } } }), { status: 200 })
+        : new Response('{"error":{"message":"Invalid URL"}}', { status: 404 })
+    }) as any
+    const client = systemOneClient(decisionEndpoints('https://gw2.example/v1', 'openai-compatible'), 'k', {}, fetchImpl)
+    const request = { model: 'typesafe/jev-1.13', state: 's', questions: { d: { type: 'choice' as const, criteria: { allow: 'a' } } } }
+    expect((await client(request)).answers.d).toMatchObject({ choice: 'allow' })
+    expect(hits).toEqual(['https://gw2.example/v1/systemone', 'https://gw2.example/v1/decisions'])
+    await client(request)
+    expect(hits.at(-1)).toBe('https://gw2.example/v1/decisions')
+    expect(hits).toHaveLength(3)
+    const none = systemOneClient(['https://gw3.example/v1/systemone'], 'k', {}, (async () => new Response('nope', { status: 404 })) as any)
+    await expect(none(request)).rejects.toThrow(/没有找到决策接口/)
   })
 })

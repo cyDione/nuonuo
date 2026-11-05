@@ -345,7 +345,11 @@ export class Reviewer {
    */
   private verdict(ref: string, prompt: string): Promise<Verdict> {
     if (this.hub.usesDecisionModel('reviewer')) return this.decisionVerdict(ref, prompt)
-    return generateStructured(this.hub, 'reviewer', { system: REVIEWER_PROMPT, prompt: `${prompt}\n\nDecide, and answer in the JSON format described above.`,
+    return this.languageVerdict('reviewer', ref, prompt)
+  }
+
+  private languageVerdict(role: 'reviewer' | 'router', ref: string, prompt: string): Promise<Verdict> {
+    return generateStructured(this.hub, role, { system: REVIEWER_PROMPT, prompt: `${prompt}\n\nDecide, and answer in the JSON format described above.`,
       schema: VerdictSchema, fields: VERDICT_FIELDS, example: VERDICT_EXAMPLE, ref, maxOutputTokens: 2_048 })
   }
 
@@ -358,9 +362,18 @@ export class Reviewer {
     try {
       const result = await this.hub.systemOne('reviewer', { state: prompt, questions: { decision: DECISION_QUESTION } }, { ref })
       answer = result.answers?.decision
-    } catch (error) { throw toStructuredError(error, 'reviewer') }
-    if (answer?.type !== 'choice' || !Object.hasOwn(DECISION_REASON, answer.choice)) {
-      throw new StructuredCallError('parse', `审核模型（Jev）没有给出放行 / 拦截 / 问我中的一个结论`, 'reviewer', JSON.stringify(answer ?? null).slice(0, 300))
+      if (answer?.type !== 'choice' || !Object.hasOwn(DECISION_REASON, answer.choice)) {
+        throw new StructuredCallError('parse', `审核模型（Jev）没有给出放行 / 拦截 / 问我中的一个结论`, 'reviewer', JSON.stringify(answer ?? null).slice(0, 300))
+      }
+    } catch (error) {
+      const failure = toStructuredError(error, 'reviewer')
+      // Jev unreachable (e.g. the gateway has no decisions endpoint) or unreadable: the main agent's language model reviews
+      // instead, as it would without a review model. A spent budget is not worked around.
+      if (failure.kind === 'budget' || !this.hub.resolve('router')) throw failure
+      let fallback: Verdict
+      try { fallback = await this.languageVerdict('router', ref, prompt) }
+      catch (second) { throw new StructuredCallError(failure.kind, `${failure.message}；改用主 Agent 模型也失败了：${toStructuredError(second, 'router').message}`, 'reviewer') }
+      return { ...fallback, reason: `${fallback.reason}（Jev 不可用，由主 Agent 模型审核：${failure.message.slice(0, 120)}）` }
     }
     const choice = answer.choice as Verdict['decision']
     const confidence = typeof answer.confidence === 'number' ? answer.confidence : 0

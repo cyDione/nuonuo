@@ -25,7 +25,7 @@ const PricesSchema = z.record(z.string(), z.object({ input: z.number().min(0).op
   cacheRead: z.number().min(0).optional(), cacheWrite: z.number().min(0).optional() }).strict())
 const ProviderBody = z.object({
   kind: z.enum(KINDS), name: z.string().trim().min(1).max(60), baseUrl: z.string().url().nullish().or(z.literal('')),
-  apiKey: z.string().max(500).nullish(), options: z.object({ prices: PricesSchema.optional(), headers: z.record(z.string(), z.string()).optional() }).optional(),
+  apiKey: z.string().max(500).nullish(), options: z.object({ prices: PricesSchema.optional(), headers: z.record(z.string(), z.string()).optional(), decisionsUrl: z.string().url().optional() }).optional(),
 })
 const ConversationPatch = z.object({ title: z.string().trim().min(1).max(80).optional(), pinned: z.boolean().optional(), archived: z.boolean().optional() }).strict()
 

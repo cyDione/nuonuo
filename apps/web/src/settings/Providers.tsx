@@ -24,6 +24,13 @@ function ProviderCard({ p }: { p: Provider }) {
   const qc = useQueryClient()
   const [modal, setModal] = useState<'key' | 'prices' | null>(null)
   const remove = useMutation({ mutationFn: () => api.del(`/providers/${p.id}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['providers'] }); qc.invalidateQueries({ queryKey: ['roles'] }) } })
+  // Jev via a gateway: the decisions endpoint is found automatically; this pins it when the gateway uses another path.
+  const decisions = useMutation({ mutationFn: (url: string) => api.patch(`/providers/${p.id}`, { options: { ...p.options, decisionsUrl: url || undefined } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['providers'] }) })
+  const editDecisions = () => {
+    const url = prompt('Jev 决策接口的完整地址（留空则自动查找 /systemone、/decisions 等常见路径）', p.options.decisionsUrl ?? '')
+    if (url !== null) decisions.mutate(url.trim())
+  }
   return <Card className="p-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 space-y-1">
@@ -32,12 +39,14 @@ function ProviderCard({ p }: { p: Provider }) {
           {p.baseUrl && <span className="font-mono">{p.baseUrl}</span>}
           <span>{p.keyEnv ? <>环境变量 <span className="font-mono">{p.keyEnv}</span>{p.hasKey ? <> · <span className="font-mono">{p.keyHint}</span></> : ' · 当前未设置'}</>
             : p.hasKey ? <>密钥 <span className="font-mono">{p.keyHint}</span></> : '未设置密钥'}</span>
+          {p.options.decisionsUrl && <span>决策接口 <span className="font-mono">{p.options.decisionsUrl}</span></span>}
           {p.options.prices && Object.keys(p.options.prices).length > 0 && <span>已填 {Object.keys(p.options.prices).length} 个模型价格</span>}
         </div>
       </div>
       <div className="flex gap-1.5">
         {!p.keyEnv && <Button size="sm" onClick={() => setModal('key')}>更换密钥</Button>}
         <Button size="sm" onClick={() => setModal('prices')}>价格</Button>
+        {p.kind === 'openai-compatible' && <Button size="sm" onClick={editDecisions}>Jev 接口</Button>}
         <Button size="sm" variant="danger" onClick={() => { if (confirm(`删除「${p.name}」？使用它的分层配置会一并移除该模型，密钥也会从钥匙串删除。`)) remove.mutate() }}><Trash2 size={13} /></Button>
       </div>
     </div>

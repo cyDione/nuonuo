@@ -8,13 +8,13 @@ import { APICallError } from '@ai-sdk/provider'
 import { newId, schema, type Store } from '@super-assistant/db'
 import { embed, generateText } from 'ai'
 import { and, eq, gte, sql } from 'drizzle-orm'
-import { DECISION_KINDS, type ProviderKind } from './catalog'
+import { isDecisionModel, type ProviderKind } from './catalog'
 import type { EmbeddingModelV4 } from '@ai-sdk/provider'
 import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOptions, type ProviderRecord } from './factory'
 import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
 import { DECISION_ROLES, resolveRole, roleSpec, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId } from './roles'
 import type { SecretStore } from './secrets'
-import { systemOneClient, type SystemOneRequest, type SystemOneResponse } from './systemone'
+import { decisionEndpoints, systemOneClient, type SystemOneRequest, type SystemOneResponse } from './systemone'
 
 export class ModelError extends Error {
   constructor(readonly code: 'no_model' | 'budget' | 'unknown_provider' | 'invalid', message: string) { super(message) }
@@ -141,7 +141,7 @@ export class ModelHub {
     const started = this.now()
     try {
       const p = this.getProvider(ref.providerId)
-      if (DECISION_KINDS.includes(p.kind)) {
+      if (isDecisionModel(p.kind, ref.model)) {
         const result = await this.systemOneClient(p)({ model: ref.model, state: 'The owner asked to list the files in the project directory.',
           questions: { ok: { type: 'noul', instructions: 'This is a harmless request.' } } }, { abortSignal: AbortSignal.timeout(30_000) })
         const answer = result.answers?.ok
@@ -176,8 +176,8 @@ export class ModelHub {
     if (!parsed.success) throw new ModelError('invalid', parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '))
     for (const ref of parsed.data.chain) {
       const p = this.getProvider(ref.providerId)
-      if (DECISION_KINDS.includes(p.kind) && !DECISION_ROLES.includes(role)) {
-        throw new ModelError('invalid', `${p.name} 是决策模型，只能用于${DECISION_ROLES.map(r => roleSpec(r).label).join('、')}，不能用于${roleSpec(role).label}`)
+      if (isDecisionModel(p.kind, ref.model) && !DECISION_ROLES.includes(role)) {
+        throw new ModelError('invalid', `${p.name} 的 ${ref.model} 是决策模型，只能用于${DECISION_ROLES.map(r => roleSpec(r).label).join('、')}，不能用于${roleSpec(role).label}`)
       }
     }
     this.store.db.insert(schema.modelRoles).values({ role, config: parsed.data, updatedAt: this.now() })
@@ -257,7 +257,7 @@ export class ModelHub {
   usesDecisionModel(role: RoleId): boolean {
     const ref = this.resolve(role)?.config.chain[0]
     if (!ref) return false
-    try { return DECISION_KINDS.includes(this.getProvider(ref.providerId).kind) } catch { return false }
+    try { return isDecisionModel(this.getProvider(ref.providerId).kind, ref.model) } catch { return false }
   }
 
   /**
@@ -267,7 +267,7 @@ export class ModelHub {
   async systemOne(role: RoleId, request: Omit<SystemOneRequest, 'model'>, context: CallContext = {}): Promise<SystemOneResponse> {
     const resolved = this.resolve(role)
     if (!resolved) throw new ModelError('no_model', `layer ${role} has no model configured`)
-    const chain = resolved.config.chain.filter(ref => { try { return DECISION_KINDS.includes(this.getProvider(ref.providerId).kind) } catch { return false } })
+    const chain = resolved.config.chain.filter(ref => { try { return isDecisionModel(this.getProvider(ref.providerId).kind, ref.model) } catch { return false } })
     if (!chain.length) throw new ModelError('no_model', `layer ${role} has no decision model configured`)
     this.checkBudget(role, resolved.config)
     let lastError: unknown
@@ -288,7 +288,7 @@ export class ModelHub {
   }
 
   private systemOneClient(p: ProviderRecord) {
-    return this.factory.systemOne?.(p, this.key(p)) ?? systemOneClient(p.baseUrl, this.key(p), p.options.headers)
+    return this.factory.systemOne?.(p, this.key(p)) ?? systemOneClient(decisionEndpoints(p.baseUrl, p.kind, p.options.decisionsUrl), this.key(p), p.options.headers)
   }
 
   // ── Usage ────────────────────────────────────────────────────────────────
