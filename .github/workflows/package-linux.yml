@@ -1,12 +1,15 @@
 name: Package Linux x64
 
+# Headless package: the service plus the web UI, with its own Node.js runtime (no desktop app).
+
 on:
   workflow_dispatch:
   push:
     tags: ['v*']
   pull_request:
     paths:
-      - apps/desktop/**
+      - scripts/stage-daemon.sh
+      - scripts/package-linux.sh
       - .github/workflows/package-linux.yml
 
 permissions:
@@ -27,20 +30,29 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Build web UI and daemon
+      - name: Build web UI and service
         run: pnpm build
 
-      - name: Stage daemon dependencies
-        run: pnpm --filter @super-assistant/desktop stage
+      - name: Package
+        run: bash scripts/package-linux.sh x64
 
-      - name: Package AppImage and tar.gz
-        working-directory: apps/desktop
-        run: pnpm exec electron-builder --linux --x64
+      - name: Smoke test the package
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg"
+          tar -xzf dist/super-assistant-*-linux-x64.tar.gz -C "$RUNNER_TEMP/pkg"
+          bin="$(echo "$RUNNER_TEMP"/pkg/*/bin/super-assistant)"
+          export SUPER_ASSISTANT_HOME="$RUNNER_TEMP/home"
+          "$bin" start --no-open > "$RUNNER_TEMP/daemon.log" 2>&1 &
+          for i in $(seq 1 30); do
+            [ -f "$SUPER_ASSISTANT_HOME/token" ] && curl -fsS -H "authorization: Bearer $(cat "$SUPER_ASSISTANT_HOME/token")" http://127.0.0.1:7420/api/health && break
+            sleep 1
+          done
+          curl -fsS -o /dev/null http://127.0.0.1:7420/
+          kill %1
+          cat "$RUNNER_TEMP/daemon.log"
 
       - uses: actions/upload-artifact@v4
         with:
           name: super-assistant-linux-x64
-          path: |
-            apps/desktop/dist/*.AppImage
-            apps/desktop/dist/*.tar.gz
+          path: dist/super-assistant-*-linux-x64.tar.gz
           if-no-files-found: error

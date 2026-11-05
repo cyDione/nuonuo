@@ -6,7 +6,7 @@ const { join } = require('node:path')
 
 exports.default = async function afterPack(context) {
   const from = join(__dirname, '..', '.stage', 'daemon', 'node_modules')
-  if (!existsSync(from)) throw new Error('daemon dependencies are not staged; run `pnpm stage` in apps/desktop first')
+  if (!existsSync(from)) throw new Error('daemon dependencies are not staged; run `pnpm stage` in apps/desktop first (scripts/stage-daemon.sh)')
   const resources = context.electronPlatformName === 'darwin'
     ? join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : join(context.appOutDir, 'resources')

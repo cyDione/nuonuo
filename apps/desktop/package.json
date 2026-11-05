@@ -7,7 +7,7 @@
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
-    "stage": "bash scripts/stage-daemon.sh",
+    "stage": "bash ../../scripts/stage-daemon.sh",
     "dist:mac": "pnpm stage && electron-builder --mac",
     "dist:linux": "pnpm stage && electron-builder --linux"
   },
