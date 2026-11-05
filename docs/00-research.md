@@ -215,7 +215,7 @@ Source ──Trigger──▶ Thread ──batch──▶ Eval(gate + assessment
 ```mermaid
 flowchart LR
   UI[浏览器 http://127.0.0.1:PORT<br/>后续 Electron 窗口] <-->|HTTP + SSE，本机令牌| D
-  subgraph D[superagent 本机常驻进程 Node 22]
+  subgraph D[super-assistant 本机常驻进程 Node 22]
     API[Hono API] --> IN[Intake]
     SRC[Source 插件<br/>webchat / github 轮询 / cron / gmail…] -->|Trigger| IN
     IN --> FP[Fast Path 规则]
@@ -229,10 +229,10 @@ flowchart LR
     RT & WK --> OB[Outbox] --> SRC
     WD[Watchdog 定时] -.-> RT & WK
   end
-  D --- DB[(~/.superagent/<br/>state.db SQLite<br/>memory/*.md<br/>work/ 任务目录<br/>blobs/)]
+  D --- DB[(~/.super-assistant/<br/>state.db SQLite<br/>memory/*.md<br/>work/ 任务目录<br/>blobs/)]
 ```
 
-- **一个进程，一个数据目录**：`~/.superagent/`，可以通过 `SUPERAGENT_HOME` 修改。
+- **一个进程，一个数据目录**：`~/.super-assistant/`，可以通过 `SUPER_ASSISTANT_HOME` 修改。
   - `state.db`：SQLite，WAL 模式，存事件日志、领域状态、Effects 和 Outbox。
   - `memory/`：Markdown 记忆。
   - `bots/<name>/profile.md`：Bot 配置。
@@ -240,7 +240,7 @@ flowchart LR
   - `blobs/`：溢出内容和附件。
   - `browser-profile/`：浏览器的持久化 profile。
 - **启动方式**：
-  - 现在：`npx superagent` 或 `pnpm start`，启动后自动打开浏览器；可选注册成系统服务（launchd / systemd / Windows 计划任务），保证开机常驻。
+  - 现在：`npx super-assistant` 或 `pnpm start`，启动后自动打开浏览器；可选注册成系统服务（launchd / systemd / Windows 计划任务），保证开机常驻。
   - Electron 版：把同一个进程作为子进程托管，加托盘图标。
 - **持久的含义**：只要机器开着就在线。机器休眠或关机后再启动，各 Source 从上次的读位置继续拉取（GitHub 通知接口、Gmail History 都支持），Effects 队列和中断的 Assignment 按原型的规则恢复。
 - **本机 Web 的安全**：
@@ -252,7 +252,7 @@ flowchart LR
 ### 4.2 Monorepo 结构
 
 ```
-super-agent/
+super-assistant/
   apps/
     daemon/        本机常驻进程：Hono API + SSE、组合根 Runtime、Effects、调度器、CLI（start/status/doctor）
     web/           React 19 + Vite + TanStack Router/Query + Tailwind/shadcn（构建产物由 daemon 托管）
@@ -335,7 +335,7 @@ definePlugin({
 
 - **每个工具都声明 `risk`**：`external` 级别（发邮件、发评论、付款、合并）必须经过 Reviewer；`write` 级别按档位决定是否审核；`read` 级别直接放行。
 - **一方插件**用 TS 在进程内实现；**三方工具**通过 MCP 接入（stdio 子进程），并按 Bot 和角色设白名单。
-- 插件就是一个本地目录，或者一个 npm 包；放进 `~/.superagent/plugins/` 就能加载，设置页里可以启用或停用。
+- 插件就是一个本地目录，或者一个 npm 包；放进 `~/.super-assistant/plugins/` 就能加载，设置页里可以启用或停用。
 - **Gmail（后续）**：
   - OAuth（本机回环地址作为回调）。
   - 用 History API 轮询收信：一封邮件是一个 Trigger，一个邮件会话是一个 Thread。
@@ -393,7 +393,7 @@ definePlugin({
 
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
-| **M0 骨架** | monorepo、daemon（本机令牌、SQLite、Effects、Outbox）、模型层（钥匙串 BYOK、分层、用量）、Web 外壳、设置 → 模型 | 填入 key，给每一层选模型，测试连通；`superagent doctor` 输出环境检查结果 |
+| **M0 骨架** | monorepo、daemon（本机令牌、SQLite、Effects、Outbox）、模型层（钥匙串 BYOK、分层、用量）、Web 外壳、设置 → 模型 | 填入 key，给每一层选模型，测试连通；`super-assistant doctor` 输出环境检查结果 |
 | **M1 对话 MVP** | agent-runtime（inbox、异步 job、recall）、core 领域层、webchat 插件、主 Agent + Worker、`workspace` 档执行器、任务卡、待你处理 | 主对话里连续吩咐 3 件事，它们并行完成；执行期间主 Agent 随时能回话；在任务对话里插话能直通给 Worker；叫停有效 |
 | **M2 GitHub 与 Routine** | github 插件（轮询通知、Issue / PR Thread、CI、PR Channel、worktree）、cron Source、Agent 主动新建对话 | 在 Issue 里 @ 自己的账号，Agent 会开 PR；review 评论直通修改；每天 9 点在新对话里收到简报 |
 | **M3 安全与持久** | Reviewer 与规则、审计、记忆三层、Watchdog、浏览器与“接管”、Docker 沙箱档、重启恢复演练 | 高风险动作出现批准卡；kill 进程后任务自动恢复；外部来源的任务在沙箱中运行 |

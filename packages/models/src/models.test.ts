@@ -1,6 +1,6 @@
 import type { LanguageModelV4, LanguageModelV4Usage } from '@ai-sdk/provider'
 import { APICallError } from '@ai-sdk/provider'
-import { openStore, type Store } from '@super-agent/db'
+import { openStore, type Store } from '@super-assistant/db'
 import { generateText, streamText } from 'ai'
 import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 import { mkdtempSync, readFileSync } from 'node:fs'
@@ -130,11 +130,11 @@ describe('FileSecrets', () => {
   })
 })
 
-describe('environment providers and presets', () => {
-  it('registers env keys as read-only providers without copying them, and applies the DeepSeek preset once', async () => {
+describe('environment providers', () => {
+  it('registers env keys as read-only providers without copying them, and sets a default model once', async () => {
     store = openStore(':memory:')
     const { EnvAwareSecrets } = await import('./env')
-    const env = { DEEPSEEK_API_KEY: 'sk-env-deepseek-5678' }
+    const env = { OPENAI_API_KEY: 'sk-env-openai-5678' }
     const inner = new MemorySecrets()
     const seen: (string | undefined)[] = []
     const hub = new ModelHub(store, new EnvAwareSecrets(inner, env), {
@@ -143,33 +143,16 @@ describe('environment providers and presets', () => {
     })
     const [id] = hub.syncEnvProviders(env)
     expect(hub.syncEnvProviders(env)).toEqual([])
-    expect(hub.listProviders()[0]).toMatchObject({ kind: 'deepseek', hasKey: true, keyHint: '…5678', keyEnv: 'DEEPSEEK_API_KEY' })
+    expect(hub.listProviders()[0]).toMatchObject({ kind: 'openai', hasKey: true, keyHint: '…5678', keyEnv: 'OPENAI_API_KEY' })
     expect(JSON.stringify(store.sqlite.prepare('select * from providers').all())).not.toContain('sk-env')
     expect(() => hub.updateProvider(id!, { apiKey: 'other' })).toThrow(/环境变量/)
-    expect(hub.applyPreset('deepseek', id!, { onlyIfEmpty: true })).toBe(true)
-    expect(hub.roleConfigs().router).toMatchObject({ chain: [{ model: 'deepseek-flash' }], reasoning: 'high' })
-    expect(hub.resolve('subagent')).toMatchObject({ source: 'worker', config: { chain: [{ model: 'deepseek-v4-pro' }] } })
-    expect(hub.resolve('filter')).toBeUndefined()
-    expect(hub.applyPreset('deepseek', id!, { onlyIfEmpty: true })).toBe(false)
-    await generateText({ model: hub.model('router'), prompt: 'x' })
-    expect(seen).toEqual(['sk-env-deepseek-5678'])
-    expect(hub.getProvider(id!).options.prices?.['deepseek-flash']?.output).toBe(1.2)
-    // The test setup: every layer on V4.1 Flash, mapped onto the gateway's model name.
-    for (const role of ROLE_IDS) if (role !== 'embedding') hub.saveRole(role, { chain: [], enabled: true })
-    expect(hub.applyPreset('deepseek-flash', id!, { available: ['group/deepseek-v4.1-flash'] })).toBe(true)
-    for (const role of ['router', 'worker', 'subagent', 'reviewer', 'watchdog', 'summarizer', 'vision', 'filter'] as const) {
-      expect(hub.resolve(role)?.config.chain[0]?.model, role).toBe('group/deepseek-v4.1-flash')
+    expect(hub.applyDefaultModel(id!, 'test-model')).toBe(true)
+    for (const role of ['router', 'worker', 'subagent', 'reviewer', 'watchdog', 'summarizer', 'vision'] as const) {
+      expect(hub.resolve(role)?.config.chain[0]?.model, role).toBe('test-model')
     }
-  })
-})
-
-describe('resolvePresetModel', async () => {
-  const { resolvePresetModel } = await import('./presets')
-  it('maps preset ids onto a gateway\'s model names', () => {
-    const gateway = ['group/deepseek-v4.1-flash', 'siliconflow/BAAI/bge-m3']
-    expect(resolvePresetModel('deepseek-flash', gateway)).toBe('group/deepseek-v4.1-flash')
-    expect(resolvePresetModel('deepseek-v4-pro', gateway)).toBe('group/deepseek-v4.1-flash')
-    expect(resolvePresetModel('deepseek-v4-pro', ['deepseek-flash', 'deepseek-v4-pro'])).toBe('deepseek-v4-pro')
-    expect(resolvePresetModel('deepseek-flash', undefined)).toBe('deepseek-flash')
+    expect(hub.resolve('filter')).toBeUndefined()
+    expect(hub.applyDefaultModel(id!, 'other-model')).toBe(false)
+    await generateText({ model: hub.model('router'), prompt: 'x' })
+    expect(seen).toEqual(['sk-env-openai-5678'])
   })
 })

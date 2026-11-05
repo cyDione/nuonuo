@@ -1,8 +1,8 @@
-import { AgentRuntime, Bus } from '@super-agent/agent-runtime'
-import { generateOf, streamOf } from '@super-agent/agent-runtime/src/testing'
-import { Engine, registerAgents, ROUTER_SESSION } from '@super-agent/core'
-import { Effects, kvGet, openStore, schema, type Store } from '@super-agent/db'
-import { MemorySecrets, ModelHub } from '@super-agent/models'
+import { AgentRuntime, Bus } from '@super-assistant/agent-runtime'
+import { generateOf, streamOf } from '@super-assistant/agent-runtime/src/testing'
+import { Engine, registerAgents, ROUTER_SESSION } from '@super-assistant/core'
+import { Effects, kvGet, openStore, schema, type Store } from '@super-assistant/db'
+import { MemorySecrets, ModelHub } from '@super-assistant/models'
 import { MockLanguageModelV4 } from 'ai/test'
 import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
@@ -75,7 +75,7 @@ describe('PluginManager', () => {
     const { plugins, dir } = setup()
     const write = (name: string, code: string) => {
       mkdirSync(join(dir, name))
-      writeFileSync(join(dir, name, 'package.json'), JSON.stringify({ name, superagent: { plugin: './index.mjs' } }))
+      writeFileSync(join(dir, name, 'package.json'), JSON.stringify({ name, 'super-assistant': { plugin: './index.mjs' } }))
       writeFileSync(join(dir, name, 'index.mjs'), code)
     }
     write('broken', 'throw new Error("boom")')

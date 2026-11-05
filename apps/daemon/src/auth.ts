@@ -48,7 +48,7 @@ export function requireToken(token: string): MiddlewareHandler {
   return async (c, next) => {
     const bearer = c.req.header('authorization')?.replace(/^Bearer\s+/i, '')
     const presented = bearer || getCookie(c, COOKIE) || ''
-    if (!presented || !same(presented, token)) return c.json({ error: { code: 'unauthorized', message: '需要访问令牌：运行 superagent token 获取登录链接' } }, 401)
+    if (!presented || !same(presented, token)) return c.json({ error: { code: 'unauthorized', message: '需要访问令牌：运行 super-assistant token 获取登录链接' } }, 401)
     await next()
   }
 }

@@ -39,11 +39,11 @@ M4 的 Gmail、Telegram、飞书等插件都按这个协议实现。
   - 新 Issue / PR、对话评论、行内 review 评论
   - 任务跟随的 PR：review 结论、CI（等所有 check 完成后，按 sha + 结果去重，只通知一次）、合并或关闭
 - **唤起**：评论里出现唤起词（默认 `@agent`）才算在叫智能体。智能体以主人的账号发言，所以不能用 @ 主人自己来唤起。
-- **防回环**：智能体发出的评论末尾带有 `<!-- super-agent -->` 标记，读回时会跳过。
+- **防回环**：智能体发出的评论末尾带有 `<!-- super-assistant -->` 标记，读回时会跳过。
 - **Worker 的 GitHub 能力**：
-  - 提示词包含：分支命名 `superagent/<任务名>`、PR 正文规范、禁止推送默认分支或自行合并。
+  - 提示词包含：分支命名 `super-assistant/<任务名>`、PR 正文规范、禁止推送默认分支或自行合并。
   - 工具 `github_follow`：跟随自己开的 PR。
-  - 环境变量：`SUPERAGENT_GITHUB_REPO/NUMBER`。
+  - 环境变量：`SUPER_ASSISTANT_GITHUB_REPO/NUMBER`。
 
 ## 定时任务
 

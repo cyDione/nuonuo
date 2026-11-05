@@ -4,9 +4,9 @@
  * An escalated action does not block the worker: it becomes an approval card, and the command runs (and its result reaches
  * the worker) once the owner approves. Every decision is written to the audit log.
  */
-import type { AgentRuntime, Bus } from '@super-agent/agent-runtime'
-import { kvGet, newId, schema, type Store } from '@super-agent/db'
-import type { ModelHub } from '@super-agent/models'
+import type { AgentRuntime, Bus } from '@super-assistant/agent-runtime'
+import { kvGet, newId, schema, type Store } from '@super-assistant/db'
+import type { ModelHub } from '@super-assistant/models'
 import { generateText, Output } from 'ai'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
@@ -50,7 +50,7 @@ const CREDENTIALS: [RegExp, string][] = [
   [/\.aws\/credentials\b|\.config\/gcloud\b|\.azure\/|\.kube\/config\b/, '云服务凭据'],
   [/\.docker\/config\.json\b|\.npmrc\b|\.pypirc\b/, '包仓库或镜像仓库凭据'],
   [/\bsecurity\s+(find|dump)-(generic|internet)-password\b|\bsecret-tool\s+lookup\b|\bgpg\b[^;&|]*--export-secret/, '系统钥匙串或私钥'],
-  [/\/etc\/(shadow|sudoers)\b|\.superagent\/(secrets|token)\b/, '系统或智能体自身的秘密'],
+  [/\/etc\/(shadow|sudoers)\b|\.super-assistant\/(secrets|token)\b/, '系统或智能体自身的秘密'],
 ]
 
 export function credentialAccess(command: string): string | undefined {

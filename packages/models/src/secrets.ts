@@ -13,7 +13,7 @@ export interface SecretStore {
   delete(ref: string): void
 }
 
-const SERVICE = 'super-agent'
+const SERVICE = 'super-assistant'
 
 export class KeychainSecrets implements SecretStore {
   readonly backend = 'keychain' as const
@@ -73,12 +73,12 @@ export class MemorySecrets implements SecretStore {
 }
 
 /**
- * Picks the keychain when it answers a probe, otherwise the encrypted file. `SUPERAGENT_SECRETS=file|keychain` forces one.
- * Returns why the file store was chosen, for `superagent doctor`.
+ * Picks the keychain when it answers a probe, otherwise the encrypted file. `SUPER_ASSISTANT_SECRETS=file|keychain` forces one.
+ * Returns why the file store was chosen, for `super-assistant doctor`.
  */
-export async function openSecretStore(home: string, prefer = process.env.SUPERAGENT_SECRETS): Promise<{ store: SecretStore; note?: string }> {
+export async function openSecretStore(home: string, prefer = process.env.SUPER_ASSISTANT_SECRETS): Promise<{ store: SecretStore; note?: string }> {
   const fileStore = () => new FileSecrets(join(home, 'secrets'))
-  if (prefer === 'file') return { store: fileStore(), note: 'SUPERAGENT_SECRETS=file' }
+  if (prefer === 'file') return { store: fileStore(), note: 'SUPER_ASSISTANT_SECRETS=file' }
   try {
     const { Entry } = await import('@napi-rs/keyring')
     const probe = new Entry(SERVICE, '__probe__')

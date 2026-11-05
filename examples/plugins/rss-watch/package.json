@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Watch RSS/Atom feeds: notify on matching items, or hand them to the agent",
   "type": "module",
-  "superagent": {
+  "super-assistant": {
     "plugin": "./index.mjs",
     "name": "RSS 订阅",
     "apiVersion": 1

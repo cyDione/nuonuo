@@ -1,5 +1,5 @@
 {
-  "name": "@super-agent/models",
+  "name": "@super-assistant/models",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "tsc -p tsconfig.json" },
   "dependencies": {
-    "@super-agent/db": "workspace:*",
+    "@super-assistant/db": "workspace:*",
     "@ai-sdk/anthropic": "^4.0.96",
     "@ai-sdk/deepseek": "^3.0.79",
     "@ai-sdk/google": "^4.0.111",

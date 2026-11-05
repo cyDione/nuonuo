@@ -2,8 +2,8 @@
  * SourceRegistry: owns the installed source kinds and their saved settings, starts and stops them, and serves the engine
  * (who may ask for work, outgoing messages through the `reply` effect) and the agents (tools, prompt text, environment).
  */
-import type { AgentExtensions, Engine, SourcePort, Ticket } from '@super-agent/core'
-import { kvGet, kvSet, type Effects, type Store } from '@super-agent/db'
+import type { AgentExtensions, Engine, SourcePort, Ticket } from '@super-assistant/core'
+import { kvGet, kvSet, type Effects, type Store } from '@super-assistant/db'
 import type { ToolSet } from 'ai'
 import type { Health, OutgoingMessage, SourceContext, SourceKind } from './kind'
 

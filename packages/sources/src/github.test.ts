@@ -1,8 +1,8 @@
-import { AgentRuntime, Bus } from '@super-agent/agent-runtime'
-import { generateOf, streamOf } from '@super-agent/agent-runtime/src/testing'
-import { Engine, registerAgents, ROUTER_SESSION } from '@super-agent/core'
-import { Effects, openStore, schema, type Store } from '@super-agent/db'
-import { MemorySecrets, ModelHub } from '@super-agent/models'
+import { AgentRuntime, Bus } from '@super-assistant/agent-runtime'
+import { generateOf, streamOf } from '@super-assistant/agent-runtime/src/testing'
+import { Engine, registerAgents, ROUTER_SESSION } from '@super-assistant/core'
+import { Effects, openStore, schema, type Store } from '@super-assistant/db'
+import { MemorySecrets, ModelHub } from '@super-assistant/models'
 import { MockLanguageModelV4 } from 'ai/test'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -78,11 +78,11 @@ describe('GitHub source', () => {
     const [request] = store.db.select().from(schema.triggers).all()
     const ticket = engine.startTask({ triggerIds: [request!.id], title: '暗色模式' })
     await runtime.idle()
-    const pr = gh.openIssue('me/app', 'me', 'feat: dark mode', `fixes #${issue} ${MARKER}`, { head: `superagent/${ticket.name}` })
+    const pr = gh.openIssue('me/app', 'me', 'feat: dark mode', `fixes #${issue} ${MARKER}`, { head: `super-assistant/${ticket.name}` })
     engine.follow(ticket.id, `github:me/app#${pr}`, 'own', { title: `me/app#${pr} feat: dark mode` })
     gh.comment('me/app', pr, 'reviewer', '变量名不清楚', { path: 'src/theme.ts', line: 12 })
     gh.review('me/app', pr, 'reviewer', 'CHANGES_REQUESTED', '请补测试')
-    gh.checks.set(FakeGithub.sha(`superagent/${ticket.name}`), [{ name: 'test', status: 'completed', conclusion: 'failure' }, { name: 'lint', status: 'completed', conclusion: 'success' }])
+    gh.checks.set(FakeGithub.sha(`super-assistant/${ticket.name}`), [{ name: 'test', status: 'completed', conclusion: 'failure' }, { name: 'lint', status: 'completed', conclusion: 'success' }])
     await registry.pollNow('github')
     const delivered = store.db.select().from(schema.triggers).all().filter(t => ((t.disposition as any).deliveredTo ?? []).includes(ticket.id))
     expect(delivered.map(t => (t.meta as any).kind).sort()).toEqual(['ci', 'review', 'review-comment'])

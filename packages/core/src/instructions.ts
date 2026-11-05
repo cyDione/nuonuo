@@ -3,7 +3,7 @@
  * do on its own, what a finished result looks like. Every change is a new version; the owner, the main agent (on the
  * owner's request) and the watchdog can edit them, and any version can be restored.
  */
-import { kvGet, kvSet, type Store } from '@super-agent/db'
+import { kvGet, kvSet, type Store } from '@super-assistant/db'
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 

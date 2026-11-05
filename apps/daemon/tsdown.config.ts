@@ -9,8 +9,8 @@ export default defineConfig({
   outDir: 'dist',
   clean: true,
   // Workspace packages are bundled; npm dependencies (native better-sqlite3, keyring) stay external.
-  noExternal: [/^@super-agent\//],
-  external: [/^(?!@super-agent\/)[^./]/],
+  noExternal: [/^@super-assistant\//],
+  external: [/^(?!@super-assistant\/)[^./]/],
   hooks: {
     'build:done': () => {
       if (existsSync('../web/dist')) cpSync('../web/dist', 'dist/web', { recursive: true })

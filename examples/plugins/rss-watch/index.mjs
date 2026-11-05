@@ -1,8 +1,8 @@
-// An example Super-agent plugin: watches RSS/Atom feeds.
+// An example Super-assistant plugin: watches RSS/Atom feeds.
 // Matching items either become a notice in this source's conversation ("notify"), or a request to the agent ("agent"),
-// e.g. "summarize this article for me". Copy this folder into ~/.superagent/plugins/ and enable it in Settings → 插件.
+// e.g. "summarize this article for me". Copy this folder into ~/.super-assistant/plugins/ and enable it in Settings → 插件.
 
-/** @param {import('@super-agent/plugin-sdk').PluginSdk} sdk */
+/** @param {import('@super-assistant/plugin-sdk').PluginSdk} sdk */
 export default function plugin({ definePlugin, z }) {
   const Config = z.object({
     feeds: z.array(z.string().url()).default([]),
@@ -27,7 +27,7 @@ export default function plugin({ definePlugin, z }) {
     const seen = new Set(ctx.state.get('seen') ?? [])
     const first = !ctx.state.get('initialized')
     for (const feed of ctx.config.feeds) {
-      const res = await fetch(feed, { signal: AbortSignal.timeout(20_000), headers: { 'user-agent': 'super-agent-rss/0.1' } })
+      const res = await fetch(feed, { signal: AbortSignal.timeout(20_000), headers: { 'user-agent': 'super-assistant-rss/0.1' } })
       if (!res.ok) throw new Error(`${feed} → ${res.status}`)
       for (const item of items(await res.text())) {
         if (!item.id || seen.has(item.id)) continue

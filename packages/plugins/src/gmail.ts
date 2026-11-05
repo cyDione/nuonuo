@@ -4,18 +4,18 @@
  * - Authorization: an OAuth "Desktop app" client of your own Google Cloud project; the consent screen redirects back to the
  *   daemon on 127.0.0.1, and the refresh token goes into the secret store.
  * - Reading: History API polling from a cursor, so a sleeping laptop catches up.
- * - Requests: mail from your allowed addresses, or mail you label (default `superagent`), goes to the agent; other mail is
+ * - Requests: mail from your allowed addresses, or mail you label (default `super-assistant`), goes to the agent; other mail is
  *   recorded but not acted on. Replies to a mail thread are saved as a draft reply in that thread.
  * - Workers get gmail_search / gmail_read / gmail_draft.
  */
 import { randomBytes } from 'node:crypto'
-import { definePlugin, tool, z, type SourceContext, type SourceKind } from '@super-agent/plugin-sdk'
+import { definePlugin, tool, z, type SourceContext, type SourceKind } from '@super-assistant/plugin-sdk'
 
 export const GmailConfig = z.object({
   clientId: z.string().trim().default(''),
   clientSecret: z.string().default(''),
   allowedSenders: z.array(z.string().trim().toLowerCase()).default([]),
-  triggerLabel: z.string().trim().default('superagent'),
+  triggerLabel: z.string().trim().default('super-assistant'),
   pollSeconds: z.number().int().min(30).max(3600).default(120),
   apiUrl: z.string().url().default('https://gmail.googleapis.com'),
   authUrl: z.string().url().default('https://accounts.google.com/o/oauth2/v2/auth'),

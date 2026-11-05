@@ -11,7 +11,7 @@
  *   current project. The main agent's prompt holds only a profile summary; the rest is recalled into context per event.
  * - A consolidator expires old episodes and merges duplicates; `MEMORY.md` mirrors the active entries for reading.
  */
-import { newId, schema, type Store } from '@super-agent/db'
+import { newId, schema, type Store } from '@super-assistant/db'
 import type { EmbeddingModelV4 } from '@ai-sdk/provider'
 import { embed, embedMany, tool } from 'ai'
 import { and, desc, eq, inArray } from 'drizzle-orm'
@@ -258,7 +258,7 @@ ${profile || '（空）'}`]
     mkdirSync(dir, { recursive: true })
     const active = this.list({ status: 'active' })
     const section = (kind: MemoryKind) => active.filter(m => m.kind === kind)
-    const parts = ['# MEMORY', '', '> 由 Super-agent 生成，只读。修改请在「设置 → 记忆」中进行。', '']
+    const parts = ['# MEMORY', '', '> 由 Super-assistant 生成，只读。修改请在「设置 → 记忆」中进行。', '']
     for (const kind of MEMORY_KINDS) {
       const rows = section(kind)
       if (!rows.length) continue

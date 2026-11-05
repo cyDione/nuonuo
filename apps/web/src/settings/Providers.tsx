@@ -14,7 +14,7 @@ export function Providers() {
   return <>
     <div className="flex justify-end"><Button variant="primary" onClick={() => setAdding(true)}><Plus size={16} />添加供应商</Button></div>
     {providers.isSuccess && list.length === 0 && <Card><Empty icon={<KeyRound size={28} />} title="还没有模型供应商">
-      添加至少一个供应商（例如 Anthropic、DeepSeek，或本地的 Ollama），然后到「分层模型」为主 Agent 选择模型。</Empty></Card>}
+      添加至少一个供应商（例如 Anthropic、OpenAI，或本地的 Ollama），然后到「分层模型」为主 Agent 选择模型。</Empty></Card>}
     <div className="space-y-3">{list.map(p => <ProviderCard key={p.id} p={p} />)}</div>
     {adding && <AddProvider onClose={() => setAdding(false)} />}
   </>

@@ -1,6 +1,6 @@
-# Super-agent
+# Super-assistant
 
-一个**完全运行在你自己电脑上**的个人 Super-agent。设计依据见 [docs/00-research.md](docs/00-research.md)，参照的是 DeepSeek《Super-agent 设计探索》和 `dsh-superagent-prototype`；交互方式对标 Grok Bot / Muse。
+一个**完全运行在你自己电脑上**的个人 Super-assistant。设计依据见 [docs/00-research.md](docs/00-research.md)，参照的是 DeepSeek《Super-agent 设计探索》和 `dsh-superagent-prototype`；交互方式对标 Grok Bot / Muse。
 
 > 当前进度：**M5**（M1–M4 的内容见下，M5 的改动见最后一组）。
 > - **双层架构**：主 Agent 负责路由和对话；Worker 在本机执行任务，多个任务并行。
@@ -23,7 +23,7 @@
 >   - **Docker 沙箱**：可选，开启后任务命令在容器里执行。
 >
 > - **M4 新增**：
->   - **插件 SDK**：第三方插件放进 `~/.superagent/plugins/`，你启用后才运行。
+>   - **插件 SDK**：第三方插件放进 `~/.super-assistant/plugins/`，你启用后才运行。
 >   - **MCP 工具**：可以选择让调用先经过审核。
 >   - **Telegram**：在手机上远程指挥家里的电脑。
 >   - **Gmail**：智能体读邮件、写草稿，发送由你决定。
@@ -44,8 +44,6 @@
 >   - **设置**：按组归类。
 >
 > 设计和实现细节见 docs/ 下的 [01-m1](docs/01-m1-implementation.md)、[02-m2](docs/02-m2-implementation.md)、[03-m3](docs/03-m3-implementation.md)、[04-plugin-sdk](docs/04-plugin-sdk.md)、[05-m4](docs/05-m4-implementation.md)、[06-audit](docs/06-audit.md)、[07-architecture](docs/07-architecture.md)（论文架构逐节对照）、[08-industry-review](docs/08-industry-review.md)（业界解读查漏补缺）、[09-m6](docs/09-m6-muse-and-memory.md)。
->
-> 测试时让所有层都用 DeepSeek V4.1 Flash：启动前设置 `SUPERAGENT_PRESET=deepseek-flash`。
 
 ## 部署（自己的 Mac 或 Linux 电脑）
 
@@ -65,12 +63,12 @@ pnpm build
 - 或写进数据目录的 `env` 文件。开机自启的服务读不到 shell 里的 `export`，用这个文件最稳：
 
 ```bash
-mkdir -p ~/.superagent
-printf 'DEEPSEEK_API_KEY=sk-...\n' > ~/.superagent/env   # 每行 KEY=value；也可放 DEEPSEEK_BASE_URL、GITHUB_TOKEN 等
-chmod 600 ~/.superagent/env
+mkdir -p ~/.super-assistant
+printf 'OPENAI_API_KEY=sk-...\n' > ~/.super-assistant/env   # 每行 KEY=value；换成你用的供应商，也可放 *_BASE_URL、GITHUB_TOKEN 等
+chmod 600 ~/.super-assistant/env
 ```
 
-检测到 DeepSeek 时会自动套用推荐的分层配置（主 Agent 用 Flash，执行层用 V4 Pro）。想让所有层都用 Flash，在 `env` 里加一行 `SUPERAGENT_PRESET=deepseek-flash`；这只在首次启动、还没配置过任何层时生效。
+各层用哪个模型在「设置 → 分层模型」里选。想跳过这一步（比如测试），在 `env` 里加一行 `SUPER_ASSISTANT_MODEL=<模型 id>`，各层都用 `env` 里第一个供应商的这个模型；这只在首次启动、还没配置过任何层时生效。
 
 **3. 启动，检查**：
 
@@ -79,12 +77,12 @@ node apps/daemon/dist/cli.mjs doctor          # 检查环境
 node apps/daemon/dist/cli.mjs start           # 打印并打开登录链接（http://127.0.0.1:7420/auth?token=…）
 ```
 
-可以加个别名：`alias superagent="node ~/super-assistant/apps/daemon/dist/cli.mjs"`。登录链接丢了，用 `superagent token` 重新打印。
+可以加个别名：`alias super-assistant="node ~/super-assistant/apps/daemon/dist/cli.mjs"`。登录链接丢了，用 `super-assistant token` 重新打印。
 
 **4. 开机自启**（macOS 用 launchd，Linux 用 systemd 用户服务）：
 
 ```bash
-superagent service install        # 写入并启动；superagent service uninstall 移除
+super-assistant service install        # 写入并启动；super-assistant service uninstall 移除
 loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运行
 ```
 
@@ -99,7 +97,24 @@ loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运�
 cd ~/super-assistant && git pull && pnpm install && pnpm build
 ```
 
-升级后重启服务：`superagent service install`，或者停掉再 `start`。数据目录 `~/.superagent/` 不受影响，数据库会自动迁移。
+升级后重启服务：`super-assistant service install`，或者停掉再 `start`。数据目录 `~/.super-assistant/` 不受影响，数据库会自动迁移。
+
+**从旧名 superagent 升级**：项目改名后，命令、数据目录、环境变量和服务名都换了，旧名不再识别。已经部署过的话，按顺序做一次：
+
+```bash
+# 1. 先用旧版本停掉并移除旧服务（git pull 之前）
+superagent service uninstall      # 或手动：launchctl unload -w ~/Library/LaunchAgents/dev.superagent.daemon.plist
+                                  #        systemctl --user disable --now superagent.service
+# 2. 拉新代码并构建
+cd ~/super-assistant && git pull && pnpm install && pnpm build
+# 3. 搬数据目录，改 env 文件里的变量名
+mv ~/.superagent ~/.super-assistant
+sed -i.bak 's/^\(export \)\{0,1\}SUPERAGENT_/\1SUPER_ASSISTANT_/' ~/.super-assistant/env
+# 4. 用新命令装服务（别名也改成 super-assistant）
+super-assistant service install
+```
+
+另外：存在系统钥匙串里的 API key 换了钥匙串条目名，需要在「设置 → 模型供应商」里重新填一次（放在 `env` 文件里的不受影响）；第三方插件 `package.json` 里的 `"superagent"` 字段改成 `"super-assistant"`；Gmail 派活标签的默认值变成 `super-assistant`，在用默认值的话把邮箱里的标签也改名。
 
 **安全建议**：任务的命令以运行服务的用户身份执行。建议用一个单独的普通用户运行，或在「设置 → 执行环境」里把 Docker 沙箱设为「全部」。不要以 root 运行。
 
@@ -118,18 +133,18 @@ cd apps/desktop && pnpm start   # 已有服务时直接连接；没有的话用�
 
 | 命令 | 作用 |
 |---|---|
-| `superagent start [-p 端口] [--no-open]` | 启动本机服务 |
-| `superagent status` | 查看是否在运行，以及后台队列是否健康 |
-| `superagent doctor` | 检查运行环境（Node、钥匙串、模型配置、git/gh/Docker） |
-| `superagent token [--rotate]` | 打印登录链接；加 `--rotate` 时轮换访问令牌 |
-| `superagent service install / uninstall` | 开机自启（macOS 用 launchd，Linux 用 systemd 用户服务） |
+| `super-assistant start [-p 端口] [--no-open]` | 启动本机服务 |
+| `super-assistant status` | 查看是否在运行，以及后台队列是否健康 |
+| `super-assistant doctor` | 检查运行环境（Node、钥匙串、模型配置、git/gh/Docker） |
+| `super-assistant token [--rotate]` | 打印登录链接；加 `--rotate` 时轮换访问令牌 |
+| `super-assistant service install / uninstall` | 开机自启（macOS 用 launchd，Linux 用 systemd 用户服务） |
 
-在仓库内开发时，可以用 `node apps/daemon/dist/cli.mjs <命令>` 代替 `superagent`。
+在仓库内开发时，可以用 `node apps/daemon/dist/cli.mjs <命令>` 代替 `super-assistant`。
 
 ## 开发
 
 ```bash
-pnpm dev     # daemon（tsx watch，数据目录为 ./.superagent-dev）+ Vite（http://localhost:5173）
+pnpm dev     # daemon（tsx watch，数据目录为 ./.super-assistant-dev）+ Vite（http://localhost:5173）
 pnpm check   # 类型检查 + 测试 + 构建
 ```
 
@@ -137,8 +152,8 @@ pnpm check   # 类型检查 + 测试 + 构建
 
 ## 数据与安全
 
-- **数据目录**：默认是 `~/.superagent/`，可用 `SUPERAGENT_HOME` 修改。里面包括：`state.db`（SQLite）、`token`（访问令牌，权限 0600）、`work/`、`memory/`、`logs/`。
-- **API key 存放位置**：只存在系统钥匙串里（macOS Keychain / Linux Secret Service），不进数据库、不进日志，也不会进入模型上下文。如果钥匙串不可用（例如无桌面的 Linux），会自动改用 `secrets/secrets.enc`（AES-256-GCM，密钥 `master.key` 的权限为 0600）。`SUPERAGENT_SECRETS=file|keychain` 可以强制指定其中一种。
+- **数据目录**：默认是 `~/.super-assistant/`，可用 `SUPER_ASSISTANT_HOME` 修改。里面包括：`state.db`（SQLite）、`token`（访问令牌，权限 0600）、`work/`、`memory/`、`logs/`。
+- **API key 存放位置**：只存在系统钥匙串里（macOS Keychain / Linux Secret Service），不进数据库、不进日志，也不会进入模型上下文。如果钥匙串不可用（例如无桌面的 Linux），会自动改用 `secrets/secrets.enc`（AES-256-GCM，密钥 `master.key` 的权限为 0600）。`SUPER_ASSISTANT_SECRETS=file|keychain` 可以强制指定其中一种。
 - **网络访问控制**：服务只监听 `127.0.0.1`。所有 API 都需要访问令牌（HttpOnly + SameSite=Strict 的 cookie，或 Bearer 头），并校验 `Host` 与 `Origin`，防止 DNS rebinding 和其他网页伪造请求。
 
 ## 代码结构

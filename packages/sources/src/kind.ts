@@ -3,9 +3,9 @@
  * Triggers, writes replies back through its channel, and can lend the agents tools, prompt text and environment.
  * Its settings form is generated from `fields`, so a new source needs no UI code.
  */
-import type { TurnContext } from '@super-agent/agent-runtime'
-import type { Engine, Ticket } from '@super-agent/core'
-import type { Store } from '@super-agent/db'
+import type { TurnContext } from '@super-assistant/agent-runtime'
+import type { Engine, Ticket } from '@super-assistant/core'
+import type { Store } from '@super-assistant/db'
 import type { ToolSet } from 'ai'
 import type { z } from 'zod'
 

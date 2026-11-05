@@ -16,15 +16,15 @@ export interface DaemonConfig {
 }
 
 export function resolveConfig(opts: { port?: number; dev?: boolean } = {}): DaemonConfig {
-  const home = resolve(process.env.SUPERAGENT_HOME || join(homedir(), '.superagent'))
-  const port = opts.port ?? (Number(process.env.SUPERAGENT_PORT) || DEFAULT_PORT)
+  const home = resolve(process.env.SUPER_ASSISTANT_HOME || join(homedir(), '.super-assistant'))
+  const port = opts.port ?? (Number(process.env.SUPER_ASSISTANT_PORT) || DEFAULT_PORT)
   const dev = Boolean(opts.dev)
   return { home, port, host: '127.0.0.1', dev, devOrigins: dev ? ['http://localhost:5173', 'http://127.0.0.1:5173'] : [] }
 }
 
 /**
  * Loads `<home>/env` (KEY=value lines) into the environment, without overriding what is already set. A service started
- * at login (launchd / systemd) does not see the shell's exports, so keys such as DEEPSEEK_API_KEY live here instead.
+ * at login (launchd / systemd) does not see the shell's exports, so keys such as OPENAI_API_KEY live here instead.
  * The file holds secrets: it is kept at mode 0600.
  */
 export function loadEnvFile(home: string, env: NodeJS.ProcessEnv = process.env): string[] {

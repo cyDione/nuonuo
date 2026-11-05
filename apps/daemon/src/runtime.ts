@@ -1,10 +1,10 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
-import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-agent/agent-runtime'
-import { browserExtension, combineExtensions, Distiller, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, Watchdog } from '@super-agent/core'
-import { Effects, kvGet, kvSet, openStore, type Store } from '@super-agent/db'
-import { gmailPlugin, telegramPlugin } from '@super-agent/plugins'
-import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-agent/sources'
-import { EnvAwareSecrets, LAYER_PRESETS, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-agent/models'
+import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-assistant/agent-runtime'
+import { browserExtension, combineExtensions, Distiller, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, Watchdog } from '@super-assistant/core'
+import { Effects, kvGet, kvSet, openStore, type Store } from '@super-assistant/db'
+import { gmailPlugin, telegramPlugin } from '@super-assistant/plugins'
+import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-assistant/sources'
+import { EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-assistant/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolSet } from 'ai'
@@ -58,7 +58,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
   const lockFile = join(config.home, 'daemon.json')
   if (options.lock !== false) {
     const running = readLock(config.home)
-    if (running && running.pid !== process.pid) throw new Error(`另一个 superagent 正在运行（pid ${running.pid}，端口 ${running.port}）`)
+    if (running && running.pid !== process.pid) throw new Error(`另一个 super-assistant 正在运行（pid ${running.pid}，端口 ${running.port}）`)
     writeFileSync(lockFile, JSON.stringify({ pid: process.pid, port: config.port, startedAt: Date.now() }))
   }
   const store = openStore(join(config.home, 'state.db'))
@@ -91,7 +91,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     sources.engine = engine
     agents.options.maxWorkers = engine.execution().maxWorkers
     const reviewer = new Reviewer(store, hub, engine, agents, bus)
-    reviewer.envFor = ticket => workerEnv({ SUPERAGENT_TICKET: ticket.id, SUPERAGENT_DIR: ticket.directory })
+    reviewer.envFor = ticket => workerEnv({ SUPER_ASSISTANT_TICKET: ticket.id, SUPER_ASSISTANT_DIR: ticket.directory })
     const conversationTitle = (id: string) => store.sqlite.prepare('SELECT title FROM conversations WHERE id = ?').get(id) as { title: string } | undefined
     const memory = new Memory(store, config.home, { embedder: () => hub.embeddingModel(), label: scope => (scope.startsWith('cnv_') ? conversationTitle(scope)?.title : undefined) })
     memory.importLegacy()
@@ -176,7 +176,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
 }
 
 /** How long a conversation stays quiet before its new messages are distilled into memory. */
-const DISTILL_QUIET_MS = Number(process.env.SUPERAGENT_DISTILL_DELAY_MS) || 120_000
+const DISTILL_QUIET_MS = Number(process.env.SUPER_ASSISTANT_DISTILL_DELAY_MS) || 120_000
 
 /** Calls `after` once a tool succeeded (ok !== false). */
 function announced(tools: ToolSet, after: (name: string, result: unknown) => void): ToolSet {
@@ -192,16 +192,14 @@ function announced(tools: ToolSet, after: (name: string, result: unknown) => voi
   return tools
 }
 
-/** Registers providers for `*_API_KEY` variables and, while no layer is configured, applies the DeepSeek preset. */
-export async function bootstrapModels(hub: ModelHub): Promise<void> {
+/**
+ * Registers providers for `*_API_KEY` variables. On first start (no layer configured yet), SUPER_ASSISTANT_MODEL puts the layers on
+ * that model of the first provider found in the environment, e.g. for a quick test setup without opening Settings.
+ */
+export async function bootstrapModels(hub: ModelHub, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   hub.syncEnvProviders()
-  const deepseek = hub.listProviders().find(p => p.kind === 'deepseek' && p.hasKey)
-  if (!deepseek || Object.values(hub.roleConfigs()).some(c => c.chain.length > 0)) return
-  // Gateways rename models; map the preset onto what this endpoint lists (best effort, offline keeps the official ids).
-  const available = await hub.listModels(deepseek.id).catch(() => undefined)
-  // SUPERAGENT_PRESET picks another layer setup (e.g. deepseek-flash: every layer on V4.1 Flash, for testing).
-  const preset = process.env.SUPERAGENT_PRESET?.trim() || 'deepseek'
-  if (hub.applyPreset(preset, deepseek.id, { onlyIfEmpty: true, ...(available ? { available } : {}) })) {
-    console.log(`已为 ${deepseek.name}${deepseek.keyEnv ? `（${deepseek.keyEnv}）` : ''} 应用分层配置：${LAYER_PRESETS.find(p => p.id === preset)?.label ?? preset}`)
-  }
+  const model = env.SUPER_ASSISTANT_MODEL?.trim()
+  const provider = hub.listProviders().find(p => p.keyEnv && p.hasKey)
+  if (!model || !provider) return
+  if (hub.applyDefaultModel(provider.id, model)) console.log(`已将各层模型设为 ${provider.name} 的 ${model}（SUPER_ASSISTANT_MODEL）`)
 }

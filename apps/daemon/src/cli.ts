@@ -12,7 +12,7 @@ import { installService, uninstallService } from './service'
 // Keys in <home>/env reach every command, including a service started at login.
 loadEnvFile(resolveConfig().home)
 
-const program = new Command('superagent').version(VERSION).description('你的个人 Super-agent（本机运行）')
+const program = new Command('super-assistant').version(VERSION).description('你的个人 Super-assistant（本机运行）')
 const entry = fileURLToPath(import.meta.url)
 
 function openBrowser(url: string) {
@@ -27,7 +27,7 @@ program.command('start').description('启动本机服务（仅监听 127.0.0.1�
   .action(async (opts: { port?: number; open: boolean; dev?: boolean }) => {
     const config = resolveConfig(opts)
     const started = await startDaemon(config)
-    console.log(`Super-agent ${VERSION} 已启动`)
+    console.log(`Super-assistant ${VERSION} 已启动`)
     console.log(`  数据目录  ${config.home}`)
     console.log(`  密钥存储  ${started.runtime.secrets.backend}${started.runtime.secretsNote ? `（${started.runtime.secretsNote}）` : ''}`)
     console.log(`  登录链接  ${config.dev ? started.loginUrl.replace(started.url, 'http://localhost:5173') : started.loginUrl}`)
