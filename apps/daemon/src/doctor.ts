@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
 import type { Runtime } from './runtime'
+import { findDockerHost } from './shell-env'
 
 export interface Check { id: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string; fix?: string }
 
@@ -10,7 +11,7 @@ function version(cmd: string, args: string[] = ['--version']): string | undefine
   catch { return undefined }
 }
 
-export function runDoctor(rt: Runtime): Check[] {
+export async function runDoctor(rt: Runtime): Promise<Check[]> {
   const checks: Check[] = []
   const [major, minor] = process.versions.node.split('.').map(Number) as [number, number]
   checks.push({ id: 'node', label: 'Node.js', status: major > 22 || (major === 22 && minor >= 12) ? 'ok' : 'error',
@@ -38,13 +39,16 @@ export function runDoctor(rt: Runtime): Check[] {
   }
   const git = version('git')
   checks.push({ id: 'git', label: 'git', status: git ? 'ok' : 'warn', detail: git ?? '未安装', fix: 'M1 起任务工作目录依赖 git' })
-  const gh = version('gh')
-  checks.push({ id: 'gh', label: 'GitHub CLI', status: gh ? 'ok' : 'warn', detail: gh ?? '未安装', fix: 'M2 的 GitHub 插件可复用 gh 登录' })
+  // Docker Desktop may be started after the service: look for its socket again on every check.
+  await findDockerHost()
   const docker = version('docker', ['version', '--format', '{{.Server.Version}}'])
+  const cli = docker ? undefined : version('docker')
   const sandbox = rt.engine.execution().sandbox
   checks.push({ id: 'docker', label: 'Docker', status: docker ? 'ok' : sandbox.mode === 'off' ? 'warn' : 'error',
-    detail: docker ? `server ${docker}${sandbox.mode !== 'off' ? `，沙箱：${sandbox.image}` : ''}` : sandbox.mode === 'off' ? '不可用（沙箱未启用）' : '不可用，但沙箱已启用',
-    fix: '安装并启动 Docker（macOS：Docker Desktop / OrbStack），沙箱执行档需要它' })
+    detail: docker ? `server ${docker}${sandbox.mode !== 'off' ? `，沙箱：${sandbox.image}` : ''}`
+      : `${cli ? '已安装但连不上引擎' : '未找到 docker 命令'}${sandbox.mode === 'off' ? '（沙箱未启用）' : '，但沙箱已启用'}`,
+    fix: cli ? '启动 Docker Desktop / OrbStack / Colima 后点「重新检查」；仍连不上时可在数据目录的 env 文件里设置 DOCKER_HOST'
+      : '安装并启动 Docker（macOS：Docker Desktop / OrbStack），沙箱执行档需要它' })
   checks.push({ id: 'browser', label: '浏览器', status: rt.browserPath ? 'ok' : 'warn', detail: rt.browserPath ?? '未找到',
     fix: '安装 Google Chrome，或设置 SUPER_ASSISTANT_BROWSER 指向 Chromium/Chrome 可执行文件' })
   return checks

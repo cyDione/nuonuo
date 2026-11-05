@@ -124,7 +124,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     setTimeout(() => control.restart?.(), 300)
     return c.json({ ok: true })
   })
-  api.get('/doctor', c => c.json({ checks: runDoctor(rt) }))
+  api.get('/doctor', async c => c.json({ checks: await runDoctor(rt) }))
   api.get('/catalog', c => c.json({ presets: PROVIDER_PRESETS, roles: ROLES, reasoningLevels: REASONING_LEVELS }))
 
   // Providers
