@@ -1,8 +1,4 @@
-/**
- * The assistant's identity in the UI (Muse): the name and face the owner chose, and a one-line status of its work.
- * Its default face is a small, original character (a soft pebble with an antenna) (the mascot) whose expression follows what it is doing: breathing when idle,
- * looking around while it works, hopping when something waits for the owner, thinking while a reply is on its way.
- */
+/** The assistant's name, face and status line. */
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { api, type Persona, type Ticket } from './api'
@@ -13,11 +9,9 @@ const FALLBACK: Persona = { name: '小助', avatar: MASCOT, color: '#2f6bff', pe
 
 export const usePersona = () => {
   const p = useQuery({ queryKey: ['persona'], queryFn: () => api.get<{ persona: Persona }>('/persona'), staleTime: 60_000 }).data?.persona
-  // Installs that never touched the old defaults (✨ on indigo) get the new look.
   return !p ? FALLBACK : p.avatar === '✨' && p.color === '#4f46e5' ? { ...p, avatar: MASCOT, color: FALLBACK.color } : p
 }
 
-/** The character is the face unless the owner picked an emoji ("✨" was the old default, so it maps to the character too). */
 export const isMascot = (p: Persona) => !p.avatar || p.avatar === MASCOT || p.avatar === '✨'
 
 export type Mood = 'idle' | 'working' | 'waiting' | 'thinking' | 'happy' | 'sleepy'
@@ -33,14 +27,10 @@ export function Avatar({ persona, size = 28, className, mood = 'idle', track }: 
 
 const INK = '#121212'
 
-/**
- * An original character: a soft cloud with dot eyes, a line smile and a curly antenna — flat, friendly, a "digital
- * colleague". Drawn in a 100×100 box; the owner's colour fills it.
- */
+/** The default face: a small cloud whose expression follows its mood. */
 export function Mascot({ color, size = 28, mood = 'idle', className, track }: { color: string; size?: number; mood?: Mood; className?: string; track?: boolean }) {
   const eyes = useRef<SVGGElement>(null)
   const root = useRef<SVGSVGElement>(null)
-  // Eyes follow the pointer (only on the large, decorative instances). Writes the transform directly; no React state per frame.
   useEffect(() => {
     if (!track || matchMedia('(prefers-reduced-motion: reduce)').matches) return
     let frame = 0
@@ -66,14 +56,11 @@ export function Mascot({ color, size = 28, mood = 'idle', className, track }: { 
     <ellipse cx="50" cy="94" rx="27" ry="3.2" fill="currentColor" opacity="0.08" />
     {mood === 'working' && <g className="m-orbit"><circle cx="50" cy="8" r="3.6" fill="var(--sun)" /></g>}
     <g className="m-body">
-      {/* The curly antenna. */}
       <g className="m-sprout"><path d="M55 27 C53 19 56 12 62 12 C68 12 68 19 63 20 C58 21 58 13 64 8 C67 6 71 6 73 8" {...line} strokeWidth={2.4} /></g>
-      {/* A cloud: one body and three soft bumps, all one colour. */}
       <g fill={color}>
         <ellipse cx="50" cy="64" rx="35" ry="27" />
         <circle cx="31" cy="48" r="17" /><circle cx="52" cy="38" r="19" /><circle cx="71" cy="49" r="16" />
       </g>
-      {/* Arms: a shade darker, resting — one waves while something waits for the owner. */}
       <g style={{ fill: `color-mix(in oklab, ${color} 78%, #000)` }}>
         <ellipse cx="20" cy="73" rx="6.5" ry="9" transform="rotate(28 20 73)" />
         {mood === 'waiting' ? <g className="m-wave"><ellipse cx="85" cy="52" rx="6" ry="10" transform="rotate(-30 85 52)" /></g>

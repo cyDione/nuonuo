@@ -134,7 +134,7 @@ function PricesModal({ p, onClose }: { p: Provider; onClose(): void }) {
   const set = (i: number, patch: Partial<Price & { model: string }>) => setRows(rs => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   const num = (v: string) => (v === '' ? undefined : Number(v))
   return <Modal title={`模型价格 · ${p.name}`} onClose={onClose} footer={<Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending}>保存</Button>}>
-    <p className="text-xs text-muted">单位：美元 / 百万 token。只用于用量页的费用估算。缓存读写留空时按输入价计。</p>
+    <p className="text-xs text-muted">美元 / 百万 token</p>
     <datalist id={`price-models-${p.id}`}>{models.map(m => <option key={m} value={m} />)}</datalist>
     <div className="space-y-2">
       <div className="grid grid-cols-[1fr_70px_70px_70px_24px] gap-1.5 text-[11px] text-faint"><span>模型</span><span>输入</span><span>输出</span><span>缓存读</span><span /></div>

@@ -34,7 +34,7 @@ function Row({ p, action }: { p: PluginInfo; action?: React.ReactNode }) {
         {p.builtIn ? <Badge>内置</Badge> : p.loaded ? <Badge tone="ok">已加载</Badge> : p.enabled ? <Badge tone="danger">加载失败</Badge> : <Badge>未启用</Badge>}
       </div>
       {p.description && <p className="mt-0.5 text-xs text-muted">{p.description}</p>}
-      {p.sources.length > 0 && <p className="mt-1 text-xs text-faint">提供来源：{p.sources.join('、')}（在「来源」页配置）</p>}
+      {p.sources.length > 0 && <p className="mt-1 text-xs text-faint">提供来源：{p.sources.join('、')}</p>}
       {p.dir && <p className="mt-1 truncate font-mono text-[11px] text-faint">{p.dir}</p>}
       {p.error && <p className="mt-1 text-xs text-danger">{p.error}</p>}
     </div>

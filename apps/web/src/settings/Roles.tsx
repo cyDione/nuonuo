@@ -57,7 +57,6 @@ function RoleDetail({ spec, specs, levels, config, resolved, providers }: RolePr
 
     <Card className="p-4">
       <h3 className="text-sm font-medium">模型</h3>
-      <p className="mt-0.5 text-xs text-muted">主模型失败时依次尝试备用模型。</p>
       <div className="mt-3 space-y-2">
         {draft.chain.map((ref, i) => <ChainRow key={i} index={i} value={ref} kind={spec.kind} providers={providers}
           onChange={v => setChain(draft.chain.map((r, j) => (j === i ? v : r)))} onRemove={() => setChain(draft.chain.filter((_, j) => j !== i))} />)}

@@ -27,10 +27,9 @@ export function Select({ className, children, ...props }: SelectHTMLAttributes<H
 }
 
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
-  return <label className="block space-y-1.5">
+  return <label className="block space-y-1.5" title={typeof hint === 'string' ? hint : undefined}>
     <span className="text-xs font-medium text-muted">{label}</span>
     {children}
-    {hint && <span className="block text-xs text-pretty text-faint">{hint}</span>}
   </label>
 }
 
@@ -73,7 +72,6 @@ export function Empty({ icon, title, children, action }: { icon?: ReactNode; tit
   return <div className="anim-rise flex flex-col items-center justify-center gap-2 py-14 text-center">
     {icon && <div className="mb-1 flex size-14 items-center justify-center rounded-2xl bg-accent-soft text-accent">{icon}</div>}
     <div className="font-display text-base font-semibold">{title}</div>
-    {children && <div className="max-w-sm text-sm text-pretty text-muted">{children}</div>}
     {action && <div className="mt-2">{action}</div>}
   </div>
 }
@@ -102,6 +100,5 @@ export function DetailHeader({ back, backLabel, icon, title, badge, children }: 
       {icon && <span className="flex size-10 items-center justify-center rounded-xl bg-accent-soft text-accent">{icon}</span>}
       <h2 className="font-display text-2xl font-semibold text-balance">{title}</h2>{badge}
     </div>
-    {children && <div className="text-sm text-pretty text-muted">{children}</div>}
   </header>
 }

@@ -16,7 +16,7 @@ export function Sources({ item }: { item?: string }) {
     const health = HEALTH[s.health.status]
     return <ListRow key={s.id} href={`#/settings/sources/${encodeURIComponent(s.id)}`} icon={<SourceIcon source={s.id} size={18} />} title={s.title}
       badge={<Badge tone={health.tone}>{health.label}</Badge>}
-      detail={s.health.status === 'error' && s.health.detail ? <span className="text-danger">{s.health.detail}</span> : s.description} />
+      {...(s.health.status === 'error' && s.health.detail ? { detail: <span className="text-danger">{s.health.detail}</span> } : {})} />
   })}</Card>
 }
 

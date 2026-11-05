@@ -56,8 +56,7 @@ export function NeedsYou({ t, onAnswer }: { t: Ticket; onAnswer(text: string, ti
   const [handoff, setHandoff] = useState<string | null>(null)
   const [detail, setDetail] = useState(false)
 
-  const shell = (children: React.ReactNode) => <div className="relative overflow-hidden rounded-[22px] border border-line bg-panel px-4 py-3.5 shadow-[var(--shadow-sheet)]">
-    <span className={cx('absolute inset-y-0 left-0 w-1', t.stage === 'person/failed' ? 'bg-danger' : 'bg-warn')} aria-hidden />{children}</div>
+  const shell = (children: React.ReactNode) => <div className="rounded-[22px] border border-line bg-panel px-4 py-3.5">{children}</div>
 
   if (t.approvals.length) {
     const a = t.approvals[0]!
@@ -93,7 +92,7 @@ export function NeedsYou({ t, onAnswer }: { t: Ticket; onAnswer(text: string, ti
   return null
 }
 
-const Tile = ({ children }: { children: React.ReactNode }) => <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-warn-soft text-warn">{children}</span>
+const Tile = ({ children }: { children: React.ReactNode }) => <span className="shrink-0 text-warn">{children}</span>
 
 /** The quiet line under the conversation while work goes on; it opens what was done. */
 export function WorkingLine({ tickets }: { tickets: Ticket[] }) {

@@ -4,7 +4,7 @@
  * (GitHub, Telegram…). On phones it slides in as a drawer.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity as ActivityIcon, FolderOpen, MessageCircle, MoreHorizontal, Pencil, Pin, PinOff, Plus, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
+import { FolderOpen, MessageCircle, MoreHorizontal, Pencil, Pin, PinOff, Plus, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api, type Conversation, type UpdateStatus } from './api'
 import { openActivity, useLive } from './live'
@@ -39,8 +39,6 @@ function SidebarBody({ route }: { route: Route }) {
   const activeId = route.page === 'chat' ? (route.id ?? (route.main ? main?.id : undefined)) : undefined
   const tickets = useTickets().data?.tickets ?? []
   const live = tickets.filter(t => t.stage !== 'ended')
-  const waiting = live.filter(t => t.stage.startsWith('person/')).length
-  const working = live.filter(t => t.stage === 'working' || t.stage === 'queued').length
   const connected = useLive(s => s.connected)
   const persona = usePersona()
   const status = statusLine(live)
@@ -53,26 +51,14 @@ function SidebarBody({ route }: { route: Route }) {
   const changed = () => qc.invalidateQueries({ queryKey: ['conversations'] })
 
   return <div className="flex min-h-0 flex-1 flex-col">
-    {/* The assistant, present: its face, what it is doing, and what waits for you. */}
     <div className="px-3 pt-3 md:pt-4">
-      <div className="rounded-[22px] border border-line bg-panel p-3 shadow-[var(--shadow-sheet)]">
-        <button onClick={() => openActivity(true)} className="press flex w-full items-center gap-3 rounded-2xl p-1 text-left" title="看看我在做什么">
-          <span className="relative flex size-12 items-center justify-center rounded-2xl bg-accent-soft">
-            <Avatar persona={persona} size={40} mood={connected ? status.tone : 'sleepy'} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-display text-[17px] leading-tight font-semibold">{persona.name}</span>
-            <span className={cx('mt-0.5 flex items-center gap-1.5 truncate text-xs', status.tone === 'waiting' ? 'text-warn' : 'text-muted')}>
-              <StatusDot tone={connected ? status.tone : 'offline'} />
-              <span className="truncate">{connected ? status.text : '重连中…'}</span>
-            </span>
-          </span>
-        </button>
-        <div className="mt-2.5 grid grid-cols-2 gap-1.5">
-          <Counter label="等你处理" value={waiting} tone="coral" onClick={() => openActivity(true)} />
-          <Counter label="正在做" value={working} tone="accent" onClick={() => openActivity(true)} />
-        </div>
-      </div>
+      <button onClick={() => openActivity(true)} className="press flex w-full items-center gap-3 rounded-2xl p-2 text-left hover:bg-panel/70" title="看看我在做什么">
+        <Avatar persona={persona} size={40} mood={connected ? status.tone : 'sleepy'} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-display text-base leading-tight font-semibold">{persona.name}</span>
+          <span className={cx('mt-0.5 block truncate text-xs', status.tone === 'waiting' ? 'text-warn' : 'text-muted')}>{connected ? status.text : '重连中…'}</span>
+        </span>
+      </button>
     </div>
 
     <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pt-4 pb-2">
@@ -81,17 +67,15 @@ function SidebarBody({ route }: { route: Route }) {
         {activeId !== main.id && (main.unread ?? 0) > 0 && <Count n={main.unread!} />}
       </NavLink>}
       <div className="flex items-center gap-1 px-3 pt-5 pb-1.5">
-        <span className="eyebrow flex-1">侧聊</span>
+        <span className="flex-1 text-xs text-faint">侧聊</span>
         <button onClick={() => go('/new')} className="press flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs text-muted hover:bg-panel hover:text-fg" title="新侧聊：单独聊一个话题或项目" aria-label="新侧聊"><Plus size={13} />新建</button>
       </div>
-      {!side.length && <p className="px-3 py-1 text-xs text-pretty text-faint">一个话题或项目单独聊，它会记住这里定下的约定。</p>}
       {side.map(c => <Item key={c.id} c={c} active={c.id === activeId} status={statusOf(c.id)} onChanged={changed} />)}
-      {outside.length > 0 && <div className="px-3 pt-5 pb-1.5"><span className="eyebrow">外部</span></div>}
+      {outside.length > 0 && <div className="px-3 pt-5 pb-1.5 text-xs text-faint">外部</div>}
       {outside.map(c => <Item key={c.id} c={c} active={c.id === activeId} status={statusOf(c.id)} onChanged={changed} />)}
     </nav>
 
     <div className="space-y-0.5 px-3 pt-2 pb-3">
-      <NavLink href="#/activity" active={route.page === 'activity'} icon={<ActivityIcon size={16} />}>动态</NavLink>
       <NavLink href="#/library" active={route.page === 'library'} icon={<FolderOpen size={16} />}>成果</NavLink>
       <NavLink href={update.data?.available ? '#/settings/system' : '#/settings/persona'} active={route.page === 'settings'} icon={<SettingsIcon size={16} />}>
         <span className="flex-1">设置</span>
@@ -107,14 +91,6 @@ export function StatusDot({ tone }: { tone: 'idle' | 'working' | 'waiting' | 'of
     {(tone === 'working' || tone === 'waiting') && <span className={cx('ping-soft absolute inset-0 rounded-full', color)} />}
     <span className={cx('relative size-2 rounded-full', color)} />
   </span>
-}
-
-function Counter({ label, value, tone, onClick }: { label: string; value: number; tone: 'coral' | 'accent'; onClick(): void }) {
-  return <button onClick={onClick} className={cx('press flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left',
-    value ? (tone === 'coral' ? 'bg-coral/15' : 'bg-accent-soft') : 'bg-sunken/70')}>
-    <span className="text-xs text-muted">{label}</span>
-    <span className={cx('font-display text-base leading-none font-semibold tabular-nums', value ? (tone === 'coral' ? 'text-fg' : 'text-accent') : 'text-faint')}>{value}</span>
-  </button>
 }
 
 const Count = ({ n }: { n: number }) => <span className="shrink-0 rounded-full bg-accent px-1.5 text-[10px] leading-[18px] font-semibold text-accent-fg tabular-nums">{n}</span>

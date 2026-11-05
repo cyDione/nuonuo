@@ -5,18 +5,17 @@
  * panel's task details, never in the timeline.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlarmClock, AlertTriangle, ArrowUp, ArrowUpRight, BellRing, ExternalLink, Eye, Hash, Inbox, Search, Sunrise } from 'lucide-react'
+import { AlarmClock, AlertTriangle, ArrowUp, ArrowUpRight, ExternalLink, Hash } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, ApiError, type Conversation, type Message, type Health, type RolesResponse, type Routine } from './api'
-import { openActivity, openTask, useLive } from './live'
+import { api, ApiError, type Conversation, type Message, type RolesResponse } from './api'
+import { useLive } from './live'
 import { Avatar, greeting, statusLine, usePersona, type Mood } from './persona'
 import { go } from './route'
 import { NeedsYou, needsOwner, useTickets, WorkingLine } from './tasks'
 import { SOURCE_LABEL, SourceIcon } from './icons'
 import { cx } from './ui'
-import { StatusDot } from './Sidebar'
 
 /** A message typed on the empty screen, sent once the new conversation's page mounts. */
 let pendingSend: { id: string; content: string } | undefined
@@ -83,33 +82,18 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
 
   const empty = !id || (thread.isSuccess && messages.length === 0)
   const status = statusLine((tickets.data?.tickets ?? []).filter(t => t.stage !== 'ended'))
-  const waitingAll = (tickets.data?.tickets ?? []).filter(needsOwner).length
   const external = current && current.source !== 'webchat'
 
-  return <div className={cx('flex h-full flex-col', empty && 'glow')}>
-    {main ? <header className="flex h-16 shrink-0 items-center gap-3 border-b border-line px-6 max-md:hidden">
-      {/* Muse: the assistant's face, with a line of what it is doing; tap for the activity log. */}
-      <button onClick={() => openActivity(true)} className="press -ml-2 flex min-w-0 items-center gap-3 rounded-2xl py-1.5 pr-3 pl-2 text-left hover:bg-sunken" title="看看我在做什么">
-        <Avatar persona={persona} size={36} mood={thinking ? 'thinking' : status.tone} />
-        <span className="min-w-0">
-          <span className="block truncate font-display text-[15px] font-semibold">{persona.name}</span>
-          <span className={cx('flex items-center gap-1.5 truncate text-xs', status.tone === 'waiting' ? 'text-warn' : 'text-muted')}>
-            <StatusDot tone={status.tone} /><span className="truncate">{status.text}</span>
-          </span>
-        </span>
-      </button>
-      <span className="flex-1" />
-      {waitingAll > 0 && <button onClick={() => openActivity(true)} className="press anim-pop flex items-center gap-1.5 rounded-full bg-warn-soft px-3 py-1.5 text-xs font-medium text-warn">
-        <Inbox size={14} />{waitingAll} 件事等你</button>}
-    </header> : thread.data && <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-5 md:px-6">
+  return <div className="flex h-full flex-col">
+    {!main && thread.data && <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-5 md:px-6">
       <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-sunken text-muted">{external ? <SourceIcon source={current!.source} size={15} /> : <Hash size={15} />}</span>
-      <h1 className="min-w-0 flex-1 truncate font-display text-[15px] font-semibold">{title}{!external && <span className="ml-2 text-xs font-normal text-faint">侧聊</span>}</h1>
+      <h1 className="min-w-0 flex-1 truncate font-display text-[15px] font-semibold">{title}</h1>
       {current?.meta.url && <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg">
         在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>}
     </header>}
     {noRouter && <div className="mx-auto mt-4 w-full max-w-3xl px-4 md:px-6"><div className="anim-rise flex items-center gap-3 rounded-2xl bg-warn-soft px-4 py-3 text-sm">
       <AlertTriangle size={16} className="shrink-0 text-warn" />
-      <span className="flex-1 text-pretty">还没有可用的模型。添加供应商的 API key（或设置 OPENAI_API_KEY 等环境变量后重启），再为「主 Agent」选择模型。</span>
+      <span className="flex-1">还没有配置模型</span>
       <a className="press shrink-0 rounded-full bg-ink px-3 py-1.5 text-xs font-medium text-ink-fg" href="#/settings/providers">去设置</a>
     </div></div>}
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
@@ -133,75 +117,20 @@ function Typing() {
   </div>
 }
 
-/** Things an assistant is asked for: errands, reminders, keeping an eye on things, finding out. Each carries a coloured tag. */
-const SUGGESTIONS: { icon: React.ReactNode; tag: string; tone: string; text: string }[] = [
-  { icon: <Sunrise size={15} />, tag: '每天', tone: 'bg-sun text-[#121212]', text: '每天早上 9 点给我整理一下 Hacker News 热门' },
-  { icon: <BellRing size={15} />, tag: '提醒', tone: 'bg-coral text-white', text: '周五下午 4 点提醒我交周报' },
-  { icon: <Eye size={15} />, tag: '盯着', tone: 'bg-lime text-white', text: '我的 GitHub 仓库有新 issue 时，先帮我看一眼' },
-  { icon: <Search size={15} />, tag: '调研', tone: 'bg-grape text-white', text: '帮我比较几款降噪耳机，列个表' },
-]
+const SUGGESTIONS = ['每天早上 9 点给我整理 Hacker News 热门', '周五下午 4 点提醒我交周报', '帮我比较几款降噪耳机']
 
 function Welcome({ onPick, disabled, main, name, mood }: { onPick(text: string): void; disabled: boolean; main: boolean; name: string; mood: 'idle' | 'working' | 'waiting' }) {
   const persona = usePersona()
-  const version = useQuery({ queryKey: ['health'], queryFn: () => api.get<Health>('/health'), staleTime: Infinity }).data?.version
-  return <div className="relative flex min-h-full flex-col items-center justify-center overflow-hidden px-4 py-10 md:px-6">
-    <div className="relative flex w-full max-w-2xl flex-col items-center text-center">
-      {/* The character on its construction drawing, with technical annotations either side. */}
-      <div className="relative mb-6 flex w-full items-center justify-center">
-        <span className="tech absolute left-0 hidden text-left sm:block">{name}_01<br />Personal assistant</span>
-        <div className="anim-pop relative flex size-44 items-center justify-center">
-          <span className="construct absolute -inset-x-16 inset-y-0 opacity-70 max-sm:-inset-x-6" aria-hidden />
-          <span className="absolute inset-3 rounded-full border border-line" aria-hidden />
-          <span className="absolute inset-9 rounded-full border border-dashed border-line" aria-hidden />
-          {['top-3 left-1/2', 'bottom-3 left-1/2', 'left-3 top-1/2', 'right-3 top-1/2'].map(p => <span key={p} className={cx('absolute size-1.5 -translate-x-1/2 -translate-y-1/2 bg-fg', p)} aria-hidden />)}
-          <Avatar persona={persona} size={main ? 112 : 96} mood={main ? mood : 'happy'} track className="relative text-fg" />
-        </div>
-        <span className="tech absolute right-0 hidden text-right sm:block">{version ? `v${version}` : 'v—'}<br />Local · 127.0.0.1</span>
-      </div>
-      <h2 className="anim-rise font-display text-3xl leading-[1.15] font-semibold text-balance md:text-[40px]">
-        {main ? <>{greeting()}，我是{name}。<br className="max-sm:hidden" />今天想让我帮你<span className="text-accent">做点什么</span>？</> : <>新开一个<span className="text-accent">侧聊</span></>}
-      </h2>
-      <p className="anim-rise mt-3 max-w-lg text-sm text-pretty text-muted [animation-delay:60ms]">{main
-        ? '有事直接跟我说，可以连着交代好几件。需要动手的我在后台做，做完或者要你拿主意时再来找你。'
-        : '单独聊一个话题或项目。我会记住这个侧聊里定下的约定，只在这里用。'}</p>
-      {main && <Today />}
-      <div className="stagger mt-3 grid w-full gap-2 sm:grid-cols-2">
-        {SUGGESTIONS.map(s => <button key={s.text} disabled={disabled} onClick={() => onPick(s.text)}
-          className="press group flex items-center gap-3 rounded-2xl border border-line bg-panel/80 p-3 text-left text-sm hover:border-fg/30 disabled:opacity-50">
-          <span className={cx('flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-medium', s.tone)}>{s.icon}{s.tag}</span>
-          <span className="min-w-0 flex-1 text-pretty text-muted group-hover:text-fg">{s.text}</span>
-          <ArrowUpRight size={15} className="shrink-0 text-faint opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
-        </button>)}
-      </div>
+  return <div className="flex min-h-full flex-col items-center justify-center px-4 py-10 text-center md:px-6">
+    <Avatar persona={persona} size={96} mood={main ? mood : 'happy'} track className="anim-pop mb-5 text-fg" />
+    <h2 className="anim-rise font-display text-3xl leading-tight font-semibold text-balance">
+      {main ? <>{greeting()}，我是{name}</> : '新侧聊'}
+    </h2>
+    <div className="stagger mt-6 flex max-w-xl flex-wrap justify-center gap-2">
+      {SUGGESTIONS.map(t => <button key={t} disabled={disabled} onClick={() => onPick(t)}
+        className="press rounded-full border border-line bg-panel px-4 py-2 text-sm text-muted hover:border-fg/30 hover:text-fg disabled:opacity-50">{t}</button>)}
     </div>
   </div>
-}
-
-/** The day at a glance on the main conversation's empty screen: what waits for you, what is going on, what comes next. */
-function Today() {
-  const tickets = (useTickets().data?.tickets ?? []).filter(t => t.stage !== 'ended')
-  const routines = useQuery({ queryKey: ['routines'], queryFn: () => api.get<{ routines: Routine[] }>('/routines') }).data?.routines ?? []
-  const waiting = tickets.filter(needsOwner)
-  const working = tickets.filter(t => t.stage === 'working' || t.stage === 'queued')
-  const next = routines.filter(r => r.enabled && r.next).sort((a, b) => a.next! - b.next!)
-  const cards = [
-    { label: '等你处理', code: 'Inbox', n: waiting.length, line: waiting[0]?.title, chip: 'bg-coral', onClick: () => openActivity(true) },
-    { label: '正在做', code: 'Active', n: working.length, line: working[0]?.title, chip: 'bg-accent', onClick: () => (working[0] ? openTask(working[0].id) : openActivity(true)) },
-    { label: '接下来', code: 'Next', n: next.length, line: next[0] ? `${fmtWhen(next[0].next!)} · ${next[0].name}` : undefined, chip: 'bg-lime', onClick: () => go('/settings/routines') },
-  ]
-  return <div className="stagger mt-7 grid w-full grid-cols-3 gap-2">
-    {cards.map((c, i) => <button key={c.label} onClick={c.onClick} className="press min-w-0 rounded-2xl border border-line bg-panel p-3 text-left hover:border-fg/30">
-      <span className="flex items-center justify-between gap-1.5"><span className="tech">0{i + 1}_{c.code}</span><span className={cx('size-2 rounded-full', c.chip)} /></span>
-      <span className={cx('mt-3 block font-display text-[32px] leading-none font-semibold tabular-nums', !c.n && 'text-faint')}>{c.n}</span>
-      <span className="mt-2 block truncate text-xs text-muted">{c.label}<span className="text-faint"> · {c.line ?? '暂时没有'}</span></span>
-    </button>)}
-  </div>
-}
-
-const fmtWhen = (at: number) => {
-  const d = new Date(at), now = new Date()
-  const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  return d.toDateString() === now.toDateString() ? `今天 ${time}` : `${d.getMonth() + 1}/${d.getDate()} ${time}`
 }
 
 /** The assistant's messages are bubbles with its face on the first of a run (Muse), so back-to-back messages stay readable. */
@@ -272,6 +201,5 @@ function Composer({ onSend, disabled, status, placeholder }: { onSend(text: stri
       <button onClick={submit} aria-label="发送" disabled={!text.trim() || disabled}
         className={cx('press flex size-10 shrink-0 items-center justify-center rounded-full', text.trim() && !disabled ? 'bg-accent text-accent-fg' : 'bg-sunken text-faint')}><ArrowUp size={18} /></button>
     </div>
-    <div className="mt-1.5 px-4 text-[11px] text-faint max-md:hidden">Enter 发送 · Shift + Enter 换行</div>
   </div>
 }
