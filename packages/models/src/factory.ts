@@ -6,7 +6,7 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { EmbeddingModelV4, LanguageModelV4 } from '@ai-sdk/provider'
 import type { ProviderKind } from './catalog'
-import { SYSTEM_ONE_BASE, systemOneClient, type SystemOneClient } from './systemone'
+import { decisionEndpoints, SYSTEM_ONE_BASE, systemOneClient, type SystemOneClient } from './systemone'
 
 export interface ProviderRecord {
   id: string
@@ -22,6 +22,8 @@ export interface ProviderOptions {
   /** USD per million tokens, keyed by model id, for cost estimates in the usage view. */
   prices?: Record<string, { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>
   headers?: Record<string, string>
+  /** Full URL of a gateway's decisions endpoint (for Jev), when it is not at a known path. */
+  decisionsUrl?: string
 }
 
 export type ModelFactory = {
@@ -54,7 +56,7 @@ export const defaultFactory: ModelFactory = {
     if (!make) throw new Error(`${p.kind} has no embedding models`)
     return make.call(provider, model) as EmbeddingModelV4
   },
-  systemOne: (p, key) => systemOneClient(p.baseUrl, key, p.options.headers),
+  systemOne: (p, key) => systemOneClient(decisionEndpoints(p.baseUrl, p.kind, p.options.decisionsUrl), key, p.options.headers),
 }
 
 const DEFAULT_BASE: Partial<Record<ProviderKind, string>> = {

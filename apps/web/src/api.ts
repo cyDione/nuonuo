@@ -29,7 +29,7 @@ export interface Preset { id: string; kind: ProviderKind; label: string; baseUrl
 export type RoleId = 'router' | 'worker' | 'subagent' | 'filter' | 'reviewer' | 'watchdog' | 'summarizer' | 'embedding' | 'vision'
 export interface RoleSpec { id: RoleId; label: string; duty: string; advice: string; inherits?: RoleId; optional?: boolean; kind: 'language' | 'embedding' }
 export interface Catalog { presets: Preset[]; roles: RoleSpec[]; reasoningLevels: string[] }
-export interface Provider { id: string; kind: ProviderKind; name: string; baseUrl: string | null; options: { prices?: Record<string, Price> }; hasKey: boolean; keyHint?: string; keyEnv?: string }
+export interface Provider { id: string; kind: ProviderKind; name: string; baseUrl: string | null; options: { prices?: Record<string, Price>; decisionsUrl?: string }; hasKey: boolean; keyHint?: string; keyEnv?: string }
 export interface Price { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
 export interface ModelRef { providerId: string; model: string }
 export interface RoleConfig { chain: ModelRef[]; enabled: boolean; reasoning?: string; temperature?: number; maxOutputTokens?: number; dailyTokenLimit?: number; dailyCostLimitUsd?: number }

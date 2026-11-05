@@ -4,6 +4,15 @@ export type ProviderKind = 'anthropic' | 'openai' | 'google' | 'deepseek' | 'ope
 /** Decision-model providers: no chat endpoint, so they serve only the layers in DECISION_ROLES. */
 export const DECISION_KINDS: readonly ProviderKind[] = ['typesafe']
 
+/**
+ * Whether a model is a decision model (TypeSafe Jev): any model of a decision provider, or a Jev model offered by a
+ * multi-provider gateway under its own name (`jev-latest`, `typesafe/jev-1.13`, `group/jev`…). `jev-router` is not one:
+ * it routes chat requests to chat models.
+ */
+export function isDecisionModel(kind: ProviderKind, model: string): boolean {
+  return DECISION_KINDS.includes(kind) || /(^|[/:])jev(?![-_]?router)([-_.:@]|$)/i.test(model.trim())
+}
+
 export interface ProviderPreset {
   id: string
   kind: ProviderKind
