@@ -21,9 +21,9 @@ export const MARKER = '<!-- super-assistant -->'
 
 /**
  * The built-in OAuth App (device flow enabled). A client ID is public by design: the device flow needs no secret.
- * Empty until one is registered; then `clientId` in the settings is only needed to use another app.
+ * The owner's "Super Assistant" app; `clientId` in the settings is only needed to use another app.
  */
-export const DEFAULT_GITHUB_CLIENT_ID = ''
+export const DEFAULT_GITHUB_CLIENT_ID = 'Ov23liK2hYlHXMinmLMg'
 /** What `gh` asks for, so workers can use `gh` and git with the same token. */
 export const GITHUB_SCOPES = 'repo read:org workflow'
 

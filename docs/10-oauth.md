@@ -11,7 +11,7 @@ GitHub 和 Gmail 都用 OAuth 授权接入：在设置页点一下，用自己�
 
 ## 用到的 OAuth 应用
 
-代码里有内置客户端的位置（`DEFAULT_GITHUB_CLIENT_ID`、`DEFAULT_GOOGLE_CLIENT_ID` / `DEFAULT_GOOGLE_CLIENT_SECRET`）。内置值为空时，设置页会直接显示 Client ID 字段；有内置值时这些字段收进「高级」，留空即用内置的。
+GitHub 已内置一个 OAuth App（`DEFAULT_GITHUB_CLIENT_ID`），直接点「授权 GitHub」即可，下面的 GitHub 步骤只在想换用自己的应用时才需要。Gmail 没有内置客户端（`DEFAULT_GOOGLE_CLIENT_ID` / `DEFAULT_GOOGLE_CLIENT_SECRET` 为空）。内置值为空时，设置页会直接显示 Client ID 字段；有内置值时这些字段收进「高级」，留空即用内置的。
 
 ### GitHub OAuth App
 
