@@ -44,15 +44,15 @@
 }
 
 :root {
-  /* Neutral chrome, colour in the cards (Figma "v4 · 主题色" → 学 Muse): no tinted greys; one coral accent for actions. */
-  --bg: #f4f4f3; --panel: #ffffff; --card: #ffffff; --bubble: #f1f1ef; --hero: #f1f1ef; --hero-2: #e6e6e3; --sunken: #ededeb; --line: #e6e6e3;
+  /* Neutral chrome, colour in the cards (Figma "v4 · 主题色" → 学 Muse): cool neutral greys with no yellow cast; one coral accent for actions. */
+  --bg: #f5f5f7; --panel: #ffffff; --card: #ffffff; --bubble: #f0f0f3; --hero: #f0f0f3; --hero-2: #e5e5ea; --sunken: #ececf0; --line: #e5e5ea;
   --fg: #141414; --muted: #636363; --faint: #9a9a9a;
   --ink: #141414; --ink-fg: #ffffff;
   --accent: #c9442e; --accent-fg: #ffffff; --accent-soft: #fbe9e5;
   --mochi: #e9845a;
   --thumb: rgb(20 20 20 / 0.2); --thumb-hover: rgb(20 20 20 / 0.36);
   --ok: #2f7a55; --warn: #a8611a; --warn-soft: #f8ecd9; --danger: #c23b33;
-  --lime: #2f9e6e; --coral: #d2535a; --sun: #f6c04e; --sky: #13857a; --grape: #7e8a6e;
+  --lime: #2f9e6e; --coral: #d2535a; --sun: #f6c04e; --sky: #3d86e0; --grape: #8a7fc0;
   --glow: rgb(233 132 90 / 0.12);
   --scrim: rgb(10 10 10 / 0.3);
   --shadow-sheet: 0 1px 0 rgb(0 0 0 / 0.03), 0 10px 30px -14px rgb(0 0 0 / 0.14);
@@ -67,7 +67,7 @@
     --mochi: #e9845a;
     --thumb: rgb(255 255 255 / 0.2); --thumb-hover: rgb(255 255 255 / 0.36);
     --ok: #6fcf9c; --warn: #f2c06b; --warn-soft: #2e2414; --danger: #f2877d;
-    --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #3fb3a3; --grape: #a3ad92;
+    --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #6fa8ef; --grape: #b1a8dc;
     --glow: rgb(233 132 90 / 0.1);
     --scrim: rgb(0 0 0 / 0.6);
     --shadow-sheet: 0 0 0 1px rgb(255 255 255 / 0.04), 0 12px 32px -16px rgb(0 0 0 / 0.7);
@@ -82,7 +82,7 @@
   --mochi: #e9845a;
   --thumb: rgb(255 255 255 / 0.2); --thumb-hover: rgb(255 255 255 / 0.36);
   --ok: #6fcf9c; --warn: #f2c06b; --warn-soft: #2e2414; --danger: #f2877d;
-  --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #3fb3a3; --grape: #a3ad92;
+  --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #6fa8ef; --grape: #b1a8dc;
   --glow: rgb(233 132 90 / 0.1);
   --scrim: rgb(0 0 0 / 0.6);
   --shadow-sheet: 0 0 0 1px rgb(255 255 255 / 0.04), 0 12px 32px -16px rgb(0 0 0 / 0.7);
@@ -281,16 +281,16 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
  * vivid one; a fine grain takes the plastic look off the gradient. A soft blob of the lightest stop drifts slowly
  * (transform only, paused while the window is in the background). Text on them is white.
  */
-.flow { --c1: #e27a5c; --c2: #d2535a; --c3: #b8395e; position: relative; isolation: isolate; overflow: hidden; color: #ffffff;
+.flow { --c1: #f08a7a; --c2: #e2566e; --c3: #c23d6b; position: relative; isolation: isolate; overflow: hidden; color: #ffffff;
   background: linear-gradient(135deg, var(--c1), var(--c2) 55%, var(--c3)); }
-.flow[data-tone="coral"] { --c1: #e27a5c; --c2: #d2535a; --c3: #b8395e; }
-.flow[data-tone="sage"] { --c1: #9a9878; --c2: #7e8a6e; --c3: #667766; }
+.flow[data-tone="coral"] { --c1: #f08a7a; --c2: #e2566e; --c3: #c23d6b; }
+.flow[data-tone="lilac"] { --c1: #b7aed6; --c2: #9c92c6; --c3: #7f74ae; }
 .flow[data-tone="teal"] { --c1: #1f9e7a; --c2: #13857a; --c3: #0b5a63; }
-.flow[data-tone="amber"] { --c1: #e6a04a; --c2: #d9772e; --c3: #c85a34; }
+.flow[data-tone="sky"] { --c1: #7ab8f0; --c2: #4a8fe2; --c3: #3466c8; }
 .flow::before { content: ""; position: absolute; inset: -40%; z-index: -1; pointer-events: none;
   background: radial-gradient(34% 38% at 30% 28%, color-mix(in oklab, var(--c1) 85%, white), transparent 70%), radial-gradient(40% 40% at 74% 76%, var(--c3), transparent 72%);
   opacity: 0.8; animation: flow 18s ease-in-out infinite alternate; }
-.flow[data-tone="sage"]::before { animation-delay: -9s; }
+.flow[data-tone="lilac"]::before { animation-delay: -9s; }
 .flow[data-tone="teal"]::before { animation-delay: -4s; animation-duration: 22s; }
 .flow::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0.32; mix-blend-mode: overlay; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 .flow.tilt::after { opacity: 0.32; transition: none; }

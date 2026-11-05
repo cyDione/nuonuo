@@ -53,7 +53,7 @@ export function MePage({ tab }: { tab: MeTab }) {
         <MeCard tab="persona" active={tab === 'persona'} icon={Heart} title="个性" tone="coral" date={day(Date.now())}>
           <p className="line-clamp-3">{persona.personality || '还没写它的性格。点开告诉它该怎么说话。'}</p>
         </MeCard>
-        <MeCard tab="soul" active={tab === 'soul'} icon={Sparkles} title="灵魂" tone="sage" date={instructions?.current.version ? `第 ${instructions.current.version} 版 · ${day(instructions.current.at)}` : '还没写'}>
+        <MeCard tab="soul" active={tab === 'soul'} icon={Sparkles} title="灵魂" tone="lilac" date={instructions?.current.version ? `第 ${instructions.current.version} 版 · ${day(instructions.current.at)}` : '还没写'}>
           {rules.length ? <ol className="list-decimal space-y-0.5 pl-4">{rules.slice(0, 3).map((r, i) => <li key={i} className="truncate">{r}</li>)}</ol> : <p>做事的规矩：怎么沟通、能做什么、交付什么。</p>}
         </MeCard>
         <MeCard tab="memory" active={tab === 'memory'} icon={Brain} title="记忆" tone="teal" date={`${active.length} 条`} badge={pending ? `${pending} 条等你确认` : undefined}>
@@ -68,7 +68,7 @@ export function MePage({ tab }: { tab: MeTab }) {
   </div>
 }
 
-function MeCard({ tab, active, icon: Icon, title, tone, date, badge, children }: { tab: MeTab; active: boolean; icon: LucideIcon; title: string; tone: 'coral' | 'sage' | 'teal'; date: string; badge?: string | undefined; children: React.ReactNode }) {
+function MeCard({ tab, active, icon: Icon, title, tone, date, badge, children }: { tab: MeTab; active: boolean; icon: LucideIcon; title: string; tone: 'coral' | 'lilac' | 'teal'; date: string; badge?: string | undefined; children: React.ReactNode }) {
   const ref = useTilt<HTMLAnchorElement>(4)
   return <a ref={ref} href={`#/me/${tab}`} data-tone={tone} aria-current={active ? 'page' : undefined}
     className={cx('flow tilt anim-rise group flex min-h-40 flex-col rounded-[22px] p-4 text-[13px] transition-[box-shadow,outline-color] outline-2 -outline-offset-2',

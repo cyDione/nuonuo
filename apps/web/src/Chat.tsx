@@ -105,7 +105,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
           在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>}
       </>}
     </TopBar>
-    {noRouter && <div className="mx-auto mt-4 w-full max-w-3xl px-4 md:px-6"><div className="anim-rise flex items-center gap-3 rounded-2xl bg-warn-soft px-4 py-3 text-sm">
+    {noRouter && <div className="mx-auto mt-4 w-full max-w-3xl px-4 md:px-6"><div className="anim-rise flex items-center gap-3 rounded-2xl bg-sunken px-4 py-3 text-sm">
       <AlertTriangle size={16} className="shrink-0 text-warn" />
       <span className="flex-1">还没有配置模型</span>
       <a className="press shrink-0 rounded-full bg-ink px-3 py-1.5 text-xs font-medium text-ink-fg" href="#/settings/providers">去设置</a>
@@ -134,7 +134,7 @@ function Typing() {
   </div>
 }
 
-const SUGGESTIONS: [string, string][] = [['每天 9 点整理 HN 热门', '#13857a'], ['周五下午提醒我交周报', '#d2535a'], ['比较几款降噪耳机', '#f2b632'], ['起草一封请假邮件', '#7e8a6e'], ['总结今天的未读消息', '#d9772e']]
+const SUGGESTIONS: [string, string][] = [['每天 9 点整理 HN 热门', '#13857a'], ['周五下午提醒我交周报', '#d2535a'], ['比较几款降噪耳机', '#8a7fc0'], ['起草一封请假邮件', '#3d86e0'], ['总结今天的未读消息', '#e9845a']]
 const TILT = [-3, 2, -1.5, 1.5, -2]
 
 function Welcome({ onPick, disabled, main, mood }: { onPick(text: string): void; disabled: boolean; main: boolean; mood: 'idle' | 'working' | 'waiting' }) {
@@ -148,7 +148,7 @@ function Welcome({ onPick, disabled, main, mood }: { onPick(text: string): void;
     </h2>
     <div className="relative mt-8 flex max-w-xl flex-wrap justify-center gap-x-2.5 gap-y-3">
       {SUGGESTIONS.map(([t, c], i) => <button key={t} disabled={disabled} onClick={() => onPick(t)} style={{ background: c, ['--r' as string]: `${TILT[i]}deg`, ['--i' as string]: i }}
-        className={cx('tag rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-50', c === '#f2b632' ? 'text-[#121212]' : 'text-white')}>{t}</button>)}
+        className={cx('tag rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-50', 'text-white')}>{t}</button>)}
     </div>
   </div>
 }
