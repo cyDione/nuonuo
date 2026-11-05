@@ -37,7 +37,9 @@
 >   - **子任务**：Worker 可以异步分出子任务并行做（`subagent_start` / `subagent_stop`）。
 >   - **链式召回**：可以从线程追到上面的工作，再追到它的执行记录。
 >
-> 设计和实现细节见 docs/ 下的 [01-m1](docs/01-m1-implementation.md)、[02-m2](docs/02-m2-implementation.md)、[03-m3](docs/03-m3-implementation.md)、[04-plugin-sdk](docs/04-plugin-sdk.md)、[05-m4](docs/05-m4-implementation.md)、[06-audit](docs/06-audit.md)。
+> 设计和实现细节见 docs/ 下的 [01-m1](docs/01-m1-implementation.md)、[02-m2](docs/02-m2-implementation.md)、[03-m3](docs/03-m3-implementation.md)、[04-plugin-sdk](docs/04-plugin-sdk.md)、[05-m4](docs/05-m4-implementation.md)、[06-audit](docs/06-audit.md)、[07-architecture](docs/07-architecture.md)（论文架构逐节对照）。
+>
+> 测试时让所有层都用 DeepSeek V4.1 Flash：启动前设置 `SUPERAGENT_PRESET=deepseek-flash`。
 
 ## 快速开始
 
