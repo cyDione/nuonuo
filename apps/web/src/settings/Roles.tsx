@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { api, type ModelRef, type Provider, type RoleConfig, type RoleSpec, type RolesResponse } from '../api'
 import { Badge, Button, Card, DetailHeader, Field, Input, ListRow, Select, fmtNum, fmtUsd } from '../ui'
 import { useCatalog, useModelOptions, useProviders } from './hooks'
+import { ModelPicker } from './ModelPicker'
 
 const EMPTY: RoleConfig = { chain: [], enabled: true }
 
@@ -58,7 +59,7 @@ function RoleDetail({ spec, specs, levels, config, resolved, providers }: RolePr
     <Card className="p-4">
       <h3 className="text-sm font-medium">模型</h3>
       <div className="mt-3 space-y-2">
-        {draft.chain.map((ref, i) => <ChainRow key={i} index={i} value={ref} kind={spec.kind} providers={providers}
+        {draft.chain.map((ref, i) => <ChainRow key={i} index={i} value={ref} role={spec.id} kind={spec.kind} providers={providers}
           onChange={v => setChain(draft.chain.map((r, j) => (j === i ? v : r)))} onRemove={() => setChain(draft.chain.filter((_, j) => j !== i))} />)}
         {draft.chain.length === 0 && <p className="text-xs text-faint">{spec.inherits && !spec.optional ? `未单独配置时沿用「${labelOf(spec.inherits)}」。` : spec.optional ? '可选层：配置模型后启用。' : '请选择模型。'}</p>}
         {draft.chain.length < 5 && providers.length > 0 && <Button size="sm" variant="ghost" onClick={() => setChain([...draft.chain, { providerId: providers[0]!.id, model: '' }])}>
@@ -94,18 +95,20 @@ function RoleDetail({ spec, specs, levels, config, resolved, providers }: RolePr
   </div>
 }
 
-function ChainRow({ index, value, kind, providers, onChange, onRemove }: { index: number; value: ModelRef; kind: RoleSpec['kind']; providers: Provider[]; onChange(v: ModelRef): void; onRemove(): void }) {
+// Same rule as isDecisionModel in @super-assistant/models: TypeSafe Jev under a gateway's name, not jev-router.
+const JEV = /(^|[/:])jev(?![-_]?router)([-_.:@]|$)/i
+
+function ChainRow({ index, value, role, kind, providers, onChange, onRemove }: { index: number; value: ModelRef; role: string; kind: RoleSpec['kind']; providers: Provider[]; onChange(v: ModelRef): void; onRemove(): void }) {
   const provider = providers.find(p => p.id === value.providerId)
-  const { models } = useModelOptions(provider)
+  const options = useModelOptions(provider, role)
   const test = useMutation({ mutationFn: () => api.post<{ ok: boolean; latencyMs: number; error?: string }>('/models/test', { ...value, kind }) })
-  const listId = `chain-${value.providerId}`
   return <div className="flex flex-wrap items-center gap-2">
     <span className="w-10 shrink-0 text-[11px] text-faint">{index === 0 ? '主模型' : `备用 ${index}`}</span>
     <div className="w-40 shrink-0"><Select value={value.providerId} onChange={e => onChange({ providerId: e.target.value, model: '' })} className="h-8 text-xs">
       {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
     </Select></div>
-    <div className="min-w-48 flex-1"><Input list={listId} value={value.model} onChange={e => onChange({ ...value, model: e.target.value })} placeholder="模型 id" className="h-8 text-xs" /></div>
-    <datalist id={listId}>{models.map(m => <option key={m} value={m} />)}</datalist>
+    <ModelPicker className="min-w-48 flex-1" value={value.model} onChange={model => onChange({ ...value, model })} models={options.models} loading={options.loading}
+      error={options.error} onRefresh={options.refresh} tag={m => (provider?.kind === 'typesafe' || JEV.test(m) ? '决策模型' : undefined)} />
     <Button size="sm" variant="ghost" disabled={!value.model || test.isPending} onClick={() => test.mutate()}>
       {test.isPending ? <Loader2 size={13} className="animate-spin" /> : test.data ? (test.data.ok ? <CheckCircle2 size={13} className="text-ok" /> : <XCircle size={13} className="text-danger" />) : '测试'}
     </Button>

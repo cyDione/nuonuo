@@ -13,6 +13,9 @@ export function isDecisionModel(kind: ProviderKind, model: string): boolean {
   return DECISION_KINDS.includes(kind) || /(^|[/:])jev(?![-_]?router)([-_.:@]|$)/i.test(model.trim())
 }
 
+/** Decision models a gateway may serve without listing them on `/models` (it lists chat models only). */
+export const DECISION_MODEL_SUGGESTIONS: readonly string[] = ['jev-latest']
+
 export interface ProviderPreset {
   id: string
   kind: ProviderKind
@@ -43,3 +46,10 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   { id: 'lmstudio', kind: 'openai-compatible', label: 'LM Studio（本地）', baseUrl: 'http://127.0.0.1:1234/v1', keyRequired: false, suggestedModels: [] },
   { id: 'custom', kind: 'openai-compatible', label: '自定义 OpenAI 兼容', keyRequired: false, suggestedModels: [] },
 ]
+
+/** The preset a stored provider came from: same kind and base URL, else the kind's only preset. */
+export function presetOf(kind: ProviderKind, baseUrl: string | null): ProviderPreset | undefined {
+  const base = (baseUrl ?? '').replace(/\/+$/, '')
+  return PROVIDER_PRESETS.find(p => p.kind === kind && (p.baseUrl ?? '').replace(/\/+$/, '') === base)
+    ?? (kind === 'openai-compatible' ? undefined : PROVIDER_PRESETS.find(p => p.kind === kind))
+}

@@ -66,6 +66,18 @@ describe('providers and layers', () => {
     expect(roles.resolved.filter).toBeNull()
     expect((await call('/api/roles/nope', { method: 'PUT', body: '{}' })).status).toBe(404)
   })
+  it('lists a provider\'s models for a layer without caching, and keeps the suggestions when the list fails', async () => {
+    const gw = (await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai-compatible', name: 'gw', baseUrl: 'http://127.0.0.1:9/v1' }) })).json() as any).provider
+    const res = await call(`/api/providers/${gw.id}/models?role=reviewer`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    const body = await res.json() as any
+    expect(body.models[0]).toBe('jev-latest')
+    expect(body.error).toBeTruthy()
+    expect((await (await call(`/api/providers/${gw.id}/models?role=router`)).json() as any).models).not.toContain('jev-latest')
+    expect((await call(`/api/providers/${gw.id}/models?role=nope`)).status).toBe(400)
+    expect((await call('/api/providers/missing/models')).status).toBe(404)
+  })
 })
 
 describe('conversations', () => {
