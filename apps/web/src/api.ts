@@ -93,7 +93,8 @@ export type FieldSpec =
   | { key: string; label: string; hint?: string; advanced?: true; type: 'text' | 'list'; placeholder?: string }
   | { key: string; label: string; hint?: string; advanced?: true; type: 'select'; options: { value: string; label: string }[] }
   | { key: string; label: string; hint?: string; advanced?: true; type: 'secret'; placeholder?: string }
-export interface SourceInfo { id: string; title: string; description: string; fields: FieldSpec[]; actions: { id: string; label: string; path: string }[]; enabled: boolean; config: Record<string, any>
+export interface SourceAction { id: string; label: string; path: string; show?: 'authorized' | 'unauthorized'; confirm?: string; primary?: true }
+export interface SourceInfo { id: string; title: string; description: string; fields: FieldSpec[]; actions: SourceAction[]; authorized?: boolean; enabled: boolean; config: Record<string, any>
   health: { status: 'off' | 'starting' | 'ok' | 'error'; detail?: string; at: number }; facts: Record<string, string> }
 export interface Routine { id: string; name: string; schedule: string; prompt: string; enabled: boolean; conversationId: string | null; lastFiredAt: number | null; next: number | null }
 export interface PluginInfo { id: string; name: string; version: string; description: string; dir: string; enabled: boolean; loaded: boolean; builtIn: boolean; sources: string[]; error?: string }

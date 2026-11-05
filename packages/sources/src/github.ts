@@ -3,6 +3,9 @@
  * laptop simply catches up from its cursors.
  *
  * - Threads are issues and pull requests: `github:owner/repo#12`.
+ * - Authorization: the OAuth device flow ("授权 GitHub" shows a code to enter on github.com), which needs no callback URL and so
+ *   works on a headless box reached over `ssh -L`. The token goes into the secret store. GITHUB_TOKEN / GH_TOKEN or the local
+ *   `gh` login still work when no authorization is stored.
  * - A request is a comment, issue or review comment that mentions the agent (default `@agent`) by an allowed account
  *   (the account behind the token, plus an allowlist).
  * - The agent writes as that same account, so its comments carry an invisible marker and are skipped when read back.
@@ -12,9 +15,17 @@ import { tool } from 'ai'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import type { SourceContext, SourceKind } from './kind'
+import type { DeviceCode, SourceContext, SourceKind } from './kind'
 
 export const MARKER = '<!-- super-assistant -->'
+
+/**
+ * The built-in OAuth App (device flow enabled). A client ID is public by design: the device flow needs no secret.
+ * Empty until one is registered; then `clientId` in the settings is only needed to use another app.
+ */
+export const DEFAULT_GITHUB_CLIENT_ID = ''
+/** What `gh` asks for, so workers can use `gh` and git with the same token. */
+export const GITHUB_SCOPES = 'repo read:org workflow'
 
 export const GithubConfigSchema = z.object({
   repos: z.array(z.string().regex(/^[\w.-]+\/[\w.-]+$/, '格式应为 owner/repo')).default([]),
@@ -22,6 +33,8 @@ export const GithubConfigSchema = z.object({
   allowed: z.array(z.string().trim().min(1)).default([]),
   pollSeconds: z.number().int().min(15).max(3600).default(60),
   apiUrl: z.string().url().default('https://api.github.com'),
+  clientId: z.string().trim().default(''),
+  oauthUrl: z.string().url().default('https://github.com'),
 }).strict()
 export type GithubConfig = z.infer<typeof GithubConfigSchema>
 
@@ -29,7 +42,7 @@ interface IssueInfo { title: string; url: string; pr: boolean; state: string; re
 
 const exec = promisify(execFile)
 
-/** The token: GITHUB_TOKEN / GH_TOKEN, else the local `gh` login. Never passed to workers (they use `gh` themselves). */
+/** The fallback token when no authorization is stored: GITHUB_TOKEN / GH_TOKEN, else the local `gh` login. */
 export async function githubToken(env = process.env): Promise<string | undefined> {
   const fromEnv = env.GITHUB_TOKEN?.trim() || env.GH_TOKEN?.trim()
   if (fromEnv) return fromEnv
@@ -62,19 +75,75 @@ export function parseThread(id: string): { repo: string; number: number } | unde
 
 
 export function githubKind(deps: { fetch?: typeof fetch; token?: () => Promise<string | undefined> } = {}): SourceKind<GithubConfig> {
-  const apis = new WeakMap<object, { api: GithubApi; login: string }>()
+  const f = deps.fetch ?? fetch
+  const apis = new WeakMap<object, { api: GithubApi; login: string; token: string | undefined; oauth: boolean }>()
+  const clientId = (ctx: SourceContext<GithubConfig>) => ctx.config.clientId || DEFAULT_GITHUB_CLIENT_ID
+  const oauthToken = (ctx: SourceContext<GithubConfig>) => ctx.secret.get('token')
+
   const session = async (ctx: SourceContext<GithubConfig>) => {
+    const stored = oauthToken(ctx)
     const known = apis.get(ctx)
-    if (known) return known
-    const token = await (deps.token ?? githubToken)()
-    const api = new GithubApi(ctx.config.apiUrl, token, deps.fetch)
-    const me = await api.get<{ login: string }>('/user')
-    const value = { api, login: me.login }
+    // Reuse the session unless the authorization changed (granted, replaced or removed) since it was made.
+    if (known && (stored ? known.token === stored : !known.oauth)) return known
+    const token = stored ?? await (deps.token ?? githubToken)()
+    if (!token) throw Object.assign(new Error('还没有授权 GitHub：在 设置 → 来源 → GitHub 点「授权 GitHub」'), { status: 401 })
+    const api = new GithubApi(ctx.config.apiUrl, token, f)
+    let me: { login: string }
+    try { me = await api.get<{ login: string }>('/user') } catch (error) {
+      if (stored && (error as { status?: number }).status === 401) throw Object.assign(new Error('GitHub 授权已失效（可能在 GitHub 上被撤销了），请重新点「授权 GitHub」'), { status: 401 })
+      throw error
+    }
+    const value = { api, login: me.login, token, oauth: Boolean(stored) }
     apis.set(ctx, value)
     ctx.state.set('login', me.login)
-    ctx.facts({ 账号: me.login })
+    ctx.facts({ 账号: me.login, 授权: stored ? 'OAuth 授权' : '环境变量 / gh 登录' })
     return value
   }
+
+  // ── OAuth device flow ──────────────────────────────────────────────────────
+  type Pending = { deviceCode: string; interval: number; expires: number; status: 'pending' | 'done' | 'error'; error?: string; login?: string }
+  let pending: Pending | undefined
+
+  async function oauthPost(ctx: SourceContext<GithubConfig>, path: string, params: Record<string, string>): Promise<Record<string, any>> {
+    const res = await f(`${ctx.config.oauthUrl.replace(/\/$/, '')}${path}`, {
+      method: 'POST', signal: AbortSignal.timeout(30_000),
+      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'super-assistant' },
+      body: new URLSearchParams(params),
+    })
+    const data = await res.json().catch(() => ({})) as Record<string, any>
+    if (!res.ok && !data.error) data.error = `HTTP ${res.status}`
+    return data
+  }
+
+  /** Polls GitHub until the owner entered the code (or it expired), then stores the token. */
+  async function waitForGrant(ctx: SourceContext<GithubConfig>, p: Pending): Promise<void> {
+    while (pending === p && p.status === 'pending') {
+      await new Promise(r => setTimeout(r, p.interval * 1000))
+      if (pending !== p) return
+      if (Date.now() > p.expires) { Object.assign(p, { status: 'error', error: '验证码已过期，请重新点「授权 GitHub」' }); return }
+      let data: Record<string, any>
+      try {
+        data = await oauthPost(ctx, '/login/oauth/access_token', { client_id: clientId(ctx), device_code: p.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' })
+      } catch { continue } // a network blip: try again at the next interval
+      if (data.access_token) {
+        try {
+          const me = await new GithubApi(ctx.config.apiUrl, data.access_token, f).get<{ login: string }>('/user')
+          ctx.secret.set('token', data.access_token)
+          ctx.state.set('login', me.login)
+          ctx.facts({ 账号: me.login, 授权: 'OAuth 授权' })
+          Object.assign(p, { status: 'done', login: me.login })
+        } catch (error) {
+          Object.assign(p, { status: 'error', error: `拿到令牌但读取账号失败：${error instanceof Error ? error.message : String(error)}` })
+        }
+        return
+      }
+      if (data.error === 'authorization_pending') continue
+      if (data.error === 'slow_down') { p.interval = Number(data.interval) || p.interval + 5; continue }
+      Object.assign(p, { status: 'error', error: data.error === 'access_denied' ? '你在 GitHub 上取消了授权' : data.error === 'expired_token' ? '验证码已过期，请重新点「授权 GitHub」' : `授权失败：${data.error_description ?? data.error}` })
+      return
+    }
+  }
+
   const addressed = (ctx: SourceContext<GithubConfig>, text: string) => text.toLowerCase().includes(ctx.config.mention.toLowerCase())
   // Comments posted before the rename carry the old marker; they are ours too, so never answer them.
   const isOwn = (body: string | null | undefined) => Boolean(body?.includes(MARKER) || body?.includes('<!-- super-agent -->'))
@@ -181,14 +250,23 @@ export function githubKind(deps: { fetch?: typeof fetch; token?: () => Promise<s
   return {
     id: 'github',
     title: 'GitHub',
-    description: '在 Issue / PR 里 @ 智能体即可派活；它会在原处回复、开 PR，并跟进评审与 CI。使用 GITHUB_TOKEN / GH_TOKEN 或本机 gh 登录。',
+    description: '在 Issue / PR 里 @ 智能体即可派活；它会在原处回复、开 PR，并跟进评审与 CI。点「授权 GitHub」用你的 GitHub 账号登录授权即可接入。',
     schema: GithubConfigSchema,
+    actions: [
+      { id: 'authorize', label: '授权 GitHub', path: 'oauth/device', show: 'unauthorized', primary: true },
+      { id: 'reauthorize', label: '重新授权', path: 'oauth/device', show: 'authorized' },
+      { id: 'disconnect', label: '断开授权', path: 'oauth/disconnect', show: 'authorized', confirm: '断开后智能体将不能再读写你的 GitHub（除非本机还有 GITHUB_TOKEN 或 gh 登录）。确定断开？' },
+    ],
+    authorized: ctx => Boolean(oauthToken(ctx)),
     fields: [
       { key: 'repos', type: 'list', label: '监听的仓库', placeholder: 'owner/repo', hint: '每行一个' },
       { key: 'mention', type: 'text', label: '唤起词', hint: '评论中包含它才算在叫智能体（智能体以你的账号发言，所以不能用 @你自己）' },
-      { key: 'allowed', type: 'list', label: '也允许这些账号派活', placeholder: 'github-login', hint: '默认只有 token 对应的账号' },
+      { key: 'allowed', type: 'list', label: '也允许这些账号派活', placeholder: 'github-login', hint: '默认只有授权的那个账号' },
       { key: 'pollSeconds', type: 'number', label: '轮询间隔（秒）', min: 15, max: 3600, advanced: true },
       { key: 'apiUrl', type: 'text', label: 'API 地址', advanced: true, hint: 'GitHub Enterprise 填 https://host/api/v3' },
+      { key: 'clientId', type: 'text', label: 'OAuth App Client ID', placeholder: 'Ov23…', ...(DEFAULT_GITHUB_CLIENT_ID ? { advanced: true as const } : {}),
+        hint: DEFAULT_GITHUB_CLIENT_ID ? '留空使用内置的应用' : '在 GitHub → Settings → Developer settings → OAuth Apps 新建一个应用，勾选 Enable Device Flow，把 Client ID 填在这里' },
+      { key: 'oauthUrl', type: 'text', label: 'OAuth 地址', advanced: true, hint: 'GitHub Enterprise 填 https://host' },
     ],
     poll: pollOnce,
     start(ctx) {
@@ -259,9 +337,45 @@ ${ref ? `This task came from GitHub ${ref.repo} #${ref.number}. Read it first: \
         }),
       }
     },
-    workerEnv(_ctx, ticket): Record<string, string> {
+    workerEnv(ctx, ticket): Record<string, string> {
       const ref = parseThread(ticket.threadId)
-      return ref ? { SUPER_ASSISTANT_GITHUB_REPO: ref.repo, SUPER_ASSISTANT_GITHUB_NUMBER: String(ref.number) } : {}
+      const env: Record<string, string> = ref ? { SUPER_ASSISTANT_GITHUB_REPO: ref.repo, SUPER_ASSISTANT_GITHUB_NUMBER: String(ref.number) } : {}
+      // With an OAuth authorization there may be no `gh` login on this machine: lend the token to `gh` and to git over HTTPS.
+      const token = oauthToken(ctx)
+      if (token) {
+        const host = new URL(ctx.config.oauthUrl).host
+        Object.assign(env, host === 'github.com' ? { GH_TOKEN: token } : { GH_ENTERPRISE_TOKEN: token, GH_HOST: host },
+          { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: `credential.https://${host}.helper`, GIT_CONFIG_VALUE_0: '',
+            GIT_CONFIG_KEY_1: `credential.https://${host}.helper`, GIT_CONFIG_VALUE_1: '!gh auth git-credential' })
+      }
+      return env
+    },
+    async http(ctx, _request, path, info) {
+      if (info.public) return undefined
+      if (path === 'oauth/device') {
+        if (!clientId(ctx)) return Response.json({ error: '先在下面填写 OAuth App 的 Client ID 并保存（GitHub → Settings → Developer settings → OAuth Apps，勾选 Enable Device Flow）' }, { status: 400 })
+        const data = await oauthPost(ctx, '/login/device/code', { client_id: clientId(ctx), scope: GITHUB_SCOPES })
+        if (!data.device_code) {
+          const hint = data.error === 'device_flow_disabled' ? '：这个 OAuth App 没有勾选 Enable Device Flow' : data.error === 'unauthorized_client' || data.error === 'Not Found' ? '：Client ID 不对' : ''
+          return Response.json({ error: `GitHub 拒绝了授权请求（${data.error_description ?? data.error}）${hint}` }, { status: 400 })
+        }
+        const p: Pending = { deviceCode: data.device_code, interval: data.interval != null ? Number(data.interval) : 5, expires: Date.now() + (Number(data.expires_in) || 900) * 1000, status: 'pending' }
+        pending = p
+        void waitForGrant(ctx, p)
+        const device: DeviceCode = { userCode: data.user_code, verificationUri: data.verification_uri, expiresIn: Number(data.expires_in) || 900, poll: 'oauth/status' }
+        return Response.json({ device })
+      }
+      if (path === 'oauth/status') {
+        if (!pending) return Response.json({ status: 'error', error: '没有进行中的授权' })
+        return Response.json({ status: pending.status, ...(pending.error ? { error: pending.error } : {}), ...(pending.login ? { login: pending.login } : {}) })
+      }
+      if (path === 'oauth/disconnect') {
+        pending = undefined
+        ctx.secret.delete('token')
+        ctx.facts({ 授权: '未授权' })
+        return Response.json({ ok: true })
+      }
+      return undefined
     },
   }
 }

@@ -39,6 +39,11 @@ export interface SourceContext<C> {
   notify(text: string, opts?: { title?: string }): void
 }
 
+export interface SourceAction { id: string; label: string; path: string; show?: 'authorized' | 'unauthorized'; confirm?: string; primary?: true }
+
+/** An OAuth device-flow code for the owner to enter on the provider's page. */
+export interface DeviceCode { userCode: string; verificationUri: string; expiresIn: number; poll: string }
+
 export interface OutgoingMessage { messageId: string; threadId: string; text: string; ticketId?: string }
 
 export interface SourceKind<C = any> {
@@ -49,8 +54,15 @@ export interface SourceKind<C = any> {
   fields: FieldSpec[]
   /** Built-in sources that run until switched off. */
   defaultEnabled?: boolean
-  /** Buttons on the settings card: the UI calls `http(path)` and follows a returned `{ url }` (e.g. an OAuth consent page). */
-  actions?: { id: string; label: string; path: string }[]
+  /**
+   * Buttons on the settings card. The UI calls `http(path)` (POST) and then, by the answer:
+   * `{ url }` opens that page (an OAuth consent page); `{ device: DeviceCode }` shows the code to enter and polls `device.poll`
+   * until it answers `{ status: 'done' | 'error' }`; anything else just refreshes the card.
+   * `show` limits a button to when the source is (not) authorized; `confirm` asks first.
+   */
+  actions?: SourceAction[]
+  /** Whether the source holds an authorization (an OAuth token); drives `show` on actions and the settings card. */
+  authorized?(ctx: SourceContext<C>): boolean
   /** Begins reading; the returned function stops it. Called when the source is enabled with a valid configuration. */
   start(ctx: SourceContext<C>): (() => void | Promise<void>) | void
   /** Reads once now (the settings page's "sync now", tests). */

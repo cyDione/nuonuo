@@ -56,6 +56,7 @@ export class FakeGmail {
   private historyId = 100
   issuedCode = 'auth-code-1'
   refreshToken = 'refresh-1'
+  revoked: string[] = []
 
   /** A mail arrives. */
   receive(from: string, subject: string, body: string, opts: { threadId?: string; labels?: string[] } = {}): FakeMail {
@@ -81,6 +82,7 @@ export class FakeGmail {
 
   private async handle(req: Request): Promise<Response> {
     const url = new URL(req.url)
+    if (url.pathname === '/revoke') { this.revoked.push(new URLSearchParams(await req.text()).get('token') ?? ''); return json({}) }
     if (url.pathname.endsWith('/token')) {
       const form = new URLSearchParams(await req.text())
       if (form.get('grant_type') === 'authorization_code') {
