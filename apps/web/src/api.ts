@@ -58,7 +58,7 @@ export interface Report { status: 'progress' | 'waiting' | 'ready' | 'blocked' |
 export interface Ticket {
   id: string; title: string; name: string; note: string | null; stage: Stage; stageLabel: string; conversationId: string | null; source: string; directory: string
   latestReport: Report | null; attention: { question: string; options?: string[]; kind?: 'question' | 'handoff'; at: number } | null
-  approvals: { id: string; command: string; reason: string; risk: string; createdAt: number }[]
+  approvals: { id: string; command: string; reason: string; risk: string; createdAt: number; card?: ApprovalCard | null }[]
   ended: { at: number; by: string; outcome: 'completed' | 'stopped' | 'dropped'; reason?: string } | null; createdAt: number; updatedAt: number
   proactive: boolean; why: string | null
 }
@@ -96,6 +96,7 @@ export type ServerEvent =
   | { type: 'persona.updated' }
   | { type: 'goals.updated' }
   | { type: 'feed.updated' }
+  | { type: 'message.updated'; conversationId: string; messageId: string }
   | { type: 'ideas.updated' }
 
 type FieldLinks = { links?: { label: string; href: string }[] }
@@ -118,6 +119,7 @@ export interface Goal { id: string; title: string; icon: GoalIcon; style: 'amoun
 export type FeedIcon = 'bell' | 'tag' | 'weather' | 'mail' | 'wifi' | 'plane' | 'calendar' | 'package' | 'chart' | 'news' | 'home' | 'heart'
 export interface FeedItem { id: string; at: number; title: string; text: string; icon: FeedIcon; card: { label?: string; value: number; was?: number; unit?: string; note?: string; series?: number[] } | null
   action: { label: string; say: string } | null; conversationId: string | null; ticketId: string | null; seen: boolean; dismissed: boolean }
+export interface ApprovalCard { title: string; note?: string; rows: { label: string; value: string }[]; confirm: string }
 export type IdeaTone = 'coral' | 'teal' | 'lilac' | 'sky' | 'amber'
 export interface Idea { id: string; kind: string; label: string; text: string; action: string; say: string; tone: IdeaTone; dismissed?: boolean; done?: boolean }
 export interface IdeaBatch { at: number; cards: Idea[]; more: { id: string; text: string; say: string; done?: boolean }[]; seen?: boolean }

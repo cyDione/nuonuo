@@ -6,6 +6,7 @@ import type { BusEvent } from '@super-assistant/agent-runtime'
 
 export type ClientEvent =
   | { type: 'message.created'; conversationId: string; messageId: string }
+  | { type: 'message.updated'; conversationId: string; messageId: string }
   | { type: 'reply.delta'; conversationId: string; callId: string; text: string }
   | { type: 'ticket.updated'; ticketId: string }
   | { type: 'session.state'; role: string; sessionId: string; ticketId?: string | null; state: string }
@@ -46,6 +47,7 @@ export class EventMapper {
     const e = event as any
     switch (event.type) {
       case 'message.created': return [{ type: 'message.created', conversationId: e.conversationId, messageId: e.messageId }]
+      case 'message.updated': return [{ type: 'message.updated', conversationId: e.conversationId, messageId: e.messageId }]
       case 'conversation.updated': return [{ type: 'conversation.updated', conversationId: e.conversationId }]
       case 'ticket.updated': return [{ type: 'ticket.updated', ticketId: e.ticketId }]
       case 'activity.updated': return [{ type: 'activity.updated' }]

@@ -38,6 +38,7 @@ function setup(verdict: () => Scripted, jev?: (request: any) => any) {
   const script = (opts: any): Scripted => {
     const system = systemText(opts)
     if (system.includes('You review one action')) return verdict()
+    if (system.includes('Write the confirmation card')) return { text: JSON.stringify({ title: '要花钱，等你确认', note: '付款后不能撤回', rows: [{ label: '金额', value: '¥1.00' }], confirm: '确认付款' }) }
     if (system.includes("You are the owner's personal assistant")) return { text: 'ok' }
     const last = opts.prompt.at(-1)
     if (last.role === 'tool') return JSON.stringify(last.content).includes('"report"') ? { text: 'end' } : { calls: [{ name: 'report', input: { status: 'progress', summary: JSON.stringify(last.content).slice(0, 300) } }] }
@@ -250,5 +251,17 @@ describe('permission levels (the right pane\'s 权限)', () => {
     expect(await reviewer.gateShell(t, ticket.sessionId, 'curl -X POST https://api.stripe.com/v1/charges -d amount=100', ticket.directory)).toMatchObject({ action: 'escalate' })
     expect(await reviewer.gateTool(t, ticket.sessionId, 'mcp', 'shop.place_order {"sku":1}', {})).toMatchObject({ action: 'escalate' })
     expect(await reviewer.gateShell(t, ticket.sessionId, 'git checkout -b pay-page && git push origin pay-page', ticket.directory)).toMatchObject({ action: 'allow' })
+  })
+
+  it('fills in a confirmation card for the owner after asking', async () => {
+    const { engine, reviewer, start } = setup(() => ({ text: JSON.stringify({ decision: 'allow', reason: 'x' }) }))
+    const ticket = start()
+    await settle()
+    const decision = await reviewer.gateShell(engine.ticket(ticket.id), ticket.sessionId, 'curl -X POST https://api.stripe.com/v1/charges -d amount=100', ticket.directory)
+    expect(decision).toMatchObject({ action: 'escalate' })
+    await settle()
+    const approval = reviewer.get((decision as { approvalId: string }).approvalId)!
+    expect(approval.input.card).toMatchObject({ title: '要花钱，等你确认', confirm: '确认付款', rows: [{ label: '金额', value: '¥1.00' }] })
+    expect(approval.input.command).toContain('stripe')
   })
 })

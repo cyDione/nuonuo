@@ -158,6 +158,17 @@ describe('router + workers', () => {
   })
 })
 
+describe('tapbacks', () => {
+  it('puts the assistant\'s reaction on the owner\'s message only', async () => {
+    const { engine, conversation } = await setup()
+    const cnv = conversation()
+    const { triggerId } = engine.receiveMessage(cnv, '哈哈哈你太逗了')
+    expect(engine.react(triggerId, '😂')).toBe(true)
+    expect(messages(cnv).find(m => m.triggerId === triggerId)?.meta).toMatchObject({ tapback: '😂' })
+    expect(engine.react('trg_nope', '👌')).toBe(false)
+  })
+})
+
 describe('full duplex', () => {
   it('moves a foreground command to the background when the owner writes, and kills jobs when the task ends', async () => {
     const { engine, conversation } = await setup()

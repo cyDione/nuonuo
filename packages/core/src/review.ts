@@ -113,6 +113,25 @@ export type GateDecision =
 
 export type Approval = typeof schema.approvals.$inferSelect
 
+/** The structured confirmation card an approval shows in the chat: what exactly will happen, in the owner's terms. */
+export const ApprovalCardSchema = z.object({
+  title: z.string().min(2).max(20),
+  note: z.string().max(20).optional(),
+  rows: z.array(z.object({ label: z.string().min(1).max(6), value: z.string().min(1).max(60) })).max(6),
+  confirm: z.string().min(2).max(8),
+})
+export type ApprovalCard = z.infer<typeof ApprovalCardSchema>
+const CARD_PROMPT = `An assistant needs its owner's yes before one action. Write the confirmation card the owner sees in the chat, in Chinese.
+- title: what kind of step and that it waits, e.g. 要花钱，等你确认 / 要往外发，等你确认 / 要删东西，等你确认.
+- note: only when it cannot be taken back, e.g. 下单后不能撤回 / 发出后撤不回; omit otherwise.
+- rows: 2 to 5 facts the owner needs to decide, each a short label (商品, 价格, 送到, 付款, 发给, 内容, 文件…) and its value, taken only from the action and task below. Never invent a value; leave a row out when you do not know it. Mask card and account numbers except the last 4 digits.
+- confirm: the confirm button, a verb for exactly this step, e.g. 确认下单, 发出去, 删除.`
+const CARD_FIELDS = `- title
+- note (optional)
+- rows: array of { label, value }
+- confirm`
+const CARD_EXAMPLE: ApprovalCard = { title: '要花钱，等你确认', note: '下单后不能撤回', rows: [{ label: '商品', value: 'Sony WH-1000XM6 · 黑色' }, { label: '价格', value: '¥1,999 · 京东自营' }], confirm: '确认下单' }
+
 const VerdictSchema = z.object({
   decision: z.enum(['allow', 'block', 'ask_owner']),
   reason: z.string().min(1).describe('One sentence, in Chinese, for the audit log and the owner'),
@@ -318,7 +337,23 @@ export class Reviewer {
     })
     this.engine.changed(ticket.id)
     this.bus.emit({ type: 'approval.updated', approvalId: id, ticketId: ticket.id })
+    void this.describe(id, ticket, display, reason)
     return { action: 'escalate', approvalId: id, reason }
+  }
+
+  /** Fills in the approval's confirmation card a moment after it is asked; without a model the plain card stays. */
+  private async describe(id: string, ticket: Ticket, display: string, reason: string): Promise<void> {
+    const role = this.hub.resolve('reviewer') && !this.hub.usesDecisionModel('reviewer') ? 'reviewer' : this.hub.resolve('router') ? 'router' : null
+    if (!role) return
+    try {
+      const card = await generateStructured(this.hub, role, { system: CARD_PROMPT, schema: ApprovalCardSchema, fields: CARD_FIELDS, example: CARD_EXAMPLE, ref: ticket.id, maxOutputTokens: 1_024,
+        prompt: `Task: ${ticket.title}\nWhy it needs a yes: ${reason}\nAction:\n${display.slice(0, 3_000)}` })
+      const row = this.get(id)
+      if (!row || row.status !== 'pending') return
+      this.store.db.update(schema.approvals).set({ input: { ...row.input, card } }).where(eq(schema.approvals.id, id)).run()
+      this.engine.changed(ticket.id)
+      this.bus.emit({ type: 'approval.updated', approvalId: id, ticketId: ticket.id })
+    } catch { /* the plain card is enough */ }
   }
 
   private executors = new Map<string, (input: Record<string, unknown>) => Promise<string>>()

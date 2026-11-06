@@ -95,7 +95,7 @@ function SidebarBody({ route }: { route: Route }) {
       </a>}
 
       <div className="flex items-baseline gap-2 px-2.5 pt-5 pb-1.5 text-xs"><span className="font-medium text-muted">侧聊</span><span className="text-faint">独立的小任务</span></div>
-      {side.length === 0 && <button onClick={() => go('/new')} className="w-full rounded-xl px-2.5 py-2 text-left text-xs text-faint hover:text-muted">把一件事单独拎出来聊，就开一个侧聊</button>}
+      {side.length === 0 && <button onClick={() => go('/new')} className="w-full rounded-xl px-2.5 py-2 text-left text-xs text-faint hover:text-muted">独立的小任务会出现在这里，比如一次旅行、一份报告。</button>}
       {side.map(c => <Item key={c.id} c={c} active={c.id === activeId} tickets={ticketsOf(c.id)} onChanged={changed} />)}
       {outside.length > 0 && <div className="px-2.5 pt-5 pb-1.5 text-xs font-medium text-muted">来自外部</div>}
       {outside.map(c => <Item key={c.id} c={c} active={c.id === activeId} tickets={ticketsOf(c.id)} onChanged={changed} />)}

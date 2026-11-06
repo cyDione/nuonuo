@@ -47,7 +47,7 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
   useSettingsShortcut()
   const { leftOpen } = usePanes()
   const chat = route.page === 'chat'
-  const tabbed = (chat && route.main) || route.page === 'activity' || route.page === 'library' || route.page === 'goals' || route.page === 'ideas'
+  const tabbed = chat || route.page === 'activity' || route.page === 'library' || route.page === 'goals' || route.page === 'ideas'
   return <div className="flex h-dvh bg-bg">
     <Sidebar route={route} open={nav} onClose={() => setNav(false)} />
     <main className={cx('flex min-w-0 flex-1', leftOpen && 'md:border-l md:border-line')}>

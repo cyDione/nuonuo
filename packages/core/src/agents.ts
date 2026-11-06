@@ -218,6 +218,11 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         inputSchema: z.object({ trigger_ids: z.array(z.string()).min(1), reason: z.string().min(1).max(200) }),
         execute: async ({ trigger_ids, reason }) => { engine.ignore(trigger_ids, reason); return { ok: true } },
       }),
+      react: tool({
+        description: 'Put a small reaction on the owner\'s message instead of (or before) a reply, the way a friend would: 👌 got it, 👀 looking into it, 😂 that was funny, ❤️ thanks, 👍 agreed. A reaction alone is enough for thanks or a joke.',
+        inputSchema: z.object({ trigger_id: z.string().describe('trigger_id of the owner\'s message'), emoji: z.enum(['👌', '👀', '😂', '❤️', '👍']) }),
+        execute: async ({ trigger_id, emoji }) => engine.react(trigger_id, emoji) ? { ok: true } : { ok: false, error: 'No owner message with this trigger_id.' },
+      }),
       message_owner: tool({
         description: 'Say something to the owner on your own initiative, in the main conversation (a heads-up, a follow-up, a reminder). Only when it is worth an interruption.',
         inputSchema: z.object({ text: z.string().min(1), ticket_id: z.string().optional().describe('The work it is about') }),
