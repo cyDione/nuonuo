@@ -4,9 +4,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Visual language: a quiet neutral workspace (grey sheets, ink type, one coral accent for actions) where colour lives in
- * a few cards, each with its own hue (no blue-purple) with a friendly
- * character for the assistant, drawn in the owner's chosen colour.
+ * Visual language (Figma v6): a pure white / pure black window, grey for the assistant's bubbles and inset surfaces, and one
+ * theme colour the owner picks (莓红 by default) for their own bubbles, the selected item and small dots. 糯糯 keeps its pink.
  */
 @theme {
   --font-sans: "Geist Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
@@ -48,12 +47,12 @@
   --bg: #ffffff; --panel: #ffffff; --card: #ffffff; --bubble: #f4f4f4; --hero: #f5f5f5; --hero-2: #ebebeb; --sunken: #f4f4f4; --line: #ebebeb;
   --fg: #141414; --muted: #636363; --faint: #9a9a9a;
   --ink: #141414; --ink-fg: #ffffff;
-  --accent: #c9442e; --accent-fg: #ffffff; --accent-soft: #fbe9e5;
-  --mochi: #e9845a;
+  --accent: var(--a-l); --accent-fg: var(--a-fg-l); --accent-soft: color-mix(in oklab, var(--accent) 10%, var(--bg));
+  --mochi: #ff7a9a;
   --thumb: rgb(20 20 20 / 0.2); --thumb-hover: rgb(20 20 20 / 0.36);
   --ok: #2f7a55; --warn: #a8611a; --warn-soft: #f8ecd9; --danger: #c23b33;
   --lime: #2f9e6e; --coral: #d2535a; --sun: #f6c04e; --sky: #3d86e0; --grape: #8a7fc0;
-  --glow: rgb(233 132 90 / 0.12);
+  --glow: color-mix(in oklab, var(--accent) 12%, transparent);
   --scrim: rgb(10 10 10 / 0.3);
   --shadow-sheet: 0 0 0 1px var(--line), 0 10px 30px -14px rgb(0 0 0 / 0.1);
   color-scheme: light;
@@ -63,12 +62,12 @@
     --bg: #000000; --panel: #000000; --card: #111111; --bubble: #1a1a1a; --hero: #111111; --hero-2: #1f1f1f; --sunken: #141414; --line: #232323;
     --fg: #f2f2f2; --muted: #9a9a9a; --faint: #666666;
     --ink: #f2f2f2; --ink-fg: #141414;
-    --accent: #f07a5e; --accent-fg: #1a0f0b; --accent-soft: #3a1f18;
-    --mochi: #e9845a;
+    --accent: var(--a-d); --accent-fg: var(--a-fg-d); --accent-soft: color-mix(in oklab, var(--accent) 22%, var(--bg));
+    --mochi: #ff7a9a;
     --thumb: rgb(255 255 255 / 0.2); --thumb-hover: rgb(255 255 255 / 0.36);
     --ok: #6fcf9c; --warn: #f2c06b; --warn-soft: #2e2414; --danger: #f2877d;
     --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #6fa8ef; --grape: #b1a8dc;
-    --glow: rgb(233 132 90 / 0.1);
+    --glow: color-mix(in oklab, var(--accent) 10%, transparent);
     --scrim: rgb(0 0 0 / 0.6);
     --shadow-sheet: 0 0 0 1px var(--line);
     color-scheme: dark;
@@ -78,16 +77,24 @@
   --bg: #000000; --panel: #000000; --card: #111111; --bubble: #1a1a1a; --hero: #111111; --hero-2: #1f1f1f; --sunken: #141414; --line: #232323;
   --fg: #f2f2f2; --muted: #9a9a9a; --faint: #666666;
   --ink: #f2f2f2; --ink-fg: #141414;
-  --accent: #f07a5e; --accent-fg: #1a0f0b; --accent-soft: #3a1f18;
-  --mochi: #e9845a;
+  --accent: var(--a-d); --accent-fg: var(--a-fg-d); --accent-soft: color-mix(in oklab, var(--accent) 22%, var(--bg));
+  --mochi: #ff7a9a;
   --thumb: rgb(255 255 255 / 0.2); --thumb-hover: rgb(255 255 255 / 0.36);
   --ok: #6fcf9c; --warn: #f2c06b; --warn-soft: #2e2414; --danger: #f2877d;
   --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #6fa8ef; --grape: #b1a8dc;
-  --glow: rgb(233 132 90 / 0.1);
+  --glow: color-mix(in oklab, var(--accent) 10%, transparent);
   --scrim: rgb(0 0 0 / 0.6);
   --shadow-sheet: 0 0 0 1px var(--line);
   color-scheme: dark;
 }
+
+/* The theme colour (prefs.ts): -l on the white window, -d on the black one. */
+:root, :root[data-accent="berry"] { --a-l: #d43d6d; --a-d: #dc4a78; --a-fg-l: #ffffff; --a-fg-d: #ffffff; }
+:root[data-accent="ink"] { --a-l: #141414; --a-d: #f2f2f2; --a-fg-l: #ffffff; --a-fg-d: #141414; }
+:root[data-accent="mint"] { --a-l: #13857a; --a-d: #179384; --a-fg-l: #ffffff; --a-fg-d: #ffffff; }
+:root[data-accent="sea"] { --a-l: #3d6fe0; --a-d: #4b7be6; --a-fg-l: #ffffff; --a-fg-d: #ffffff; }
+:root[data-accent="grape"] { --a-l: #7a5cc8; --a-d: #8869d6; --a-fg-l: #ffffff; --a-fg-d: #ffffff; }
+:root[data-accent="slate"] { --a-l: #5b6b80; --a-d: #6a7b91; --a-fg-l: #ffffff; --a-fg-d: #ffffff; }
 
 @layer base {
   html, body, #root { height: 100%; }
@@ -316,4 +323,22 @@ html.quick, html.quick body { background: transparent !important; }
   .out-r, .out-l, .out-sheet, .out-pop { animation-name: fade-out; }
   .msg-actions { transform: none; }
   .flow::before { animation: none; }
+}
+
+/* ── v6 (Figma section 18–21) ────────────────────────────────────────────── */
+.seg-thumb { transition: transform 220ms var(--ease-out-strong); }
+/* The typing bubble: three dots that light up in turn (MotionGrid). */
+.typing-cell { width: 6px; height: 6px; border-radius: 99px; background: var(--faint); opacity: 0.35; transition: opacity 160ms ease-out, transform 160ms var(--ease-out-strong); }
+.typing-cell[data-active="true"] { opacity: 1; transform: translateY(-1.5px); }
+/* A tapback on the owner's bubble: pops in from the bubble's corner. */
+.tapback { animation: tapback-in 320ms cubic-bezier(0.34, 1.4, 0.64, 1) both; transform-origin: 30% 30%; }
+@keyframes tapback-in { from { opacity: 0; transform: scale(0.4) translate(-6px, -6px) } }
+/* The switch: an accent track and a white thumb that slides (animate-ui drives the thumb). */
+.toggle { width: 40px; height: 24px; border-radius: 99px; padding: 2px; background: var(--hero-2); transition: background-color 180ms ease; display: inline-flex; flex-shrink: 0; }
+.toggle[data-state="checked"] { background: var(--accent); justify-content: flex-end; }
+.toggle > span { width: 20px; height: 20px; border-radius: 99px; background: #ffffff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.18); display: block; }
+@media (prefers-reduced-motion: reduce) {
+  .seg-thumb { transition: none; }
+  .typing-cell { transition: none; }
+  .tapback { animation-name: fade; }
 }

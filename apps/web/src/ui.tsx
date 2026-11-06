@@ -111,3 +111,16 @@ export function DetailHeader({ back, backLabel, icon, title, badge, children }: 
     </div>
   </header>
 }
+
+/** A segmented control: a grey track with a white block that slides to the chosen option (equal-width options). */
+export function Seg<T extends string>({ value, options, onChange, label, className }: { value: T; options: { id: T; label: ReactNode; dot?: boolean }[]; onChange(v: T): void; label: string; className?: string }) {
+  const i = Math.max(0, options.findIndex(o => o.id === value))
+  return <div role="radiogroup" aria-label={label} className={cx('relative flex rounded-full bg-sunken p-[3px]', className)}>
+    <span aria-hidden className="seg-thumb absolute top-[3px] bottom-[3px] left-[3px] rounded-full bg-panel shadow-[0_1px_2px_rgb(0_0_0/0.08),0_0_0_0.5px_rgb(0_0_0/0.04)]"
+      style={{ width: `calc((100% - 6px) / ${options.length})`, transform: `translateX(${i * 100}%)` }} />
+    {options.map(o => <button key={o.id} role="radio" aria-checked={o.id === value} onClick={() => onChange(o.id)}
+      className={cx('relative z-10 flex h-7 flex-1 items-center justify-center rounded-full px-3 text-[13px] transition-colors duration-150', o.id === value ? 'font-medium text-fg' : 'text-muted hover:text-fg')}>
+      {o.label}{o.dot && <span className="absolute top-1 right-[calc(50%-18px)] size-1.5 rounded-full bg-accent" />}
+    </button>)}
+  </div>
+}

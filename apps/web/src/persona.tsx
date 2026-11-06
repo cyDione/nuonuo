@@ -5,17 +5,21 @@ import { api, type Persona, type Ticket } from './api'
 import { cx } from './ui'
 
 export const MASCOT = 'mascot'
-/** Mochi's own colour (暖杏 Apricot): reads on both the light and the dark window (Figma "v4 · 主题色"). */
-export const BRAND = '#e9845a'
-const FALLBACK: Persona = { name: '小助', avatar: MASCOT, color: BRAND, personality: '' }
-// Earlier default colours, which read too dark on the dark theme: shown as the current brand blue.
-const OLD_DEFAULTS = new Set(['#4f46e5', '#2f6bff', '#2b4bff', '#2b3cff', '#5c7bff', '#7d8bf0'])
+/** 糯糯's own pink (Figma "10 · Logo 重做"): reads on both the pure white and the pure black window. */
+export const BRAND = '#ff7a9a'
+/** The assistant's official name. 小助 was the old default and is shown as 糯糯. */
+export const OFFICIAL_NAME = '糯糯'
+const FALLBACK: Persona = { name: OFFICIAL_NAME, avatar: MASCOT, color: BRAND, personality: '' }
+// Earlier default colours: shown as the current brand pink.
+const OLD_DEFAULTS = new Set(['#4f46e5', '#2f6bff', '#2b4bff', '#2b3cff', '#5c7bff', '#7d8bf0', '#e9845a'])
 
 export const usePersona = () => {
   const p = useQuery({ queryKey: ['persona'], queryFn: () => api.get<{ persona: Persona }>('/persona'), staleTime: 60_000 }).data?.persona
   if (!p) return FALLBACK
   const avatar = p.avatar === '✨' ? MASCOT : p.avatar
-  return avatar !== p.avatar || OLD_DEFAULTS.has(p.color.toLowerCase()) ? { ...p, avatar, color: OLD_DEFAULTS.has(p.color.toLowerCase()) ? BRAND : p.color } : p
+  const name = p.name === '小助' ? OFFICIAL_NAME : p.name
+  const old = OLD_DEFAULTS.has(p.color.toLowerCase())
+  return avatar !== p.avatar || old || name !== p.name ? { ...p, name, avatar, color: old ? BRAND : p.color } : p
 }
 
 export const isMascot = (p: Persona) => !p.avatar || p.avatar === MASCOT || p.avatar === '✨'
@@ -33,8 +37,10 @@ export function Avatar({ persona, size = 28, className, mood = 'idle', track }: 
 
 const INK = '#14152B'
 const SUN = '#FFC23D'
-const BLUSH = '#FF7A9C'
-const BODY = 'M50 18 C72 18 86 31 86 55 C86 75 71 85 50 85 C29 85 14 75 14 55 C14 31 28 18 50 18 Z'
+/** The eyes are cut out of the body, so they show the page behind: white on the light window, black on the dark one. */
+const CUT = 'var(--bg)'
+/** The mound: a circle on a rounded block (Figma 53:999). */
+const BODY = 'M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z'
 const STAR = 'M74 9 C75.6 16.4 75.6 16.4 83 18 C75.6 19.6 75.6 19.6 74 27 C72.4 19.6 72.4 19.6 65 18 C72.4 16.4 72.4 16.4 74 9 Z'
 
 /**
@@ -75,29 +81,19 @@ export function Mascot({ color, size = 28, mood = 'idle', className, track }: { 
 
   const m = shown
   const closed = m === 'happy' || m === 'sleepy'
-  const line = { stroke: INK, strokeWidth: 2.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' }
+  const line = { stroke: CUT, strokeWidth: 2.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' }
   const look = m === 'thinking' ? 'translate(2.2px, -2.4px)' : m === 'listening' ? 'translate(-1px, 1.5px)' : undefined
   return <svg ref={root} viewBox="0 0 100 100" width={size} height={size} className={cx('mascot shrink-0 overflow-visible', className)} data-mood={m} data-blink={blink || undefined} aria-hidden>
     <ellipse className="m-shadow" cx="50" cy="93" rx="28" ry="3.4" fill="currentColor" opacity="0.08" />
     <g className="m-body">
       <path d={BODY} fill={color} />
-      <path d="M16 60 C17 76 31 85 50 85 C69 85 83 76 84 60 C80 74 67 80 50 80 C33 80 20 74 16 60 Z" fill="#000" opacity="0.12" />
-      <ellipse cx="33" cy="33" rx="9" ry="5" transform="rotate(-28 33 33)" fill="#fff" opacity="0.28" />
       {closed ? <g {...line} strokeWidth={3.3}>
         {m === 'happy' ? <><path d="M35 56 Q39.5 49.4 44 56" /><path d="M56 56 Q60.5 49.4 65 56" /></>
           : <><path d="M35 55 Q39.5 59.5 44 55" /><path d="M56 55 Q60.5 59.5 65 55" /></>}
       </g> : <g className="m-look"><g ref={eyes} className="m-pupils"><g style={look ? { transform: look } : undefined} className="m-pupils">
-        <g className="m-eye"><ellipse cx="39.5" cy="55" rx="3.8" ry="5.6" fill={INK} /><circle cx="40.7" cy="53" r="1.2" fill="#fff" /></g>
-        <g className="m-eye"><ellipse cx="60.5" cy="55" rx="3.8" ry="5.6" fill={INK} /><circle cx="61.7" cy="53" r="1.2" fill="#fff" /></g>
+        <g className="m-eye"><rect x="35.5" y="48" width="8" height="15" rx="4" fill={CUT} /></g>
+        <g className="m-eye"><rect x="56.5" y="48" width="8" height="15" rx="4" fill={CUT} /></g>
       </g></g></g>}
-      {m === 'happy' ? <path d="M45 65.5 Q50 72.5 55 65.5 Z" fill={INK} />
-        : m === 'waiting' ? <ellipse cx="50" cy="67.5" rx="2.4" ry="3" fill={INK} />
-        : m === 'thinking' ? <path d="M47 67.5 Q51 65.5 54 67.5" {...line} />
-        : m === 'sleepy' ? <path d="M47.5 67.5 L52.5 67.5" {...line} />
-        : m === 'listening' ? <ellipse cx="50" cy="67" rx="3.4" ry="2.4" fill={INK} />
-        : <path d="M46 65.5 Q50 70 54 65.5" {...line} />}
-      <ellipse cx="29" cy="65" rx="5" ry="3" fill={BLUSH} opacity="0.55" />
-      <ellipse cx="71" cy="65" rx="5" ry="3" fill={BLUSH} opacity="0.55" />
     </g>
     {(m === 'idle' || m === 'happy' || m === 'working') && <path className="m-star" d={STAR} fill={SUN} />}
     {m === 'waiting' && <g className="anim-pop">
@@ -116,7 +112,7 @@ export function statusLine(tickets: Ticket[]): { text: string; tone: 'idle' | 'w
   const parts: string[] = []
   if (working.length) parts.push(working.length === 1 ? `正在做：${working[0]!.title}` : `正在做 ${working.length} 件事`)
   if (waiting.length) parts.push(`${waiting.length} 件事等你`)
-  return { text: parts.join(' · ') || '随时可以找我', tone: waiting.length ? 'waiting' : working.length ? 'working' : 'idle' }
+  return { text: parts.join(' · ') || '在，有事叫我', tone: waiting.length ? 'waiting' : working.length ? 'working' : 'idle' }
 }
 
 /** 早上好 / 下午好 …, for the greeting on the main conversation's empty screen. */
