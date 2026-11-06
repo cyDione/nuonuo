@@ -1,6 +1,6 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-assistant/agent-runtime'
-import { browserExtension, combineExtensions, Distiller, Goals, goalsExtension, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
+import { browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@super-assistant/db'
 import { gmailPlugin, telegramPlugin } from '@super-assistant/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-assistant/sources'
@@ -27,6 +27,7 @@ export interface Runtime {
   distiller: Distiller
   instructions: Instructions
   goals: Goals
+  feed: Feed
   screener: Screener
   watchdog: Watchdog
   browser: BrowserManager
@@ -92,6 +93,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     }, { concurrency: 2, baseDelayMs: 10_000, maxDelayMs: 600_000 })
     const instructions = new Instructions(store)
     const goals = new Goals(store, Date.now, () => bus.emit({ type: 'goals.updated' }))
+    const feed = new Feed(store, Date.now, () => bus.emit({ type: 'feed.updated' }))
     sources.engine = engine
     agents.options.maxWorkers = engine.execution().maxWorkers
     const reviewer = new Reviewer(store, hub, engine, agents, bus)
@@ -135,6 +137,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       { routerPrompt: () => personaPrompt(store) },
       instructionsExtension(instructions),
       goalsExtension(goals),
+      feedExtension(feed),
       proactiveExtension(store, engine),
       browserExtension(browser, engine, agents),
       sandboxExtension(engine),
@@ -152,7 +155,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
+      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
       startAgents() {
         engine.mainConversation()
         agents.recover(session => engine.recoveryNote(session.id, session.role))

@@ -343,10 +343,16 @@ html.quick, html.quick body { background: transparent !important; }
 /* 成果 cards: zoom from 0.96 and fade in, one after another. */
 @keyframes card-in { from { opacity: 0; transform: scale(0.96) } to { opacity: 1; transform: none } }
 .card-in { animation: card-in 280ms var(--ease-out-strong) both; }
+/* 动态: each change rises 12px and fades in, 60ms after the one before; the price line draws itself. */
+@keyframes feed-in { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+.feed-in { animation: feed-in 320ms var(--ease-out-strong) both; }
+@keyframes spark-draw { from { stroke-dashoffset: 1 } to { stroke-dashoffset: 0 } }
+.spark-line { stroke-dasharray: 1; animation: spark-draw 900ms var(--ease-out-strong) 200ms both; }
 @media (prefers-reduced-motion: reduce) {
   .grow-bar { transition: none; }
   .dot-in { animation: none; }
-  .card-in { animation-name: fade; }
+  .card-in, .feed-in { animation-name: fade; }
+  .spark-line { animation: none; }
   .seg-thumb { transition: none; }
   .typing-cell { transition: none; }
   .tapback { animation-name: fade; }

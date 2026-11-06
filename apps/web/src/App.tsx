@@ -8,7 +8,7 @@ import { Settings } from './settings/Settings'
 import { Sidebar, StatusDot } from './Sidebar'
 import { openActivity, openTask, useLive, useLiveEvents } from './live'
 import { needsOwner, TaskDrawer, useTickets } from './tasks'
-import { Activity } from './Activity'
+import { Activity, useFeed } from './Activity'
 import { Library } from './library'
 import { GoalsPage } from './goals'
 import { PaneDrawer, RightPane, setPaneTab } from './RightPane'
@@ -77,7 +77,7 @@ const TAB_PATHS: Record<Tab, string> = { chat: '/', activity: '/activity', goals
 
 /** 聊天 / 动态 / 成果 across the top of the main area (Figma v6). The page you're on sits on the white block. */
 function Tabs({ route }: { route: ReturnType<typeof useRoute> }) {
-  const waiting = (useTickets().data?.tickets ?? []).filter(needsOwner).length
+  const waiting = (useTickets().data?.tickets ?? []).filter(needsOwner).length + (useFeed().data?.unseen ?? 0)
   const value: Tab = route.page === 'activity' ? 'activity' : route.page === 'library' ? 'library' : route.page === 'goals' ? 'goals' : 'chat'
   return <div className="relative">
     <TopBar right={<SearchButton className="no-drag relative z-10 mr-1" />} />

@@ -369,6 +369,11 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   })
   api.delete('/goals/:id', c => { rt.goals.remove(c.req.param('id')); return c.body(null, 204) })
 
+  // 动态: changes in what it watches for the owner.
+  api.get('/feed', c => c.json({ items: rt.feed.list(), unseen: rt.feed.unseen() }))
+  api.post('/feed/seen', c => { rt.feed.seeAll(); return c.json({ ok: true }) })
+  api.post('/feed/:id/dismiss', c => { guard(() => rt.feed.dismiss(c.req.param('id'))); return c.json({ ok: true }) })
+
   // Memory
   api.get('/memories', c => {
     const status = (c.req.query('status') ?? 'active,pending').split(',') as MemoryStatus[]

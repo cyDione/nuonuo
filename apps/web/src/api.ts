@@ -95,6 +95,7 @@ export type ServerEvent =
   | { type: 'activity.updated' }
   | { type: 'persona.updated' }
   | { type: 'goals.updated' }
+  | { type: 'feed.updated' }
 
 type FieldLinks = { links?: { label: string; href: string }[] }
 export type FieldSpec = FieldLinks & (
@@ -113,4 +114,7 @@ export interface McpStatus { name: string; state: 'off' | 'connecting' | 'connec
 export type GoalIcon = 'target' | 'moon' | 'wallet' | 'book' | 'run' | 'dumbbell' | 'heart' | 'music' | 'code' | 'leaf' | 'globe' | 'pen'
 export interface Goal { id: string; title: string; icon: GoalIcon; style: 'amount' | 'days'; unit: string; current: number; target: number; note: string | null
   headline: { value: string; unit?: string; note?: string } | null; pinned: boolean; status: 'active' | 'done' | 'dropped'; createdAt: number; updatedAt: number }
+export type FeedIcon = 'bell' | 'tag' | 'weather' | 'mail' | 'wifi' | 'plane' | 'calendar' | 'package' | 'chart' | 'news' | 'home' | 'heart'
+export interface FeedItem { id: string; at: number; title: string; text: string; icon: FeedIcon; card: { label?: string; value: number; was?: number; unit?: string; note?: string; series?: number[] } | null
+  action: { label: string; say: string } | null; conversationId: string | null; ticketId: string | null; seen: boolean; dismissed: boolean }
 export interface GoalLogEntry { id: string; goalId: string; at: number; text: string; delta: number | null; goal: string }

@@ -302,4 +302,20 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX goal_log_at ON goal_log(goal_id, at);
   `,
+  /* 8: v6 动态, what the assistant noticed changing in what it watches for the owner */ `
+  CREATE TABLE feed (
+    id TEXT PRIMARY KEY,
+    at INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    icon TEXT NOT NULL DEFAULT 'bell',
+    card TEXT,
+    action TEXT,
+    conversation_id TEXT,
+    ticket_id TEXT,
+    seen INTEGER NOT NULL DEFAULT 0,
+    dismissed INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX feed_at ON feed(at);
+  `,
 ]

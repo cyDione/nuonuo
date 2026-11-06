@@ -308,3 +308,20 @@ export const goalLog = sqliteTable('goal_log', {
   text: text('text').notNull(),
   delta: real('delta'),
 })
+
+/** 动态: a change in something the assistant watches for the owner (a price drop, a reply, the weather on a trip day). */
+export const feed = sqliteTable('feed', {
+  id: text('id').primaryKey(),
+  at: integer('at').notNull(),
+  title: text('title').notNull(),
+  text: text('text').notNull().default(''),
+  icon: text('icon').notNull().default('bell'),
+  /** The big colour card, for the one change that matters most: a number that moved, what it was, and its recent values. */
+  card: json<{ label?: string; value: number; was?: number; unit?: string; note?: string; series?: number[] } | null>('card'),
+  /** One button; pressing it says `say` to the assistant in the main chat, as the owner. */
+  action: json<{ label: string; say: string } | null>('action'),
+  conversationId: text('conversation_id'),
+  ticketId: text('ticket_id'),
+  seen: integer('seen', { mode: 'boolean' }).notNull().default(false),
+  dismissed: integer('dismissed', { mode: 'boolean' }).notNull().default(false),
+})

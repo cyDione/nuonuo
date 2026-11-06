@@ -12,6 +12,7 @@ import { openActivity, openTask, useActivityOpen, useLive } from './live'
 import { Avatar, statusLine, usePersona } from './persona'
 import { go } from './route'
 import { GoalsPaneTab } from './goals'
+import { Grants } from './Activity'
 import { InstructionsPage } from './settings/Instructions'
 import { MemoryPage } from './settings/MemoryPage'
 import { needsOwner, useTickets } from './tasks'
@@ -236,6 +237,7 @@ function PermissionsTab() {
       </form>}
       <p className="mt-2 text-[11px] leading-5 text-faint">你在对话里点名这些文件夹时，它可以直接在里面做事。</p>
     </section>
+    <Grants />
     <section className="border-t border-line pt-5">
       <Head title="最近 7 天" />
       <p className="text-sm tabular-nums">自己做了 {self} 次 · 问过你 {asked} 次 · 你拒绝了 {refused} 次</p>
