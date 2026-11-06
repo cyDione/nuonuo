@@ -17,6 +17,7 @@ import { DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, KIND_LABEL, persona, s
 import { kvGet, kvSet } from '@super-assistant/db'
 import { fireRoutine } from '@super-assistant/sources'
 import { runDoctor } from './doctor'
+import { search } from './search'
 import type { Runtime } from './runtime'
 import type { Updater } from './update'
 
@@ -250,6 +251,8 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     '.csv': 'text/csv; charset=utf-8', '.html': 'text/plain; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
     '.webp': 'image/webp', '.svg': 'text/plain; charset=utf-8', '.pdf': 'application/pdf' }
   const textual = (ext: string) => /^\.(md|txt|json|csv|log|ya?ml|toml|ini|py|js|ts|tsx|jsx|sh|go|rs|java|c|cpp|h|rb|php|sql|html|css|xml|svg)$/.test(ext)
+  // ⌘K: conversations, what was made and what it remembers.
+  api.get('/search', c => c.json(search(rt.store, c.req.query('q') ?? '')))
   api.get('/artifacts', c => {
     const titles = new Map<string, { title: string; conversationId: string | null }>()
     const items = rt.engine.artifacts({ limit: 300 }).map(a => {

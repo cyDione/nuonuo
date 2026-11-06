@@ -3,13 +3,13 @@
  * what is going on, what comes next, what I noticed on my own, and where every event went.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlarmClock, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, FolderOpen, Inbox, KeyRound, Sparkles } from 'lucide-react'
+import { AlarmClock, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Inbox, KeyRound, Sparkles } from 'lucide-react'
 import { useState } from 'react'
-import { api, type ActivityEvent, type Artifact, type Routine, type Ticket } from './api'
+import { api, type ActivityEvent, type Routine, type Ticket } from './api'
 import { openTask } from './live'
-import { endedText, FileChip, fmtSize, NeedsYou, needsOwner, STATE_TEXT, StateIcon, useTickets } from './tasks'
+import { endedText, NeedsYou, needsOwner, STATE_TEXT, StateIcon, useTickets } from './tasks'
 import { SourceIcon, SOURCE_LABEL } from './icons'
-import { Button, cx, Empty } from './ui'
+import { Button, cx } from './ui'
 import { go } from './route'
 
 const ago = (at: number) => {
@@ -127,23 +127,6 @@ function EventRow({ e }: { e: ActivityEvent }) {
     </div>
     {e.ticketId && <button onClick={() => openTask(e.ticketId)} className="shrink-0 text-xs text-accent">详情</button>}
   </div>
-}
-
-export function Library() {
-  const items = useQuery({ queryKey: ['artifacts'], queryFn: () => api.get<{ artifacts: Artifact[] }>('/artifacts') }).data?.artifacts
-  return <Page title="成果">
-    {items && !items.length && <Empty icon={<FolderOpen size={26} />} title="还没有文件" action={<Button size="sm" variant="ink" onClick={() => go('/')}>去主对话交代一件事</Button>}>我做完的事如果有文件（报告、脚本、图片……），会跟着回复一起发给你，也会出现在这里。</Empty>}
-    <div className="stagger divide-y divide-line overflow-hidden rounded-2xl border border-line bg-panel empty:hidden">
-      {items?.map(a => <div key={a.id} className="flex items-center gap-3 px-4 py-2.5">
-        <div className="min-w-0 flex-1"><FileChip id={a.id} name={a.name} size={a.size} /></div>
-        <div className="hidden min-w-0 shrink text-right text-xs text-faint sm:block">
-          <button onClick={() => openTask(a.ticketId)} className="block max-w-56 truncate hover:text-muted">{a.title}</button>
-          <span>{ago(a.createdAt)} · {fmtSize(a.size)}</span>
-        </div>
-        <a href={`/api/artifacts/${a.id}?download=1`} className="press shrink-0 rounded-full border border-line px-3 py-1 text-xs hover:border-fg/30">下载</a>
-      </div>)}
-    </div>
-  </Page>
 }
 
 function Page({ title, children }: { title: string; children: React.ReactNode }) {

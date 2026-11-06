@@ -8,7 +8,8 @@ import { Settings } from './settings/Settings'
 import { Sidebar, StatusDot } from './Sidebar'
 import { openActivity, openTask, useLive, useLiveEvents } from './live'
 import { needsOwner, TaskDrawer, useTickets } from './tasks'
-import { Activity, Library } from './Activity'
+import { Activity } from './Activity'
+import { Library } from './library'
 import { GoalsPage } from './goals'
 import { PaneDrawer, RightPane, setPaneTab } from './RightPane'
 import { openPane } from './Sidebar'
@@ -17,6 +18,7 @@ import { Pane, Resizer, togglePane, TopBar, useDesktopChrome, usePanes, usePaneS
 import { Avatar, BRAND, Mascot, statusLine, usePersona } from './persona'
 import { cx, IconButton, Seg } from './ui'
 import { useSettingsShortcut } from './QuickSettings'
+import { SearchButton, SearchDialog } from './search'
 
 export function App() {
   const route = useRoute()
@@ -66,6 +68,7 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
     </main>
     <TaskDrawer />
     <PaneDrawer />
+    <SearchDialog />
   </div>
 }
 
@@ -77,7 +80,7 @@ function Tabs({ route }: { route: ReturnType<typeof useRoute> }) {
   const waiting = (useTickets().data?.tickets ?? []).filter(needsOwner).length
   const value: Tab = route.page === 'activity' ? 'activity' : route.page === 'library' ? 'library' : route.page === 'goals' ? 'goals' : 'chat'
   return <div className="relative">
-    <TopBar />
+    <TopBar right={<SearchButton className="no-drag relative z-10 mr-1" />} />
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
       <Seg label="页面" value={value} onChange={t => go(TAB_PATHS[t])} className="no-drag pointer-events-auto w-[288px]"
         options={[{ id: 'chat', label: '聊天' }, { id: 'activity', label: '动态', dot: waiting > 0 && value !== 'activity' }, { id: 'goals', label: '目标' }, { id: 'library', label: '成果' }]} />

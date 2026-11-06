@@ -340,9 +340,13 @@ html.quick, html.quick body { background: transparent !important; }
 /* Goals: a bar fills to its progress; the days on the pinned card light up one by one. */
 .grow-bar { transition: transform 900ms var(--ease-out-strong); }
 .dot-in { animation: pop 260ms var(--ease-out-strong) both; }
+/* 成果 cards: zoom from 0.96 and fade in, one after another. */
+@keyframes card-in { from { opacity: 0; transform: scale(0.96) } to { opacity: 1; transform: none } }
+.card-in { animation: card-in 280ms var(--ease-out-strong) both; }
 @media (prefers-reduced-motion: reduce) {
   .grow-bar { transition: none; }
   .dot-in { animation: none; }
+  .card-in { animation-name: fade; }
   .seg-thumb { transition: none; }
   .typing-cell { transition: none; }
   .tapback { animation-name: fade; }
