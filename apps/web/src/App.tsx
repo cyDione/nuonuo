@@ -9,6 +9,7 @@ import { Sidebar, StatusDot } from './Sidebar'
 import { openActivity, openTask, useLive, useLiveEvents } from './live'
 import { needsOwner, TaskDrawer, useTickets } from './tasks'
 import { Activity, Library } from './Activity'
+import { GoalsPage } from './goals'
 import { PaneDrawer, RightPane, setPaneTab } from './RightPane'
 import { openPane } from './Sidebar'
 import { QuickAsk } from './QuickAsk'
@@ -43,7 +44,7 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
   useSettingsShortcut()
   const { leftOpen } = usePanes()
   const chat = route.page === 'chat'
-  const tabbed = (chat && route.main) || route.page === 'activity' || route.page === 'library'
+  const tabbed = (chat && route.main) || route.page === 'activity' || route.page === 'library' || route.page === 'goals'
   return <div className="flex h-dvh bg-bg">
     <Sidebar route={route} open={nav} onClose={() => setNav(false)} />
     <main className={cx('flex min-w-0 flex-1', leftOpen && 'md:border-l md:border-line')}>
@@ -52,7 +53,7 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
         {tabbed ? <Tabs route={route} /> : !chat && <TopBar className="max-md:hidden" />}
         <div key={route.page === 'chat' ? `c${route.id ?? (route.main ? 'main' : 'new')}` : route.page} className="min-h-0 flex-1">
           {chat ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
-            : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library />
+            : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : route.page === 'goals' ? <GoalsPage />
             : route.page === 'settings' ? <Settings tab={route.tab} {...(route.item ? { item: route.item } : {})} /> : null}
         </div>
       </div>
@@ -68,18 +69,18 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
   </div>
 }
 
-type Tab = 'chat' | 'activity' | 'library'
-const TAB_PATHS: Record<Tab, string> = { chat: '/', activity: '/activity', library: '/library' }
+type Tab = 'chat' | 'activity' | 'goals' | 'library'
+const TAB_PATHS: Record<Tab, string> = { chat: '/', activity: '/activity', goals: '/goals', library: '/library' }
 
 /** 聊天 / 动态 / 成果 across the top of the main area (Figma v6). The page you're on sits on the white block. */
 function Tabs({ route }: { route: ReturnType<typeof useRoute> }) {
   const waiting = (useTickets().data?.tickets ?? []).filter(needsOwner).length
-  const value: Tab = route.page === 'activity' ? 'activity' : route.page === 'library' ? 'library' : 'chat'
+  const value: Tab = route.page === 'activity' ? 'activity' : route.page === 'library' ? 'library' : route.page === 'goals' ? 'goals' : 'chat'
   return <div className="relative">
     <TopBar />
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-      <Seg label="页面" value={value} onChange={t => go(TAB_PATHS[t])} className="no-drag pointer-events-auto w-[220px]"
-        options={[{ id: 'chat', label: '聊天' }, { id: 'activity', label: '动态', dot: waiting > 0 && value !== 'activity' }, { id: 'library', label: '成果' }]} />
+      <Seg label="页面" value={value} onChange={t => go(TAB_PATHS[t])} className="no-drag pointer-events-auto w-[288px]"
+        options={[{ id: 'chat', label: '聊天' }, { id: 'activity', label: '动态', dot: waiting > 0 && value !== 'activity' }, { id: 'goals', label: '目标' }, { id: 'library', label: '成果' }]} />
     </div>
   </div>
 }

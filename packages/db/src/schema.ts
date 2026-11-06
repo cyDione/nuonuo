@@ -282,3 +282,29 @@ export const grants = sqliteTable('grants', {
   createdAt: integer('created_at').notNull(),
   revokedAt: integer('revoked_at'),
 })
+
+/** A long-running aim of the owner's (目标): an amount toward a target, or days kept out of a number of days. */
+export const goals = sqliteTable('goals', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  icon: text('icon').notNull().default('target'),
+  style: text('style').$type<'amount' | 'days'>().notNull().default('amount'),
+  unit: text('unit').notNull().default(''),
+  current: real('current').notNull().default(0),
+  target: real('target').notNull(),
+  note: text('note'),
+  headline: json<{ value: string; unit?: string; note?: string } | null>('headline'),
+  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+  status: text('status').$type<'active' | 'done' | 'dropped'>().notNull().default('active'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+/** What the assistant did toward a goal ("23:00 提醒你放下手机"), with the progress it added, if any. */
+export const goalLog = sqliteTable('goal_log', {
+  id: text('id').primaryKey(),
+  goalId: text('goal_id').notNull(),
+  at: integer('at').notNull(),
+  text: text('text').notNull(),
+  delta: real('delta'),
+})

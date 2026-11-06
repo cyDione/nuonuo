@@ -67,6 +67,9 @@ export function useLiveEvents() {
         case 'persona.updated':
           qc.invalidateQueries({ queryKey: ['persona'] })
           break
+        case 'goals.updated':
+          qc.invalidateQueries({ queryKey: ['goals'] })
+          break
         case 'activity.updated':
           soon('activity', () => qc.invalidateQueries({ queryKey: ['activity'] }), 500)
           break

@@ -277,4 +277,29 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE UNIQUE INDEX grants_key ON grants(ticket_id, tool, key);
   `,
+  /* 7: v6 goals (long-running aims with progress) and what the assistant did toward them */ `
+  CREATE TABLE goals (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    icon TEXT NOT NULL DEFAULT 'target',
+    style TEXT NOT NULL DEFAULT 'amount',
+    unit TEXT NOT NULL DEFAULT '',
+    current REAL NOT NULL DEFAULT 0,
+    target REAL NOT NULL,
+    note TEXT,
+    headline TEXT,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE goal_log (
+    id TEXT PRIMARY KEY,
+    goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+    at INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    delta REAL
+  );
+  CREATE INDEX goal_log_at ON goal_log(goal_id, at);
+  `,
 ]

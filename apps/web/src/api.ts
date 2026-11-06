@@ -94,6 +94,7 @@ export type ServerEvent =
   | { type: 'conversation.updated'; conversationId: string }
   | { type: 'activity.updated' }
   | { type: 'persona.updated' }
+  | { type: 'goals.updated' }
 
 type FieldLinks = { links?: { label: string; href: string }[] }
 export type FieldSpec = FieldLinks & (
@@ -109,3 +110,7 @@ export interface Routine { id: string; name: string; schedule: string; prompt: s
 export interface PluginInfo { id: string; name: string; version: string; description: string; dir: string; enabled: boolean; loaded: boolean; builtIn: boolean; sources: string[]; error?: string }
 export interface McpServer { name: string; enabled: boolean; transport: 'stdio' | 'http'; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string>; roles: ('worker' | 'router')[]; review: boolean }
 export interface McpStatus { name: string; state: 'off' | 'connecting' | 'connected' | 'error'; tools: { name: string; description: string }[]; error?: string }
+export type GoalIcon = 'target' | 'moon' | 'wallet' | 'book' | 'run' | 'dumbbell' | 'heart' | 'music' | 'code' | 'leaf' | 'globe' | 'pen'
+export interface Goal { id: string; title: string; icon: GoalIcon; style: 'amount' | 'days'; unit: string; current: number; target: number; note: string | null
+  headline: { value: string; unit?: string; note?: string } | null; pinned: boolean; status: 'active' | 'done' | 'dropped'; createdAt: number; updatedAt: number }
+export interface GoalLogEntry { id: string; goalId: string; at: number; text: string; delta: number | null; goal: string }

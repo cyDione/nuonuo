@@ -337,7 +337,12 @@ html.quick, html.quick body { background: transparent !important; }
 .toggle { width: 40px; height: 24px; border-radius: 99px; padding: 2px; background: var(--hero-2); transition: background-color 180ms ease; display: inline-flex; flex-shrink: 0; }
 .toggle[data-state="checked"] { background: var(--accent); justify-content: flex-end; }
 .toggle > span { width: 20px; height: 20px; border-radius: 99px; background: #ffffff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.18); display: block; }
+/* Goals: a bar fills to its progress; the days on the pinned card light up one by one. */
+.grow-bar { transition: transform 900ms var(--ease-out-strong); }
+.dot-in { animation: pop 260ms var(--ease-out-strong) both; }
 @media (prefers-reduced-motion: reduce) {
+  .grow-bar { transition: none; }
+  .dot-in { animation: none; }
   .seg-thumb { transition: none; }
   .typing-cell { transition: none; }
   .tapback { animation-name: fade; }

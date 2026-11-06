@@ -22,6 +22,9 @@ import { TopBar } from './shell'
 
 /** A message typed on the empty screen, sent once the new conversation's page mounts. */
 let pendingSend: { id: string; content: string } | undefined
+/** Text to put in the main conversation's input bar (a new goal starts as 「我想」), taken once the main chat shows. */
+let pendingPrefill: string | undefined
+export function prefillComposer(text: string) { pendingPrefill = text; dispatchEvent(new Event('sa-prefill')) }
 
 export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const qc = useQueryClient()
@@ -90,6 +93,20 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
     if (!id || document.visibilityState !== 'visible') return
     if ((current?.unread ?? 0) > 0 || messages.length) void api.post(`/conversations/${id}/read`).then(() => qc.invalidateQueries({ queryKey: ['conversations'] }))
   }, [id, messages.length])
+
+  useEffect(() => {
+    if (!main) return
+    const take = () => {
+      if (pendingPrefill == null) return
+      const t = pendingPrefill
+      pendingPrefill = undefined
+      setText(t)
+      requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(t.length, t.length) } })
+    }
+    take()
+    addEventListener('sa-prefill', take)
+    return () => removeEventListener('sa-prefill', take)
+  }, [main])
 
   useEffect(() => {
     if (id && pendingSend?.id === id) { const { content } = pendingSend; pendingSend = undefined; void send(content) }

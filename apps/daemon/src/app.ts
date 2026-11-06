@@ -358,6 +358,14 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.delete('/grants/:id', c => { rt.reviewer.revokeGrant(c.req.param('id')); rt.bus.emit({ type: 'activity.updated' }); return c.body(null, 204) })
   api.get('/audit', c => c.json({ entries: rt.reviewer.auditLog(Math.min(Number(c.req.query('limit')) || 200, 1000)) }))
 
+  // Goals (目标): set in conversation; the owner pins, finishes, drops or deletes them here.
+  api.get('/goals', c => c.json({ goals: rt.goals.list(['active', 'done']), week: rt.goals.week() }))
+  api.patch('/goals/:id', async c => {
+    const patch = await body(c, z.object({ pinned: z.boolean().optional(), status: z.enum(['active', 'done', 'dropped']).optional(), title: z.string().trim().min(1).max(40).optional() }).strict())
+    return c.json({ goal: guard(() => rt.goals.update(c.req.param('id'), patch)) })
+  })
+  api.delete('/goals/:id', c => { rt.goals.remove(c.req.param('id')); return c.body(null, 204) })
+
   // Memory
   api.get('/memories', c => {
     const status = (c.req.query('status') ?? 'active,pending').split(',') as MemoryStatus[]
