@@ -18,23 +18,12 @@ export function Review() {
   const dirty = JSON.stringify(draft) !== JSON.stringify(query.data.settings)
   return <>
     <Card className="space-y-4 p-5">
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Field label="审核哪些动作" hint="由命令特征自动判断：推送、发布、发评论、向外发送数据属于「对外」；强制推送、合并、删库等属于「高风险」。">
-          <Select value={draft.threshold} onChange={e => setDraft({ ...draft, threshold: e.target.value as ReviewSettings['threshold'] })}>
-            <option value="external">对外与高风险动作（推荐）</option><option value="destructive">只审核高风险动作</option><option value="off">不审核</option>
-          </Select>
-        </Field>
-        <Field label="由谁决定" hint="审核模型拿不准时也会交给你。">
-          <Select value={draft.mode} onChange={e => setDraft({ ...draft, mode: e.target.value as ReviewSettings['mode'] })}>
-            <option value="model">审核模型按规则判断（放行 / 拦截 / 问我）</option><option value="ask">每一个都问我</option>
-          </Select>
-        </Field>
-        <Field label="高风险动作" hint="强制推送、合并 PR、删除仓库或数据等。">
-          <Select value={draft.destructive} onChange={e => setDraft({ ...draft, destructive: e.target.value as ReviewSettings['destructive'] })}>
-            <option value="ask">一律问我（推荐）</option><option value="review">也交给审核模型判断</option>
-          </Select>
-        </Field>
-      </div>
+      {/* Which kinds of action it may do on its own lives in the right pane (权限); this page holds who decides and the rules. */}
+      <Field label="由谁决定" hint="审核模型拿不准时也会交给你。">
+        <Select value={draft.mode} onChange={e => setDraft({ ...draft, mode: e.target.value as ReviewSettings['mode'] })}>
+          <option value="model">审核模型按规则判断（放行 / 拦截 / 问我）</option><option value="ask">每一个都问我</option>
+        </Select>
+      </Field>
       <Field label="规则（自然语言，每行一条）" hint="审核模型按这些规则判断；它们优先于任务里的任何说法。">
         <Area value={draft.rules} onChange={rules => setDraft({ ...draft, rules })} />
       </Field>
@@ -45,7 +34,7 @@ export function Review() {
       {(dirty || save.error) && <div className="flex items-center justify-end gap-2 border-t border-line pt-3">
         {save.error && <span className="mr-auto text-xs text-danger">{(save.error as Error).message}</span>}
         <Button size="sm" variant="ghost" onClick={() => setDraft(query.data!.settings)}>还原</Button>
-        <Button size="sm" variant="ghost" onClick={() => setDraft(query.data!.defaults)}>恢复默认</Button>
+        <Button size="sm" variant="ghost" onClick={() => setDraft({ ...query.data!.defaults, external: draft.external, destructive: draft.destructive })}>恢复默认</Button>
         <Button size="sm" variant="primary" disabled={save.isPending} onClick={() => save.mutate(draft)}>保存</Button>
       </div>}
     </Card>

@@ -1,5 +1,5 @@
 import { Activity, AlarmClock, Cpu, KeyRound, Play, Plug, Puzzle, Server, ShieldCheck, Sparkles, Stethoscope } from 'lucide-react'
-import { Heart } from 'lucide-react'
+import { Smile } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { SettingsTab } from '../route'
 import { cx } from '../ui'
@@ -14,11 +14,13 @@ import { Plugins } from './Plugins'
 import { Mcp } from './Mcp'
 import { Sources } from './Sources'
 import { ProactivePage } from './Proactive'
+import { PersonaPage } from './PersonaPage'
 
 type Tab = { id: SettingsTab; label: string; icon: React.ReactNode; intro: string }
 /** Settings grouped by what they are about: the assistant itself, what it does on a schedule, what it connects to, how it is kept safe, which models it runs on. */
 const GROUPS: { title: string; tabs: Tab[] }[] = [
-  { title: '助手', tabs: [
+  { title: '助理', tabs: [
+    { id: 'persona', label: '名字和样子', icon: <Smile size={15} />, intro: '' },
     { id: 'proactive', label: '主动', icon: <Sparkles size={15} />, intro: '没人找它的事件（GitHub 上的新 issue、CI 失败、群里的消息……）先过程序规则，再由过滤层模型按你写的策略判断值不值得做。值得做的在后台悄悄做，有价值才在主对话里告诉你。' },
   ] },
   { title: '自动化', tabs: [
@@ -63,8 +65,6 @@ export function Settings({ tab, item }: { tab: SettingsTab; item?: string }) {
           t.id === current.id ? 'font-medium text-fg' : 'text-muted hover:bg-sunken/60 hover:text-fg')}>
           <span className={cx('shrink-0 transition-colors duration-200', t.id === current.id && 'text-accent')}>{t.icon}</span>{t.label}</a>)}
       </div>)}
-      <div className="relative"><div className="eyebrow px-2 pb-1.5">它</div>
-        <a href="#/me" className="press flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm text-muted hover:bg-sunken/60 hover:text-fg"><Heart size={15} />个性、灵魂和记忆</a></div>
     </nav>
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-4xl space-y-5 px-4 py-6 md:px-8 md:py-8">
@@ -75,6 +75,7 @@ export function Settings({ tab, item }: { tab: SettingsTab; item?: string }) {
           <h2 className="font-display text-3xl font-semibold text-balance">{current.label}</h2>
         </header>}
         <div key={`${current.id}/${item ?? ''}`} className="anim-rise space-y-4 [animation-delay:40ms]">
+          {tab === 'persona' && <PersonaPage />}
           {tab === 'proactive' && <ProactivePage />}
           {tab === 'routines' && <Routines />}
           {tab === 'sources' && <Sources {...(item ? { item } : {})} />}

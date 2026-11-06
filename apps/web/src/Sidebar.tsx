@@ -46,9 +46,9 @@ const TOPIC_COLORS = ['#e2566e', '#13857a', '#8a7fc0', '#3d86e0', '#d98a3a', '#c
 export const topicColor = (id: string) => TOPIC_COLORS[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TOPIC_COLORS.length]!
 
 /** Opens what 糯糯 is up to: the right pane on wide windows, a drawer or sheet on narrow ones. */
-export function openPane() {
-  if (matchMedia('(min-width: 1280px)').matches) togglePane('right')
-  else openActivity(true)
+export function openPane(open?: boolean) {
+  if (matchMedia('(min-width: 1280px)').matches) togglePane('right', open)
+  else openActivity(open ?? true)
 }
 
 const day = (t: number) => { const d = new Date(t); return `${d.getMonth() + 1}.${d.getDate()}` }
@@ -73,7 +73,7 @@ function SidebarBody({ route }: { route: Route }) {
   const mainWaits = main ? ticketsOf(main.id).some(needsOwner) || (activeId !== main.id && (main.unread ?? 0) > 0) : false
   return <div className="flex min-h-0 flex-1 flex-col">
     <div className="px-2.5 pt-1">
-      <button onClick={openPane} aria-expanded={paneOpen} title="看看它在做什么"
+      <button onClick={() => openPane()} aria-expanded={paneOpen} title="看看它在做什么"
         className={cx('squish press flex w-full min-w-0 items-center gap-3 rounded-2xl p-2.5 text-left transition-colors duration-150', paneOpen ? 'bg-sunken xl:bg-sunken' : 'hover:bg-sunken/70')}>
         <Avatar persona={persona} size={40} mood={mood} />
         <span className="min-w-0 flex-1">

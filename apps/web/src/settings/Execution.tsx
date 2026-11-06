@@ -19,10 +19,6 @@ export function Execution() {
       <Field label="命令转后台前等待（秒）" hint="超过后命令在后台继续，任务可以先处理别的"><Input type="number" min={1} max={600} value={draft.foregroundSeconds} onChange={num('foregroundSeconds')} /></Field>
       <Field label="单条命令上限（分钟）"><Input type="number" min={1} value={draft.timeoutMinutes} onChange={num('timeoutMinutes')} /></Field>
     </div>
-    <Field label="允许的工作目录" hint="每行一个。默认每个任务在数据目录的 work/ 下新建目录；你在对话里点名这些目录（或其子目录）时，任务可以直接在里面工作。">
-      <textarea className="min-h-20 w-full rounded-xl border border-line bg-panel px-3 py-2 font-mono text-sm outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none"
-        value={draft.workspaceRoots.join('\n')} placeholder="~/code" onChange={e => setDraft({ ...draft, workspaceRoots: lines(e.target.value) })} />
-    </Field>
     <div className="grid gap-4 border-t border-line pt-4 sm:grid-cols-3">
       <Field label="Docker 沙箱" hint="在容器里执行任务的命令，容器只能看到任务目录">
         <select className="h-10 w-full rounded-xl border border-line bg-panel px-2.5 text-sm" value={draft.sandbox.mode}
