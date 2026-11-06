@@ -80,7 +80,8 @@ export type TranscriptItem =
 export interface TicketDetail { ticket: Ticket; reports: (Report & { id: number; humanAction: Report['humanAction'] | null })[]; transcript: TranscriptItem[]; running: boolean; jobs: { jobId: string; command: string; startedAt: number }[]; browser: boolean; project: string | null; usage: { tokens: number; costUsd: number | null }; files?: { id: string; name: string; size: number }[] }
 export interface SandboxSettings { mode: 'off' | 'external' | 'all'; image: string; network: 'bridge' | 'none' }
 export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: number; timeoutMinutes: number; blockedCommands: string[]; workspaceRoots: string[]; sandbox: SandboxSettings }
-export interface ReviewSettings { threshold: 'off' | 'destructive' | 'external'; mode: 'model' | 'ask'; destructive: 'ask' | 'review'; rules: string[]; allow: string[]; deny: string[] }
+export type Level = 'allow' | 'review' | 'ask' | 'deny'
+export interface ReviewSettings { external: Level; destructive: Exclude<Level, 'allow'>; mode: 'model' | 'ask'; rules: string[]; allow: string[]; deny: string[] }
 export interface AuditEntry { id: number; at: number; ticketId: string | null; actor: string; action: string; tool: string | null; input: string | null; risk: string | null; decision: string; reason: string | null }
 export interface Persona { name: string; avatar: string; color: string; personality: string }
 

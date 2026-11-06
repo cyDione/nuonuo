@@ -12,10 +12,11 @@ export const isMacDesktop = desktop?.platform === 'darwin'
 
 // ── Pane sizes, remembered per device ───────────────────────────────────────
 export type PaneSide = 'left' | 'right'
-const LIMITS = { left: { min: 200, max: 360, initial: 252 }, right: { min: 300, max: 460, initial: 344 } }
+const LIMITS = { left: { min: 200, max: 360, initial: 252 }, right: { min: 320, max: 460, initial: 360 } }
 interface Panes { left: number; right: number; leftOpen: boolean; rightOpen: boolean }
 const load = (): Panes => {
-  const base = { left: LIMITS.left.initial, right: LIMITS.right.initial, leftOpen: true, rightOpen: true }
+  // The right pane opens from 糯糯 in the sidebar; the chat has the window to itself until then.
+  const base = { left: LIMITS.left.initial, right: LIMITS.right.initial, leftOpen: true, rightOpen: false }
   try {
     const saved = JSON.parse(localStorage.getItem('sa-panes') ?? '{}') as Partial<Panes>
     // The right pane used to be remembered on its own.

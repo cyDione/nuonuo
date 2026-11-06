@@ -34,13 +34,6 @@ export function PersonaPage() {
           className={cx('press size-7 rounded-full', form.color === c && 'ring-2 ring-offset-2 ring-offset-panel')} style={{ background: c, ['--tw-ring-color' as string]: c }} />)}</div>
       </div>
     </Card>
-    <Card className="space-y-2 p-5">
-      <Field label="性格" hint="它说话的样子。每条消息都会按这个来；怎么做事、交付什么，写在「说明」里。">
-        <textarea className="min-h-28 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm leading-6 outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none"
-          value={form.personality} onChange={e => setForm({ ...form, personality: e.target.value })} placeholder="比如：说话直接、简短，像一个靠谱的同事" />
-      </Field>
-      <div className="flex flex-wrap gap-1.5">{EXAMPLES.map(x => <button key={x} onClick={() => setForm({ ...form, personality: x })} className="press rounded-full border border-line px-3 py-1 text-xs text-muted hover:border-fg/30 hover:text-fg">{x}</button>)}</div>
-    </Card>
     <div className="flex justify-end gap-2">
       {dirty && <Button size="sm" variant="ghost" onClick={() => setForm(data.persona)}>还原</Button>}
       <Button size="sm" variant="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate(form)}>保存</Button>

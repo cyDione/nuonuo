@@ -9,8 +9,8 @@ import { Sidebar, StatusDot } from './Sidebar'
 import { openActivity, openTask, useLive, useLiveEvents } from './live'
 import { needsOwner, TaskDrawer, useTickets } from './tasks'
 import { Activity, Library } from './Activity'
-import { TodayDrawer, TodayPanel } from './Today'
-import { MePage } from './MePage'
+import { PaneDrawer, RightPane, setPaneTab } from './RightPane'
+import { openPane } from './Sidebar'
 import { QuickAsk } from './QuickAsk'
 import { Pane, Resizer, togglePane, TopBar, useDesktopChrome, usePanes, usePaneShortcuts, useScrollingClass } from './shell'
 import { Avatar, BRAND, Mascot, statusLine, usePersona } from './persona'
@@ -23,7 +23,11 @@ export function App() {
   const health = useQuery({ queryKey: ['health'], queryFn: () => api.get<Health>('/health'), refetchInterval: 30_000 })
   const [nav, setNav] = useState(false)
   // Going somewhere else closes the activity panel and any open task.
-  useEffect(() => { openActivity(false); openTask(null) }, [JSON.stringify(route)])
+  useEffect(() => {
+    openActivity(false); openTask(null)
+    // Old links to 它 (#/me) open the right pane on 它是谁 over the main chat.
+    if (route.page === 'me') { go('/'); setPaneTab('who'); setTimeout(() => openPane(true), 60) }
+  }, [JSON.stringify(route)])
 
   const authed = health.isSuccess
   if (health.error instanceof ApiError && health.error.status === 401) return <Login />
@@ -49,19 +53,18 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
         <div key={route.page === 'chat' ? `c${route.id ?? (route.main ? 'main' : 'new')}` : route.page} className="min-h-0 flex-1">
           {chat ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
             : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library />
-            : route.page === 'me' ? <MePage tab={route.tab} />
             : route.page === 'settings' ? <Settings tab={route.tab} {...(route.item ? { item: route.item } : {})} /> : null}
         </div>
       </div>
       {chat && <div className="contents max-xl:hidden">
         <Resizer side="right" />
         <Pane side="right"><aside className="h-full w-full overflow-hidden border-l border-line bg-panel">
-          <TodayPanel onClose={() => togglePane('right', false)} />
+          <RightPane onClose={() => togglePane('right', false)} />
         </aside></Pane>
       </div>}
     </main>
     <TaskDrawer />
-    <TodayDrawer />
+    <PaneDrawer />
   </div>
 }
 

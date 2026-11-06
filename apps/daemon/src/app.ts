@@ -338,7 +338,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
 
   // Review: rules, approvals, audit
   const ReviewBody = z.object({
-    threshold: z.enum(['off', 'destructive', 'external']), mode: z.enum(['model', 'ask']), destructive: z.enum(['ask', 'review']),
+    external: z.enum(['allow', 'review', 'ask', 'deny']), mode: z.enum(['model', 'ask']), destructive: z.enum(['review', 'ask', 'deny']),
     rules: z.array(z.string().trim().min(1).max(500)).max(50),
     allow: z.array(z.string().trim().min(1).max(300)).max(100), deny: z.array(z.string().trim().min(1).max(300)).max(100),
   }).strict()

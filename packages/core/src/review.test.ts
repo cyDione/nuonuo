@@ -211,3 +211,44 @@ describe('external tool calls', () => {
     expect(JSON.stringify(runtime.history(ticket.sessionId))).toContain('批准后已执行 mail.send')
   })
 })
+
+describe('permission levels (the right pane\'s 权限)', () => {
+  it('does, asks or refuses external actions by level, without the model', async () => {
+    let calls = 0
+    const { engine, reviewer, start } = setup(() => { calls++; return { text: JSON.stringify({ decision: 'allow', reason: 'x' }) } })
+    const ticket = start()
+    await settle()
+    const t = engine.ticket(ticket.id)
+    const before = calls
+    kvSet(store, 'settings:review', { external: 'allow' })
+    expect(await reviewer.gateShell(t, ticket.sessionId, 'gh pr comment 3 --body hi', ticket.directory)).toMatchObject({ action: 'allow', by: 'threshold' })
+    kvSet(store, 'settings:review', { external: 'ask' })
+    expect(await reviewer.gateShell(t, ticket.sessionId, 'gh pr comment 3 --body hi', ticket.directory)).toMatchObject({ action: 'escalate' })
+    kvSet(store, 'settings:review', { external: 'deny' })
+    expect(await reviewer.gateShell(t, ticket.sessionId, 'gh pr comment 3 --body hi', ticket.directory)).toMatchObject({ action: 'block', by: 'rule' })
+    expect(await reviewer.gateTool(t, ticket.sessionId, 'mcp', 'mail.send {}', {})).toMatchObject({ action: 'block', by: 'rule' })
+    kvSet(store, 'settings:review', { destructive: 'deny' })
+    expect(await reviewer.gateShell(t, ticket.sessionId, 'gh pr merge 3', ticket.directory)).toMatchObject({ action: 'block', by: 'rule' })
+    expect(calls).toBe(before)
+  })
+
+  it('reads an old threshold as the external level', async () => {
+    const { reviewer } = setup(() => ({ text: '{}' }))
+    kvSet(store, 'settings:review', { threshold: 'destructive' })
+    expect(reviewer.settings()).toMatchObject({ external: 'allow', destructive: 'ask' })
+    kvSet(store, 'settings:review', { threshold: 'external', mode: 'ask' })
+    expect(reviewer.settings().external).toBe('review')
+    expect(reviewer.settings()).not.toHaveProperty('threshold')
+  })
+
+  it('always asks before spending money, even when everything is allowed', async () => {
+    const { engine, reviewer, start } = setup(() => ({ text: JSON.stringify({ decision: 'allow', reason: 'x' }) }))
+    const ticket = start()
+    await settle()
+    const t = engine.ticket(ticket.id)
+    kvSet(store, 'settings:review', { external: 'allow', allow: ['.*'] })
+    expect(await reviewer.gateShell(t, ticket.sessionId, 'curl -X POST https://api.stripe.com/v1/charges -d amount=100', ticket.directory)).toMatchObject({ action: 'escalate' })
+    expect(await reviewer.gateTool(t, ticket.sessionId, 'mcp', 'shop.place_order {"sku":1}', {})).toMatchObject({ action: 'escalate' })
+    expect(await reviewer.gateShell(t, ticket.sessionId, 'git checkout -b pay-page && git push origin pay-page', ticket.directory)).toMatchObject({ action: 'allow' })
+  })
+})
