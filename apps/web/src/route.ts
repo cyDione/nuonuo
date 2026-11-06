@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export type Route = { page: 'chat'; id?: string; main?: boolean } | { page: 'activity' } | { page: 'library' } | { page: 'goals' } | { page: 'settings'; tab: SettingsTab; item?: string } | { page: 'me' } | { page: 'quick' }
+export type Route = { page: 'chat'; id?: string; main?: boolean } | { page: 'activity' } | { page: 'library' } | { page: 'goals' } | { page: 'ideas' } | { page: 'settings'; tab: SettingsTab; item?: string } | { page: 'me' } | { page: 'quick' }
 export type SettingsTab = 'persona' | 'providers' | 'roles' | 'instructions' | 'proactive' | 'sources' | 'plugins' | 'mcp' | 'routines' | 'review' | 'memory' | 'execution' | 'usage' | 'system'
 
 function parse(hash: string): Route {
@@ -18,6 +18,7 @@ function parse(hash: string): Route {
   if (parts[0] === 'activity') return { page: 'activity' }
   if (parts[0] === 'library') return { page: 'library' }
   if (parts[0] === 'goals') return { page: 'goals' }
+  if (parts[0] === 'ideas') return { page: 'ideas' }
   return { page: 'chat', main: true }
 }
 

@@ -294,6 +294,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .flow[data-tone="lilac"] { --c1: #b7aed6; --c2: #9c92c6; --c3: #7f74ae; }
 .flow[data-tone="teal"] { --c1: #1f9e7a; --c2: #13857a; --c3: #0b5a63; }
 .flow[data-tone="sky"] { --c1: #7ab8f0; --c2: #4a8fe2; --c3: #3466c8; }
+.flow[data-tone="amber"] { --c1: #f4b183; --c2: #e8834f; --c3: #c95f2c; }
 .flow::before { content: ""; position: absolute; inset: -40%; z-index: -1; pointer-events: none;
   background: radial-gradient(34% 38% at 30% 28%, color-mix(in oklab, var(--c1) 85%, white), transparent 70%), radial-gradient(40% 40% at 74% 76%, var(--c3), transparent 72%);
   opacity: 0.8; animation: flow 18s ease-in-out infinite alternate; }

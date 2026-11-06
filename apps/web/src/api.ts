@@ -96,6 +96,7 @@ export type ServerEvent =
   | { type: 'persona.updated' }
   | { type: 'goals.updated' }
   | { type: 'feed.updated' }
+  | { type: 'ideas.updated' }
 
 type FieldLinks = { links?: { label: string; href: string }[] }
 export type FieldSpec = FieldLinks & (
@@ -117,4 +118,8 @@ export interface Goal { id: string; title: string; icon: GoalIcon; style: 'amoun
 export type FeedIcon = 'bell' | 'tag' | 'weather' | 'mail' | 'wifi' | 'plane' | 'calendar' | 'package' | 'chart' | 'news' | 'home' | 'heart'
 export interface FeedItem { id: string; at: number; title: string; text: string; icon: FeedIcon; card: { label?: string; value: number; was?: number; unit?: string; note?: string; series?: number[] } | null
   action: { label: string; say: string } | null; conversationId: string | null; ticketId: string | null; seen: boolean; dismissed: boolean }
+export type IdeaTone = 'coral' | 'teal' | 'lilac' | 'sky' | 'amber'
+export interface Idea { id: string; kind: string; label: string; text: string; action: string; say: string; tone: IdeaTone; dismissed?: boolean; done?: boolean }
+export interface IdeaBatch { at: number; cards: Idea[]; more: { id: string; text: string; say: string; done?: boolean }[]; seen?: boolean }
+export interface IdeaSettings { cadence: 'daily' | 'weekly' | 'off'; hour: number }
 export interface GoalLogEntry { id: string; goalId: string; at: number; text: string; delta: number | null; goal: string }

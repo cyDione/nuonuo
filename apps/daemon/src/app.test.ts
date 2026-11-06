@@ -134,6 +134,15 @@ describe('conversations', () => {
     expect((await call('/api/tickets/tkt_nope')).status).toBe(404)
   })
 
+  it('serves 点子 and their cadence, and refuses to think them up without a model', async () => {
+    expect(await (await call('/api/ideas')).json()).toEqual({ batch: null, settings: { cadence: 'daily', hour: 7 } })
+    const put = await call('/api/settings/ideas', { method: 'PUT', body: JSON.stringify({ cadence: 'weekly' }) })
+    expect(((await put.json()) as any).settings.cadence).toBe('weekly')
+    expect((await call('/api/settings/ideas', { method: 'PUT', body: JSON.stringify({ cadence: 'hourly' }) })).status).toBe(400)
+    expect((await call('/api/ideas/ida_nope/dismiss', { method: 'POST' })).status).toBe(400)
+    expect((await call('/api/ideas/refresh', { method: 'POST' })).status).toBe(400)
+  })
+
   it('searches the conversations and what it remembers, taking % literally', async () => {
     const { conversation } = await (await call('/api/conversations', { method: 'POST', body: '{}' })).json() as any
     rt.store.db.insert(schema.messages).values([

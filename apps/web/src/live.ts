@@ -70,6 +70,9 @@ export function useLiveEvents() {
         case 'goals.updated':
           qc.invalidateQueries({ queryKey: ['goals'] })
           break
+        case 'ideas.updated':
+          qc.invalidateQueries({ queryKey: ['ideas'] })
+          break
         case 'feed.updated':
           qc.invalidateQueries({ queryKey: ['feed'] })
           break
