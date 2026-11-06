@@ -12,6 +12,7 @@ import { api, type Stage, type Ticket, type TicketDetail, type TranscriptItem } 
 import { openTask, useLive, useOpenTask } from './live'
 import { go } from './route'
 import { Button, cx, IconButton } from './ui'
+import { getPrefs } from './prefs'
 import { HandoffModal } from './handoff'
 import { ArtifactModal, previewKind } from './preview'
 import { usePresence } from './shell'
@@ -208,7 +209,8 @@ function toSteps(items: TranscriptItem[], dir: string): StepItem[] {
 }
 
 function Step({ step }: { step: StepItem }) {
-  const [open, setOpen] = useState(false)
+  // 显示原始记录 (quick settings): each call opens with its raw input and output.
+  const [open, setOpen] = useState(() => getPrefs().showRaw && step.kind === 'step')
   return <li>
     <button onClick={() => setOpen(v => !v)} aria-expanded={open} className={cx('relative flex w-full items-start gap-2.5 rounded-xl px-2 py-1.5 text-left text-sm hover:bg-sunken', step.kind === 'error' && 'text-danger', step.kind === 'note' && 'text-muted')}>
       <span className={cx('flex size-6 shrink-0 items-center justify-center rounded-lg border border-line bg-panel', step.kind === 'error' ? 'text-danger' : 'text-muted')}><step.icon size={13} /></span>

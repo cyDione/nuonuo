@@ -40,7 +40,7 @@ export function TodayPanel({ onClose, variant = 'side' }: { onClose?(): void; va
   const hero = useTilt<HTMLDivElement>(2)
 
   return <div className="flex h-full flex-col">
-    <div ref={hero} data-tone="teal" className={cx('flow tilt px-4 pt-3.5 pb-5', variant === 'sheet' ? 'mx-2.5 rounded-[22px]' : 'm-2.5 rounded-[18px]')}>
+    <div ref={hero} data-tone="sky" className={cx('flow tilt px-4 pt-3.5 pb-5', variant === 'sheet' ? 'mx-2.5 rounded-[22px]' : 'm-2.5 rounded-[18px]')}>
       <div className="relative flex items-center">
         <span className="flex-1 text-xs font-medium tabular-nums opacity-65">{now.getMonth() + 1}月{now.getDate()}日 · {WEEK[now.getDay()]}</span>
         {onClose && <IconButton label={variant === 'side' ? '收起' : '关闭'} onClick={onClose} className="-mr-1.5 text-white/75 hover:bg-white/15 hover:text-white">{variant === 'side' ? <PanelRightClose size={17} /> : <X size={18} />}</IconButton>}

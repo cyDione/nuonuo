@@ -3,10 +3,16 @@ import { kvGet, kvSet, type Store } from '@super-assistant/db'
 
 export interface Persona { name: string; avatar: string; color: string; personality: string }
 
-export const DEFAULT_PERSONA: Persona = { name: '小助', avatar: 'mascot', color: '#e9845a', personality: '' }
+/** The assistant's official name is 糯糯 (Mochi). 小助 was the old default and is read as 糯糯. */
+export const DEFAULT_PERSONA: Persona = { name: '糯糯', avatar: 'mascot', color: '#ff7a9a', personality: '' }
+const OLD_DEFAULT_NAMES = new Set(['小助'])
+const OLD_DEFAULT_COLORS = new Set(['#e9845a'])
 
 export function persona(store: Store): Persona {
-  return { ...DEFAULT_PERSONA, ...(kvGet<Partial<Persona>>(store, 'persona') ?? {}) }
+  const p = { ...DEFAULT_PERSONA, ...(kvGet<Partial<Persona>>(store, 'persona') ?? {}) }
+  if (OLD_DEFAULT_NAMES.has(p.name)) p.name = DEFAULT_PERSONA.name
+  if (OLD_DEFAULT_COLORS.has(p.color.toLowerCase())) p.color = DEFAULT_PERSONA.color
+  return p
 }
 
 export function savePersona(store: Store, patch: Partial<Persona>): Persona {

@@ -3,7 +3,7 @@ import { Inbox, Menu } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, ApiError, type Health } from './api'
 import { Chat } from './Chat'
-import { useRoute } from './route'
+import { go, useRoute } from './route'
 import { Settings } from './settings/Settings'
 import { Sidebar, StatusDot } from './Sidebar'
 import { openActivity, openTask, useLive, useLiveEvents } from './live'
@@ -12,9 +12,10 @@ import { Activity, Library } from './Activity'
 import { TodayDrawer, TodayPanel } from './Today'
 import { MePage } from './MePage'
 import { QuickAsk } from './QuickAsk'
-import { Pane, Resizer, togglePane, TopBar, useDesktopChrome, usePaneShortcuts, useScrollingClass } from './shell'
+import { Pane, Resizer, togglePane, TopBar, useDesktopChrome, usePanes, usePaneShortcuts, useScrollingClass } from './shell'
 import { Avatar, BRAND, Mascot, statusLine, usePersona } from './persona'
-import { cx, IconButton } from './ui'
+import { cx, IconButton, Seg } from './ui'
+import { useSettingsShortcut } from './QuickSettings'
 
 export function App() {
   const route = useRoute()
@@ -35,13 +36,16 @@ export function App() {
 function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; nav: boolean; setNav(v: boolean): void }) {
   usePaneShortcuts()
   useScrollingClass()
+  useSettingsShortcut()
+  const { leftOpen } = usePanes()
   const chat = route.page === 'chat'
-  return <div className="flex h-dvh">
+  const tabbed = (chat && route.main) || route.page === 'activity' || route.page === 'library'
+  return <div className="flex h-dvh bg-bg">
     <Sidebar route={route} open={nav} onClose={() => setNav(false)} />
-    <main className="flex min-w-0 flex-1 md:py-2 md:pr-2">
-      <div className="sheet relative flex min-w-0 flex-1 flex-col overflow-hidden md:rounded-[22px]">
+    <main className={cx('flex min-w-0 flex-1', leftOpen && 'md:border-l md:border-line')}>
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <MobileBar onMenu={() => setNav(true)} />
-        {!chat && <TopBar className="max-md:hidden" />}
+        {tabbed ? <Tabs route={route} /> : !chat && <TopBar className="max-md:hidden" />}
         <div key={route.page === 'chat' ? `c${route.id ?? (route.main ? 'main' : 'new')}` : route.page} className="min-h-0 flex-1">
           {chat ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
             : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library />
@@ -51,13 +55,29 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
       </div>
       {chat && <div className="contents max-xl:hidden">
         <Resizer side="right" />
-        <Pane side="right"><aside className="h-full w-full overflow-hidden rounded-[22px] bg-card shadow-[var(--shadow-sheet)]">
+        <Pane side="right"><aside className="h-full w-full overflow-hidden border-l border-line bg-panel">
           <TodayPanel onClose={() => togglePane('right', false)} />
         </aside></Pane>
       </div>}
     </main>
     <TaskDrawer />
     <TodayDrawer />
+  </div>
+}
+
+type Tab = 'chat' | 'activity' | 'library'
+const TAB_PATHS: Record<Tab, string> = { chat: '/', activity: '/activity', library: '/library' }
+
+/** 聊天 / 动态 / 成果 across the top of the main area (Figma v6). The page you're on sits on the white block. */
+function Tabs({ route }: { route: ReturnType<typeof useRoute> }) {
+  const waiting = (useTickets().data?.tickets ?? []).filter(needsOwner).length
+  const value: Tab = route.page === 'activity' ? 'activity' : route.page === 'library' ? 'library' : 'chat'
+  return <div className="relative">
+    <TopBar />
+    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+      <Seg label="页面" value={value} onChange={t => go(TAB_PATHS[t])} className="no-drag pointer-events-auto w-[220px]"
+        options={[{ id: 'chat', label: '聊天' }, { id: 'activity', label: '动态', dot: waiting > 0 && value !== 'activity' }, { id: 'library', label: '成果' }]} />
+    </div>
   </div>
 }
 
