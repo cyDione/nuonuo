@@ -6,6 +6,7 @@ import { generateOf, lastUserText, streamOf, systemText } from '@super-assistant
 import { EventMapper, partialString } from './events'
 import { ModelHub } from '@super-assistant/models'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { schema } from '@super-assistant/db'
 import { createApp } from './app'
 import { resolveConfig } from './config'
 import { createRuntime, type Runtime } from './runtime'
@@ -131,6 +132,31 @@ describe('conversations', () => {
     expect(list.conversations.find((c: any) => c.id === conversation.id)).toMatchObject({ title: '问候' })
     expect((await (await call('/api/tickets')).json() as any).tickets).toEqual([])
     expect((await call('/api/tickets/tkt_nope')).status).toBe(404)
+  })
+
+  it('serves 点子 and their cadence, and refuses to think them up without a model', async () => {
+    expect(await (await call('/api/ideas')).json()).toEqual({ batch: null, settings: { cadence: 'daily', hour: 7 } })
+    const put = await call('/api/settings/ideas', { method: 'PUT', body: JSON.stringify({ cadence: 'weekly' }) })
+    expect(((await put.json()) as any).settings.cadence).toBe('weekly')
+    expect((await call('/api/settings/ideas', { method: 'PUT', body: JSON.stringify({ cadence: 'hourly' }) })).status).toBe(400)
+    expect((await call('/api/ideas/ida_nope/dismiss', { method: 'POST' })).status).toBe(400)
+    expect((await call('/api/ideas/refresh', { method: 'POST' })).status).toBe(400)
+  })
+
+  it('searches the conversations and what it remembers, taking % literally', async () => {
+    const { conversation } = await (await call('/api/conversations', { method: 'POST', body: '{}' })).json() as any
+    rt.store.db.insert(schema.messages).values([
+      { id: 'msg_a', conversationId: conversation.id, role: 'user', content: '那帮我盯着 XM6 耳机，降到 2000 以下告诉我', createdAt: 1 },
+      { id: 'msg_b', conversationId: conversation.id, role: 'assistant', content: '折扣 100% 是假的', createdAt: 2 },
+    ]).run()
+    rt.memory.add({ kind: 'profile', text: '你更喜欢头戴式耳机，通勤用', trust: 'user', createdBy: 'owner' })
+    const found = await (await call(`/api/search?q=${encodeURIComponent('耳机')}`)).json() as any
+    expect(found.messages.map((m: any) => m.id)).toEqual(['msg_a'])
+    expect(found.memories[0].text).toContain('头戴式')
+    expect(found.artifacts).toEqual([])
+    const pct = await (await call(`/api/search?q=${encodeURIComponent('0%')}`)).json() as any
+    expect(pct.messages.map((m: any) => m.id)).toEqual(['msg_b'])
+    expect((await (await call('/api/search?q=%20')).json() as any).messages).toEqual([])
   })
 })
 

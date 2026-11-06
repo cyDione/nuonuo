@@ -6,6 +6,7 @@ import type { BusEvent } from '@super-assistant/agent-runtime'
 
 export type ClientEvent =
   | { type: 'message.created'; conversationId: string; messageId: string }
+  | { type: 'message.updated'; conversationId: string; messageId: string }
   | { type: 'reply.delta'; conversationId: string; callId: string; text: string }
   | { type: 'ticket.updated'; ticketId: string }
   | { type: 'session.state'; role: string; sessionId: string; ticketId?: string | null; state: string }
@@ -13,6 +14,9 @@ export type ClientEvent =
   | { type: 'conversation.updated'; conversationId: string }
   | { type: 'activity.updated' }
   | { type: 'persona.updated' }
+  | { type: 'goals.updated' }
+  | { type: 'feed.updated' }
+  | { type: 'ideas.updated' }
 
 /** Reads a possibly unfinished JSON object's string field, e.g. `"text":"hel` → `hel`. */
 export function partialString(json: string, field: string): string | undefined {
@@ -43,10 +47,14 @@ export class EventMapper {
     const e = event as any
     switch (event.type) {
       case 'message.created': return [{ type: 'message.created', conversationId: e.conversationId, messageId: e.messageId }]
+      case 'message.updated': return [{ type: 'message.updated', conversationId: e.conversationId, messageId: e.messageId }]
       case 'conversation.updated': return [{ type: 'conversation.updated', conversationId: e.conversationId }]
       case 'ticket.updated': return [{ type: 'ticket.updated', ticketId: e.ticketId }]
       case 'activity.updated': return [{ type: 'activity.updated' }]
       case 'persona.updated': return [{ type: 'persona.updated' }]
+      case 'goals.updated': return [{ type: 'goals.updated' }]
+      case 'feed.updated': return [{ type: 'feed.updated' }]
+      case 'ideas.updated': return [{ type: 'ideas.updated' }]
       case 'approval.updated': return [{ type: 'ticket.updated', ticketId: e.ticketId }]
       // A subagent's state and text belong to its parent's work; the web shows only the helper itself.
       case 'session.state': return e.role === 'subagent' ? [] : [{ type: 'session.state', role: e.role, sessionId: e.sessionId, ticketId: e.ticketId, state: e.state }]

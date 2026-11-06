@@ -61,11 +61,23 @@ export function useLiveEvents() {
           void qc.invalidateQueries({ queryKey: ['messages', e.conversationId] }).then(() => clearDraftAfterMessage(e.conversationId))
           soon('conversations', () => qc.invalidateQueries({ queryKey: ['conversations'] }))
           break
+        case 'message.updated':
+          qc.invalidateQueries({ queryKey: ['messages', e.conversationId] })
+          break
         case 'conversation.updated':
           qc.invalidateQueries({ queryKey: ['conversations'] })
           break
         case 'persona.updated':
           qc.invalidateQueries({ queryKey: ['persona'] })
+          break
+        case 'goals.updated':
+          qc.invalidateQueries({ queryKey: ['goals'] })
+          break
+        case 'ideas.updated':
+          qc.invalidateQueries({ queryKey: ['ideas'] })
+          break
+        case 'feed.updated':
+          qc.invalidateQueries({ queryKey: ['feed'] })
           break
         case 'activity.updated':
           soon('activity', () => qc.invalidateQueries({ queryKey: ['activity'] }), 500)

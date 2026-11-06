@@ -56,6 +56,16 @@ export class Engine {
     this.now = opts.now ?? Date.now
   }
 
+  /** The assistant's tapback on the owner's message (👌 😂 ❤️ …), shown on the bubble's corner. */
+  react(triggerId: string, emoji: string): boolean {
+    const message = this.store.db.select().from(schema.messages).where(eq(schema.messages.triggerId, triggerId)).get()
+    if (!message || message.role !== 'user') return false
+    this.store.db.update(schema.messages).set({ meta: { ...message.meta, tapback: emoji } }).where(eq(schema.messages.id, message.id)).run()
+    this.bus.emit({ type: 'message.updated', conversationId: message.conversationId, messageId: message.id })
+    return true
+  }
+
+
   get workRoot() { return join(this.opts.home, 'work') }
 
   execution(): ExecutionSettings {

@@ -5,19 +5,21 @@
  * On narrower windows the same pane opens as a drawer, and on phones as a sheet from the bottom.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, ChevronDown, ChevronRight, CreditCard, Folder, Globe, Lock, Plus, Send, Shield, ShieldCheck, Smile, Trash2, X } from 'lucide-react'
+import { Activity, ChevronDown, Target, ChevronRight, CreditCard, Folder, Globe, Lock, Plus, Send, Shield, ShieldCheck, Smile, Trash2, X } from 'lucide-react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { api, type AuditEntry, type ExecutionSettings, type InstructionsState, type Level, type Persona, type ReviewSettings, type Routine, type Ticket } from './api'
 import { openActivity, openTask, useActivityOpen, useLive } from './live'
 import { Avatar, statusLine, usePersona } from './persona'
 import { go } from './route'
+import { GoalsPaneTab } from './goals'
+import { Grants } from './Activity'
 import { InstructionsPage } from './settings/Instructions'
 import { MemoryPage } from './settings/MemoryPage'
 import { needsOwner, useTickets } from './tasks'
 import { cx, IconButton, Modal, Seg } from './ui'
 import { usePresence } from './shell'
 
-export type PaneTab = 'activity' | 'who' | 'permissions'
+export type PaneTab = 'activity' | 'who' | 'permissions' | 'goals'
 let tab: PaneTab = 'activity'
 const tabListeners = new Set<() => void>()
 export function setPaneTab(next: PaneTab) { tab = next; for (const l of tabListeners) l() }
@@ -27,6 +29,7 @@ const TABS: { id: PaneTab; label: React.ReactNode }[] = [
   { id: 'activity', label: <span className="flex items-center" title="活动"><Activity size={17} aria-label="活动" /></span> },
   { id: 'who', label: <span className="flex items-center" title="它是谁"><Smile size={17} aria-label="它是谁" /></span> },
   { id: 'permissions', label: <span className="flex items-center" title="权限"><Shield size={17} aria-label="权限" /></span> },
+  { id: 'goals', label: <span className="flex items-center" title="目标"><Target size={17} aria-label="目标" /></span> },
 ]
 
 const hm = (at: number) => new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
@@ -55,7 +58,7 @@ export function RightPane({ onClose }: { onClose(): void }) {
     </div>
     <div className="px-6 pt-5 pb-1"><Seg label="右侧栏" value={current} options={TABS} onChange={setPaneTab} className="[&_button]:h-8" /></div>
     <div key={current} className="anim-fade min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-6">
-      {current === 'activity' ? <ActivityTab onLeave={onClose} /> : current === 'who' ? <WhoTab /> : <PermissionsTab />}
+      {current === 'activity' ? <ActivityTab onLeave={onClose} /> : current === 'who' ? <WhoTab /> : current === 'goals' ? <GoalsPaneTab onLeave={onClose} /> : <PermissionsTab />}
     </div>
   </div>
 }
@@ -234,6 +237,7 @@ function PermissionsTab() {
       </form>}
       <p className="mt-2 text-[11px] leading-5 text-faint">你在对话里点名这些文件夹时，它可以直接在里面做事。</p>
     </section>
+    <Grants />
     <section className="border-t border-line pt-5">
       <Head title="最近 7 天" />
       <p className="text-sm tabular-nums">自己做了 {self} 次 · 问过你 {asked} 次 · 你拒绝了 {refused} 次</p>

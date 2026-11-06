@@ -7,7 +7,7 @@ import { desc, eq } from 'drizzle-orm'
 export function ticketView(engine: Engine, t: Ticket, approvals: { id: string; input: Record<string, unknown>; reason: string; risk: string; createdAt: number }[] = []) {
   const stage = engine.stage(t)
   return {
-    approvals: approvals.map(a => ({ id: a.id, command: String(a.input.command ?? ''), reason: a.reason, risk: a.risk, createdAt: a.createdAt })),
+    approvals: approvals.map(a => ({ id: a.id, command: String(a.input.command ?? ''), reason: a.reason, risk: a.risk, createdAt: a.createdAt, card: (a.input.card as object | undefined) ?? null })),
     id: t.id, title: t.title, name: t.name, note: t.note, stage, stageLabel: STAGE_LABEL[stage],
     conversationId: engine.conversationOfThread(t.threadId) ?? null, source: sourceOfThread(t.threadId), directory: t.directory,
     latestReport: t.latestReport, attention: t.attention, ended: t.ended, createdAt: t.createdAt, updatedAt: t.updatedAt,

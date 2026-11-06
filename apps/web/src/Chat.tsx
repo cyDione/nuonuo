@@ -6,22 +6,25 @@
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { MotionGrid, MotionGridCells } from '@animate-ui/react/primitives/motion-grid'
-import { AlarmClock, AlertTriangle, ArrowDown, ArrowUp, ArrowUpRight, Check, Copy, ExternalLink, Mic, Plus, SquarePen } from 'lucide-react'
+import { Particles, ParticlesEffect } from '@animate-ui/react/primitives/effects/particles'
+import { SplittingText } from '@animate-ui/react/primitives/texts/splitting'
+import { AlarmClock, AlertTriangle, ArrowDown, ArrowUp, ArrowUpRight, Bell, Check, ChevronLeft, Copy, ExternalLink, FileText, Mic, Plane, Plus, Scale, Square, SquarePen, Tag, type LucideIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, ApiError, type Conversation, type Message, type RolesResponse } from './api'
+import { api, ApiError, type Artifact, type Conversation, type Message, type RolesResponse } from './api'
 import { useLive } from './live'
-import { Avatar, greeting, statusLine, usePersona } from './persona'
-import { topicColor } from './Sidebar'
+import { Avatar, usePersona } from './persona'
 import { go } from './route'
 import { NeedsYou, needsOwner, useTickets } from './tasks'
 import { SOURCE_LABEL, SourceIcon } from './icons'
 import { cx } from './ui'
-import { TopBar } from './shell'
 
 /** A message typed on the empty screen, sent once the new conversation's page mounts. */
 let pendingSend: { id: string; content: string } | undefined
+/** Text to put in the main conversation's input bar (a new goal starts as 「我想」), taken once the main chat shows. */
+let pendingPrefill: string | undefined
+export function prefillComposer(text: string) { pendingPrefill = text; dispatchEvent(new Event('sa-prefill')) }
 
 export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const qc = useQueryClient()
@@ -92,23 +95,43 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   }, [id, messages.length])
 
   useEffect(() => {
+    if (!main) return
+    const take = () => {
+      if (pendingPrefill == null) return
+      const t = pendingPrefill
+      pendingPrefill = undefined
+      setText(t)
+      requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(t.length, t.length) } })
+    }
+    take()
+    addEventListener('sa-prefill', take)
+    return () => removeEventListener('sa-prefill', take)
+  }, [main])
+
+  useEffect(() => {
     if (id && pendingSend?.id === id) { const { content } = pendingSend; pendingSend = undefined; void send(content) }
   }, [id])
 
   const empty = !id || (thread.isSuccess && messages.length === 0)
-  const status = statusLine((tickets.data?.tickets ?? []).filter(t => t.stage !== 'ended'))
+  const all = (tickets.data?.tickets ?? []).filter(t => t.conversationId === id)
+  const ended = all.filter(t => t.stage === 'ended').sort((a, b) => (b.ended?.at ?? 0) - (a.ended?.at ?? 0))[0]
+  const sideStatus = asks.length ? '等你点头' : working.length ? '在做' : ended?.ended ? `${new Date(ended.ended.at).getMonth() + 1}.${new Date(ended.ended.at).getDate()} 做完` : ''
+  const artifacts = useQuery({ queryKey: ['artifacts'], queryFn: () => api.get<{ artifacts: Artifact[] }>('/artifacts'), enabled: Boolean(id) && !main }).data?.artifacts ?? []
+  const made = artifacts.filter(a => a.conversationId === id).length
   const external = current && current.source !== 'webchat'
 
   return <div className="flex h-full flex-col">
-    {!main && <TopBar className={cx('md:px-4', thread.data ? 'border-b border-line' : 'max-md:hidden')}>
-      {thread.data && <>
-        {external ? <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-sunken text-muted"><SourceIcon source={current!.source} size={14} /></span>
-          : <span className="size-2.5 shrink-0 rounded-full" style={{ background: topicColor(id!) }} />}
-        <h1 className="min-w-0 flex-1 truncate font-display text-[15px] font-semibold">{title}</h1>
-        {current?.meta.url && <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg">
-          在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>}
-      </>}
-    </TopBar>}
+    {!main && thread.data && <div className="border-b border-line">
+      <div className="mx-auto flex h-11 w-full max-w-[680px] items-center gap-2 px-3 md:px-8">
+        <button onClick={() => go('/')} aria-label="回主聊" title="回主聊" className="press -ml-1.5 flex size-7 shrink-0 items-center justify-center rounded-full text-muted hover:bg-sunken hover:text-fg"><ChevronLeft size={18} /></button>
+        {external && <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-sunken text-muted"><SourceIcon source={current!.source} size={13} /></span>}
+        <h1 className="min-w-0 shrink truncate font-display text-[15px] font-semibold">{title}</h1>
+        <span className="min-w-0 flex-1 truncate text-xs text-faint">{external ? SOURCE_LABEL[current!.source] ?? current!.source : ['侧聊', sideStatus].filter(Boolean).join(' · ')}</span>
+        {current?.meta.url ? <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg">
+          在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>
+          : !external && (made ? <a href="#/library" className="shrink-0 text-xs text-muted hover:text-fg">{made} 个成果 ›</a> : <span className="shrink-0 text-xs text-faint max-sm:hidden">做完了就收进成果</span>)}
+      </div>
+    </div>}
     {noRouter && <div className="mx-auto mt-4 w-full max-w-3xl px-4 md:px-6"><div className="anim-rise flex items-center gap-3 rounded-2xl bg-sunken px-4 py-3 text-sm">
       <AlertTriangle size={16} className="shrink-0 text-warn" />
       <span className="flex-1">还没有配置模型</span>
@@ -116,16 +139,16 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
     </div></div>}
     <div className="relative min-h-0 flex-1">
     <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
-      {empty ? <Welcome onPick={t => { setText(t); requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(t.length, t.length) } }) }} disabled={Boolean(noRouter)} main={Boolean(main)} mood={status.tone} /> :
+      {empty ? <Welcome onSend={t => void send(t)} disabled={Boolean(noRouter)} main={Boolean(main)} /> :
         <div className="mx-auto max-w-[680px] px-4 pt-4 pb-4 md:px-8">
           {messages.map((m, i) => <div key={m.id} className={cx(i > 0 && (messages[i - 1]!.role === m.role ? 'mt-1.5' : 'mt-4'))}>
             <When m={m} prev={messages[i - 1]} name={persona.name} />
             <Item m={m} fresh={m.createdAt > mountedAt}
-              tapback={m.role !== 'user' || m.meta.source && m.meta.source !== 'webchat' ? undefined : i === lastUser && i > lastReply && busy ? '👀' : m.ticketId ? '👌' : undefined} />
+              tapback={m.role !== 'user' || m.meta.source && m.meta.source !== 'webchat' ? undefined : m.meta.tapback ?? (i === lastUser && i > lastReply && busy ? '👀' : m.ticketId ? '👌' : undefined)} />
           </div>)}
           {draft && <div className="mt-1.5"><Bubble fresh><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.text}</ReactMarkdown><span className="caret" /></div></Bubble></div>}
           {busy && <div className="mt-4"><Bubble fresh><Typing /></Bubble></div>}
-          {asks.map(t => <div key={t.id} className="anim-rise mt-2 max-w-[440px]"><NeedsYou t={t} onAnswer={(text, ticketId) => send(text, ticketId)} /></div>)}
+          {asks.map(t => <div key={t.id} className="anim-rise mt-2 max-w-[440px]"><NeedsYou t={t} onAnswer={(text, ticketId) => send(text, ticketId)} onEdit={v => { setText(v); requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(v.length, v.length) } }) }} /></div>)}
         </div>}
     </div>
     {behind && <button onClick={() => toBottom(true)} className="anim-pop press absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-ink-fg shadow-lg"><ArrowDown size={13} />新消息</button>}
@@ -155,33 +178,33 @@ function When({ m, prev, name }: { m: Message; prev?: Message; name: string }) {
   return <div className="pt-2 pb-3 text-center text-[11px] text-faint tabular-nums">{date} {time}{first && ` · ${name}先开口`}</div>
 }
 
-const SUGGESTIONS: [string, string][] = [['每天 9 点整理 HN 热门', '#13857a'], ['周五下午提醒我交周报', '#d2535a'], ['比较几款降噪耳机', '#8a7fc0'], ['起草一封请假邮件', '#3d86e0'], ['总结今天的未读消息', '#e9845a']]
-const TILT = [-3, 2, -1.5, 1.5, -2]
+const FIRST: [LucideIcon, string][] = [[Tag, '帮我盯一个东西的价格'], [Bell, '每周五提醒我写周报'], [Plane, '帮我规划一次旅行']]
+const SIDE: [LucideIcon, string][] = [[Plane, '规划一次旅行'], [FileText, '写一份报告'], [Scale, '比较几款降噪耳机']]
 
-function Welcome({ onPick, disabled, main, mood }: { onPick(text: string): void; disabled: boolean; main: boolean; mood: 'idle' | 'working' | 'waiting' }) {
+/**
+ * An empty conversation (Figma v6, 20c). The main chat's first open: 糯糯 hops in, its hello writes itself in one
+ * character at a time, three suggestions fade in after; pressing one sends it. A new side chat gets the same, quieter.
+ */
+function Welcome({ onSend, disabled, main }: { onSend(text: string): void; disabled: boolean; main: boolean }) {
   const persona = usePersona()
-  return <div className="relative flex min-h-full flex-col items-center justify-center overflow-hidden px-4 py-10 text-center md:px-6">
-    <div className="glow pointer-events-none absolute top-[6%] left-1/2 -ml-[300px] h-[440px] w-[600px] rounded-full" aria-hidden />
-    <Avatar persona={persona} size={128} mood={main ? mood : 'happy'} track className="anim-pop relative text-fg" />
-    <p className="anim-rise relative mt-3 text-base font-medium text-faint">{main ? greeting() : '新侧聊'}</p>
-    <h2 className="anim-rise relative mt-1 font-display text-[clamp(30px,6vw,44px)] leading-[1.28] font-semibold text-balance">
-      {main ? <>今天想让我<br /><Mark>帮你做</Mark>点什么？</> : <>这次想<Mark>聊点</Mark>什么？</>}
+  return <div className="flex min-h-full flex-col items-center justify-center px-4 py-10 text-center md:px-6">
+    <Avatar persona={persona} size={main ? 104 : 80} mood="happy" track className="welcome-hop text-fg" />
+    <h2 className="mt-5 font-display text-[clamp(26px,4vw,32px)] leading-tight font-semibold">
+      <SplittingText type="chars" text={main ? `你好，我是${persona.name}` : '新侧聊'} stagger={0.06} delay={250}
+        initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }} />
     </h2>
-    <div className="relative mt-8 flex max-w-xl flex-wrap justify-center gap-x-2.5 gap-y-3">
-      {SUGGESTIONS.map(([t, c], i) => <button key={t} disabled={disabled} onClick={() => onPick(t)} style={{ background: c, ['--r' as string]: `${TILT[i]}deg`, ['--i' as string]: i }}
-        className={cx('tag rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-50', 'text-white')}>{t}</button>)}
+    <p className="feed-in mt-2.5 text-sm text-muted text-pretty" style={{ animationDelay: '650ms' }}>
+      {main ? '先认识一下？说说你最近在忙什么，我会记下来，以后帮你盯着。' : '一件独立的小事放在这里，做完了就收进成果。'}
+    </p>
+    <div className="mt-7 flex max-w-xl flex-wrap justify-center gap-2.5">
+      {(main ? FIRST : SIDE).map(([Icon, t], i) => <button key={t} disabled={disabled} onClick={() => onSend(t)} style={{ animationDelay: `${800 + i * 90}ms` }}
+        className="feed-in press flex items-center gap-2 rounded-full border border-line bg-panel px-4 py-2 text-sm hover:border-faint disabled:opacity-50">
+        <Icon size={15} className="text-muted" />{t}</button>)}
     </div>
+    {main && <p className="feed-in mt-8 text-xs text-faint" style={{ animationDelay: '1100ms' }}>你说的都只存在这台电脑上。花钱、发消息、改日程，我都会先问你。</p>}
   </div>
 }
 
-/** The accented words of the greeting, underlined by a hand-drawn line that draws itself in. */
-function Mark({ children }: { children: React.ReactNode }) {
-  return <span className="relative inline-block text-accent">{children}
-    <svg className="squiggle absolute -bottom-1.5 left-0 h-2.5 w-full" viewBox="0 0 132 10" preserveAspectRatio="none" aria-hidden>
-      <path d="M2 7 C 13 1, 20 1, 24 5 S 35 9, 46 5 S 57 1, 68 5 S 79 9, 90 5 S 101 1, 112 5 S 123 9, 130 4" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" />
-    </svg>
-  </span>
-}
 
 /** 糯糯's messages: grey bubbles, no face beside them. */
 function Bubble({ fresh, aside, children }: { fresh?: boolean; aside?: React.ReactNode; children: React.ReactNode }) {
@@ -213,7 +236,7 @@ function Item({ m, fresh, tapback }: { m: Message; fresh: boolean; tapback?: str
     <MsgActions m={m} />
     <div className="relative max-w-[85%]">
       <div className="selectable rounded-[20px] bg-accent px-4 py-2.5 text-[15px] whitespace-pre-wrap text-accent-fg">{m.content}</div>
-      {tapback && <Tapback emoji={tapback} />}
+      {tapback && <Tapback key={tapback} emoji={tapback} />}
     </div>
   </div>
   return <div className="msg space-y-1.5">
@@ -228,11 +251,16 @@ function Item({ m, fresh, tapback }: { m: Message; fresh: boolean; tapback?: str
   </div>
 }
 
-const TAPBACK_LABEL: Record<string, string> = { '👌': '收到', '👀': '在看', '😂': '哈哈' }
-/** 糯糯's reaction, sitting on the bottom-left corner of the owner's bubble. */
+const TAPBACK_LABEL: Record<string, string> = { '👌': '收到', '👀': '在看', '😂': '哈哈', '❤️': '谢谢', '👍': '好' }
+const PAGE_OPENED = Date.now()
+/** 糯糯's reaction, sitting on the bottom-left corner of the owner's bubble. It zooms in, with a small burst when it lands live. */
 function Tapback({ emoji }: { emoji: string }) {
-  return <span key={emoji} title={TAPBACK_LABEL[emoji]} aria-label={TAPBACK_LABEL[emoji]}
-    className="tapback absolute -bottom-3.5 -left-2 flex h-7 min-w-9 items-center justify-center rounded-full border-2 border-bg bg-bubble px-1.5 text-[14px] leading-none select-none">{emoji}</span>
+  const [live] = useState(() => Date.now() - PAGE_OPENED > 1500)
+  return <Particles key={emoji} animate={live} style={{ position: 'absolute' }} className="-bottom-3.5 -left-2">
+    <span title={TAPBACK_LABEL[emoji]} aria-label={TAPBACK_LABEL[emoji]}
+      className="tapback relative flex h-7 min-w-9 items-center justify-center rounded-full border-2 border-bg bg-bubble px-1.5 text-[14px] leading-none select-none">{emoji}</span>
+    {live && <ParticlesEffect count={7} radius={24} spread={360} duration={0.7} sideOffset={-14} className="size-1.5 rounded-full bg-accent" />}
+  </Particles>
 }
 
 /** Beside a message on hover: copy it, and when it was sent. */
@@ -269,12 +297,14 @@ function Composer({ text, setText, inputRef, onSend, disabled, placeholder }: { 
   return <div className="mx-auto w-full max-w-[680px] px-3 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] md:px-8 md:pb-5">
     <div className={cx('flex items-end gap-1 rounded-[26px] border bg-panel p-1.5 shadow-[0_6px_24px_-12px_rgb(0_0_0/0.14)] transition-[border-color] duration-200',
       voice.listening ? 'border-accent' : 'border-line focus-within:border-faint')}>
-      <PlusMenu onPick={prefill} />
+      {voice.listening ? <Wave /> : <PlusMenu onPick={prefill} />}
       <textarea ref={inputRef} value={text} rows={1} autoFocus placeholder={disabled ? '请先在设置中配置模型' : voice.listening ? '在听…' : placeholder}
         disabled={disabled} onChange={e => setText(e.target.value)} aria-label="消息"
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
         className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] outline-none placeholder:text-faint focus-visible:outline-none" />
-      {ready ? <button onClick={submit} aria-label="发送" className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><ArrowUp size={18} /></button>
+      {voice.listening && <Elapsed />}
+      {voice.listening ? <button onClick={voice.stop} aria-label="停止" title="停止" className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><Square size={13} fill="currentColor" /></button>
+        : ready ? <button onClick={submit} aria-label="发送" className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><ArrowUp size={18} /></button>
         : <button onClick={voice.toggle} disabled={disabled || !voice.supported} aria-label={voice.listening ? '停止' : '说话'} aria-pressed={voice.listening}
           title={voice.supported ? (voice.listening ? '停止' : '说话') : '这里用不了语音输入'}
           className={cx('press relative flex size-9 shrink-0 items-center justify-center rounded-full disabled:opacity-40', voice.listening ? 'bg-accent text-accent-fg' : 'text-muted hover:bg-sunken hover:text-fg')}>
@@ -282,6 +312,22 @@ function Composer({ text, setText, inputRef, onSend, disabled, placeholder }: { 
           <Mic size={18} className="relative" /></button>}
     </div>
   </div>
+}
+
+/** While you speak: sound bars that move on the left of the input (where + was). */
+function Wave() {
+  return <span aria-hidden className="flex h-9 shrink-0 items-center gap-[3px] pr-1 pl-3 text-accent">
+    {[0.45, 0.8, 1, 0.6, 0.9, 0.5, 0.7].map((h, i) => <span key={i} className="wave-bar w-[2.5px] rounded-full bg-current" style={{ height: `${Math.round(h * 18)}px`, animationDelay: `${i * 90}ms` }} />)}
+  </span>
+}
+
+/** How long you have been speaking, 0:04. */
+function Elapsed() {
+  const [start] = useState(Date.now)
+  const [now, setNow] = useState(start)
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t) }, [])
+  const s = Math.floor((now - start) / 1000)
+  return <span className="flex h-9 shrink-0 items-center px-2 text-xs text-faint tabular-nums">{Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}</span>
 }
 
 /** + in the input bar: start a side chat, or begin a reminder or a watch in your own words. */

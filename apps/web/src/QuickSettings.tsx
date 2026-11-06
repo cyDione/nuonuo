@@ -8,12 +8,13 @@ import { Root as Switch, SwitchThumb } from '@animate-ui/react/primitives/radix-
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronRight, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api, type ProactiveSettings, type UpdateStatus } from './api'
+import { api, type IdeaSettings, type ProactiveSettings, type UpdateStatus } from './api'
 import { ACCENTS, setPrefs, usePrefs, type Theme } from './prefs'
 import { go } from './route'
 import { cx, Seg } from './ui'
 
 const THEMES: { id: Theme; label: string }[] = [{ id: 'light', label: '浅色' }, { id: 'dark', label: '深色' }, { id: 'system', label: '跟随系统' }]
+const CADENCES: { id: IdeaSettings['cadence']; label: string }[] = [{ id: 'daily', label: '每天' }, { id: 'weekly', label: '每周' }, { id: 'off', label: '关' }]
 const MODES: { id: ProactiveSettings['mode']; label: string }[] = [{ id: 'off', label: '关' }, { id: 'observe', label: '只留意' }, { id: 'auto', label: '主动去做' }]
 
 /** ⌘, opens the full settings from anywhere. */
@@ -53,6 +54,12 @@ function Body({ update, onDone }: { update: string | null; onDone(): void }) {
     onMutate: mode => { qc.setQueryData<{ settings: ProactiveSettings }>(['proactive'], old => old && { ...old, settings: { ...old.settings, mode } }) },
     onSettled: () => { qc.invalidateQueries({ queryKey: ['proactive'] }); qc.invalidateQueries({ queryKey: ['activity'] }) },
   })
+  const ideas = useQuery({ queryKey: ['ideas'], queryFn: () => api.get<{ settings: IdeaSettings }>('/ideas') }).data?.settings
+  const setCadence = useMutation({
+    mutationFn: (cadence: IdeaSettings['cadence']) => api.put('/settings/ideas', { cadence }),
+    onMutate: cadence => { qc.setQueryData<{ settings: IdeaSettings }>(['ideas'], old => old && { ...old, settings: { ...old.settings, cadence } }) },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['ideas'] }),
+  })
   const all = (path: string) => { onDone(); go(path) }
   return <div>
     <div className="space-y-4 px-5 pt-5 pb-4">
@@ -71,6 +78,7 @@ function Body({ update, onDone }: { update: string | null; onDone(): void }) {
         </div>
       </Section>
       {proactive && <Section title="主动程度"><Seg label="主动程度" value={proactive.mode} options={MODES} onChange={m => setMode.mutate(m)} /></Section>}
+      {ideas && <Section title="点子多久换一批"><Seg label="点子" value={ideas.cadence} options={CADENCES} onChange={c => setCadence.mutate(c)} /></Section>}
       <label className="flex cursor-pointer items-center gap-3">
         <span className="min-w-0 flex-1">
           <span className="block text-sm">显示原始记录</span>

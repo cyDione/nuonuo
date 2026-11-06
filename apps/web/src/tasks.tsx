@@ -48,7 +48,7 @@ export function StateIcon({ t, size = 14 }: { t: Ticket; size?: number }) {
  * One thing the owner is asked for, as part of the conversation: plain words first, technical detail folded away.
  * Answers to questions are typed in the composer like any message (they reach the right work automatically).
  */
-export function NeedsYou({ t, onAnswer }: { t: Ticket; onAnswer(text: string, ticketId: string): void }) {
+export function NeedsYou({ t, onAnswer, onEdit }: { t: Ticket; onAnswer(text: string, ticketId: string): void; onEdit?(text: string): void }) {
   const qc = useQueryClient()
   const refresh = () => qc.invalidateQueries({ queryKey: ['tickets'] })
   const decide = useMutation({ mutationFn: (v: { id: string; approve: boolean; note?: string; scope?: 'task' }) => api.post(`/approvals/${v.id}`, { approve: v.approve, ...(v.note ? { note: v.note } : {}), ...(v.scope ? { scope: v.scope } : {}) }),
@@ -60,6 +60,7 @@ export function NeedsYou({ t, onAnswer }: { t: Ticket; onAnswer(text: string, ti
 
   const shell = (children: React.ReactNode) => <div className="max-w-xl rounded-[20px] border border-warn/25 bg-card px-4 py-3.5 shadow-[var(--shadow-sheet)]">{children}</div>
 
+  if (t.approvals[0]?.card) return <ApprovalCardView t={t} onEdit={onEdit} />
   if (t.approvals.length) {
     const a = t.approvals[0]!
     return shell(<>
@@ -92,6 +93,46 @@ export function NeedsYou({ t, onAnswer }: { t: Ticket; onAnswer(text: string, ti
     <Button size="sm" variant="ghost" onClick={() => stop.mutate()} disabled={stop.isPending}>算了</Button>
   </div>)
   return null
+}
+
+/**
+ * The structured confirmation (Figma v6, 18a): before spending, sending or changing something that cannot be taken back,
+ * a card with exactly what will happen. Only its button confirms: 「好」 in the chat does not. The button draws a check
+ * when pressed, then the card goes.
+ */
+function ApprovalCardView({ t, onEdit }: { t: Ticket; onEdit?: ((text: string) => void) | undefined }) {
+  const qc = useQueryClient()
+  const a = t.approvals[0]!
+  const card = a.card!
+  const [done, setDone] = useState(false)
+  const decide = useMutation({
+    mutationFn: (approve: boolean) => api.post(`/approvals/${a.id}`, { approve }),
+    onSuccess: (_r, approve) => { if (approve) { setDone(true); setTimeout(() => qc.invalidateQueries({ queryKey: ['tickets'] }), 750) } else qc.invalidateQueries({ queryKey: ['tickets'] }) },
+  })
+  const [detail, setDetail] = useState(false)
+  return <div className="max-w-[440px] overflow-hidden rounded-[18px] border border-line bg-card">
+    <div className="flex items-center gap-2 px-4 py-3">
+      <ShieldAlert size={16} className="shrink-0" />
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{card.title}</span>
+      {card.note && <span className="shrink-0 text-xs text-faint">{card.note}</span>}
+    </div>
+    <div className="border-t border-line px-4 pt-3 pb-3.5">
+      <dl className="grid grid-cols-[4.5em_1fr] gap-x-3 gap-y-2 text-sm">
+        {card.rows.map(r => <div key={r.label} className="contents"><dt className="text-faint">{r.label}</dt><dd className="min-w-0 break-words">{r.value}</dd></div>)}
+      </dl>
+      <button onClick={() => setDetail(v => !v)} className="mt-2 flex items-center gap-0.5 text-xs text-faint hover:text-muted">{detail ? <ChevronDown size={12} /> : <ChevronRight size={12} />}具体操作</button>
+      {detail && <pre className="anim-fade mt-1 overflow-x-auto rounded-xl bg-sunken px-3 py-2 font-mono text-xs whitespace-pre-wrap">{a.command}</pre>}
+      <div className="mt-3 flex items-center gap-2">
+        <button onClick={() => decide.mutate(true)} disabled={decide.isPending || done}
+          className="press flex h-8 items-center gap-1.5 rounded-full bg-ink px-4 text-[13px] font-medium text-ink-fg disabled:cursor-default">
+          {done && <svg viewBox="0 0 16 16" className="size-3.5" aria-hidden><path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" pathLength={1} className="check-draw" /></svg>}
+          {done ? '好了' : card.confirm}
+        </button>
+        {!done && <button onClick={() => decide.mutate(false)} disabled={decide.isPending} className="press h-8 rounded-full border border-line px-4 text-[13px] hover:border-faint">先不要</button>}
+        {!done && onEdit && <button onClick={() => onEdit('这一步改一下：')} className="ml-auto text-xs text-muted hover:text-fg">改一下</button>}
+      </div>
+    </div>
+  </div>
 }
 
 const Tile = ({ children }: { children: React.ReactNode }) => <span className="flex size-7 shrink-0 items-center justify-center rounded-[10px] bg-warn-soft text-warn">{children}</span>

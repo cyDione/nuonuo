@@ -13,10 +13,11 @@ import { connectHost, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, 
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
-import { DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-assistant/core'
+import { DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-assistant/core'
 import { kvGet, kvSet } from '@super-assistant/db'
 import { fireRoutine } from '@super-assistant/sources'
 import { runDoctor } from './doctor'
+import { search } from './search'
 import type { Runtime } from './runtime'
 import type { Updater } from './update'
 
@@ -250,6 +251,8 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     '.csv': 'text/csv; charset=utf-8', '.html': 'text/plain; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
     '.webp': 'image/webp', '.svg': 'text/plain; charset=utf-8', '.pdf': 'application/pdf' }
   const textual = (ext: string) => /^\.(md|txt|json|csv|log|ya?ml|toml|ini|py|js|ts|tsx|jsx|sh|go|rs|java|c|cpp|h|rb|php|sql|html|css|xml|svg)$/.test(ext)
+  // ⌘K: conversations, what was made and what it remembers.
+  api.get('/search', c => c.json(search(rt.store, c.req.query('q') ?? '')))
   api.get('/artifacts', c => {
     const titles = new Map<string, { title: string; conversationId: string | null }>()
     const items = rt.engine.artifacts({ limit: 300 }).map(a => {
@@ -357,6 +360,42 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.get('/grants', c => c.json({ grants: rt.reviewer.grants() }))
   api.delete('/grants/:id', c => { rt.reviewer.revokeGrant(c.req.param('id')); rt.bus.emit({ type: 'activity.updated' }); return c.body(null, 204) })
   api.get('/audit', c => c.json({ entries: rt.reviewer.auditLog(Math.min(Number(c.req.query('limit')) || 200, 1000)) }))
+
+  // Goals (目标): set in conversation; the owner pins, finishes, drops or deletes them here.
+  api.get('/goals', c => c.json({ goals: rt.goals.list(['active', 'done']), week: rt.goals.week() }))
+  api.patch('/goals/:id', async c => {
+    const patch = await body(c, z.object({ pinned: z.boolean().optional(), status: z.enum(['active', 'done', 'dropped']).optional(), title: z.string().trim().min(1).max(40).optional() }).strict())
+    return c.json({ goal: guard(() => rt.goals.update(c.req.param('id'), patch)) })
+  })
+  api.delete('/goals/:id', c => { rt.goals.remove(c.req.param('id')); return c.body(null, 204) })
+
+  // 动态: changes in what it watches for the owner.
+  api.get('/feed', c => c.json({ items: rt.feed.list(), unseen: rt.feed.unseen() }))
+  api.post('/feed/seen', c => { rt.feed.seeAll(); return c.json({ ok: true }) })
+  api.post('/feed/:id/dismiss', c => { guard(() => rt.feed.dismiss(c.req.param('id'))); return c.json({ ok: true }) })
+
+  // 点子: a few things it could do, a new batch each morning.
+  api.get('/ideas', c => c.json({ batch: rt.ideas.batch(), settings: rt.ideas.settings() }))
+  api.put('/settings/ideas', async c => c.json({ settings: rt.ideas.saveSettings(await body(c, z.object({ cadence: z.enum(['daily', 'weekly', 'off']).optional(), hour: z.number().int().min(0).max(23).optional() }).strict())) }))
+  api.post('/ideas/refresh', async c => {
+    if (!rt.hub.resolve('router')) throw new ModelError('no_model', '主 Agent 还没有配置模型：请到 设置 → 分层模型 选择')
+    try { return c.json({ batch: await rt.ideas.refresh() }) } catch (error) {
+      if (error instanceof StructuredCallError) throw new HttpError(409, 'ideas_failed', `这次没想出来：${error.message}`)
+      throw error
+    }
+  })
+  api.post('/ideas/seen', c => { rt.ideas.seen(); return c.json({ ok: true }) })
+  api.post('/ideas/:id/dismiss', c => { guard(() => rt.ideas.dismiss(c.req.param('id'))); return c.json({ ok: true }) })
+  /** 「去做」: a side chat that starts with what the idea offered. */
+  api.post('/ideas/:id/go', c => {
+    if (!rt.hub.resolve('router')) throw new ModelError('no_model', '主 Agent 还没有配置模型：请到 设置 → 分层模型 选择')
+    const idea = guard(() => rt.ideas.take(c.req.param('id')))
+    const title = ('label' in idea && typeof idea.label === 'string' && idea.label ? idea.label.split(' · ')[0]! : idea.text).slice(0, 40)
+    const conversation = conversations.create(title)
+    rt.engine.receiveMessage(conversation.id, idea.say)
+    rt.bus.emit({ type: 'conversation.updated', conversationId: conversation.id })
+    return c.json({ conversationId: conversation.id }, 201)
+  })
 
   // Memory
   api.get('/memories', c => {
