@@ -11,6 +11,7 @@ import { motion } from 'motion/react'
 import { api } from './api'
 import { prefillComposer } from './Chat'
 import { usePersona } from './persona'
+import { getPrefs, keyLabel, matchesKey } from './prefs'
 import { ArtifactModal, previewKind } from './preview'
 import { setPaneTab } from './RightPane'
 import { go } from './route'
@@ -27,14 +28,14 @@ const useOpen = () => useSyncExternalStore(l => { listeners.add(l); return () =>
 
 /** ⌘K anywhere opens the box; the button sits at the top right of the tabbed pages. */
 export function SearchButton({ className }: { className?: string }) {
-  return <IconButton label="搜索 (⌘K)" onClick={() => openSearch()} className={cx('size-8', className)}><Search size={17} /></IconButton>
+  return <IconButton label={`搜索 (${keyLabel(getPrefs().keys.search).join('')})`} onClick={() => openSearch()} className={cx('size-8', className)}><Search size={17} /></IconButton>
 }
 
 export function SearchDialog() {
   const open = useOpen()
   const [file, setFile] = useState<{ id: string; name: string } | null>(null)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openSearch(!isOpen) } }
+    const onKey = (e: KeyboardEvent) => { if (matchesKey(e, getPrefs().keys.search)) { e.preventDefault(); openSearch(!isOpen) } }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
   }, [])

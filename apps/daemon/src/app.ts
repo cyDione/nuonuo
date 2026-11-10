@@ -13,11 +13,13 @@ import { connectHost, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, 
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
-import { DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-assistant/core'
+import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-assistant/core'
 import { kvGet, kvSet } from '@super-assistant/db'
 import { fireRoutine } from '@super-assistant/sources'
 import { runDoctor } from './doctor'
 import { search } from './search'
+import { clearChats, exportAll, PrivacySchema, privacySettings, savePrivacySettings, sideChats } from './data'
+import { DEFAULT_NOTIFY, NotifySettingsSchema, notifySettings, saveNotifySettings } from './notices'
 import type { Runtime } from './runtime'
 import type { Updater } from './update'
 
@@ -86,6 +88,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   const updates = () => { if (!updater) throw new HttpError(404, 'not_found', '更新不可用'); return updater }
   api.get('/update', c => c.json(updates().status()))
   api.post('/update/check', async c => c.json(await updates().check()))
+  api.put('/update/settings', async c => c.json(updates().setPrefs(await body(c, z.object({ auto: z.boolean(), channel: z.enum(['stable', 'beta']), install: z.boolean() }).partial().strict()))))
   api.post('/update', async c => {
     try { return c.json(await updates().update()) } catch (error) { throw error instanceof HttpError ? error : new HttpError(409, 'update_failed', (error as Error).message) }
   })
@@ -191,7 +194,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.get('/conversations/main', c => c.json({ id: rt.engine.mainConversation() }))
   api.get('/persona', c => c.json({ persona: persona(rt.store), defaults: DEFAULT_PERSONA }))
   api.put('/persona', async c => {
-    const input = await body(c, z.object({ name: z.string().max(40), avatar: z.string().max(16), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), personality: z.string().max(2_000) }).partial())
+    const input = await body(c, z.object({ name: z.string().max(40), avatar: z.string().max(16), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), personality: z.string().max(2_000), role: z.enum(PERSONA_ROLES), language: z.enum(PERSONA_LANGUAGES) }).partial())
     const next = savePersona(rt.store, input)
     rt.bus.emit({ type: 'persona.updated' })
     return c.json({ persona: next })
@@ -416,6 +419,36 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   })
   api.delete('/memories/:id', c => { rt.memory.remove(c.req.param('id')); return c.body(null, 204) })
   api.post('/memories/consolidate', c => c.json(rt.memory.consolidate()))
+
+  // 通知: which changes notify, how, and the quiet hours. 试一下 sends a sample whatever the settings.
+  api.get('/settings/notifications', c => c.json({ settings: notifySettings(rt.store), defaults: DEFAULT_NOTIFY }))
+  api.put('/settings/notifications', async c => {
+    const patch = await body(c, NotifySettingsSchema.partial())
+    return c.json({ settings: guard(() => saveNotifySettings(rt.store, patch)) })
+  })
+  api.post('/notifications/test', c => c.json({ notice: rt.notices.test() }))
+
+  // 数据和隐私
+  api.get('/settings/privacy', c => c.json({ settings: privacySettings(rt.store) }))
+  api.put('/settings/privacy', async c => c.json({ settings: savePrivacySettings(rt.store, await body(c, PrivacySchema.partial())) }))
+  api.get('/export', c => {
+    const data = exportAll(rt.store, { app: 'super-assistant', version: VERSION, persona: persona(rt.store) })
+    const day = new Date().toISOString().slice(0, 10)
+    c.header('content-disposition', `attachment; filename="super-assistant-${day}.json"`)
+    return c.json(data)
+  })
+  api.delete('/memories', c => {
+    const all = rt.memory.list({ status: ['active', 'pending'] })
+    for (const m of all) rt.memory.remove(m.id)
+    return c.json({ removed: all.length })
+  })
+  api.delete('/conversations', c => {
+    const keep = [rt.engine.mainConversation(), rt.watchdog.conversation()]
+    for (const id of sideChats(rt.store, keep)) for (const t of rt.engine.tickets({ threadId: rt.engine.threadOf(id), open: true })) rt.engine.stopTask(t.id, 'person', '聊天记录已清除')
+    const removed = clearChats(rt.store, keep)
+    rt.bus.emit({ type: 'conversation.updated', conversationId: keep[0]! })
+    return c.json({ removed })
+  })
 
   // Watchdog
   api.get('/watchdog', c => c.json({ conversationId: rt.watchdog.conversation(), state: rt.agents.session(WATCHDOG_SESSION)?.state ?? 'idle' }))

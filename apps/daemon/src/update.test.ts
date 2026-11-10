@@ -88,6 +88,27 @@ describe('Updater', () => {
   })
 })
 
+describe('update settings', () => {
+  it('keeps the choices on disk, and the beta channel reads the newest release including pre-releases', async () => {
+    const calls: string[] = []
+    const fetchImpl = (async (url: string) => {
+      calls.push(url)
+      return new Response(JSON.stringify([
+        { tag_name: 'v99.1.0-beta.1', html_url: 'u', draft: true, assets: [] },
+        { tag_name: 'v99.0.0-beta.2', html_url: 'u', assets: [{ name: `super-assistant-99.0.0-beta.2-linux-${process.arch}.tar.gz` }] },
+      ]))
+    }) as unknown as typeof fetch
+    const home = mkdtempSync(join(tmpdir(), 'sa-home-'))
+    const updater = new Updater({ home, entry: join(fakePackage(), 'lib/cli.mjs'), env: {}, fetch: fetchImpl })
+    expect(updater.status().prefs).toEqual({ auto: true, channel: 'stable', install: false })
+    updater.setPrefs({ channel: 'beta', install: true })
+    const s = await updater.check()
+    expect(calls[0]).toBe('https://api.github.com/repos/cyDione/super-assistant/releases?per_page=15')
+    expect(s.latest?.tag).toBe('v99.0.0-beta.2')
+    expect(new Updater({ home, entry: join(fakePackage(), 'lib/cli.mjs'), env: {} }).status().prefs).toEqual({ auto: true, channel: 'beta', install: true })
+  })
+})
+
 describe('runsAsService', () => {
   const cgroup = (text: string) => { const f = join(mkdtempSync(join(tmpdir(), 'sa-cg-')), 'cgroup'); writeFileSync(f, text); return f }
   it('is true for the unit (by its variable, or by its cgroup for units from older versions)', () => {

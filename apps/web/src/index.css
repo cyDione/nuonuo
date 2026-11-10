@@ -366,3 +366,13 @@ html.quick, html.quick body { background: transparent !important; }
   .typing-cell { transition: none; }
   .tapback { animation-name: fade; }
 }
+
+/* 设置: pages without motion (Figma 21). Nothing slides, fades or presses in here. */
+.settings-static, .settings-static *, .settings-static *::before, .settings-static *::after { transition: none !important; animation: none !important; }
+.settings-static .press:active:not(:disabled) { transform: none; }
+
+/* 设置 → 通用: 减少动态效果 does what the system setting does, for this device only. */
+html[data-motion="reduce"] *, html[data-motion="reduce"] *::before, html[data-motion="reduce"] *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; transition-delay: 0ms !important; scroll-behavior: auto !important; }
+/* 字号: the whole interface is sized from the root. */
+html[data-text="small"] { font-size: 15px; }
+html[data-text="large"] { font-size: 17.5px; }

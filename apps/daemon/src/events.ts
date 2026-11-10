@@ -17,6 +17,7 @@ export type ClientEvent =
   | { type: 'goals.updated' }
   | { type: 'feed.updated' }
   | { type: 'ideas.updated' }
+  | { type: 'notice'; id: string; kind: string; title: string; body: string; hash: string; silent: boolean }
 
 /** Reads a possibly unfinished JSON object's string field, e.g. `"text":"hel` → `hel`. */
 export function partialString(json: string, field: string): string | undefined {
@@ -55,6 +56,7 @@ export class EventMapper {
       case 'goals.updated': return [{ type: 'goals.updated' }]
       case 'feed.updated': return [{ type: 'feed.updated' }]
       case 'ideas.updated': return [{ type: 'ideas.updated' }]
+      case 'notice': return [{ type: 'notice', id: e.id, kind: e.kind, title: e.title, body: e.body, hash: e.hash, silent: e.silent }]
       case 'approval.updated': return [{ type: 'ticket.updated', ticketId: e.ticketId }]
       // A subagent's state and text belong to its parent's work; the web shows only the helper itself.
       case 'session.state': return e.role === 'subagent' ? [] : [{ type: 'session.state', role: e.role, sessionId: e.sessionId, ticketId: e.ticketId, state: e.state }]

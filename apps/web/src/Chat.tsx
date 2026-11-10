@@ -12,6 +12,7 @@ import { AlarmClock, AlertTriangle, ArrowDown, ArrowUp, ArrowUpRight, Bell, Chec
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { getPrefs, usePrefs } from './prefs'
 import { api, ApiError, type Artifact, type Conversation, type Message, type RolesResponse } from './api'
 import { useLive } from './live'
 import { Avatar, usePersona } from './persona'
@@ -278,7 +279,12 @@ function MsgActions({ m }: { m: Message }) {
  * becomes the send button. Never blocks on a message in flight: the owner may type several in a row.
  */
 function Composer({ text, setText, inputRef, onSend, disabled, placeholder }: { text: string; setText(v: string): void; inputRef: React.RefObject<HTMLTextAreaElement | null>; onSend(text: string): void; disabled: boolean; placeholder: string }) {
-  const voice = useVoice(heard => setText(heard))
+  const prefs = usePrefs()
+  // 设置 → 语音 → 说完自动发送: a pause of 1.5 s sends what was heard.
+  const voice = useVoice(heard => setText(heard), heard => {
+    if (!prefs.autoSend || !heard.trim() || disabled) return
+    voice.stop(); onSend(heard.trim()); setText('')
+  })
   useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
@@ -305,6 +311,7 @@ function Composer({ text, setText, inputRef, onSend, disabled, placeholder }: { 
       {voice.listening && <Elapsed />}
       {voice.listening ? <button onClick={voice.stop} aria-label="停止" title="停止" className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><Square size={13} fill="currentColor" /></button>
         : ready ? <button onClick={submit} aria-label="发送" className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><ArrowUp size={18} /></button>
+        : !prefs.voiceInput ? <button disabled aria-label="发送" className="flex size-9 shrink-0 items-center justify-center rounded-full text-faint opacity-60"><ArrowUp size={18} /></button>
         : <button onClick={voice.toggle} disabled={disabled || !voice.supported} aria-label={voice.listening ? '停止' : '说话'} aria-pressed={voice.listening}
           title={voice.supported ? (voice.listening ? '停止' : '说话') : '这里用不了语音输入'}
           className={cx('press relative flex size-9 shrink-0 items-center justify-center rounded-full disabled:opacity-40', voice.listening ? 'bg-accent text-accent-fg' : 'text-muted hover:bg-sunken hover:text-fg')}>
@@ -357,21 +364,29 @@ function PlusMenu({ onPick }: { onPick(text: string): void }) {
 
 type Recognition = { lang: string; interimResults: boolean; continuous: boolean; start(): void; stop(): void; onresult: ((e: any) => void) | null; onend: (() => void) | null; onerror: (() => void) | null }
 /** Voice input through the browser's speech recognition, where there is one. */
-function useVoice(onText: (text: string) => void) {
+function useVoice(onText: (text: string) => void, onPause?: (text: string) => void) {
   const Impl = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition as (new () => Recognition) | undefined
   const rec = useRef<Recognition | null>(null)
   const [listening, setListening] = useState(false)
   const latest = useRef(onText)
   latest.current = onText
+  const paused = useRef(onPause)
+  paused.current = onPause
+  const pause = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => rec.current?.stop(), [])
   const stop = () => { rec.current?.stop() }
   const toggle = () => {
     if (!Impl) return
     if (listening) return stop()
     const r: Recognition = new Impl()
-    r.lang = 'zh-CN'; r.interimResults = true; r.continuous = true
-    r.onresult = e => latest.current(Array.from(e.results as ArrayLike<any>).map(x => x[0].transcript).join(''))
-    r.onend = () => { setListening(false); rec.current = null }
+    r.lang = getPrefs().voiceLang; r.interimResults = true; r.continuous = true
+    r.onresult = e => {
+      const heard = Array.from(e.results as ArrayLike<any>).map(x => x[0].transcript).join('')
+      latest.current(heard)
+      clearTimeout(pause.current)
+      pause.current = setTimeout(() => paused.current?.(heard), 1_500)
+    }
+    r.onend = () => { clearTimeout(pause.current); setListening(false); rec.current = null }
     r.onerror = () => { setListening(false); rec.current = null }
     rec.current = r
     try { r.start(); setListening(true) } catch { setListening(false) }

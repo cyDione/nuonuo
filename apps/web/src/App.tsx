@@ -46,6 +46,8 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
   useScrollingClass()
   useSettingsShortcut()
   const { leftOpen } = usePanes()
+  // 设置 has the window to itself, with its own sidebar and 返回聊天 (Figma v6, 21).
+  if (route.page === 'settings') return <><Settings tab={route.tab} {...(route.item ? { item: route.item } : {})} /><SearchDialog /></>
   const chat = route.page === 'chat'
   const tabbed = chat || route.page === 'activity' || route.page === 'library' || route.page === 'goals' || route.page === 'ideas'
   return <div className="flex h-dvh bg-bg">
@@ -57,7 +59,7 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
         <div key={route.page === 'chat' ? `c${route.id ?? (route.main ? 'main' : 'new')}` : route.page} className="min-h-0 flex-1">
           {chat ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
             : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : route.page === 'goals' ? <GoalsPage /> : route.page === 'ideas' ? <IdeasPage />
-            : route.page === 'settings' ? <Settings tab={route.tab} {...(route.item ? { item: route.item } : {})} /> : null}
+            : null}
         </div>
       </div>
       {chat && <div className="contents max-xl:hidden">

@@ -1,4 +1,6 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
+import { pruneChats } from './data'
+import { Notices } from './notices'
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-assistant/agent-runtime'
 import { browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@super-assistant/db'
@@ -29,6 +31,7 @@ export interface Runtime {
   goals: Goals
   feed: Feed
   ideas: Ideas
+  notices: Notices
   screener: Screener
   watchdog: Watchdog
   browser: BrowserManager
@@ -129,7 +132,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       correctionTools: () => announced({ ...instructions.tools('watchdog'), update_proactive: proactiveTool(store, 'watchdog', engine) }, (name, result) => {
         const r = result as { version?: number }
         const what = name === 'update_instructions' ? `说明（第 ${r.version} 版）` : `主动策略（第 ${r.version} 版）`
-        const where = name === 'update_instructions' ? '设置 → 说明' : '设置 → 主动'
+        const where = name === 'update_instructions' ? '右侧栏的「它是谁」' : '设置 → 助理 → 主动的策略'
         engine.reply({ conversationId: watchdog.conversation(), text: `我刚改了${what}。不同意的话告诉我，或者在${where}里恢复到上一版。` })
       }),
     })
@@ -152,13 +155,15 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       if (event.type !== 'ticket.updated') return
       try { if (engine.ticket(String(event.ticketId)).ended) void browser.closePage(String(event.ticketId)) } catch { /* deleted */ }
     })
+    const notices = new Notices(store, bus, { feed, ideas, reviewer, ticketConversation: id => { try { return engine.conversationOfTicket(id) } catch { return null } } })
+    notices.register()
     let watchdogTimer: NodeJS.Timeout | undefined
     let memoryTimer: NodeJS.Timeout | undefined
     let ideasTimer: NodeJS.Timeout | undefined
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
+      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
       startAgents() {
         engine.mainConversation()
         agents.recover(session => engine.recoveryNote(session.id, session.role))
@@ -166,7 +171,11 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         void mcp.sync()
         watchdogTimer = setInterval(() => { try { if (hub.resolve('watchdog')) watchdog.tick() } catch (e) { console.error('[watchdog]', e) } }, 60_000)
         // Nightly memory upkeep (expire episodes, merge duplicates); also on start when the last run is over a day old.
-        const upkeep = () => { try { if (Date.now() - (kvGet<number>(store, 'memory:consolidated') ?? 0) > 20 * 3_600_000) { memory.consolidate(); kvSet(store, 'memory:consolidated', Date.now()) } } catch (e) { console.error('[memory]', e) } }
+        const upkeep = () => {
+          try { if (Date.now() - (kvGet<number>(store, 'memory:consolidated') ?? 0) > 20 * 3_600_000) { memory.consolidate(); kvSet(store, 'memory:consolidated', Date.now()) } } catch (e) { console.error('[memory]', e) }
+          // 聊天记录保留 (设置 → 数据和隐私): older messages go, hourly.
+          try { pruneChats(store, engine.mainConversation(), id => engine.tickets({ threadId: engine.threadOf(id), open: true }).length > 0) } catch (e) { console.error('[privacy]', e) }
+        }
         upkeep()
         memoryTimer = setInterval(upkeep, 3_600_000)
         void memory.embedPending().catch(() => 0)

@@ -4,9 +4,13 @@
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { PanelLeft } from 'lucide-react'
+import { getPrefs, matchesKey } from './prefs'
 import { cx, IconButton } from './ui'
 
-interface DesktopBridge { isDesktop: true; platform: string; setBadge?(n: number): void; on?(event: string, fn: (value: unknown) => void): void; quick?(action: 'hide' | 'open', hash?: string): void }
+/** The desktop app's own settings (设置 → 通用 · 快捷键). */
+export interface DesktopPrefs { tray: boolean; close: 'hide' | 'quit'; summon: string; quick: string; openAtLogin: boolean; registered: { summon?: boolean; quick?: boolean } }
+interface DesktopBridge { isDesktop: true; platform: string; setBadge?(n: number): void; on?(event: string, fn: (value: unknown) => void): void; quick?(action: 'hide' | 'open', hash?: string): void
+  prefs?: { get(): Promise<DesktopPrefs>; set(patch: Partial<Omit<DesktopPrefs, 'registered'>>): Promise<DesktopPrefs> }; reveal?(path: string): Promise<string> }
 export const desktop = (window as { superAssistantDesktop?: DesktopBridge }).superAssistantDesktop
 export const isMacDesktop = desktop?.platform === 'darwin'
 
@@ -42,13 +46,18 @@ function instantly(fn: () => void) {
   requestAnimationFrame(() => requestAnimationFrame(() => delete root.dataset.instant))
 }
 
-/** ⌘\ folds the left pane, ⌘. the right one (Ctrl on Windows and Linux). */
+/**
+ * ⌘\ folds the left pane; the right pane, a new side chat and the main chat follow 设置 → 快捷键 (⌘I, ⌘N, ⌘1 by
+ * default; Ctrl on Windows and Linux).
+ */
 export function usePaneShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return
-      if (e.key === '\\') { e.preventDefault(); instantly(() => togglePane('left')) }
-      else if (e.key === '.') { e.preventDefault(); instantly(() => togglePane('right')) }
+      const keys = getPrefs().keys
+      if (matchesKey(e, keys.pane)) { e.preventDefault(); instantly(() => togglePane('right')) }
+      else if (matchesKey(e, keys.newChat)) { e.preventDefault(); location.hash = '/new' }
+      else if (matchesKey(e, keys.mainChat)) { e.preventDefault(); location.hash = '/' }
+      else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === '\\') { e.preventDefault(); instantly(() => togglePane('left')) }
     }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
