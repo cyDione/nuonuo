@@ -8,17 +8,17 @@ import { Settings } from './settings/Settings'
 import { Sidebar, StatusDot } from './Sidebar'
 import { openActivity, openTask, useLive, useLiveEvents } from './live'
 import { needsOwner, TaskDrawer, useTickets } from './tasks'
-import { Activity, useFeed } from './Activity'
+import { Activity } from './Activity'
 import { Library } from './library'
 import { GoalsPage } from './goals'
-import { IdeasPage, useIdeas } from './ideas'
+import { IdeasPage } from './ideas'
 import { PaneDrawer, RightPane, setPaneTab } from './RightPane'
 import { openPane } from './Sidebar'
 import { QuickAsk } from './QuickAsk'
 import { Pane, Resizer, togglePane, TopBar, useDesktopChrome, usePanes, usePaneShortcuts, useScrollingClass } from './shell'
 import { Avatar, BRAND, Mascot, statusLine, usePersona } from './persona'
-import { cx, IconButton, Seg } from './ui'
-import { useSettingsShortcut } from './QuickSettings'
+import { cx, IconButton } from './ui'
+import { useSettingsShortcut } from './More'
 import { SearchButton, SearchDialog } from './search'
 
 export function App() {
@@ -55,7 +55,7 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
     <main className={cx('flex min-w-0 flex-1', leftOpen && 'md:border-l md:border-line')}>
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <MobileBar onMenu={() => setNav(true)} />
-        {tabbed ? <Tabs route={route} /> : !chat && <TopBar className="max-md:hidden" />}
+        {tabbed ? <TopBar className="max-md:hidden" right={<SearchButton className="no-drag mr-1" />} /> : !chat && <TopBar className="max-md:hidden" />}
         <div key={route.page === 'chat' ? `c${route.id ?? (route.main ? 'main' : 'new')}` : route.page} className="min-h-0 flex-1">
           {chat ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
             : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : route.page === 'goals' ? <GoalsPage /> : route.page === 'ideas' ? <IdeasPage />
@@ -75,24 +75,6 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
   </div>
 }
 
-type Tab = 'chat' | 'activity' | 'ideas' | 'goals' | 'library'
-const TAB_PATHS: Record<Tab, string> = { chat: '/', activity: '/activity', ideas: '/ideas', goals: '/goals', library: '/library' }
-
-/** 聊天 / 动态 / 成果 across the top of the main area (Figma v6). The page you're on sits on the white block. */
-function Tabs({ route }: { route: ReturnType<typeof useRoute> }) {
-  const waiting = (useTickets().data?.tickets ?? []).filter(needsOwner).length + (useFeed().data?.unseen ?? 0)
-  const ideas = useIdeas().data?.batch
-  const freshIdeas = !!ideas && !ideas.seen && ideas.cards.some(c => !c.dismissed && !c.done)
-  const value: Tab = route.page === 'activity' ? 'activity' : route.page === 'library' ? 'library' : route.page === 'goals' ? 'goals' : route.page === 'ideas' ? 'ideas' : 'chat'
-  return <div className="relative">
-    <TopBar right={<SearchButton className="no-drag relative z-10 mr-1" />} />
-    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-      <Seg label="页面" value={value} onChange={t => go(TAB_PATHS[t])} className="no-drag pointer-events-auto w-[352px]"
-        options={[{ id: 'chat', label: '聊天' }, { id: 'activity', label: '动态', dot: waiting > 0 && value !== 'activity' }, { id: 'ideas', label: '点子', dot: freshIdeas && value !== 'ideas' }, { id: 'goals', label: '目标' }, { id: 'library', label: '成果' }]} />
-    </div>
-  </div>
-}
-
 /** Phones: the menu, the assistant's face and status, and what waits for you (opens the "today" sheet). */
 function MobileBar({ onMenu }: { onMenu(): void }) {
   const persona = usePersona()
@@ -109,6 +91,7 @@ function MobileBar({ onMenu }: { onMenu(): void }) {
         <span className="flex items-center gap-1.5 truncate text-[11px] text-faint"><StatusDot tone={connected ? status.tone : 'offline'} /><span className="truncate">{connected ? status.text : '重连中…'}</span></span>
       </span>
     </button>
+    <SearchButton />
     <button onClick={() => openActivity(true)} aria-label="今天" className={cx('press mr-1 flex h-9 items-center gap-1 rounded-full px-3 text-[13px] font-semibold tabular-nums', waiting ? 'bg-warn-soft text-warn' : 'text-muted')}>
       <Inbox size={16} />{waiting > 0 && <span key={waiting} className="bump">{waiting}</span>}
     </button>

@@ -58,7 +58,7 @@ export function IdeasPage() {
 
       {batch && left > 0 && <div className="mt-8 flex items-center gap-3 text-sm text-muted">
         <Avatar persona={persona} size={28} mood="happy" />
-        {settings?.cadence === 'weekly' ? '这周就这些。' : '今天就这些。'}点子太多会吵的话，左下角的快捷设置里可以调成每周一次。
+        {settings?.cadence === 'weekly' ? '这周就这些。' : '今天就这些。'}点子太多会吵的话，在「设置 → 助理」里可以调成每周一次。
       </div>}
     </div>
   </div>

@@ -1,6 +1,6 @@
 /**
  * Sidebar (Figma v6, section 18): 糯糯 and its status line on top (click it to open the right pane), the pinned 主聊, then
- * 侧聊 (bounded side tasks) and threads mirrored from outside; the quick-settings button and 新侧聊 at the bottom.
+ * 侧聊 (bounded side tasks) and threads mirrored from outside; 更多 (动态 · 点子 · 目标 · 成果 · 设置) and 新侧聊 at the bottom.
  * On phones it slides in as a drawer.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -16,7 +16,7 @@ import { SourceIcon } from './icons'
 import { cx, IconButton } from './ui'
 import { MOD } from './prefs'
 import { isMacDesktop, Pane, Resizer, togglePane, usePanes, usePresence } from './shell'
-import { QuickSettings } from './QuickSettings'
+import { More } from './More'
 
 /** The window's title bar row above the sidebar: room for the traffic lights, and the button that folds the sidebar. */
 function TitleRow() {
@@ -103,7 +103,7 @@ function SidebarBody({ route }: { route: Route }) {
     </nav>
 
     <div className="flex items-center justify-between px-3 pt-2 pb-3">
-      <QuickSettings />
+      <More route={route} />
       <button onClick={() => go('/new')} className="press flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-muted hover:bg-sunken hover:text-fg"><SquarePen size={15} />新侧聊</button>
     </div>
   </div>

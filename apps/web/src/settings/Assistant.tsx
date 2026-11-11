@@ -4,15 +4,17 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { api, type NotifySettings, type Persona, type ProactiveSettings } from '../api'
+import { api, type IdeaSettings, type NotifySettings, type Persona, type ProactiveSettings } from '../api'
 import { isMascot, Mascot, MASCOT } from '../persona'
 import { cx } from '../ui'
-import { Area, Block, Btn, Foot, NumberInput, Page, Row, SaveBar, Section, SelectInput, TextInput, Toggle } from './kit'
+import { Area, Block, Btn, Choice, Foot, NumberInput, Page, Row, SaveBar, Section, SelectInput, TextInput, Toggle } from './kit'
 import { useNotify } from './hooks'
 
 const ROLES: { id: Persona['role']; label: string }[] = [{ id: 'all', label: '什么都帮' }, { id: 'life', label: '生活助理' }, { id: 'work', label: '工作助理' }, { id: 'study', label: '学习伙伴' }]
 const AVATARS = ['🦊', '🐱', '🐼', '🦉', '🐙', '🌱']
 const COLORS = ['#ff7a9a', '#5db49c', '#f2be45', '#d0583a', '#3f8f9c', '#5c5c5c']
+const MODES: { id: ProactiveSettings['mode']; label: string }[] = [{ id: 'off', label: '关' }, { id: 'observe', label: '只留意' }, { id: 'auto', label: '主动去做' }]
+const CADENCES: { id: IdeaSettings['cadence']; label: string }[] = [{ id: 'daily', label: '每天早上' }, { id: 'weekly', label: '每周一次' }, { id: 'off', label: '不要' }]
 const BY: Record<string, string> = { owner: '你改的', router: '按你说的话改的', watchdog: '看门狗改的' }
 
 export function AssistantPage() {
@@ -27,7 +29,14 @@ export function AssistantPage() {
   })
   const saveProactive = useMutation({
     mutationFn: (patch: Partial<ProactiveSettings>) => api.put('/settings/proactive', { ...proactive!.settings, ...patch }),
+    onMutate: patch => qc.setQueryData<{ settings: ProactiveSettings }>(['proactive'], old => old && { ...old, settings: { ...old.settings, ...patch } }),
     onSettled: () => { qc.invalidateQueries({ queryKey: ['proactive'] }); qc.invalidateQueries({ queryKey: ['activity'] }) },
+  })
+  const ideas = useQuery({ queryKey: ['ideas'], queryFn: () => api.get<{ settings: IdeaSettings }>('/ideas') }).data?.settings
+  const setCadence = useMutation({
+    mutationFn: (cadence: IdeaSettings['cadence']) => api.put('/settings/ideas', { cadence }),
+    onMutate: cadence => qc.setQueryData<{ settings: IdeaSettings }>(['ideas'], old => old && { ...old, settings: { ...old.settings, cadence } }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['ideas'] }),
   })
   const [name, setName] = useState('')
   const [strategy, setStrategy] = useState('')
@@ -40,7 +49,7 @@ export function AssistantPage() {
   const quiet = notify.data?.settings.quiet
   const setQuiet = (patch: Partial<NotifySettings['quiet']>) => quiet && notify.save({ quiet: { ...quiet, ...patch } })
   return <Page title="助理">
-    <Section title="它是谁" foot="性格、灵魂和记忆在右侧栏「它是谁」里改；主动程度和点子在快捷设置里调。">
+    <Section title="它是谁" foot="性格、灵魂和记忆在右侧栏「它是谁」里改。">
       <Row label="名字">
         <TextInput value={name} maxLength={24} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
           onBlur={() => { if (name.trim() && name.trim() !== persona.name) savePersona.mutate({ name: name.trim() }); else setName(persona.name) }} className="w-[200px]" />
@@ -61,6 +70,15 @@ export function AssistantPage() {
             className={cx('size-5 rounded-full', persona.color === c && 'ring-2 ring-offset-2 ring-offset-sunken')} style={{ background: c, ['--tw-ring-color' as string]: c }} />)}
         </span>
       </Row>
+    </Section>
+
+    <Section title="主动">
+      <Row label="主动程度" sub="关：不主动找事 · 只留意：看到了告诉你 · 主动去做：能做的先做">
+        <Choice label="主动程度" value={s.mode} onChange={mode => saveProactive.mutate({ mode })} options={MODES} className="w-[260px]" />
+      </Row>
+      {ideas && <Row label="点子" sub="多久换一批，换的时候在「点子」页">
+        <Choice label="点子" value={ideas.cadence} onChange={c => setCadence.mutate(c)} options={CADENCES} className="w-[280px]" />
+      </Row>}
     </Section>
 
     <section>

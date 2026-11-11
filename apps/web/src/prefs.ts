@@ -6,7 +6,7 @@ import { useSyncExternalStore } from 'react'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type AccentId = 'berry' | 'ink' | 'mint' | 'sea' | 'grape' | 'slate'
-/** The six theme colours (Figma section 20, 快捷设置). 莓红 is the default and matches 糯糯. */
+/** The six theme colours (Figma section 22, 设置 → 通用). 莓红 is the default and matches 糯糯. */
 export const ACCENTS: { id: AccentId; label: string; color: string }[] = [
   { id: 'berry', label: '莓红', color: '#d43d6d' },
   { id: 'ink', label: '墨', color: '#141414' },
