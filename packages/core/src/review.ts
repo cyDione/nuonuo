@@ -390,6 +390,19 @@ export class Reviewer {
   }
 
   /**
+   * An action the owner set to 先问你 (a local app's write, a calendar event): asked on an approval card every time,
+   * unless the owner said 这类以后直接做 for it. Silent proactive work is blocked instead, as for any approval.
+   */
+  askOwner(ticket: Ticket, sessionId: string, tool: string, display: string, input: Record<string, unknown>, reason: string): GateDecision {
+    const granted = this.granted(ticket.id, tool, grantKey(tool, display, input))
+    if (granted) {
+      this.audit({ ticketId: ticket.id, actor: 'owner', action: 'review', tool, input: display, risk: 'external', decision: 'allow', reason: `你已允许：${granted.label}` })
+      return { action: 'allow', by: 'rule' }
+    }
+    return this.escalateAction(ticket, sessionId, tool, display, input, 'external', reason)
+  }
+
+  /**
    * Reviews a call to an external tool (an MCP server marked for review). Such calls are treated as external actions:
    * the same lists, level, mode and reviewer model apply as for shell commands.
    */
@@ -511,5 +524,6 @@ export function grantKey(tool: string, display: string, input: Record<string, un
 export function grantLabel(tool: string, display: string, input: Record<string, unknown> = {}): string {
   if (tool === 'shell') return classifyShell(display).reasons.join('、') || '运行命令'
   if (tool === 'mcp') return `调用 ${String(input.server ?? '')} 的 ${String(input.tool ?? '')}`
+  if (typeof input.label === 'string') return input.label
   return tool
 }

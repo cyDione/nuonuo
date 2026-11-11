@@ -2,7 +2,7 @@
 import { pruneChats } from './data'
 import { Notices } from './notices'
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-assistant/agent-runtime'
-import { accessExtension, LocalAccess, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
+import { accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@super-assistant/db'
 import { gmailPlugin, telegramPlugin } from '@super-assistant/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-assistant/sources'
@@ -144,7 +144,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       }),
     })
     registerAgents(store, agents, engine, combineExtensions(
-      sources.agentExtensions(),
+      gatedSourceExtension(sources.agentExtensions(), access, reviewer),
       memoryExtension(memory, engine),
       { routerPrompt: () => personaPrompt(store) },
       instructionsExtension(instructions),
@@ -154,6 +154,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       browserExtension(browser, engine, agents),
       sandboxExtension(engine),
       accessExtension(access, uploadsDir),
+      localAppsExtension(new LocalApps(access, reviewer)),
       mcpExtension(mcp, engine, reviewer),
       { gateShell: (ticket, sessionId, command, cwd) => reviewer.gateShell(ticket, sessionId, command, cwd) },
     ))

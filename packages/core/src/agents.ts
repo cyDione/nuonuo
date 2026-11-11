@@ -8,6 +8,7 @@ import { clip, DomainError, Engine, ROUTER_SESSION } from './engine'
 import { sourceOfThread, STAGE_LABEL, type Mandate, type Ticket } from './model'
 import { PROACTIVE_WORKER_PROMPT, ROUTER_PROMPT, SUBAGENT_PROMPT, WORKER_PROMPT } from './prompts'
 import type { LocalAccess } from './access'
+import { gateSourceTools, type LocalApps } from './localapps'
 import type { Instructions } from './instructions'
 import { proactiveSettings, saveProactiveSettings } from './proactive'
 import type { Memory, MemoryTrust } from './memory'
@@ -581,6 +582,19 @@ export function combineExtensions(...exts: AgentExtensions[]): AgentExtensions {
     ...(gate ? { gateShell: gate } : {}),
     ...(wrap ? { wrapShell: wrap } : {}),
     ...(fsAccess ? { fsAccess } : {}),
+  }
+}
+
+/** Puts source tools that reach the owner's apps (Google Calendar) under the same 权限 levels as the local ones. */
+export function gatedSourceExtension(ext: AgentExtensions, access: LocalAccess, reviewer: Reviewer | undefined): AgentExtensions {
+  return { ...ext, workerTools: (ticket, ctx) => gateSourceTools(ext.workerTools?.(ticket, ctx) ?? {}, ticket, ctx.session.id, access, reviewer) }
+}
+
+/** The owner's apps on this Mac (日历, 提醒事项, 备忘录, 通讯录, 照片), at their levels in 权限. */
+export function localAppsExtension(apps: LocalApps): AgentExtensions {
+  return {
+    workerTools: (ticket, ctx) => isProactive(ticket) ? {} : apps.tools(ticket, ctx.session.id),
+    workerPrompt: ticket => isProactive(ticket) ? undefined : apps.prompt(),
   }
 }
 
