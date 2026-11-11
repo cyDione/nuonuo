@@ -1,27 +1,30 @@
 <div align="center">
 
-<img src="docs/assets/mascot.svg" width="104" alt="糯糯" />
-
-# Nuonuo
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/hero-dark.svg" />
+  <img src="docs/assets/readme/hero-light.svg" width="100%" alt="糯糯 Nuonuo：你说一句话，它在后台把事办完，再用一句话告诉你结果" />
+</picture>
 
 [![CI](https://github.com/cyDione/nuonuo/actions/workflows/ci.yml/badge.svg)](https://github.com/cyDione/nuonuo/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/cyDione/nuonuo)](https://github.com/cyDione/nuonuo/releases)
-![Node version](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/cyDione/nuonuo?color=d43d6d)](https://github.com/cyDione/nuonuo/releases)
+![Node version](https://img.shields.io/badge/node-%3E%3D22.12-141414)
+[![License](https://img.shields.io/badge/license-MIT-141414.svg)](LICENSE)
 
-住在你电脑里的个人助理「糯糯」。你说一句话，它在后台把事办完，再用一句话告诉你结果。
+[看看它](#看看它) · [它怎么做事](#它怎么做事) · [功能](#功能) · [快速开始](#快速开始) · [使用](#使用) · [设计理念](#设计理念) · [工作原理](#工作原理)
 
-[看看它](#看看它) · [功能](#功能) · [快速开始](#快速开始) · [使用](#使用) · [设计理念](#设计理念) · [工作原理](#工作原理) · [参考](#参考)
+<br />
 
-<img src="docs/assets/demo.gif" alt="运行演示：跟糯糯说一句话，它接下任务，在后台做完，把成果交给你" width="860" />
+<img src="docs/assets/demo.gif" width="100%" alt="运行演示：跟糯糯说一句话，它接下任务，在后台做完，把成果交给你" />
+
+<sub>一次真实运行的录屏，等待的部分做了快进：排一个杭州周末两天的行程，查天气，做成网页。</sub>
 
 </div>
 
+<br />
+
 Nuonuo 是一个**主动的个人助理**。它不是写代码的 Agent，也不是要你一直盯着的控制台。你面对的只有一个助理：糯糯。服务和执行都在你自己的机器上，模型用你自己的 key。
 
-你在主聊、桌面端、Telegram、GitHub 或邮件里交代一件事，糯糯先回你一句，再把事情交给后台的执行者去做：查资料、排行程、整理文件、盯一个 PR、每天早上给你一份摘要。做完以后它只回你一段话，完整的成果在聊天里直接打开。没人找它的时候，它也会留意你接进来的来源，把值得看的东西放进「动态」，把想到的事放进「点子」。
-
-上面的动图是一次真实运行的录屏，等待的部分做了快进：你说「帮我排一下这个周末去杭州的两天行程，查一下天气，做成一个网页」，糯糯先回一句，再问一下出发城市；没等到回答就按常见方案先做。做完回你一段话，网页在「更多 · 成果」里直接打开，右侧栏「活动」里记着它今天做过的事。
+没人找它的时候，它也会留意你接进来的来源，把值得看的东西放进「动态」，把想到的事放进「点子」。
 
 ## 看看它
 
@@ -31,18 +34,27 @@ Nuonuo 是一个**主动的个人助理**。它不是写代码的 Agent，也不
     <td width="50%"><img src="docs/assets/screens/who.png" alt="右侧栏「它是谁」：名字、样子、灵魂和记忆" /></td>
   </tr>
   <tr>
-    <td align="center">右侧栏「活动」：等你点头的、正在做的、做过的</td>
-    <td align="center">「它是谁」：名字、样子、灵魂、记忆和会做的事</td>
+    <td align="center"><sub>右侧栏「活动」：等你点头的、正在做的、做过的</sub></td>
+    <td align="center"><sub>「它是谁」：名字、样子、灵魂、记忆和会做的事</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/assets/screens/dark.png" alt="深色模式" /></td>
     <td width="50%"><img src="docs/assets/screens/english.png" alt="English 界面" /></td>
   </tr>
   <tr>
-    <td align="center">纯黑底的深色模式，主题色可换</td>
-    <td align="center">English 界面和「更多」菜单</td>
+    <td align="center"><sub>纯黑底的深色模式，主题色可换</sub></td>
+    <td align="center"><sub>English 界面和「更多」菜单</sub></td>
   </tr>
 </table>
+
+## 它怎么做事
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/flow-dark.svg" />
+  <img src="docs/assets/readme/flow-light.svg" width="100%" alt="四步：你说一句；糯糯先回一句「好」；后台去做，有风险的先问你；做完用一句话告诉你，成果直接打开" />
+</picture>
+
+你在主聊、桌面端、Telegram、GitHub 或邮件里交代一件事，糯糯先回你一句，再把事情交给后台的执行者去做：查资料、排行程、整理文件、盯一个 PR、每天早上给你一份摘要。做完以后它只回你一段话，完整的成果在聊天里直接打开。
 
 ## 功能
 
