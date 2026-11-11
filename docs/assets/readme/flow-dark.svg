@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="330" viewBox="0 0 1200 330" role="img" aria-labelledby="title desc">
+<title id="title">糯糯怎么做事</title>
+<desc id="desc">四步：你说一句；糯糯先回一句「好」；后台的执行者去做，有风险的先问你；做完用一句话告诉你，成果直接打开。</desc>
+<rect width="1200" height="330" rx="28" fill="#000000"/>
+<rect x="0.5" y="0.5" width="1199" height="329" rx="27.5" fill="none" stroke="#232323"/>
+<path d="M256.0 104 H944.0" stroke="#DC4A78" stroke-width="3" stroke-dasharray="2 12" stroke-linecap="round" opacity="0.55"/>
+<circle cx="186.0" cy="104" r="66" fill="#000000"/>
+<circle cx="186.0" cy="104" r="62" fill="#1A1A1A"/>
+<g transform="translate(140.0 56) scale(0.92)"><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><g transform="translate(-1 1.5)"><rect x="35.5" y="48" width="8" height="15" rx="4" fill="#000000"/><rect x="56.5" y="48" width="8" height="15" rx="4" fill="#000000"/></g><g stroke="#DC4A78" stroke-width="3" stroke-linecap="round" fill="none"><path d="M86 30 Q92 38 86 46"/><path d="M93 24 Q103 38 93 52"/></g></g>
+<circle cx="136.0" cy="56" r="17" fill="#DC4A78"/>
+<text x="136.0" y="63" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" font-weight="700" fill="#FFFFFF">1</text>
+<text x="186.0" y="222" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="30" font-weight="700" fill="#F2F2F2">你说一句</text>
+<text x="186.0" y="262" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" fill="#9A9A9A">在聊天、桌面端、</text>
+<text x="186.0" y="292" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" fill="#9A9A9A">Telegram 或邮件里</text>
+<circle cx="462.0" cy="104" r="66" fill="#000000"/>
+<circle cx="462.0" cy="104" r="62" fill="#1A1A1A"/>
+<g transform="translate(416.0 56) scale(0.92)"><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><g transform="translate(0 0)"><rect x="35.5" y="48" width="8" height="15" rx="4" fill="#000000"/><rect x="56.5" y="48" width="8" height="15" rx="4" fill="#000000"/></g><path d="M74 9 C75.6 16.4 75.6 16.4 83 18 C75.6 19.6 75.6 19.6 74 27 C72.4 19.6 72.4 19.6 65 18 C72.4 16.4 72.4 16.4 74 9 Z" fill="#FFC23D"/></g>
+<circle cx="412.0" cy="56" r="17" fill="#DC4A78"/>
+<text x="412.0" y="63" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" font-weight="700" fill="#FFFFFF">2</text>
+<text x="462.0" y="222" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="30" font-weight="700" fill="#F2F2F2">它先回「好」</text>
+<text x="462.0" y="262" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" fill="#9A9A9A">马上回你一句，</text>
+<text x="462.0" y="292" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" fill="#9A9A9A">不让你干等</text>
+<circle cx="738.0" cy="104" r="66" fill="#000000"/>
+<circle cx="738.0" cy="104" r="62" fill="#1A1A1A"/>
+<g transform="translate(692.0 56) scale(0.92)"><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><g transform="translate(2.2 -2.4)"><rect x="35.5" y="48" width="8" height="15" rx="4" fill="#000000"/><rect x="56.5" y="48" width="8" height="15" rx="4" fill="#000000"/></g><g fill="#666666"><circle cx="76" cy="28" r="2.2"/><circle cx="82" cy="22" r="3"/><circle cx="89" cy="15" r="3.8"/></g></g>
+<circle cx="688.0" cy="56" r="17" fill="#DC4A78"/>
+<text x="688.0" y="63" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" font-weight="700" fill="#FFFFFF">3</text>
+<text x="738.0" y="222" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="30" font-weight="700" fill="#F2F2F2">后台去做</text>
+<text x="738.0" y="262" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" fill="#9A9A9A">查、写、跑，并行很多件；</text>
+<text x="738.0" y="292" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" fill="#9A9A9A">有风险的先问你</text>
+<circle cx="1014.0" cy="104" r="66" fill="#000000"/>
+<circle cx="1014.0" cy="104" r="62" fill="#1A1A1A"/>
+<g transform="translate(968.0 56) scale(0.92)"><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><path d="M35 56 Q39.5 49.4 44 56 M56 56 Q60.5 49.4 65 56" stroke="#000000" stroke-width="3.3" stroke-linecap="round" fill="none"/><path d="M74 9 C75.6 16.4 75.6 16.4 83 18 C75.6 19.6 75.6 19.6 74 27 C72.4 19.6 72.4 19.6 65 18 C72.4 16.4 72.4 16.4 74 9 Z" fill="#FFC23D"/></g>
+<circle cx="964.0" cy="56" r="17" fill="#DC4A78"/>
+<text x="964.0" y="63" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" font-weight="700" fill="#FFFFFF">4</text>
+<text x="1014.0" y="222" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="30" font-weight="700" fill="#F2F2F2">一句话告诉你</text>
+<text x="1014.0" y="262" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" fill="#9A9A9A">完整成果在聊天里</text>
+<text x="1014.0" y="292" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="20" fill="#9A9A9A">直接打开</text>
+</svg>
