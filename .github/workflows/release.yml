@@ -5,9 +5,24 @@ name: Release
 #   macOS desktop app (own Node.js and service)      arm64, x64        super-assistant-<v>-mac-<arch>.dmg / .zip
 #   Windows desktop app (own Node.js and service)    x64, arm64        super-assistant-<v>-win-<arch>-setup.exe / .zip
 # On a v* tag the packages are published as the GitHub Release that install.sh and the update check read.
+#
+# Releasing without anyone clicking: run this workflow by hand (Actions → Release → Run workflow, or the API) with a
+# version. It checks every package is already at that version (pnpm set-version, merged first), builds all six
+# packages from the chosen commit, and only when every build passed creates the v<version> tag and the Release.
+# A tag or Release made with the workflow token starts no other workflow, so the build happens in this same run.
+# Without a version, a manual run only builds the packages (as on pull requests).
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.2.2 (empty: build only, publish nothing)'
+        required: false
+        default: ''
+      notes:
+        description: 'Release notes in Markdown (empty: generated from the merged pull requests)'
+        required: false
+        default: ''
   push:
     tags: ['v*']
   pull_request:
@@ -24,8 +39,37 @@ permissions:
   contents: read
 
 jobs:
+  # Decides what this run releases: the pushed v* tag, the version given to a manual run, or nothing.
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.what.outputs.tag }}
+      sha: ${{ steps.what.outputs.sha }}
+    steps:
+      - id: what
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          tag=""
+          if [ "$GITHUB_REF_TYPE" = tag ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
+            tag="$GITHUB_REF_NAME"
+          elif [ -n "$VERSION" ]; then
+            version="${VERSION#v}"
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::not a version: $VERSION"; exit 1; }
+            tag="v$version"
+            # Never release a version twice: an existing tag or Release stops the run before anything is built.
+            if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then echo "::error::tag $tag already exists"; exit 1; fi
+            if gh release view "$tag" >/dev/null 2>&1; then echo "::error::release $tag already exists"; exit 1; fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "release: ${tag:-none}, commit $GITHUB_SHA"
+
   linux:
     name: linux-${{ matrix.arch }}
+    needs: prepare
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -35,6 +79,8 @@ jobs:
           - { runner: ubuntu-24.04-arm, arch: arm64 }
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -43,9 +89,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Check the tag matches the version
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.prepare.outputs.tag != ''
         # Every package must be at the tag's version (pnpm set-version sets them all); the update check compares them.
-        run: node scripts/set-version.mjs --check "$GITHUB_REF_NAME"
+        run: node scripts/set-version.mjs --check "${{ needs.prepare.outputs.tag }}"
 
       - name: Build web UI and service
         run: pnpm build
@@ -77,6 +123,7 @@ jobs:
 
   desktop:
     name: ${{ matrix.os }}-${{ matrix.arch }}
+    needs: prepare
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -95,6 +142,8 @@ jobs:
       CSC_FOR_PULL_REQUEST: 'true'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -103,8 +152,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Check the tag matches the version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: node scripts/set-version.mjs --check "$GITHUB_REF_NAME"
+        if: needs.prepare.outputs.tag != ''
+        run: node scripts/set-version.mjs --check "${{ needs.prepare.outputs.tag }}"
 
       - name: Build web UI and service
         run: pnpm build
@@ -151,11 +200,11 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, desktop]
+    if: needs.prepare.outputs.tag != ''
+    needs: [prepare, linux, desktop]
     runs-on: ubuntu-24.04
     permissions:
-      contents: write  # publishes the GitHub Release that install.sh and the update check read
+      contents: write  # creates the tag and publishes the GitHub Release that install.sh and the update check read
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -165,10 +214,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          NOTES: ${{ inputs.notes }}
         run: |
           ls -l dist
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          elif [ -n "$NOTES" ]; then
+            # A manual run: the tag does not exist yet, so the Release creates it on the built commit.
+            gh release create "$TAG" dist/* --target "$SHA" --title "$TAG" --notes "$NOTES"
           else
-            gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+            gh release create "$TAG" dist/* --target "$SHA" --title "$TAG" --generate-notes
           fi
