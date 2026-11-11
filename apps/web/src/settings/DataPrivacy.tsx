@@ -6,12 +6,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type Health, type PrivacySettings } from '../api'
 import { desktop, isMacDesktop } from '../shell'
-import { Btn, Page, Row, Section, SelectInput } from './kit'
+import { setPrefs, usePrefs } from '../prefs'
+import { Btn, Page, Row, Section, SelectInput, Toggle } from './kit'
 
 const KEEP: { id: PrivacySettings['keep']; label: string }[] = [{ id: 'forever', label: '一直保留' }, { id: '365', label: '一年' }, { id: '90', label: '90 天' }, { id: '30', label: '30 天' }]
 
 export function DataPrivacy() {
   const qc = useQueryClient()
+  const prefs = usePrefs()
   const health = useQuery({ queryKey: ['health'], queryFn: () => api.get<Health>('/health') }).data
   const privacy = useQuery({ queryKey: ['privacy'], queryFn: () => api.get<{ settings: PrivacySettings }>('/settings/privacy') }).data?.settings
   const setKeep = useMutation({ mutationFn: (keep: PrivacySettings['keep']) => api.put('/settings/privacy', { keep }), onSettled: () => qc.invalidateQueries({ queryKey: ['privacy'] }) })
@@ -34,12 +36,13 @@ export function DataPrivacy() {
       </Row>
       <Row label="只在这台电脑上" sub="聊天、记忆和文件都存在这里；只有调用模型时，才把那一段对话发给你选的模型服务" />
     </Section>
-    {privacy && <Section title="记录" foot="超过期限的聊天每小时清理一次，主聊会留着但变短。「显示原始记录」在快捷设置里。">
+    {privacy && <Section title="记录" foot="超过期限的聊天每小时清理一次，主聊会留着但变短。">
       <Row label="聊天记录保留">
         <SelectInput value={privacy.keep} onChange={e => { const keep = e.target.value as PrivacySettings['keep']; if (keep === 'forever' || confirm(`超过${KEEP.find(k => k.id === keep)!.label}的聊天记录会被删掉，不能恢复。继续？`)) setKeep.mutate(keep) }}>
           {KEEP.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}
         </SelectInput>
       </Row>
+      <Row label="显示原始记录" sub="给技术用户：聊天里显示它每一步调了什么"><Toggle label="显示原始记录" checked={prefs.showRaw} onChange={showRaw => setPrefs({ showRaw })} /></Row>
     </Section>}
     <Section title="导出和清除" foot={done ?? '清除之后不能恢复。想留一份，先导出。'}>
       <Row label="导出全部数据" sub="聊天、记忆、目标、动态、定时任务和做过的事，一个 JSON 文件；不含 API key">

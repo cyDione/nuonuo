@@ -1,8 +1,8 @@
 /**
  * 设置窗口 (Figma v6, section 21; ⌘,): the whole window, with its own sidebar. 返回聊天 at the top (or Esc) goes back to
  * where you were; 搜索设置 narrows the list. Five groups: 助理 · 连接 · 安全 · 模型 · 应用. Pages here have no motion.
- * What lives elsewhere stays there: look, theme colour, 主动程度, 点子 and raw records in the quick settings; personality,
- * soul and memory in the right pane's 它是谁; what it may do on its own in the right pane's 权限.
+ * What lives elsewhere stays there: personality, soul and memory in the right pane's 它是谁; what it may do on its own in
+ * the right pane's 权限. Look, theme colour, 主动程度, 点子 and raw records are here (通用, 助理, 数据和隐私).
  */
 import { Activity, AlarmClock, Bell, ChevronLeft, Cpu, Info, Keyboard, KeyRound, Lock, Mic, Play, Plug, Puzzle, Search, Server, Settings as Cog, ShieldCheck, Smile } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -30,7 +30,7 @@ import { System } from './System'
 type Tab = { id: SettingsTab; label: string; icon: ReactNode; words: string }
 const GROUPS: { title: string; tabs: Tab[] }[] = [
   { title: '助理', tabs: [
-    { id: 'persona', label: '助理', icon: <Smile size={17} />, words: '名字 角色 主动 策略 节奏 同时 每天 不理会 账号 安静时间 头像' },
+    { id: 'persona', label: '助理', icon: <Smile size={17} />, words: '名字 角色 主动 主动程度 只留意 点子 策略 节奏 同时 每天 不理会 账号 安静时间 头像' },
     { id: 'routines', label: '定时任务', icon: <AlarmClock size={17} />, words: '定时 cron 每天 简报 周报 提醒' },
   ] },
   { title: '连接', tabs: [
@@ -48,11 +48,11 @@ const GROUPS: { title: string; tabs: Tab[] }[] = [
     { id: 'usage', label: '用量', icon: <Activity size={17} />, words: '调用 token 费用 缓存' },
   ] },
   { title: '应用', tabs: [
-    { id: 'general', label: '通用', icon: <Cog size={17} />, words: '开机 启动 菜单栏 关掉窗口 语言 字号 动态效果' },
+    { id: 'general', label: '通用', icon: <Cog size={17} />, words: '外观 浅色 深色 主题色 颜色 开机 启动 菜单栏 关掉窗口 语言 字号 动态效果' },
     { id: 'notifications', label: '通知', icon: <Bell size={17} />, words: '通知 价格 动态 点子 确认 横幅 声音 Dock 数字 试一下' },
     { id: 'voice', label: '语音', icon: <Mic size={17} />, words: '语音 输入 识别 语言 自动发送 朗读 声音 语速' },
     { id: 'shortcuts', label: '快捷键', icon: <Keyboard size={17} />, words: '快捷键 叫出 快速问 搜索 新侧聊 主聊 右侧栏' },
-    { id: 'data', label: '数据和隐私', icon: <Lock size={17} />, words: '数据目录 隐私 聊天记录 保留 导出 清除 记忆' },
+    { id: 'data', label: '数据和隐私', icon: <Lock size={17} />, words: '数据目录 隐私 聊天记录 保留 原始记录 导出 清除 记忆' },
     { id: 'system', label: '系统和更新', icon: <Info size={17} />, words: '版本 更新 渠道 服务 重启 密钥 网页版 局域网 端口 看门狗 环境检查' },
   ] },
 ]
