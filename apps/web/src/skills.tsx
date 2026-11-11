@@ -8,6 +8,7 @@ import { Sparkle, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Skill } from './api'
 import { cx } from './ui'
+import { tx } from './i18n'
 
 export function Switch({ on, onChange, label, disabled }: { on: boolean; onChange(v: boolean): void; label: string; disabled?: boolean }) {
   return <button role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
@@ -36,26 +37,26 @@ export function SkillsSection({ Head, LinkBtn }: { Head: React.ComponentType<{ t
   }
   const field = 'w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm outline-none focus:border-faint'
   return <section className="border-t border-line pt-5">
-    <Head title="会做的事" count={skills.length || undefined} action={<LinkBtn onClick={() => setAll(v => !v)}>{all ? '收起' : skills.length ? '全部' : '教它一件'}</LinkBtn>} />
+    <Head title={tx('会做的事')} count={skills.length || undefined} action={<LinkBtn onClick={() => setAll(v => !v)}>{all ? tx('收起') : skills.length ? tx('全部') : tx('教它一件')}</LinkBtn>} />
     <div className="space-y-1">{shown.map(s => <div key={s.id} className="flex min-h-12 items-center gap-3">
       <span className={cx('flex size-8 shrink-0 items-center justify-center rounded-lg bg-sunken', s.enabled ? 'text-fg' : 'text-faint')}><Sparkle size={15} /></span>
       <button onClick={() => all && setForm({ id: s.id, name: s.name, when: s.when, steps: s.steps })} className={cx('min-w-0 flex-1 text-left', !all && 'cursor-default')}>
         <span className={cx('block truncate text-sm font-medium', !s.enabled && 'text-faint')}>{s.name}</span>
-        <span className="block truncate text-[11px] text-faint">{s.when}{!s.enabled && s.by === 'assistant' ? ' · 它记下的，等你打开' : !s.enabled ? ' · 停用了' : ''}</span>
+        <span className="block truncate text-[11px] text-faint">{s.when}{!s.enabled && s.by === 'assistant' ? tx(' · 它记下的，等你打开') : !s.enabled ? tx(' · 停用了') : ''}</span>
       </button>
-      {all && <button onClick={() => { if (confirm(`删掉「${s.name}」？`)) remove.mutate(s.id) }} aria-label={`删掉 ${s.name}`} className="press flex size-7 shrink-0 items-center justify-center rounded-full text-faint hover:bg-sunken hover:text-fg"><Trash2 size={13} /></button>}
+      {all && <button onClick={() => { if (confirm(tx('删掉「{0}」？', s.name))) remove.mutate(s.id) }} aria-label={tx('删掉 {0}', s.name)} className="press flex size-7 shrink-0 items-center justify-center rounded-full text-faint hover:bg-sunken hover:text-fg"><Trash2 size={13} /></button>}
       <Switch on={s.enabled} label={s.name} onChange={enabled => patch.mutate({ id: s.id, enabled })} />
     </div>)}</div>
-    {all && !form && <button onClick={() => setForm({ ...EMPTY })} className="press mt-2 h-8 rounded-full border border-line px-3 text-[13px] hover:border-faint">教它一件新的</button>}
+    {all && !form && <button onClick={() => setForm({ ...EMPTY })} className="press mt-2 h-8 rounded-full border border-line px-3 text-[13px] hover:border-faint">{tx('教它一件新的')}</button>}
     {form && <form className="anim-rise mt-3 space-y-2" onSubmit={e => { e.preventDefault(); save() }}>
-      <input autoFocus value={form.name} maxLength={20} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="名字，比如 写周报" aria-label="名字" className={field} />
-      <input value={form.when} maxLength={120} onChange={e => setForm({ ...form, when: e.target.value })} placeholder="什么时候用，比如 我说写周报的时候" aria-label="什么时候用" className={field} />
-      <textarea value={form.steps} onChange={e => setForm({ ...form, steps: e.target.value })} placeholder={'怎么做，一行一步\n- 先看这周的日历\n- 再按 本周 / 下周 / 风险 写'} aria-label="怎么做" className={cx(field, 'min-h-28 leading-6')} />
+      <input autoFocus value={form.name} maxLength={20} onChange={e => setForm({ ...form, name: e.target.value })} placeholder={tx('名字，比如 写周报')} aria-label={tx('名字')} className={field} />
+      <input value={form.when} maxLength={120} onChange={e => setForm({ ...form, when: e.target.value })} placeholder={tx('什么时候用，比如 我说写周报的时候')} aria-label={tx('什么时候用')} className={field} />
+      <textarea value={form.steps} onChange={e => setForm({ ...form, steps: e.target.value })} placeholder={tx('怎么做，一行一步\n- 先看这周的日历\n- 再按 本周 / 下周 / 风险 写')} aria-label={tx('怎么做')} className={cx(field, 'min-h-28 leading-6')} />
       <div className="flex justify-end gap-1.5">
-        <button type="button" onClick={() => setForm(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">取消</button>
-        <button type="submit" disabled={!form.name.trim() || !form.when.trim() || !form.steps.trim() || create.isPending || patch.isPending} className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-50">保存</button>
+        <button type="button" onClick={() => setForm(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">{tx('取消')}</button>
+        <button type="submit" disabled={!form.name.trim() || !form.when.trim() || !form.steps.trim() || create.isPending || patch.isPending} className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-50">{tx('保存')}</button>
       </div>
     </form>}
-    <p className="mt-2.5 text-[11px] text-faint">聊天里说「以后这种事都这么做」，它就记成一件会做的事。</p>
+    <p className="mt-2.5 text-[11px] text-faint">{tx('聊天里说「以后这种事都这么做」，它就记成一件会做的事。')}</p>
   </section>
 }

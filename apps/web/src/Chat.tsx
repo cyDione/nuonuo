@@ -22,6 +22,7 @@ import { Onboarding, useOnboarding } from './onboarding'
 import { LearnedNote, NeedsYou, needsOwner, useTickets, type Learned } from './tasks'
 import { SOURCE_LABEL, SourceIcon } from './icons'
 import { cx } from './ui'
+import { locale, tx } from './i18n'
 
 /** A message typed on the empty screen, sent once the new conversation's page mounts. */
 let pendingSend: { id: string; content: string } | undefined
@@ -83,7 +84,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
 
   async function send(content: string, replyTo?: string) {
     setError(null)
-    if (files.some(f => !f.upload && !f.error)) { setError('附件还在传，等一下再发'); return }
+    if (files.some(f => !f.upload && !f.error)) { setError(tx('附件还在传，等一下再发')); return }
     const attachments = files.filter(f => f.upload).map(f => f.upload!.id)
     if (!id) {
       try {
@@ -103,7 +104,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
         old && !old.messages.some(m => m.id === message.id) ? { ...old, messages: [...old.messages, message] } : old)
       qc.invalidateQueries({ queryKey: ['conversations'] })
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : `发送失败：${(e as Error).message}`)
+      setError(e instanceof ApiError ? e.message : tx('发送失败：{0}', (e as Error).message))
     }
   }
 
@@ -113,7 +114,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
       const key = `${file.name}-${file.size}-${Math.random()}`
       const preview = /^image\/(png|jpeg|gif|webp)$/.test(file.type) ? URL.createObjectURL(file) : undefined
       setFiles(v => [...v, { key, name: file.name, mime: file.type, size: file.size, ...(preview ? { preview } : {}) }])
-      if (file.size > 50 * 1024 * 1024) { setFiles(v => v.map(f => f.key === key ? { ...f, error: '超过 50MB' } : f)); continue }
+      if (file.size > 50 * 1024 * 1024) { setFiles(v => v.map(f => f.key === key ? { ...f, error: tx('超过 50MB') } : f)); continue }
       upload(file, id).then(u => setFiles(v => v.map(f => f.key === key ? { ...f, upload: u } : f)), e => setFiles(v => v.map(f => f.key === key ? { ...f, error: (e as Error).message } : f)))
     }
     requestAnimationFrame(() => inputRef.current?.focus())
@@ -134,7 +135,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
     setError(null)
     try {
       const r = await api.post<{ compacted: boolean; note?: string }>(`/conversations/${id}/compact`)
-      if (!r.compacted) { setNote(r.note ?? '前面的还不多，不用整理'); setTimeout(() => setNote(null), 2_500) }
+      if (!r.compacted) { setNote(r.note ?? tx('前面的还不多，不用整理')); setTimeout(() => setNote(null), 2_500) }
       await refresh()
     } catch (e) { setError((e as Error).message) }
   }
@@ -178,7 +179,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const empty = !id || (thread.isSuccess && said.length === 0)
   const all = (tickets.data?.tickets ?? []).filter(t => t.conversationId === id)
   const ended = all.filter(t => t.stage === 'ended').sort((a, b) => (b.ended?.at ?? 0) - (a.ended?.at ?? 0))[0]
-  const sideStatus = asks.length ? '等你点头' : working.length ? '在做' : ended?.ended ? `${new Date(ended.ended.at).getMonth() + 1}.${new Date(ended.ended.at).getDate()} 做完` : ''
+  const sideStatus = asks.length ? tx('等你点头') : working.length ? tx('在做') : ended?.ended ? tx('{0}.{1} 做完', new Date(ended.ended.at).getMonth() + 1, new Date(ended.ended.at).getDate()) : ''
   const artifacts = useQuery({ queryKey: ['artifacts'], queryFn: () => api.get<{ artifacts: Artifact[] }>('/artifacts'), enabled: Boolean(id) && !main }).data?.artifacts ?? []
   const made = artifacts.filter(a => a.conversationId === id).length
   const external = current && current.source !== 'webchat'
@@ -190,22 +191,21 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
     onDragLeave={e => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false) }}
     onDrop={e => { if (!hasFiles(e)) return; e.preventDefault(); setDragging(false); if (!noRouter) addFiles(e.dataTransfer.files) }}>
     {dragging && <div className="anim-fade pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-2 rounded-[28px] border-2 border-dashed border-accent bg-accent-soft/80 text-sm font-medium text-accent">
-      <UploadIcon size={22} />松手就发给{persona.name}看</div>}
+      <UploadIcon size={22} />{tx('松手就发给{0}看', persona.name)}</div>}
     {!main && thread.data && <div className="border-b border-line">
       <div className="mx-auto flex h-11 w-full max-w-[680px] items-center gap-2 px-3 md:px-8">
-        <button onClick={() => go('/')} aria-label="回主聊" title="回主聊" className="press -ml-1.5 flex size-7 shrink-0 items-center justify-center rounded-full text-muted hover:bg-sunken hover:text-fg"><ChevronLeft size={18} /></button>
+        <button onClick={() => go('/')} aria-label={tx('回主聊')} title={tx('回主聊')} className="press -ml-1.5 flex size-7 shrink-0 items-center justify-center rounded-full text-muted hover:bg-sunken hover:text-fg"><ChevronLeft size={18} /></button>
         {external && <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-sunken text-muted"><SourceIcon source={current!.source} size={13} /></span>}
         <h1 className="min-w-0 shrink truncate font-display text-[15px] font-semibold">{title}</h1>
-        <span className="min-w-0 flex-1 truncate text-xs text-faint">{external ? SOURCE_LABEL[current!.source] ?? current!.source : ['侧聊', sideStatus].filter(Boolean).join(' · ')}</span>
-        {current?.meta.url ? <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg">
-          在 {SOURCE_LABEL[current.source] ?? current.source} 打开 <ExternalLink size={12} /></a>
-          : !external && (made ? <a href="#/library" className="shrink-0 text-xs text-muted hover:text-fg">{made} 个成果 ›</a> : <span className="shrink-0 text-xs text-faint max-sm:hidden">做完了就收进成果</span>)}
+        <span className="min-w-0 flex-1 truncate text-xs text-faint">{external ? SOURCE_LABEL[current!.source] ?? current!.source : [tx('侧聊'), sideStatus].filter(Boolean).join(' · ')}</span>
+        {current?.meta.url ? <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg"> {tx('在')} {SOURCE_LABEL[current.source] ?? current.source} {tx('打开')} <ExternalLink size={12} /></a>
+          : !external && (made ? <a href="#/library" className="shrink-0 text-xs text-muted hover:text-fg">{tx('{0} 个成果 ›', made)}</a> : <span className="shrink-0 text-xs text-faint max-sm:hidden">{tx('做完了就收进成果')}</span>)}
       </div>
     </div>}
     {noRouter && !(main && empty && onboarding.step) && <div className="mx-auto mt-4 w-full max-w-3xl px-4 md:px-6"><div className="anim-rise flex items-center gap-3 rounded-2xl bg-sunken px-4 py-3 text-sm">
       <AlertTriangle size={16} className="shrink-0 text-warn" />
-      <span className="flex-1">还没有配置模型</span>
-      <a className="press shrink-0 rounded-full bg-ink px-3 py-1.5 text-xs font-medium text-ink-fg" href="#/settings/providers">去设置</a>
+      <span className="flex-1">{tx('还没有配置模型')}</span>
+      <a className="press shrink-0 rounded-full bg-ink px-3 py-1.5 text-xs font-medium text-ink-fg" href="#/settings/providers">{tx('去设置')}</a>
     </div></div>}
     <div className="relative min-h-0 flex-1">
     {finding && <FindBar root={scrollRef} deps={messages.length} onClose={() => setFinding(false)} />}
@@ -232,11 +232,11 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
           {asks.map(t => <div key={t.id} className="anim-rise mt-2 max-w-[440px]"><NeedsYou t={t} onLearned={l => setLearned(v => [...v, l])} onAnswer={(text, ticketId) => send(text, ticketId)} onEdit={v => { setText(v); requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(v.length, v.length) } }) }} /></div>)}
         </div>}
     </div>
-    {behind && <button onClick={() => toBottom(true)} className="anim-pop press absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-ink-fg shadow-lg"><ArrowDown size={13} />新消息</button>}
+    {behind && <button onClick={() => toBottom(true)} className="anim-pop press absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-ink-fg shadow-lg"><ArrowDown size={13} />{tx('新消息')}</button>}
     </div>
     {error && <div className="mx-auto w-full max-w-3xl px-4 md:px-6"><div className="anim-rise rounded-2xl bg-danger/10 px-4 py-2.5 text-sm text-danger">{error}</div></div>}
     {note && <div className="mx-auto w-full max-w-3xl px-4 md:px-6"><div className="anim-rise rounded-2xl bg-sunken px-4 py-2.5 text-sm text-muted">{note}</div></div>}
-    <Composer text={text} setText={setText} inputRef={inputRef} onSend={value => send(value)} disabled={Boolean(noRouter)} placeholder={files.length ? '再说点什么…' : `跟${persona.name}说…`}
+    <Composer text={text} setText={setText} inputRef={inputRef} onSend={value => send(value)} disabled={Boolean(noRouter)} placeholder={files.length ? tx('再说点什么…') : tx('跟{0}说…', persona.name)}
       files={files} onFiles={addFiles} onRemoveFile={removeFile} onCompact={id && said.length ? () => void compact() : undefined}
       top={quote ? <QuoteBar m={quote} name={persona.name} onClear={() => setQuote(null)} /> : undefined} />
   </div>
@@ -246,7 +246,7 @@ const TYPING: [number, number][][] = [[[0, 0]], [[1, 0]], [[2, 0]], []]
 /** The typing bubble's three dots light up in turn. */
 function Typing() {
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches
-  return <div role="status" aria-label="正在输入" className="flex h-6 items-center">
+  return <div role="status" aria-label={tx('正在输入')} className="flex h-6 items-center">
     <MotionGrid gridSize={[3, 1]} frames={TYPING} duration={220} animate={!still} className="gap-1"><MotionGridCells className="typing-cell" /></MotionGrid>
   </div>
 }
@@ -255,15 +255,15 @@ function Typing() {
 function When({ m, prev, name }: { m: Message; prev?: Message; name: string }) {
   if (prev && m.createdAt - prev.createdAt < 15 * 60_000) return null
   const d = new Date(m.createdAt), now = new Date()
-  const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
   const days = Math.round((new Date(now.toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86_400_000)
-  const date = days === 0 ? '今天' : days === 1 ? '昨天' : d.getFullYear() === now.getFullYear() ? `${d.getMonth() + 1} 月 ${d.getDate()} 日` : d.toLocaleDateString('zh-CN')
+  const date = days === 0 ? tx('今天') : days === 1 ? tx('昨天') : d.getFullYear() === now.getFullYear() ? tx('{0} 月 {1} 日', d.getMonth() + 1, d.getDate()) : d.toLocaleDateString(locale)
   const first = Boolean(prev) && m.role === 'assistant' && !m.meta.source
-  return <div className="pt-2 pb-3 text-center text-[11px] text-faint tabular-nums">{date} {time}{first && ` · ${name}先开口`}</div>
+  return <div className="pt-2 pb-3 text-center text-[11px] text-faint tabular-nums">{date} {time}{first && tx(' · {0}先开口', name)}</div>
 }
 
-const FIRST: [LucideIcon, string][] = [[Tag, '帮我盯一个东西的价格'], [Bell, '每周五提醒我写周报'], [Plane, '帮我规划一次旅行']]
-const SIDE: [LucideIcon, string][] = [[Plane, '规划一次旅行'], [FileText, '写一份报告'], [Scale, '比较几款降噪耳机']]
+const FIRST: [LucideIcon, string][] = [[Tag, tx('帮我盯一个东西的价格')], [Bell, tx('每周五提醒我写周报')], [Plane, tx('帮我规划一次旅行')]]
+const SIDE: [LucideIcon, string][] = [[Plane, tx('规划一次旅行')], [FileText, tx('写一份报告')], [Scale, tx('比较几款降噪耳机')]]
 
 /**
  * An empty conversation (Figma v6, 20c). The main chat's first open: 糯糯 hops in, its hello writes itself in one
@@ -274,18 +274,18 @@ function Welcome({ onSend, disabled, main }: { onSend(text: string): void; disab
   return <div className="flex min-h-full flex-col items-center justify-center px-4 py-10 text-center md:px-6">
     <Avatar persona={persona} size={main ? 104 : 80} mood="happy" track className="welcome-hop text-fg" />
     <h2 className="mt-5 font-display text-[clamp(26px,4vw,32px)] leading-tight font-semibold">
-      <SplittingText type="chars" text={main ? `你好，我是${persona.name}` : '新侧聊'} stagger={0.06} delay={250}
+      <SplittingText type="chars" text={main ? tx('你好，我是{0}', persona.name) : tx('新侧聊')} stagger={0.06} delay={250}
         initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }} />
     </h2>
     <p className="feed-in mt-2.5 text-sm text-muted text-pretty" style={{ animationDelay: '650ms' }}>
-      {main ? '先认识一下？说说你最近在忙什么，我会记下来，以后帮你盯着。' : '一件独立的小事放在这里，做完了就收进成果。'}
+      {main ? tx('先认识一下？说说你最近在忙什么，我会记下来，以后帮你盯着。') : tx('一件独立的小事放在这里，做完了就收进成果。')}
     </p>
     <div className="mt-7 flex max-w-xl flex-wrap justify-center gap-2.5">
       {(main ? FIRST : SIDE).map(([Icon, t], i) => <button key={t} disabled={disabled} onClick={() => onSend(t)} style={{ animationDelay: `${800 + i * 90}ms` }}
         className="feed-in press flex items-center gap-2 rounded-full border border-line bg-panel px-4 py-2 text-sm hover:border-faint disabled:opacity-50">
         <Icon size={15} className="text-muted" />{t}</button>)}
     </div>
-    {main && <p className="feed-in mt-8 text-xs text-faint" style={{ animationDelay: '1100ms' }}>你说的都只存在这台电脑上。花钱、发消息、改日程，我都会先问你。</p>}
+    {main && <p className="feed-in mt-8 text-xs text-faint" style={{ animationDelay: '1100ms' }}>{tx('你说的都只存在这台电脑上。花钱、发消息、改日程，我都会先问你。')}</p>}
   </div>
 }
 
@@ -311,16 +311,15 @@ function Item({ m, fresh, tapback, name, actions }: { m: Message; fresh: boolean
     <div className="mt-0.5 flex size-[30px] shrink-0 items-center justify-center rounded-xl bg-sunken text-muted"><SourceIcon source={m.meta.source} size={14} /></div>
     <div className="min-w-0 flex-1 rounded-[22px] rounded-tl-md border border-line bg-card px-4 py-2.5">
       <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-        <span className="font-medium text-fg">{m.meta.source === 'cron' ? '定时任务' : m.meta.actor}</span>
+        <span className="font-medium text-fg">{m.meta.source === 'cron' ? tx('定时任务') : m.meta.actor}</span>
         {m.meta.human === false && <span className="rounded-full bg-sunken px-1.5 text-[10px]">bot</span>}
         <span className="text-faint tabular-nums">{new Date(m.createdAt).toLocaleString()}</span>
-        {m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent" aria-label="打开原文"><ExternalLink size={12} /></a>}
+        {m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent" aria-label={tx('打开原文')}><ExternalLink size={12} /></a>}
       </div>
       <div className="prose-chat text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
     </div>
   </div>
-  if (m.role === 'user' && m.meta.recalled) return <div className="anim-fade py-1 text-center text-xs text-faint">
-    你撤回了一条消息{actions.canReedit && <> · <button onClick={actions.reedit} className="text-muted hover:text-fg">重新编辑</button></>}
+  if (m.role === 'user' && m.meta.recalled) return <div className="anim-fade py-1 text-center text-xs text-faint"> {tx('你撤回了一条消息')}{actions.canReedit && <> · <button onClick={actions.reedit} className="text-muted hover:text-fg">{tx('重新编辑')}</button></>}
   </div>
   if (m.role === 'user') return <div className={cx('msg flex flex-col items-end', fresh && 'anim-send')}>
     {m.meta.attachments?.length > 0 && <SentFiles files={m.meta.attachments} />}
@@ -340,14 +339,14 @@ function Item({ m, fresh, tapback, name, actions }: { m: Message; fresh: boolean
     {m.meta.error && <div className="flex items-center gap-1 text-xs text-danger"><AlertTriangle size={12} />{m.meta.error}</div>}
     {m.meta.via && <div className="flex items-center gap-1 text-[11px] text-faint">
       <SourceIcon source={m.meta.via} size={11} />
-      {m.meta.delivery === 'sent' ? <>已发到 {SOURCE_LABEL[m.meta.via] ?? m.meta.via}{m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent" aria-label="打开"><ArrowUpRight size={11} /></a>}</>
-        : m.meta.delivery === 'pending' ? '发送中…'
-        : <span className="text-danger">{m.meta.delivery === 'dropped' ? '没能发出去' : '发送失败，稍后重试'}{m.meta.deliveryError ? `：${m.meta.deliveryError}` : ''}</span>}
+      {m.meta.delivery === 'sent' ? <>{tx('已发到')} {SOURCE_LABEL[m.meta.via] ?? m.meta.via}{m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent" aria-label={tx('打开')}><ArrowUpRight size={11} /></a>}</>
+        : m.meta.delivery === 'pending' ? tx('发送中…')
+        : <span className="text-danger">{m.meta.delivery === 'dropped' ? tx('没能发出去') : tx('发送失败，稍后重试')}{m.meta.deliveryError ? `：${m.meta.deliveryError}` : ''}</span>}
     </div>}
   </div>
 }
 
-const TAPBACK_LABEL: Record<string, string> = { '👌': '收到', '👀': '在看', '😂': '哈哈', '❤️': '谢谢', '👍': '好' }
+const TAPBACK_LABEL: Record<string, string> = { '👌': tx('收到'), '👀': tx('在看'), '😂': tx('哈哈'), '❤️': tx('谢谢'), '👍': tx('好') }
 const PAGE_OPENED = Date.now()
 /** 糯糯's reaction, chosen by the model, sitting on the bottom-right corner (the end) of the owner's bubble. It zooms in, with a small burst when it lands live. */
 function Tapback({ emoji }: { emoji: string }) {
@@ -370,14 +369,14 @@ function MsgActions({ m, actions }: { m: Message; actions: Actions }) {
   const recent = mine && Date.now() - m.createdAt < RECALL_MS
   const btn = (label: string, icon: React.ReactNode, run: () => void) => <button onClick={run} aria-label={label} title={label}
     className="press flex size-6 items-center justify-center rounded-md hover:bg-sunken hover:text-fg">{icon}</button>
-  const time = <span className="px-0.5 tabular-nums">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+  const time = <span className="px-0.5 tabular-nums">{new Date(m.createdAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}</span>
   return <div className="msg-actions flex h-6 shrink-0 items-center gap-0.5 text-[11px] text-faint">
     {mine && time}
-    {recent && m.content && btn('编辑', <Pencil size={13} />, actions.edit)}
-    {btn('回复这条', <Reply size={13} />, actions.quote)}
-    {m.content && btn('复制', copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />, copy)}
-    {recent && btn('撤回', <Undo2 size={13} />, actions.recall)}
-    {m.role === 'assistant' && btn('重新回答', <RotateCcw size={13} />, actions.regenerate)}
+    {recent && m.content && btn(tx('编辑'), <Pencil size={13} />, actions.edit)}
+    {btn(tx('回复这条'), <Reply size={13} />, actions.quote)}
+    {m.content && btn(tx('复制'), copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />, copy)}
+    {recent && btn(tx('撤回'), <Undo2 size={13} />, actions.recall)}
+    {m.role === 'assistant' && btn(tx('重新回答'), <RotateCcw size={13} />, actions.regenerate)}
     {!mine && time}
   </div>
 }
@@ -391,15 +390,15 @@ function EditBox({ m, onCancel, onSave }: { m: Message; onCancel(): void; onSave
   const ok = value.trim() && value.trim() !== m.content
   return <div className="ml-auto max-w-[85%]">
     <div className="rounded-[20px] border-2 border-accent bg-panel px-4 pt-2.5 pb-2">
-      <textarea ref={ref} value={value} onChange={e => setValue(e.target.value)} aria-label="改这条消息" rows={1}
+      <textarea ref={ref} value={value} onChange={e => setValue(e.target.value)} aria-label={tx('改这条消息')} rows={1}
         onKeyDown={e => { if (e.key === 'Escape') onCancel(); else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (ok) onSave(value.trim()) } }}
         className="w-full min-w-[260px] resize-none bg-transparent text-[15px] outline-none" />
       <div className="mt-1 flex justify-end gap-1.5">
-        <button onClick={onCancel} className="press h-8 rounded-full border border-line px-3.5 text-[13px] hover:border-faint">取消</button>
-        <button onClick={() => ok && onSave(value.trim())} disabled={!ok} className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-40">改好了，发</button>
+        <button onClick={onCancel} className="press h-8 rounded-full border border-line px-3.5 text-[13px] hover:border-faint">{tx('取消')}</button>
+        <button onClick={() => ok && onSave(value.trim())} disabled={!ok} className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-40">{tx('改好了，发')}</button>
       </div>
     </div>
-    <p className="mt-1 text-right text-[11px] text-faint">改了以后，它按新的说法重新做；之前那条作废</p>
+    <p className="mt-1 text-right text-[11px] text-faint">{tx('改了以后，它按新的说法重新做；之前那条作废')}</p>
   </div>
 }
 
@@ -440,17 +439,17 @@ function Composer({ text, setText, inputRef, onSend, disabled, placeholder, file
       <PendingFiles files={files} onRemove={onRemoveFile} />
     <div className="flex items-end gap-1">
       {voice.listening ? <Wave /> : <PlusMenu onPick={prefill} onFile={() => picker.current?.click()} onCompact={onCompact} />}
-      <textarea ref={inputRef} value={text} rows={1} autoFocus placeholder={disabled ? '先接上一个模型，才能聊' : voice.listening ? '在听…' : placeholder}
-        disabled={disabled} onChange={e => setText(e.target.value)} aria-label="消息"
+      <textarea ref={inputRef} value={text} rows={1} autoFocus placeholder={disabled ? tx('先接上一个模型，才能聊') : voice.listening ? tx('在听…') : placeholder}
+        disabled={disabled} onChange={e => setText(e.target.value)} aria-label={tx('消息')}
         onPaste={e => { const pasted = Array.from(e.clipboardData.files); if (pasted.length) { e.preventDefault(); onFiles(pasted) } }}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
         className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] outline-none placeholder:text-faint focus-visible:outline-none" />
       {voice.listening && <Elapsed />}
-      {voice.listening ? <button onClick={voice.stop} aria-label="停止" title="停止" className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><Square size={13} fill="currentColor" /></button>
-        : ready ? <button onClick={submit} aria-label="发送" className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><ArrowUp size={18} /></button>
-        : !prefs.voiceInput ? <button disabled aria-label="发送" className="flex size-9 shrink-0 items-center justify-center rounded-full text-faint opacity-60"><ArrowUp size={18} /></button>
-        : <button onClick={voice.toggle} disabled={disabled || !voice.supported} aria-label={voice.listening ? '停止' : '说话'} aria-pressed={voice.listening}
-          title={voice.supported ? (voice.listening ? '停止' : '说话') : '这里用不了语音输入'}
+      {voice.listening ? <button onClick={voice.stop} aria-label={tx('停止')} title={tx('停止')} className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><Square size={13} fill="currentColor" /></button>
+        : ready ? <button onClick={submit} aria-label={tx('发送')} className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><ArrowUp size={18} /></button>
+        : !prefs.voiceInput ? <button disabled aria-label={tx('发送')} className="flex size-9 shrink-0 items-center justify-center rounded-full text-faint opacity-60"><ArrowUp size={18} /></button>
+        : <button onClick={voice.toggle} disabled={disabled || !voice.supported} aria-label={voice.listening ? tx('停止') : tx('说话')} aria-pressed={voice.listening}
+          title={voice.supported ? (voice.listening ? tx('停止') : tx('说话')) : tx('这里用不了语音输入')}
           className={cx('press relative flex size-9 shrink-0 items-center justify-center rounded-full disabled:opacity-40', voice.listening ? 'bg-accent text-accent-fg' : 'text-muted hover:bg-sunken hover:text-fg')}>
           {voice.listening && <span className="ping-soft absolute inset-0 rounded-full bg-accent" aria-hidden />}
           <Mic size={18} className="relative" /></button>}
@@ -489,14 +488,14 @@ function PlusMenu({ onPick, onFile, onCompact }: { onPick(text: string): void; o
   const item = (icon: React.ReactNode, label: string, run: () => void) => <button role="menuitem" onClick={() => { setOpen(false); run() }}
     className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm hover:bg-sunken">{icon}{label}</button>
   return <div ref={ref} className="relative">
-    <button onClick={() => setOpen(v => !v)} aria-label="更多" aria-expanded={open}
+    <button onClick={() => setOpen(v => !v)} aria-label={tx('更多')} aria-expanded={open}
       className={cx('press flex size-9 shrink-0 items-center justify-center rounded-full text-muted hover:bg-sunken hover:text-fg', open && 'bg-sunken text-fg')}>
       <Plus size={19} className={cx('transition-transform duration-200 ease-out', open && 'rotate-45')} /></button>
     {open && <div role="menu" className="anim-menu absolute bottom-11 left-0 z-20 w-48 rounded-2xl border border-line bg-panel p-1 shadow-xl [transform-origin:bottom_left]">
-      {item(<Paperclip size={15} className="text-muted" />, '添加文件…', onFile)}
-      {item(<AlarmClock size={15} className="text-muted" />, '定时提醒我…', () => onPick('每天早上 9 点提醒我'))}
-      {item(<ArrowUpRight size={15} className="text-muted" />, '帮我盯着…', () => onPick('帮我盯着'))}
-      {onCompact && <><div className="mx-2 my-1 h-px bg-line" />{item(<Layers size={15} className="text-muted" />, '整理一下前面的', onCompact)}</>}
+      {item(<Paperclip size={15} className="text-muted" />, tx('添加文件…'), onFile)}
+      {item(<AlarmClock size={15} className="text-muted" />, tx('定时提醒我…'), () => onPick(tx('每天早上 9 点提醒我')))}
+      {item(<ArrowUpRight size={15} className="text-muted" />, tx('帮我盯着…'), () => onPick(tx('帮我盯着')))}
+      {onCompact && <><div className="mx-2 my-1 h-px bg-line" />{item(<Layers size={15} className="text-muted" />, tx('整理一下前面的'), onCompact)}</>}
     </div>}
   </div>
 }

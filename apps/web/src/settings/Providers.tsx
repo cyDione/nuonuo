@@ -9,20 +9,21 @@ import { api, type Preset, type Price, type Provider } from '../api'
 import { go } from '../route'
 import { Block, Btn, NumberInput, Page, Pill, Row, Section, TextInput } from './kit'
 import { useCatalog, useModelOptions, useProviders } from './hooks'
+import { tx } from '../i18n'
 
-const KIND_LABEL: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Gemini', deepseek: 'DeepSeek', 'openai-compatible': 'OpenAI 兼容', typesafe: '决策接口' }
+const KIND_LABEL: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Gemini', deepseek: 'DeepSeek', 'openai-compatible': tx('OpenAI 兼容'), typesafe: tx('决策接口') }
 const host = (url: string | null) => (url ?? '').replace(/^https?:\/\//, '').replace(/\/$/, '')
-const keyWhere = (p: Provider) => p.keyEnv ? `环境变量 ${p.keyEnv}` : p.hasKey ? '密钥在钥匙串里' : '没有密钥'
+const keyWhere = (p: Provider) => p.keyEnv ? tx('环境变量 {0}', p.keyEnv) : p.hasKey ? tx('密钥在钥匙串里') : tx('没有密钥')
 
 export function Providers({ item }: { item?: string }) {
   const providers = useProviders()
   const [adding, setAdding] = useState(false)
   const list = providers.data?.providers ?? []
   const open = item ? list.find(p => p.id === item) : undefined
-  return <Page title="模型供应商" action={<Btn tone="ink" className="h-[32px] rounded-[10px]" onClick={() => { setAdding(true); if (item) go('/settings/providers') }}><Plus size={15} />添加</Btn>}>
-    <Section foot="API key 存在系统钥匙串里（或加密文件），不进数据库、不进模型上下文，也不会传给任务的命令行。">
+  return <Page title={tx('模型供应商')} action={<Btn tone="ink" className="h-[32px] rounded-[10px]" onClick={() => { setAdding(true); if (item) go('/settings/providers') }}><Plus size={15} />{tx('添加')}</Btn>}>
+    <Section foot={tx('API key 存在系统钥匙串里（或加密文件），不进数据库、不进模型上下文，也不会传给任务的命令行。')}>
       {list.map(p => <ProviderRow key={p.id} p={p} />)}
-      {providers.isSuccess && !list.length && <Row label="还没有模型供应商" sub="先加一个（Anthropic、OpenAI，或本机的 Ollama），再到「分层模型」给主 Agent 选模型。" />}
+      {providers.isSuccess && !list.length && <Row label={tx('还没有模型供应商')} sub={tx('先加一个（Anthropic、OpenAI，或本机的 Ollama），再到「分层模型」给主 Agent 选模型。')} />}
     </Section>
     {adding && !open && <AddProvider onDone={id => { setAdding(false); if (id) go(`/settings/providers/${id}`) }} />}
     {open && <ProviderDetail key={open.id} p={open} />}
@@ -31,10 +32,10 @@ export function Providers({ item }: { item?: string }) {
 
 function ProviderRow({ p }: { p: Provider }) {
   const live = useModelOptions(p)
-  const state = p.kind === 'typesafe' ? null : live.loading ? <Pill>在试</Pill> : live.error ? <Pill tone="danger">连不上</Pill> : live.models.length ? <Pill tone="ok">连得上</Pill> : null
+  const state = p.kind === 'typesafe' ? null : live.loading ? <Pill>{tx('在试')}</Pill> : live.error ? <Pill tone="danger">{tx('连不上')}</Pill> : live.models.length ? <Pill tone="ok">{tx('连得上')}</Pill> : null
   return <Row href={`#/settings/providers/${p.id}`} icon={<KeyRound size={18} />} label={p.name}
-    sub={<span className="line-clamp-1">{[KIND_LABEL[p.kind], host(p.baseUrl), p.kind === 'typesafe' ? '只给审核用' : keyWhere(p)].filter(Boolean).join(' · ')}</span>}>
-    {p.keyEnv && !p.hasKey ? <span className="text-[13px] text-faint">没设置</span> : state}
+    sub={<span className="line-clamp-1">{[KIND_LABEL[p.kind], host(p.baseUrl), p.kind === 'typesafe' ? tx('只给审核用') : keyWhere(p)].filter(Boolean).join(' · ')}</span>}>
+    {p.keyEnv && !p.hasKey ? <span className="text-[13px] text-faint">{tx('没设置')}</span> : state}
   </Row>
 }
 
@@ -59,31 +60,31 @@ function ProviderDetail({ p }: { p: Provider }) {
   const priced = Object.keys(p.options.prices ?? {}).length
   return <>
     <Section title={p.name} foot={patch.error || remove.error ? <span className="text-danger">{((patch.error ?? remove.error) as Error).message}</span> : undefined}>
-      <Row label="名称"><TextInput value={name} onChange={e => setName(e.target.value)} onBlur={() => name.trim() && name.trim() !== p.name && patch.mutate({ name: name.trim() })} /></Row>
-      {compatible && <Row label="Base URL" sub="自动补上 /v1"><TextInput className="w-[300px] font-mono" value={baseUrl} placeholder="https://…/v1"
+      <Row label={tx('名称')}><TextInput value={name} onChange={e => setName(e.target.value)} onBlur={() => name.trim() && name.trim() !== p.name && patch.mutate({ name: name.trim() })} /></Row>
+      {compatible && <Row label="Base URL" sub={tx('自动补上 /v1')}><TextInput className="w-[300px] font-mono" value={baseUrl} placeholder="https://…/v1"
         onChange={e => setBaseUrl(e.target.value)} onBlur={() => baseUrl.trim() !== (p.baseUrl ?? '') && patch.mutate({ baseUrl: baseUrl.trim() || null })} /></Row>}
-      {p.keyEnv ? <Row label="API key" sub={`从环境变量 ${p.keyEnv} 读取${p.hasKey ? ` · ${p.keyHint}` : '（现在没设置）'}`} />
-        : <Row label="API key" sub={p.hasKey ? `在钥匙串里 · ${p.keyHint}` : '还没有密钥'}>
-          {p.hasKey && <Btn tone="danger" onClick={() => { if (confirm(`从钥匙串删掉「${p.name}」的密钥？`)) patch.mutate({ apiKey: null }) }}>移除密钥</Btn>}
-          <Btn onClick={() => setKey(k => (k === null ? '' : null))}>{p.hasKey ? '更换密钥' : '填入密钥'}</Btn>
+      {p.keyEnv ? <Row label="API key" sub={tx('从环境变量 {0} 读取{1}', p.keyEnv, p.hasKey ? ` · ${p.keyHint}` : tx('（现在没设置）'))} />
+        : <Row label="API key" sub={p.hasKey ? tx('在钥匙串里 · {0}', p.keyHint) : tx('还没有密钥')}>
+          {p.hasKey && <Btn tone="danger" onClick={() => { if (confirm(tx('从钥匙串删掉「{0}」的密钥？', p.name))) patch.mutate({ apiKey: null }) }}>{tx('移除密钥')}</Btn>}
+          <Btn onClick={() => setKey(k => (k === null ? '' : null))}>{p.hasKey ? tx('更换密钥') : tx('填入密钥')}</Btn>
         </Row>}
-      {key !== null && <Row label="新的 API key">
+      {key !== null && <Row label={tx('新的 API key')}>
         <TextInput type="password" autoComplete="off" autoFocus value={key} onChange={e => setKey(e.target.value)} placeholder="sk-…" />
-        <Btn tone="ink" disabled={!key || patch.isPending} onClick={() => patch.mutate({ apiKey: key })}>保存</Btn>
+        <Btn tone="ink" disabled={!key || patch.isPending} onClick={() => patch.mutate({ apiKey: key })}>{tx('保存')}</Btn>
       </Row>}
-      {p.kind !== 'typesafe' && <Row label="连通测试" sub={test.isPending || live.loading ? '在试…'
-        : tested ? (tested.ok ? `刚刚 · ${tested.latencyMs}ms · 读到 ${live.models.length} 个模型` : <span className="text-danger">{tested.error?.slice(0, 160)}</span>)
-        : live.error ? <span className="text-danger">读不到模型列表：{live.error.slice(0, 160)}</span> : live.models.length ? `读到 ${live.models.length} 个模型` : '还没试过'}>
-        <Btn disabled={test.isPending || !live.models.length} onClick={() => test.mutate()}>{tested ? '再测一次' : '测一次'}</Btn>
+      {p.kind !== 'typesafe' && <Row label={tx('连通测试')} sub={test.isPending || live.loading ? tx('在试…')
+        : tested ? (tested.ok ? tx('刚刚 · {0}ms · 读到 {1} 个模型', tested.latencyMs, live.models.length) : <span className="text-danger">{tested.error?.slice(0, 160)}</span>)
+        : live.error ? <span className="text-danger">{tx('读不到模型列表：{0}', live.error.slice(0, 160))}</span> : live.models.length ? tx('读到 {0} 个模型', live.models.length) : tx('还没试过')}>
+        <Btn disabled={test.isPending || !live.models.length} onClick={() => test.mutate()}>{tested ? tx('再测一次') : tx('测一次')}</Btn>
       </Row>}
-      {p.kind === 'openai-compatible' && <Row label="决策接口" sub="网关上的 Jev 决策接口；留空会自动找 /systemone、/decisions 等常见路径">
-        <TextInput className="w-[260px] font-mono" value={decisions} placeholder="自动查找" onChange={e => setDecisions(e.target.value)}
+      {p.kind === 'openai-compatible' && <Row label={tx('决策接口')} sub={tx('网关上的 Jev 决策接口；留空会自动找 /systemone、/decisions 等常见路径')}>
+        <TextInput className="w-[260px] font-mono" value={decisions} placeholder={tx('自动查找')} onChange={e => setDecisions(e.target.value)}
           onBlur={() => decisions.trim() !== (p.options.decisionsUrl ?? '') && patch.mutate({ options: { ...p.options, decisionsUrl: decisions.trim() || undefined } })} />
       </Row>}
-      <Row label="价格" sub={`美元 / 百万 token · ${priced ? `${priced} 个模型填了价格` : '还没填'}，用量页才算得出费用`}><Btn onClick={() => setPrices(v => !v)}>{prices ? '收起' : '编辑价格'}</Btn></Row>
+      <Row label={tx('价格')} sub={tx('美元 / 百万 token · {0}，用量页才算得出费用', priced ? tx('{0} 个模型填了价格', priced) : tx('还没填'))}><Btn onClick={() => setPrices(v => !v)}>{prices ? tx('收起') : tx('编辑价格')}</Btn></Row>
       {prices && <Prices p={p} onDone={() => setPrices(false)} />}
-      <Row label="删除这个供应商" sub="用到它的分层会去掉这个模型，密钥也从钥匙串删除">
-        <Btn tone="danger" disabled={remove.isPending} onClick={() => { if (confirm(`删除「${p.name}」？`)) remove.mutate() }}>删除</Btn>
+      <Row label={tx('删除这个供应商')} sub={tx('用到它的分层会去掉这个模型，密钥也从钥匙串删除')}>
+        <Btn tone="danger" disabled={remove.isPending} onClick={() => { if (confirm(tx('删除「{0}」？', p.name))) remove.mutate() }}>{tx('删除')}</Btn>
       </Row>
     </Section>
   </>
@@ -102,18 +103,18 @@ function Prices({ p, onDone }: { p: Provider; onDone(): void }) {
   const grid = 'grid grid-cols-[1fr_72px_72px_72px_24px] items-center gap-1.5'
   return <Block className="space-y-1.5">
     <datalist id={`price-models-${p.id}`}>{models.map(m => <option key={m} value={m} />)}</datalist>
-    <div className={`${grid} text-xs text-faint`}><span>模型</span><span>输入</span><span>输出</span><span>缓存读</span><span /></div>
+    <div className={`${grid} text-xs text-faint`}><span>{tx('模型')}</span><span>{tx('输入')}</span><span>{tx('输出')}</span><span>{tx('缓存读')}</span><span /></div>
     {rows.map((r, i) => <div key={i} className={grid}>
       <TextInput list={`price-models-${p.id}`} className="w-full font-mono" value={r.model} onChange={e => set(i, { model: e.target.value })} />
       {(['input', 'output', 'cacheRead'] as const).map(k => <NumberInput key={k} className="w-full" min={0} step="any" value={r[k] ?? ''} onChange={e => set(i, { [k]: num(e.target.value) })} aria-label={k} />)}
-      <button type="button" onClick={() => setRows(rs => rs.filter((_, j) => j !== i))} aria-label="删掉这一行" className="text-faint hover:text-danger"><Trash2 size={14} /></button>
+      <button type="button" onClick={() => setRows(rs => rs.filter((_, j) => j !== i))} aria-label={tx('删掉这一行')} className="text-faint hover:text-danger"><Trash2 size={14} /></button>
     </div>)}
     <div className="flex items-center gap-2 pt-1">
-      <Btn onClick={() => setRows(rs => [...rs, { model: '' }])}><Plus size={13} />加一行</Btn>
+      <Btn onClick={() => setRows(rs => [...rs, { model: '' }])}><Plus size={13} />{tx('加一行')}</Btn>
       {save.error && <span className="text-xs text-danger">{(save.error as Error).message}</span>}
       <span className="flex-1" />
-      <Btn onClick={onDone}>取消</Btn>
-      <Btn tone="ink" disabled={save.isPending} onClick={() => save.mutate()}>保存价格</Btn>
+      <Btn onClick={onDone}>{tx('取消')}</Btn>
+      <Btn tone="ink" disabled={save.isPending} onClick={() => save.mutate()}>{tx('保存价格')}</Btn>
     </div>
   </Block>
 }
@@ -131,7 +132,7 @@ function AddProvider({ onDone }: { onDone(id?: string): void }) {
     onSuccess: r => { qc.invalidateQueries({ queryKey: ['providers'] }); onDone(r.provider?.id) },
   })
   const compatible = preset?.kind === 'openai-compatible' || preset?.kind === 'typesafe'
-  if (!preset) return <Section title="添加供应商" foot={<button type="button" className="text-muted hover:text-fg" onClick={() => onDone()}>取消</button>}>
+  if (!preset) return <Section title={tx('添加供应商')} foot={<button type="button" className="text-muted hover:text-fg" onClick={() => onDone()}>{tx('取消')}</button>}>
     <Block className="grid grid-cols-2 gap-2 sm:grid-cols-3">
       {catalog.data?.presets.map(p => <button key={p.id} type="button" onClick={() => { setPreset(p); setName(p.label); setBaseUrl(p.baseUrl ?? '') }}
         className="rounded-[10px] border border-line bg-card px-3 py-2.5 text-left hover:border-faint">
@@ -139,17 +140,17 @@ function AddProvider({ onDone }: { onDone(id?: string): void }) {
       </button>)}
     </Block>
   </Section>
-  return <Section title={`添加 ${preset.label}`}>
-    <Row label="名称"><TextInput value={name} onChange={e => setName(e.target.value)} /></Row>
-    {compatible && <Row label="Base URL" sub="接口地址，通常以 /v1 结尾"><TextInput className="w-[300px] font-mono" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://…/v1" /></Row>}
-    <Row label="API key" sub={<>{preset.keyRequired ? '存进系统钥匙串' : '本机服务可以留空'}{preset.docsUrl && <a href={preset.docsUrl} target="_blank" rel="noreferrer" className="ml-1.5 inline-flex items-center gap-0.5 text-accent">去拿一个<ExternalLink size={11} /></a>}</>}>
+  return <Section title={tx('添加 {0}', preset.label)}>
+    <Row label={tx('名称')}><TextInput value={name} onChange={e => setName(e.target.value)} /></Row>
+    {compatible && <Row label="Base URL" sub={tx('接口地址，通常以 /v1 结尾')}><TextInput className="w-[300px] font-mono" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://…/v1" /></Row>}
+    <Row label="API key" sub={<>{preset.keyRequired ? tx('存进系统钥匙串') : tx('本机服务可以留空')}{preset.docsUrl && <a href={preset.docsUrl} target="_blank" rel="noreferrer" className="ml-1.5 inline-flex items-center gap-0.5 text-accent">{tx('去拿一个')}<ExternalLink size={11} /></a>}</>}>
       <TextInput type="password" autoComplete="off" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-…" />
     </Row>
     <Block className="flex flex-wrap items-center justify-end gap-2">
       {create.error && <span className="mr-auto text-xs text-danger">{(create.error as Error).message}</span>}
-      <Btn onClick={() => setPreset(null)}>换一个</Btn>
-      <Btn onClick={() => onDone()}>取消</Btn>
-      <Btn tone="ink" disabled={create.isPending || (preset.keyRequired && !apiKey) || (compatible && !baseUrl)} onClick={() => create.mutate()}>添加</Btn>
+      <Btn onClick={() => setPreset(null)}>{tx('换一个')}</Btn>
+      <Btn onClick={() => onDone()}>{tx('取消')}</Btn>
+      <Btn tone="ink" disabled={create.isPending || (preset.keyRequired && !apiKey) || (compatible && !baseUrl)} onClick={() => create.mutate()}>{tx('添加')}</Btn>
     </Block>
   </Section>
 }

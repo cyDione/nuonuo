@@ -1,13 +1,14 @@
 import { Check, ChevronDown, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cx } from '../ui'
+import { tx } from '../i18n'
 
 /**
  * A model id field with a real list: the arrow opens every model the provider offers (not only those matching what is
  * already typed, as a native datalist does), typing filters it, and the refresh button asks the provider again.
  * Any id can still be typed by hand.
  */
-export function ModelPicker({ value, onChange, models, loading, error, onRefresh, placeholder = '模型 id', tag, className }: {
+export function ModelPicker({ value, onChange, models, loading, error, onRefresh, placeholder = tx('模型 id'), tag, className }: {
   value: string; onChange(v: string): void; models: string[]; loading?: boolean; error?: string; onRefresh(): void
   placeholder?: string; tag?(model: string): string | undefined; className?: string
 }) {
@@ -43,11 +44,11 @@ export function ModelPicker({ value, onChange, models, loading, error, onRefresh
           else if (e.key === 'Enter' && open && shown[active]) { e.preventDefault(); pick(shown[active]!) }
           else if (e.key === 'Escape') setOpen(false)
         }} />
-      <button type="button" aria-label="展开模型列表" onClick={() => (open ? setOpen(false) : show(true))}
+      <button type="button" aria-label={tx('展开模型列表')} onClick={() => (open ? setOpen(false) : show(true))}
         className="grid h-full w-7 place-items-center text-faint hover:text-fg">
         <ChevronDown size={14} className={cx('transition-transform duration-200', open && 'rotate-180')} />
       </button>
-      <button type="button" aria-label="重新拉取模型列表" title={error ? `读取失败：${error}\n点击重试` : '重新拉取模型列表'} onClick={onRefresh} disabled={loading}
+      <button type="button" aria-label={tx('重新拉取模型列表')} title={error ? tx('读取失败：{0}\n点击重试', error) : tx('重新拉取模型列表')} onClick={onRefresh} disabled={loading}
         className={cx('grid h-full w-7 place-items-center border-l border-line hover:text-fg', error ? 'text-danger' : 'text-faint')}>
         <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
       </button>
@@ -63,11 +64,11 @@ export function ModelPicker({ value, onChange, models, loading, error, onRefresh
         </li> })}
       </ul>}
       <div className="flex items-center gap-2 border-t border-line px-3 py-1.5 text-[11px] text-faint">
-        {loading ? '正在读取模型列表…'
-          : error ? <span className="truncate text-danger" title={error}>未能读取模型列表：{error}</span>
-          : shown.length === 0 ? (models.length ? '没有匹配的模型，可直接使用输入的 id' : '供应商没有返回模型，可直接输入 id')
-          : `${shown.length} / ${models.length} 个模型`}
-        <button type="button" onPointerDown={e => e.preventDefault()} onClick={onRefresh} disabled={loading} className="ml-auto shrink-0 text-accent hover:underline disabled:opacity-50">重新拉取</button>
+        {loading ? tx('正在读取模型列表…')
+          : error ? <span className="truncate text-danger" title={error}>{tx('未能读取模型列表：{0}', error)}</span>
+          : shown.length === 0 ? (models.length ? tx('没有匹配的模型，可直接使用输入的 id') : tx('供应商没有返回模型，可直接输入 id'))
+          : tx('{0} / {1} 个模型', shown.length, models.length)}
+        <button type="button" onPointerDown={e => e.preventDefault()} onClick={onRefresh} disabled={loading} className="ml-auto shrink-0 text-accent hover:underline disabled:opacity-50">{tx('重新拉取')}</button>
       </div>
     </div>}
   </div>

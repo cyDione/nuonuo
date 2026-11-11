@@ -6,6 +6,7 @@
 import { ChevronRight } from 'lucide-react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import { cx } from '../ui'
+import { tx } from '../i18n'
 
 export function Page({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return <div className="space-y-6">
@@ -92,18 +93,18 @@ export function Pill({ tone = 'neutral', children }: { tone?: 'ok' | 'danger' | 
 export const Keys = ({ keys, onClick, active, label }: { keys: string[]; onClick?(): void; active?: boolean; label?: string }) =>
   <button type="button" onClick={onClick} aria-label={label} disabled={!onClick}
     className={cx('flex min-h-[26px] items-center gap-1 rounded-[8px] px-1 disabled:cursor-default', active && 'ring-2 ring-accent')}>
-    {active ? <span className="px-2 text-xs text-muted">按下新的组合键…</span>
+    {active ? <span className="px-2 text-xs text-muted">{tx('按下新的组合键…')}</span>
       : keys.length ? keys.map((k, i) => <kbd key={i} className="flex h-[24px] min-w-[24px] items-center justify-center rounded-[6px] border border-line bg-card px-1.5 font-sans text-xs">{k}</kbd>)
-      : <span className="px-2 text-xs text-faint">未设置</span>}
+      : <span className="px-2 text-xs text-faint">{tx('未设置')}</span>}
   </button>
 
 /** Unsaved changes: 还原 and 保存 at the end of a page, with the error if saving failed. */
-export function SaveBar({ dirty, pending, error, onReset, onSave, label = '保存', extra }: { dirty: boolean; pending?: boolean; error?: unknown; onReset(): void; onSave(): void; label?: string; extra?: ReactNode }) {
+export function SaveBar({ dirty, pending, error, onReset, onSave, label = tx('保存'), extra }: { dirty: boolean; pending?: boolean; error?: unknown; onReset(): void; onSave(): void; label?: string; extra?: ReactNode }) {
   if (!dirty && !error && !extra) return null
   return <div className="flex flex-wrap items-center justify-end gap-2">
     {Boolean(error) && <span className="mr-auto text-xs text-danger">{(error as Error).message}</span>}
     {extra}
-    {dirty && <><Btn onClick={onReset}>还原</Btn><Btn tone="ink" onClick={onSave} disabled={pending}>{label}</Btn></>}
+    {dirty && <><Btn onClick={onReset}>{tx('还原')}</Btn><Btn tone="ink" onClick={onSave} disabled={pending}>{label}</Btn></>}
   </div>
 }
 

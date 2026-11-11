@@ -1,4 +1,5 @@
 import { AlarmClock, Mail, MessageSquare, Rss, Send, Shield } from 'lucide-react'
+import { tx } from './i18n'
 
 /** The GitHub mark (lucide no longer ships brand icons). */
 export function GithubIcon({ size = 14, className }: { size?: number; className?: string }) {
@@ -17,4 +18,4 @@ export function SourceIcon({ source, size = 14, className }: { source: string; s
   return <MessageSquare size={size} {...(className ? { className } : {})} />
 }
 
-export const SOURCE_LABEL: Record<string, string> = { github: 'GitHub', cron: '定时任务', webchat: '对话', watchdog: 'Watchdog', telegram: 'Telegram', gmail: 'Gmail', rss: 'RSS' }
+export const SOURCE_LABEL: Record<string, string> = { github: 'GitHub', cron: tx('定时任务'), webchat: tx('对话'), watchdog: 'Watchdog', telegram: 'Telegram', gmail: 'Gmail', rss: 'RSS' }

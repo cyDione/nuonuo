@@ -1,6 +1,7 @@
 /** Small shared controls built on the theme tokens in index.css. */
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { locale, tx } from './i18n'
 
 const cx = (...parts: (string | false | undefined | null)[]) => parts.filter(Boolean).join(' ')
 export { cx }
@@ -64,7 +65,7 @@ export function Modal({ title, onClose: done, children, footer }: { title: strin
     <div role="dialog" aria-modal="true" aria-label={title} className={cx('anim-pop w-full max-w-lg rounded-3xl border border-line bg-panel shadow-2xl', leaving && 'out-pop')}>
       <div className="flex items-center justify-between px-6 pt-5 pb-3">
         <h2 className="font-display text-lg font-semibold">{title}</h2>
-        <IconButton label="关闭" onClick={onClose}><X size={18} /></IconButton>
+        <IconButton label={tx('关闭')} onClick={onClose}><X size={18} /></IconButton>
       </div>
       <div className="max-h-[70vh] space-y-4 overflow-y-auto px-6 pb-5">{children}</div>
       {footer && <div className="flex items-center justify-end gap-2 border-t border-line px-6 py-3.5">{footer}</div>}
@@ -85,7 +86,7 @@ export function Empty({ icon, title, children, action }: { icon?: ReactNode; tit
   </div>
 }
 
-export const fmtNum = (n: number | null | undefined) => (n ?? 0).toLocaleString('zh-CN')
+export const fmtNum = (n: number | null | undefined) => (n ?? 0).toLocaleString(locale)
 export const fmtUsd = (n: number | null | undefined) => (n == null ? '—' : `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`)
 
 /** A clickable row in a settings list that opens the item's own page. */

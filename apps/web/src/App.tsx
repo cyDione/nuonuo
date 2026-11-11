@@ -20,6 +20,7 @@ import { Avatar, BRAND, Mascot, statusLine, usePersona } from './persona'
 import { cx, IconButton } from './ui'
 import { useSettingsShortcut } from './More'
 import { SearchButton, SearchDialog } from './search'
+import { tx } from './i18n'
 
 export function App() {
   const route = useRoute()
@@ -98,16 +99,16 @@ function MobileBar({ onMenu }: { onMenu(): void }) {
   const status = statusLine(tickets)
   const waiting = tickets.filter(needsOwner).length
   return <div className="flex h-14 shrink-0 items-center gap-1 px-2 pt-[env(safe-area-inset-top)] md:hidden">
-    <IconButton label="打开菜单" onClick={onMenu} className="size-10 text-fg"><Menu size={20} /></IconButton>
+    <IconButton label={tx('打开菜单')} onClick={onMenu} className="size-10 text-fg"><Menu size={20} /></IconButton>
     <button onClick={() => openActivity(true)} className="press flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1 py-1 text-left">
       <Avatar persona={persona} size={30} mood={connected ? status.tone : 'sleepy'} />
       <span className="min-w-0">
         <span className="block truncate font-display text-[15px] leading-tight font-semibold">{persona.name}</span>
-        <span className="flex items-center gap-1.5 truncate text-[11px] text-faint"><StatusDot tone={connected ? status.tone : 'offline'} /><span className="truncate">{connected ? status.text : '重连中…'}</span></span>
+        <span className="flex items-center gap-1.5 truncate text-[11px] text-faint"><StatusDot tone={connected ? status.tone : 'offline'} /><span className="truncate">{connected ? status.text : tx('重连中…')}</span></span>
       </span>
     </button>
     <SearchButton />
-    <button onClick={() => openActivity(true)} aria-label="今天" className={cx('press mr-1 flex h-9 items-center gap-1 rounded-full px-3 text-[13px] font-semibold tabular-nums', waiting ? 'bg-warn-soft text-warn' : 'text-muted')}>
+    <button onClick={() => openActivity(true)} aria-label={tx('今天')} className={cx('press mr-1 flex h-9 items-center gap-1 rounded-full px-3 text-[13px] font-semibold tabular-nums', waiting ? 'bg-warn-soft text-warn' : 'text-muted')}>
       <Inbox size={16} />{waiting > 0 && <span key={waiting} className="bump">{waiting}</span>}
     </button>
   </div>
@@ -129,7 +130,7 @@ function Shell({ authed, children }: { authed: boolean; children: React.ReactNod
 function Splash() {
   return <div className="flex h-dvh flex-col items-center justify-center gap-4 text-sm text-muted">
     <Mascot color={BRAND} size={72} mood="thinking" />
-    <span className="anim-fade">正在连接本机服务…</span>
+    <span className="anim-fade">{tx('正在连接本机服务…')}</span>
   </div>
 }
 
@@ -143,8 +144,8 @@ function Centered({ children }: { children: React.ReactNode }) {
 function Login() {
   return <Centered>
     <div className="flex justify-center"><Mascot color={BRAND} size={88} mood="waiting" track /></div>
-    <h1 className="font-display text-2xl font-semibold text-balance">先打个招呼</h1>
-    <p className="text-sm text-pretty text-muted">Super-assistant 只接受带访问令牌的请求。在终端运行下面的命令，打开它输出的链接：</p>
+    <h1 className="font-display text-2xl font-semibold text-balance">{tx('先打个招呼')}</h1>
+    <p className="text-sm text-pretty text-muted">{tx('Super-assistant 只接受带访问令牌的请求。在终端运行下面的命令，打开它输出的链接：')}</p>
     <pre className="rounded-2xl bg-ink px-4 py-3 text-left font-mono text-sm text-ink-fg">super-assistant token</pre>
   </Centered>
 }
@@ -152,8 +153,8 @@ function Login() {
 function Offline({ message }: { message: string }) {
   return <Centered>
     <div className="flex justify-center"><Mascot color={BRAND} size={88} mood="sleepy" /></div>
-    <h1 className="font-display text-2xl font-semibold text-balance">连不上本机服务</h1>
-    <p className="text-sm text-pretty text-muted">请确认 <code className="rounded bg-sunken px-1.5 py-0.5 font-mono">super-assistant start</code> 正在运行。</p>
+    <h1 className="font-display text-2xl font-semibold text-balance">{tx('连不上本机服务')}</h1>
+    <p className="text-sm text-pretty text-muted">{tx('请确认')} <code className="rounded bg-sunken px-1.5 py-0.5 font-mono">super-assistant start</code> {tx('正在运行。')}</p>
     <p className="text-xs break-words text-faint">{message}</p>
   </Centered>
 }

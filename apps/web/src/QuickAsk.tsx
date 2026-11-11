@@ -15,6 +15,7 @@ import { MOD } from './prefs'
 import { desktop } from './shell'
 import { needsOwner, useTickets } from './tasks'
 import { cx } from './ui'
+import { locale, tx } from './i18n'
 
 interface Pick { key: string; icon: LucideIcon; title: string; detail: string; hash: string }
 
@@ -41,9 +42,9 @@ export function QuickAsk() {
   const picks: Pick[] = [
     ...conversations.filter(c => !c.meta.main && !c.archived).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 2)
       .map(c => ({ key: c.id, icon: MessageCircle, title: c.title, detail: c.lastMessage ?? '', hash: `#/c/${c.id}` })),
-    ...(waiting.length ? [{ key: 'waiting', icon: Inbox, title: `${waiting.length} 件事等你`, detail: waiting.slice(0, 2).map(t => t.title).join(' · '), hash: '#/activity' }] : []),
+    ...(waiting.length ? [{ key: 'waiting', icon: Inbox, title: tx('{0} 件事等你', waiting.length), detail: waiting.slice(0, 2).map(t => t.title).join(' · '), hash: '#/activity' }] : []),
     ...routines.filter(r => r.enabled && r.next).sort((a, b) => a.next! - b.next!).slice(0, 1)
-      .map(r => ({ key: r.id, icon: AlarmClock, title: r.name, detail: new Date(r.next!).toLocaleString('zh-CN', { weekday: 'short', hour: '2-digit', minute: '2-digit' }), hash: r.conversationId ? `#/c/${r.conversationId}` : '#/settings/routines' })),
+      .map(r => ({ key: r.id, icon: AlarmClock, title: r.name, detail: new Date(r.next!).toLocaleString(locale, { weekday: 'short', hour: '2-digit', minute: '2-digit' }), hash: r.conversationId ? `#/c/${r.conversationId}` : '#/settings/routines' })),
   ]
 
   // Each time the window comes back, start fresh with the cursor in the box.
@@ -75,16 +76,16 @@ export function QuickAsk() {
     <div className="w-full max-w-[600px] overflow-hidden rounded-[22px] border border-line bg-panel/95 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.45)] backdrop-blur-xl" onKeyDown={onKey}>
       <div className="drag flex items-center gap-3 px-4 py-3.5">
         <Avatar persona={persona} size={30} mood={sentAt && !answer ? 'thinking' : text ? 'listening' : 'idle'} />
-        <input ref={input} autoFocus value={text} onChange={e => setText(e.target.value)} placeholder={`问${persona.name}，或者交给它一件事…`} aria-label="快问"
+        <input ref={input} autoFocus value={text} onChange={e => setText(e.target.value)} placeholder={tx('问{0}，或者交给它一件事…', persona.name)} aria-label={tx('快问')}
           className="no-drag min-w-0 flex-1 bg-transparent text-[17px] outline-none placeholder:text-faint focus-visible:outline-none" />
-        <button onClick={() => void send()} disabled={!text.trim()} aria-label="交给它"
+        <button onClick={() => void send()} disabled={!text.trim()} aria-label={tx('交给它')}
           className={cx('press no-drag flex size-9 shrink-0 items-center justify-center rounded-full transition-colors', text.trim() ? 'bg-accent text-accent-fg' : 'bg-sunken text-faint')}><ArrowUp size={17} /></button>
       </div>
       {sentAt ? <div className="anim-rise max-h-[50vh] overflow-y-auto border-t border-line px-5 py-4 text-[14px]">
         {answer ? <div className="prose-chat selectable"><ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown>{draft && <span className="caret" />}</div>
-          : <span className="flex items-center gap-2 text-faint">已交给{persona.name}，它在想…</span>}
+          : <span className="flex items-center gap-2 text-faint">{tx('已交给{0}，它在想…', persona.name)}</span>}
       </div> : picks.length > 0 && <div className="border-t border-line px-2 pt-2 pb-1.5">
-        <div className="px-2.5 pb-1 text-[11px] font-medium text-faint">接着聊</div>
+        <div className="px-2.5 pb-1 text-[11px] font-medium text-faint">{tx('接着聊')}</div>
         {picks.map((p, i) => <button key={p.key} onMouseEnter={() => setSel(i)} onClick={() => open(p.hash)}
           className={cx('flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors', i === sel ? 'bg-accent-soft' : '')}>
           <span className={cx('flex size-7 shrink-0 items-center justify-center rounded-lg', i === sel ? 'bg-accent text-accent-fg' : 'bg-sunken text-muted')}><p.icon size={14} /></span>
@@ -93,7 +94,7 @@ export function QuickAsk() {
         </button>)}
       </div>}
       <div className="flex gap-4 border-t border-line bg-sunken/40 px-4 py-2 text-[11px] text-faint">
-        <span>↵ 交给{persona.name}</span><span>{MOD}↵ 在主窗口打开</span><span>esc 收起</span>
+        <span>{tx('↵ 交给{0}', persona.name)}</span><span>{tx('{0}↵ 在主窗口打开', MOD)}</span><span>{tx('esc 收起')}</span>
       </div>
     </div>
   </div>

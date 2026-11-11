@@ -13,6 +13,7 @@ import { useIdeas } from './ideas'
 import { getPrefs, keyLabel, matchesKey, MOD, usePrefs } from './prefs'
 import { go, type Route } from './route'
 import { cx } from './ui'
+import { tx } from './i18n'
 
 /** ⌘, opens the full settings from anywhere. */
 export function useSettingsShortcut() {
@@ -27,10 +28,10 @@ export function useSettingsShortcut() {
 
 type Page = 'activity' | 'ideas' | 'goals' | 'library'
 const PAGES: { id: Page; label: string; icon: LucideIcon; path: string }[] = [
-  { id: 'activity', label: '动态', icon: Newspaper, path: '/activity' },
-  { id: 'ideas', label: '点子', icon: Lightbulb, path: '/ideas' },
-  { id: 'goals', label: '目标', icon: Target, path: '/goals' },
-  { id: 'library', label: '成果', icon: Package, path: '/library' },
+  { id: 'activity', label: tx('动态'), icon: Newspaper, path: '/activity' },
+  { id: 'ideas', label: tx('点子'), icon: Lightbulb, path: '/ideas' },
+  { id: 'goals', label: tx('目标'), icon: Target, path: '/goals' },
+  { id: 'library', label: tx('成果'), icon: Package, path: '/library' },
 ]
 
 export function More({ route }: { route: Route }) {
@@ -43,8 +44,8 @@ export function More({ route }: { route: Route }) {
   const update = useQuery({ queryKey: ['update'], queryFn: () => api.get<UpdateStatus>('/update'), refetchInterval: 30 * 60_000, retry: false }).data
   const current = PAGES.find(p => p.id === route.page)?.id
   const news: Partial<Record<Page, string>> = {
-    ...(fresh > 0 && current !== 'activity' ? { activity: `${fresh} 条新的` } : {}),
-    ...(freshIdeas && current !== 'ideas' ? { ideas: '今天一批' } : {}),
+    ...(fresh > 0 && current !== 'activity' ? { activity: tx('{0} 条新的', fresh) } : {}),
+    ...(freshIdeas && current !== 'ideas' ? { ideas: tx('今天一批') } : {}),
   }
   const dot = Object.keys(news).length > 0 || !!update?.available
   const list = useRef<HTMLDivElement>(null)
@@ -59,14 +60,12 @@ export function More({ route }: { route: Route }) {
   }
   const shortcut = prefs.keys.settings ? keyLabel(prefs.keys.settings).join(MOD === 'Ctrl' ? '+' : '') : ''
   return <Popover open={open} onOpenChange={setOpen}>
-    <PopoverTrigger aria-label="更多页面和设置" className={cx('press flex h-8 items-center gap-1.5 rounded-[10px] pr-2.5 pl-2 text-[13px] transition-colors duration-150',
+    <PopoverTrigger aria-label={tx('更多页面和设置')} className={cx('press flex h-8 items-center gap-1.5 rounded-[10px] pr-2.5 pl-2 text-[13px] transition-colors duration-150',
       current ? 'bg-accent-soft font-medium text-accent' : open ? 'bg-sunken text-fg' : 'text-fg hover:bg-sunken')}>
       <span className="relative">
         <LayoutGrid size={16} />
-        {dot && !current && <span className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-accent ring-[1.5px] ring-bg" aria-label="有新的" />}
-      </span>
-      更多
-    </PopoverTrigger>
+        {dot && !current && <span className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-accent ring-[1.5px] ring-bg" aria-label={tx('有新的')} />}
+      </span> {tx('更多')} </PopoverTrigger>
     <PopoverPortal>
       <PopoverContent side="top" align="start" sideOffset={8} collisionPadding={12} transition={{ type: 'spring', stiffness: 520, damping: 38 }}
         onOpenAutoFocus={e => { e.preventDefault(); list.current?.querySelector<HTMLButtonElement>('[data-row]')?.focus() }}
@@ -74,7 +73,7 @@ export function More({ route }: { route: Route }) {
         <div ref={list} onKeyDown={onKeyDown} className="flex flex-col gap-0.5">
           {PAGES.map(p => <Row key={p.id} icon={p.icon} label={p.label} on={p.id === current} meta={news[p.id]} dot={!!news[p.id]} onClick={() => pick(p.path)} />)}
           <div className="mx-1 my-1 h-px bg-line" />
-          <Row icon={Settings} label="设置" meta={update?.available ? '有新版本' : shortcut} dot={!!update?.available}
+          <Row icon={Settings} label={tx('设置')} meta={update?.available ? tx('有新版本') : shortcut} dot={!!update?.available}
             onClick={() => pick(update?.available ? '/settings/system' : '/settings/persona')} />
         </div>
       </PopoverContent>

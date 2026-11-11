@@ -14,13 +14,14 @@ import { prefillComposer } from './Chat'
 import { Avatar, usePersona } from './persona'
 import { go } from './route'
 import { cx } from './ui'
+import { locale, tx } from './i18n'
 
 const ICONS: Record<GoalIcon, LucideIcon> = { target: Target, moon: Moon, wallet: Wallet, book: BookOpen, run: Footprints, dumbbell: Dumbbell, heart: Heart, music: Music, code: Code, leaf: Leaf, globe: Globe, pen: PenLine }
 const money = (unit: string) => unit === '元' || unit === '¥' || unit === '￥'
-const num = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 1 })
+const num = (n: number) => n.toLocaleString(locale, { maximumFractionDigits: 1 })
 /** "¥6,400 / 12,000", "1 / 2 本", "第 9 / 21 天". */
 export function amount(g: Goal) {
-  if (g.style === 'days') return `${num(g.current)} / ${num(g.target)} 天`
+  if (g.style === 'days') return tx('{0} / {1} 天', num(g.current), num(g.target))
   return money(g.unit) ? `¥${num(g.current)} / ${num(g.target)}` : `${num(g.current)} / ${num(g.target)}${g.unit ? ` ${g.unit}` : ''}`
 }
 const share = (g: Goal) => Math.max(0, Math.min(1, g.target ? g.current / g.target : 0))
@@ -28,7 +29,7 @@ const share = (g: Goal) => Math.max(0, Math.min(1, g.target ? g.current / g.targ
 export const useGoals = () => useQuery({ queryKey: ['goals'], queryFn: () => api.get<{ goals: Goal[]; week: GoalLogEntry[] }>('/goals') })
 
 /** Starts a new goal the way the page says: in the main conversation, with 「我想」 already typed. */
-export function newGoal() { go('/'); prefillComposer('我想') }
+export function newGoal() { go('/'); prefillComposer(tx('我想')) }
 
 /** A bar that fills from empty to the goal's progress when it appears. */
 export function Bar({ value, className, tone = 'ink' }: { value: number; className?: string; tone?: 'ink' | 'white' | 'accent' }) {
@@ -62,34 +63,32 @@ export function GoalsPage() {
   const drop = () => { if (order) reorder.mutate(order); setDragging(null) }
   return <div className="h-full overflow-y-auto">
     <div className="mx-auto max-w-[640px] px-4 pt-6 pb-12 md:px-8">
-      <h1 className="text-[28px] font-semibold">目标</h1>
-      <p className="mt-1 text-sm text-muted">长期的事，{persona.name}帮你记着进度</p>
+      <h1 className="text-[28px] font-semibold">{tx('目标')}</h1>
+      <p className="mt-1 text-sm text-muted">{tx('长期的事，{0}帮你记着进度', persona.name)}</p>
       <div className="mt-6 space-y-3">
         {listed.map(g => <div key={g.id} onDragOver={e => { if (dragging) { e.preventDefault(); over(g.id) } }} onDrop={e => { e.preventDefault(); drop() }}
           className={cx('relative transition-opacity duration-150', dragging === g.id && 'opacity-50')}>
           {listed.length > 1 && <span draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setDragImage(e.currentTarget.parentElement!, 24, 24); setDragging(g.id) }} onDragEnd={drop}
-            aria-label={`拖动「${g.title}」排序`} title="拖动排序" className="absolute top-5 -left-7 hidden cursor-grab text-faint hover:text-fg active:cursor-grabbing md:block"><GripVertical size={16} /></span>}
+            aria-label={tx('拖动「{0}」排序', g.title)} title={tx('拖动排序')} className="absolute top-5 -left-7 hidden cursor-grab text-faint hover:text-fg active:cursor-grabbing md:block"><GripVertical size={16} /></span>}
           {g === featured ? <Featured g={g} steps={steps(g)} /> : <GoalCard g={g} steps={steps(g)} />}
         </div>)}
         <button onClick={newGoal} className="press flex w-full items-center gap-3 rounded-2xl border border-dashed border-line px-5 py-4 text-left text-sm text-muted hover:border-faint hover:text-fg">
-          <Plus size={17} />新目标：跟{persona.name}说一句就行，比如「我想每周跑三次」
-        </button>
+          <Plus size={17} />{tx('新目标：跟{0}说一句就行，比如「我想每周跑三次」', persona.name)} </button>
       </div>
       {data && data.week.length > 0 && <section className="mt-10">
-        <h2 className="mb-3 text-xs text-muted">这周它帮你做的</h2>
+        <h2 className="mb-3 text-xs text-muted">{tx('这周它帮你做的')}</h2>
         <ul className="space-y-2 text-sm">{data.week.slice(0, 8).map(e => <li key={e.id} className="flex gap-3">
           <span className="mt-2 size-1 shrink-0 rounded-full bg-faint" /><span className="min-w-0 flex-1">{e.text}<span className="ml-2 text-xs text-faint">{e.goal}</span></span>
         </li>)}</ul>
       </section>}
       {done.length > 0 && <section className="mt-10">
-        <h2 className="mb-3 text-xs text-muted">完成了</h2>
+        <h2 className="mb-3 text-xs text-muted">{tx('完成了')}</h2>
         <div className="space-y-1">{done.map(g => <div key={g.id} className="flex items-center gap-3 py-1.5 text-sm">
           <Check size={15} className="text-ok" /><span className="flex-1">{g.title}</span><span className="text-xs text-faint tabular-nums">{amount(g)}</span>
         </div>)}</div>
       </section>}
       <div className="mt-10 flex items-center gap-3 text-sm text-muted">
-        <Avatar persona={persona} size={28} mood="happy" />想让它每周跟你对一次进度？在聊天里说一声就行。
-      </div>
+        <Avatar persona={persona} size={28} mood="happy" />{tx('想让它每周跟你对一次进度？在聊天里说一声就行。')} </div>
     </div>
   </div>
 }
@@ -104,12 +103,12 @@ function Featured({ g, steps }: { g: Goal; steps: Goal[] }) {
   return <div data-tone="teal" className="flow anim-rise relative rounded-[22px] px-6 pt-5 pb-5">
     <div className="relative flex items-start">
       <div className="min-w-0 flex-1">
-        <div className="text-xs opacity-80">{g.title}{g.style === 'days' ? ` · 第 ${num(g.current)} / ${num(g.target)} 天` : ''}</div>
+        <div className="text-xs opacity-80">{g.title}{g.style === 'days' ? tx(' · 第 {0} / {1} 天', num(g.current), num(g.target)) : ''}</div>
         <div className="mt-2 flex items-baseline gap-2">
           <span className="text-[52px] leading-none font-semibold tabular-nums">
             {head && !numeric ? head.value : <CountingNumber number={numeric ? big : 0} decimalPlaces={String(head?.value ?? big).includes('.') ? 1 : 0} thousandSeparator="," transition={{ stiffness: 90, damping: 30 }} />}
           </span>
-          <span className="text-sm opacity-85">{head ? head.unit : g.style === 'days' ? '天' : money(g.unit) ? `元 / ${num(g.target)}` : `${g.unit} / ${num(g.target)}`}</span>
+          <span className="text-sm opacity-85">{head ? head.unit : g.style === 'days' ? tx('天') : money(g.unit) ? tx('元 / {0}', num(g.target)) : `${g.unit} / ${num(g.target)}`}</span>
         </div>
         <p className="mt-3 text-sm opacity-90">{head?.note ?? g.note ?? ''}</p>
       </div>
@@ -117,12 +116,12 @@ function Featured({ g, steps }: { g: Goal; steps: Goal[] }) {
       <span className="absolute -top-1 -right-2"><Menu g={g} light /></span>
     </div>
     <div className="relative mt-4">
-      {dots ? <div className="flex flex-wrap gap-2" aria-label={`第 ${g.current} / ${g.target} 天`}>
+      {dots ? <div className="flex flex-wrap gap-2" aria-label={tx('第 {0} / {1} 天', g.current, g.target)}>
         {Array.from({ length: dots }, (_, i) => <span key={i} className={cx('dot-in size-2.5 rounded-full', i < g.current ? 'bg-white' : 'bg-white/30')} style={{ animationDelay: `${i * 30}ms` }} />)}
       </div> : <Bar value={share(g)} tone="white" />}
     </div>
     {steps.length > 0 && <Steps steps={steps} light />}
-    <button onClick={() => { go('/'); prefillComposer(`聊聊「${g.title}」的进度`) }} className="press relative mt-4 h-8 rounded-full bg-white px-3.5 text-[13px] font-medium text-[#0b3d3a]">跟它聊聊</button>
+    <button onClick={() => { go('/'); prefillComposer(tx('聊聊「{0}」的进度', g.title)) }} className="press relative mt-4 h-8 rounded-full bg-white px-3.5 text-[13px] font-medium text-[#0b3d3a]">{tx('跟它聊聊')}</button>
   </div>
 }
 
@@ -146,10 +145,10 @@ function GoalCard({ g, steps }: { g: Goal; steps: Goal[] }) {
 
 /** What is left of a small goal, said plainly: 「还差 ¥1,600」, 「还差 3 天」. */
 function left(g: Goal) {
-  if (g.status === 'done') return '做到了'
+  if (g.status === 'done') return tx('做到了')
   const rest = Math.max(0, g.target - g.current)
-  if (g.style === 'days') return `还差 ${num(rest)} 天`
-  return money(g.unit) ? `还差 ¥${num(rest)}` : `还差 ${num(rest)}${g.unit ? ` ${g.unit}` : ''}`
+  if (g.style === 'days') return tx('还差 {0} 天', num(rest))
+  return money(g.unit) ? tx('还差 ¥{0}', num(rest)) : tx('还差 {0}{1}', num(rest), g.unit ? ` ${g.unit}` : '')
 }
 
 /** The small goals under a goal: a check when done, a circle you can tick when it is. */
@@ -180,18 +179,18 @@ function Suggest({ g }: { g: Goal }) {
   const idea = ideas?.[0]
   if (!idea) return <div className="mt-3 flex items-center gap-2">
     <button onClick={() => ask.mutate()} disabled={ask.isPending} className="press flex h-7 items-center gap-1.5 rounded-full px-2 -ml-2 text-xs text-muted hover:bg-panel hover:text-fg disabled:opacity-60">
-      {ask.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <Sparkles size={13} />}{ideas ? '再想几个小目标' : '拆成几个小目标'}</button>
+      {ask.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <Sparkles size={13} />}{ideas ? tx('再想几个小目标') : tx('拆成几个小目标')}</button>
     {error && <span className="text-xs text-danger">{error}</span>}
   </div>
   return <div className="anim-rise mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-panel px-3.5 py-3">
     <Sparkles size={15} className="shrink-0 self-start text-accent mt-0.5" />
     <span className="min-w-0 flex-1">
-      <span className="block text-xs text-accent">{persona.name}建议加一个小目标</span>
+      <span className="block text-xs text-accent">{tx('{0}建议加一个小目标', persona.name)}</span>
       <span className="mt-0.5 block text-sm">{idea.title}</span>
     </span>
     <span className="flex shrink-0 gap-1.5">
-      <button onClick={() => add.mutate(idea)} disabled={add.isPending} className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-60">加上</button>
-      <button onClick={() => setIdeas(v => v?.slice(1) ?? null)} className="press h-8 rounded-full border border-line px-3.5 text-[13px] hover:border-faint">不用了</button>
+      <button onClick={() => add.mutate(idea)} disabled={add.isPending} className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-60">{tx('加上')}</button>
+      <button onClick={() => setIdeas(v => v?.slice(1) ?? null)} className="press h-8 rounded-full border border-line px-3.5 text-[13px] hover:border-faint">{tx('不用了')}</button>
     </span>
   </div>
 }
@@ -211,13 +210,13 @@ function Menu({ g, light }: { g: Goal; light?: boolean }) {
   const item = (icon: React.ReactNode, label: string, body: Partial<Goal>) => <button role="menuitem" onClick={() => { setOpen(false); patch.mutate(body) }}
     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-fg hover:bg-sunken">{icon}{label}</button>
   return <div ref={ref} className="relative -mt-1 -mr-2">
-    <button onClick={() => setOpen(v => !v)} aria-label="更多" aria-expanded={open}
+    <button onClick={() => setOpen(v => !v)} aria-label={tx('更多')} aria-expanded={open}
       className={cx('press flex size-8 items-center justify-center rounded-full', light ? 'text-white/80 hover:bg-white/15' : 'text-faint opacity-0 group-hover:opacity-100 hover:bg-panel hover:text-fg focus-visible:opacity-100', open && 'opacity-100')}>
       <MoreHorizontal size={16} /></button>
     {open && <div role="menu" className="anim-menu absolute top-9 right-0 z-20 w-36 rounded-2xl border border-line bg-panel p-1 shadow-xl">
-      {!g.pinned && item(<Pin size={14} />, '放到最上面', { pinned: true })}
-      {item(<Check size={14} />, '完成了', { status: 'done' })}
-      {item(<X size={14} />, '不做了', { status: 'dropped' })}
+      {!g.pinned && item(<Pin size={14} />, tx('放到最上面'), { pinned: true })}
+      {item(<Check size={14} />, tx('完成了'), { status: 'done' })}
+      {item(<X size={14} />, tx('不做了'), { status: 'dropped' })}
     </div>}
   </div>
 }

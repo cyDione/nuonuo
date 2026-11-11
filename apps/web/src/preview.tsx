@@ -10,6 +10,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, type Artifact, type Conversation } from './api'
 import { go } from './route'
+import { locale, tx } from './i18n'
 
 export type PreviewKind = 'markdown' | 'csv' | 'image' | 'pdf' | 'html' | 'text' | 'none'
 
@@ -29,7 +30,7 @@ const url = (id: string) => `/api/artifacts/${id}`
 function useText(id: string, enabled: boolean) {
   return useQuery({ queryKey: ['artifact-text', id], enabled, staleTime: 60_000, queryFn: async () => {
     const res = await fetch(url(id), { credentials: 'same-origin' })
-    if (!res.ok) throw new Error(res.status === 404 ? '文件已不存在' : `读取失败（${res.status}）`)
+    if (!res.ok) throw new Error(res.status === 404 ? tx('文件已不存在') : tx('读取失败（{0}）', res.status))
     return res.text()
   } })
 }
@@ -55,9 +56,9 @@ export function ArtifactBody({ id, name }: { id: string; name: string }) {
   const text = useText(id, ['markdown', 'csv', 'html', 'text'].includes(kind))
   if (kind === 'image') return <img src={url(id)} alt={name} className="mx-auto max-h-[70vh] rounded-lg" />
   if (kind === 'pdf') return <iframe src={url(id)} title={name} className="h-[75vh] w-full rounded-lg border border-line" />
-  if (kind === 'none') return <p className="py-10 text-center text-sm text-muted">这种文件没法在这里预览，可以下载后打开。</p>
+  if (kind === 'none') return <p className="py-10 text-center text-sm text-muted">{tx('这种文件没法在这里预览，可以下载后打开。')}</p>
   if (text.error) return <p className="py-10 text-center text-sm text-danger">{(text.error as Error).message}</p>
-  if (!text.data) return <p className="py-10 text-center text-sm text-faint">读取中…</p>
+  if (!text.data) return <p className="py-10 text-center text-sm text-faint">{tx('读取中…')}</p>
   if (kind === 'markdown') return <div className="prose-chat text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{text.data}</ReactMarkdown></div>
   if (kind === 'csv') {
     const rows = parseCsv(text.data, name.toLowerCase().endsWith('.tsv') ? '\t' : ',').slice(0, 500)
@@ -80,12 +81,12 @@ function Source({ id, onGo }: { id: string; onGo(): void }) {
     .data?.conversations.find(c => c.id === artifact?.conversationId)
   if (!artifact) return null
   const main = conversation?.meta.main === true
-  const facts = [new Date(artifact.createdAt).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' }), size(artifact.size)].join(' · ')
+  const facts = [new Date(artifact.createdAt).toLocaleDateString(locale, { month: 'long', day: 'numeric' }), size(artifact.size)].join(' · ')
   return <div className="mt-1.5 flex min-w-0 items-center gap-3">
     {conversation && <button onClick={() => { onGo(); go(main ? '/' : `/c/${conversation.id}`) }}
       className="press group flex min-w-0 items-center gap-1.5 rounded-full bg-sunken py-1 pr-2 pl-2.5 text-xs font-medium hover:bg-hero-2">
       <MessageCircle size={13} className="shrink-0 text-muted" />
-      <span className="truncate">来自 {main ? '主聊' : `侧聊「${conversation.title || artifact.title}」`}</span>
+      <span className="truncate">{tx('来自')} {main ? tx('主聊') : tx('侧聊「{0}」', conversation.title || artifact.title)}</span>
       <ChevronRight size={12} className="shrink-0 text-faint transition-transform duration-200 ease-out group-hover:translate-x-0.5" />
     </button>}
     <span className="shrink-0 text-xs text-faint tabular-nums">{facts}</span>
@@ -104,9 +105,9 @@ export function ArtifactModal({ id, name, onClose }: { id: string; name: string;
       <div className="border-b border-line px-5 py-3">
         <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate font-display font-semibold">{name}</span>
-          <a href={url(id)} target="_blank" rel="noreferrer" className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title="新窗口打开" aria-label="新窗口打开"><ExternalLink size={16} /></a>
-          <a href={`${url(id)}?download=1`} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title="下载" aria-label="下载"><Download size={16} /></a>
-          <button onClick={onClose} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" aria-label="关闭"><X size={18} /></button>
+          <a href={url(id)} target="_blank" rel="noreferrer" className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title={tx('新窗口打开')} aria-label={tx('新窗口打开')}><ExternalLink size={16} /></a>
+          <a href={`${url(id)}?download=1`} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title={tx('下载')} aria-label={tx('下载')}><Download size={16} /></a>
+          <button onClick={onClose} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" aria-label={tx('关闭')}><X size={18} /></button>
         </div>
         <Source id={id} onGo={onClose} />
       </div>

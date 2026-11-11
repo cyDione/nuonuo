@@ -10,9 +10,10 @@ import { api, type Artifact, type Conversation } from './api'
 import { ArtifactModal, previewKind } from './preview'
 import { go } from './route'
 import { Button, cx, Empty, Seg } from './ui'
+import { tx } from './i18n'
 
 type Kind = 'doc' | 'sheet' | 'image' | 'page' | 'other'
-const KIND_LABEL: Record<Kind, string> = { doc: '文档', sheet: '表格', image: '图片', page: '网页', other: '文件' }
+const KIND_LABEL: Record<Kind, string> = { doc: tx('文档'), sheet: tx('表格'), image: tx('图片'), page: tx('网页'), other: tx('文件') }
 const ORDER: Kind[] = ['doc', 'sheet', 'image', 'page', 'other']
 
 function kindOf(name: string): Kind {
@@ -25,7 +26,7 @@ function kindOf(name: string): Kind {
 }
 const day = (at: number) => {
   const d = new Date(at), now = new Date()
-  if (d.toDateString() === now.toDateString()) return '今天'
+  if (d.toDateString() === now.toDateString()) return tx('今天')
   return d.getFullYear() === now.getFullYear() ? `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}` : d.toLocaleDateString()
 }
 const stem = (name: string) => name.replace(/\.[^.]+$/, '')
@@ -43,23 +44,22 @@ export function Library() {
   const kinds = ORDER.filter(k => all.some(a => a.kind === k))
   const shown = all.filter(a => filter === 'all' || a.kind === filter)
     .sort((a, b) => byName ? a.name.localeCompare(b.name, 'zh-CN') : b.createdAt - a.createdAt)
-  const where = (a: Artifact) => !a.conversationId ? null : a.conversationId === mainId ? '主聊' : '侧聊'
+  const where = (a: Artifact) => !a.conversationId ? null : a.conversationId === mainId ? tx('主聊') : tx('侧聊')
 
   return <div className="h-full overflow-y-auto">
     <div className="mx-auto max-w-[56rem] px-4 pt-8 pb-16 md:px-6">
       <header className="anim-rise">
-        <h1 className="font-display text-3xl font-semibold">成果</h1>
-        <p className="mt-1.5 text-sm text-muted">你们一起做出来的东西，安静地放在这里，不会塞进聊天</p>
+        <h1 className="font-display text-3xl font-semibold">{tx('成果')}</h1>
+        <p className="mt-1.5 text-sm text-muted">{tx('你们一起做出来的东西，安静地放在这里，不会塞进聊天')}</p>
       </header>
 
-      {items && !items.length && <div className="mt-10"><Empty icon={<FolderOpen size={26} />} title="还没有东西" action={<Button size="sm" variant="ink" onClick={() => go('/')}>去主聊交代一件事</Button>}>
-        糯糯做完的事如果有文件（报告、表格、图片……），会跟着回复一起发给你，也会放在这里。</Empty></div>}
+      {items && !items.length && <div className="mt-10"><Empty icon={<FolderOpen size={26} />} title={tx('还没有东西')} action={<Button size="sm" variant="ink" onClick={() => go('/')}>{tx('去主聊交代一件事')}</Button>}> {tx('糯糯做完的事如果有文件（报告、表格、图片……），会跟着回复一起发给你，也会放在这里。')}</Empty></div>}
 
       {!!all.length && <div className="mt-7 flex items-center justify-between gap-3">
-        {kinds.length > 1 ? <Seg<'all' | Kind> label="筛选成果" value={filter} onChange={setFilter} className="w-fit"
-          options={[{ id: 'all', label: '全部' }, ...kinds.map(k => ({ id: k, label: KIND_LABEL[k] }))]} /> : <span />}
+        {kinds.length > 1 ? <Seg<'all' | Kind> label={tx('筛选成果')} value={filter} onChange={setFilter} className="w-fit"
+          options={[{ id: 'all', label: tx('全部') }, ...kinds.map(k => ({ id: k, label: KIND_LABEL[k] }))]} /> : <span />}
         <button onClick={() => setByName(v => !v)} className="press flex items-center gap-1 rounded-full px-2 py-1 text-[13px] text-muted hover:text-fg">
-          {byName ? '按名字' : '最近'}<ArrowDownUp size={13} />
+          {byName ? tx('按名字') : tx('最近')}<ArrowDownUp size={13} />
         </button>
       </div>}
 
