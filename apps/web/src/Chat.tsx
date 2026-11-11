@@ -1,6 +1,6 @@
 /**
  * A conversation, the way you message a person (Figma v6): the owner's messages in the theme colour, 糯糯's replies in grey
- * bubbles, several short ones in a row. It answers a message with a tapback first (👌 收到, 👀 在看); while it works, only
+ * bubbles, several short ones in a row. 糯糯 may put a tapback on a message when it fits (👍 认同, 😂 好笑), its own choice; while it works, only
  * a typing bubble shows. No status or process lines ever appear here: what it is doing lives in the right pane. What
  * needs the owner (a yes/no, a question, the browser) arrives as a card.
  */
@@ -60,8 +60,6 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const thinking = routerBusy && last?.role === 'user' && !draft
   // While it works, only the typing bubble shows (never a status line).
   const busy = !draft && (thinking || working.length > 0)
-  const lastUser = messages.findLastIndex(m => m.role === 'user')
-  const lastReply = messages.findLastIndex(m => m.role === 'assistant')
 
   // Follows new messages while you are at the bottom; if you scrolled up to read, a 新消息 button appears instead.
   const atBottom = useRef(true)
@@ -148,7 +146,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
           {messages.map((m, i) => <div key={m.id} className={cx(i > 0 && (messages[i - 1]!.role === m.role ? 'mt-1.5' : 'mt-4'))}>
             <When m={m} prev={messages[i - 1]} name={persona.name} />
             <Item m={m} fresh={m.createdAt > mountedAt}
-              tapback={m.role !== 'user' || m.meta.source && m.meta.source !== 'webchat' ? undefined : m.meta.tapback ?? (i === lastUser && i > lastReply && busy ? '👀' : m.ticketId ? '👌' : undefined)} />
+              tapback={m.role !== 'user' || m.meta.source && m.meta.source !== 'webchat' ? undefined : m.meta.tapback} />
           </div>)}
           {draft && <div className="mt-1.5"><Bubble fresh><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.text}</ReactMarkdown><span className="caret" /></div></Bubble></div>}
           {busy && <div className="mt-4"><Bubble fresh><Typing /></Bubble></div>}
@@ -258,10 +256,10 @@ function Item({ m, fresh, tapback }: { m: Message; fresh: boolean; tapback?: str
 
 const TAPBACK_LABEL: Record<string, string> = { '👌': '收到', '👀': '在看', '😂': '哈哈', '❤️': '谢谢', '👍': '好' }
 const PAGE_OPENED = Date.now()
-/** 糯糯's reaction, sitting on the bottom-left corner of the owner's bubble. It zooms in, with a small burst when it lands live. */
+/** 糯糯's reaction, chosen by the model, sitting on the bottom-right corner (the end) of the owner's bubble. It zooms in, with a small burst when it lands live. */
 function Tapback({ emoji }: { emoji: string }) {
   const [live] = useState(() => Date.now() - PAGE_OPENED > 1500)
-  return <Particles key={emoji} animate={live} style={{ position: 'absolute' }} className="-bottom-3.5 -left-2">
+  return <Particles key={emoji} animate={live} style={{ position: 'absolute' }} className="-right-2 -bottom-3.5">
     <span title={TAPBACK_LABEL[emoji]} aria-label={TAPBACK_LABEL[emoji]}
       className="tapback relative flex h-7 min-w-9 items-center justify-center rounded-full border-2 border-bg bg-bubble px-1.5 text-[14px] leading-none select-none">{emoji}</span>
     {live && <ParticlesEffect count={7} radius={24} spread={360} duration={0.7} sideOffset={-14} className="size-1.5 rounded-full bg-accent" />}

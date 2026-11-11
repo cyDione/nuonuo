@@ -331,9 +331,9 @@ html.quick, html.quick body { background: transparent !important; }
 /* The typing bubble: three dots that light up in turn (MotionGrid). */
 .typing-cell { width: 6px; height: 6px; border-radius: 99px; background: var(--faint); opacity: 0.35; transition: opacity 160ms ease-out, transform 160ms var(--ease-out-strong); }
 .typing-cell[data-active="true"] { opacity: 1; transform: translateY(-1.5px); }
-/* A tapback on the owner's bubble: pops in from the bubble's corner. */
-.tapback { animation: tapback-in 320ms cubic-bezier(0.34, 1.4, 0.64, 1) both; transform-origin: 30% 30%; }
-@keyframes tapback-in { from { opacity: 0; transform: scale(0.4) translate(-6px, -6px) } }
+/* A tapback on the owner's bubble: pops in from the bubble's bottom-right corner (its end). */
+.tapback { animation: tapback-in 320ms cubic-bezier(0.34, 1.4, 0.64, 1) both; transform-origin: 70% 30%; }
+@keyframes tapback-in { from { opacity: 0; transform: scale(0.4) translate(6px, -6px) } }
 /* The switch: an accent track and a white thumb that slides (animate-ui drives the thumb). */
 .toggle { width: 40px; height: 24px; border-radius: 99px; padding: 2px; background: var(--hero-2); transition: background-color 180ms ease; display: inline-flex; flex-shrink: 0; }
 .toggle[data-state="checked"] { background: var(--accent); justify-content: flex-end; }
