@@ -183,53 +183,16 @@ nuonuo start -d
 
 整个系统是一个本机进程：一个 Node 服务、一个 SQLite 文件，加一个可以直接用文本编辑器查看的数据目录。
 
-```mermaid
-flowchart TB
-  subgraph IN["来源（回复也回到这里）"]
-    direction LR
-    web["网页 / 桌面端"] ~~~ tg["Telegram"] ~~~ gh["GitHub"] ~~~ gm["Gmail / 日历"] ~~~ cron["定时任务"] ~~~ plug["第三方插件"]
-  end
-
-  subgraph FILTER["两级过滤"]
-    direction LR
-    fast["Fast Path<br/>程序规则"] --> slow["Slow Path<br/>过滤模型 + 你选的主动程度"]
-  end
-
-  router["主 Agent（糯糯）<br/>常驻 · 没有 shell<br/>分派 · 回复 · 记忆"]
-
-  subgraph WORK["Worker（并行）"]
-    direction LR
-    w1["Worker 1"] ~~~ w2["Worker 2"] ~~~ wn["Worker N"]
-    w1 -.-> sub["子任务"]
-  end
-
-  review{"审核层<br/>规则 + 审核模型"}
-  you(["你：批准 / 回答 / 接管浏览器"])
-
-  subgraph ENV["执行环境（你的电脑）"]
-    direction LR
-    sh["Shell<br/>可选 Docker 沙箱"] ~~~ br["浏览器"] ~~~ mcp["MCP 工具"] ~~~ fs["允许的文件夹 / 本机 App"]
-  end
-
-  subgraph BASE["底座"]
-    direction LR
-    db[("SQLite<br/>会话 · 事件 · 任务 · 记忆 · 审计")] ~~~ wd["Watchdog<br/>每分钟巡检"]
-  end
-
-  IN -- "你直接说的话" --> router
-  IN -- "其他事件" --> FILTER --> router
-  router <-- "开工 · 汇报" --> WORK
-  WORK --> review
-  review -- "放行" --> ENV
-  review -- "高风险" --> you
-  you -- "批准" --> ENV
-  ENV ~~~ BASE
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/architecture-dark.svg" />
+  <img src="docs/assets/readme/architecture-light.svg" width="100%" alt="架构图：来源的事件里，你直接说的话直接交给主 Agent 糯糯，其他事件先过两级过滤，值得看的进动态和点子；糯糯没有 shell，只把事情派给并行的 Worker；Worker 的动作先过审核，放行的进执行环境，高风险的先问你；底座是 SQLite 和每分钟巡检的 Watchdog" />
+</picture>
 
 - **主 Agent 和 Worker 分开**：主 Agent 常驻，负责分派和回复，用快而便宜的模型；Worker 每件事一个，用最强的模型，只向主 Agent 汇报。
 - **事件驱动**：网页消息、GitHub 评论、邮件、定时任务都统一成 Trigger。一件事开工后，同一线程的后续事件由程序直接送给负责它的 Worker，不再经过主 Agent（订阅直通）。
 - **无状态循环**：每一步都从 SQLite 重建上下文，进程随时可以重启。长输出存到窗口外，窗口里只留引用，需要时用 `recall` 取回。
 - **全双工**：新消息在推理步之间注入；耗时命令自动转到后台，跑完再继续。
+- **记忆走旁路**：对话安静下来以后，便宜的模型先筛一遍（留 / 待确认 / 丢），再提炼成一到三条记忆并带上原话出处。回复你从不等它。
 - **外部 Watchdog**：一个独立的会话每分钟巡检一次，发现卡住或死循环的任务，就提醒它、重启它，或者告诉你。主 Agent 自己 3 分钟没动静也会被切掉重来。
 - **数据会自己收拾**：运行数据定期清理；原始事件和审核记录在「设置 · 数据和隐私 · 原始记录」里能看到。
 
