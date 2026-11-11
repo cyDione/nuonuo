@@ -38,7 +38,8 @@ super-assistant service install                         # 开机自启（systemd
 
 **macOS / Windows 桌面端**：下载对应的安装包安装即可。应用自带服务，关掉窗口后留在托盘里继续工作。默认只有应用窗口能用；想在浏览器（或手机等局域网设备）里打开，到「设置 → 系统 → 网页访问」勾选「允许在浏览器里打开」，选「仅本机」或「局域网」并设置端口，点「重启服务」，再复制登录链接。
 
-- macOS 包没有 Apple 开发者签名（只做了 ad-hoc 签名）。第一次打开如果提示「已损坏」或「无法验证开发者」，运行 `xattr -dr com.apple.quarantine /Applications/Super-assistant.app`，或在 Finder 里右键 →「打开」。
+- macOS 可以不下载 dmg，直接在终端运行 `curl -fsSL https://raw.githubusercontent.com/cyDione/super-assistant/main/install.sh | bash`：它下载对应芯片的 zip，装进 `/Applications`（没有写权限时装进 `~/Applications`），再运行一次就是更新（先退出应用）。curl 下载的文件没有「来自互联网」的隔离标记，所以没有开发者签名时也能直接打开。
+- 发布流程配好 Apple 开发者证书（见下面「macOS 签名和公证」）之前，macOS 包只有 ad-hoc 签名。浏览器下载的 dmg 第一次打开会提示「无法验证开发者」或「已损坏」。打开 dmg 之前先运行 `xattr -cr /路径/super-assistant-<版本>-mac-<芯片>.dmg` 清掉隔离标记，从里面拖出来的应用就不会被拦；已经装好的，运行 `xattr -dr com.apple.quarantine /Applications/Super-assistant.app`，或到「系统设置 → 隐私与安全性」点「仍要打开」。
 - Windows 包没有代码签名，SmartScreen 提示时点「更多信息 → 仍要运行」。
 - 桌面端有新版本时，「设置 → 系统 → 版本更新」会提示并给出下载链接，下载新安装包覆盖安装即可。
 
@@ -83,6 +84,10 @@ loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运�
 
 **5. 可选**：
 - **自己打包**：Linux 无桌面包 `pnpm build && bash scripts/package-linux.sh`（打的是本机 CPU 的包）；桌面端 `pnpm build`，再在 `apps/desktop` 里运行 `pnpm dist:mac` / `pnpm dist:win`（同样只能打本机系统和 CPU 的包）。GitHub Actions 的 “Release” 工作流在 6 台对应的机器上打全部的包；推送 `v*` 标签时自动发布 Release。发版前先用 `pnpm set-version 0.2.0` 把所有包改成同一个版本号并提交，再打 `v0.2.0` 标签；标签和版本号不一致时，工作流会报错并且不发布。也可以不打标签：在 Actions → Release → Run workflow 里填版本号（和可选的发布说明）手动运行，6 个包都打成功后，工作流自己创建 `v0.2.0` 标签和 Release；这个版本已经有标签或 Release 时，它直接报错，不会重复发布。已经发布的版本打包中途停了，就勾上 rebuild 再运行一次，它会按原来的标签重新打包，并把包传到原来的 Release 上。
+- **macOS 签名和公证**：Release 工作流发版时，如果仓库配了下面这些 Actions secrets（仓库 Settings → Secrets and variables → Actions → New repository secret），就用 Developer ID 证书签名、开启 hardened runtime，并交给 Apple 公证，用户下载 dmg 后可以直接打开。没配时照旧 ad-hoc 签名，工作流只给一个警告；只配了证书、没配公证方式时，工作流报错停下（签了名但没公证，照样会被拦）。拉取请求和只打包不发布的运行都不签名。
+  - `MAC_CERT_P12_BASE64`：「Developer ID Application」证书连同私钥导出的 .p12，转成 base64（`base64 -i cert.p12 | pbcopy`）；`MAC_CERT_PASSWORD`：导出 .p12 时设的密码。
+  - 公证用 App Store Connect API 密钥（推荐）：`APPLE_API_KEY_P8`（下载的 `AuthKey_XXXX.p8` 文件的全部内容）、`APPLE_API_KEY_ID`（密钥 ID）、`APPLE_API_ISSUER`（Issuer ID）。
+  - 或者用 Apple ID：`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`（在 account.apple.com 生成的 App 专用密码）、`APPLE_TEAM_ID`。
 - **在外面用**：启用 Telegram 插件，用手机指挥家里的电脑，不需要开放端口。或者用 SSH 端口转发 `ssh -L 7420:127.0.0.1:7420 你的电脑`，再在本地打开登录链接；在同一个局域网里，也可以让服务监听局域网地址（见上面的「地址和端口」）。
 - **GitHub**：在「设置 → 来源 → GitHub」点「授权 GitHub」，页面会给出一个验证码，在 github.com/login/device 输入并同意即可（设备码授权，不需要回调地址，通过 SSH 端口转发访问也能用）；再填写要监听的仓库。授权后智能体的 `gh` 和 git 也用这个授权。没有授权时仍会退回到 `env` 里的 `GITHUB_TOKEN` 或本机 `gh auth login`。
 - **Gmail**：启用 Gmail 插件，在「设置 → 来源 → Gmail」点「授权 Gmail」，用 Google 账号登录并同意，浏览器会跳回本机服务（经 `ssh -L` 转发也可以）。随时可以点「断开授权」，会同时在 Google 那边撤销。

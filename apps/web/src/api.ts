@@ -55,7 +55,9 @@ export interface Check { id: string; label: string; status: 'ok' | 'warn' | 'err
 export interface Release { tag: string; version: string; url: string; notes: string; publishedAt: string | null; hasPackage: boolean }
 export interface UpdateStatus { current: string; install: 'package' | 'source' | 'desktop' | 'other'; canUpdate: boolean; checkedAt: number | null; latest: Release | null
   available: boolean; checkError: string | null; hint: string
-  run: { state: 'running' | 'installed' | 'failed'; target: string; startedAt: number; log: string; error?: string } | null; prefs?: UpdatePrefs }
+  run: { state: 'running' | 'installed' | 'failed'; target: string; startedAt: number; log: string; error?: string } | null; prefs?: UpdatePrefs
+  /** Desktop app: the new version the service downloaded (installed by the app). */
+  download?: { state: 'downloading' | 'ready' | 'failed'; tag: string; version: string; received: number; size: number; error?: string } | null }
 export interface AccessStatus {
   desktop: boolean
   running: { host: string; port: number; web: boolean }

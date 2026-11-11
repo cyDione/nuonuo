@@ -3,7 +3,8 @@
 const { app, BrowserWindow, Menu, Notification, Tray, globalShortcut, nativeImage, nativeTheme, screen, shell, ipcMain, session } = require('electron')
 const { existsSync, readFileSync, writeFileSync } = require('node:fs')
 const path = require('node:path')
-const { ensureDaemon, stopDaemon, readLock } = require('./lib/daemon.cjs')
+const { ensureDaemon, stopDaemon, readLock, home } = require('./lib/daemon.cjs')
+const { startInstall } = require('./lib/update.cjs')
 
 const SHORTCUT = 'CommandOrControl+Shift+Space'
 let win, quick, tray, daemon
@@ -157,7 +158,7 @@ function refreshTray() {
     updateItem(),
     { type: 'separator' },
     { label: '退出（后台服务继续运行）', click: () => { quitting = true; app.quit() } },
-    { label: '退出并停止后台服务', click: () => { stopDaemon(); quitting = true; app.quit() } },
+    { label: '退出并停止后台服务', click: () => { stopService = true; stopDaemon(); quitting = true; app.quit() } },
   ]))
 }
 
@@ -182,7 +183,7 @@ async function reconnect() {
       await new Promise(r => setTimeout(r, 1_500))
       const lock = readLock()
       if (!lock && i < 6) continue
-      const next = await ensureDaemon().catch(() => undefined)
+      const next = await ensureDaemon(console.log, ownVersion()).catch(() => undefined)
       if (!next) continue
       const moved = next.port !== daemon.port || next.host !== daemon.host
       daemon = next
@@ -229,6 +230,52 @@ function showNotice(notice) {
   if (notice.chime && win && !win.isDestroyed()) win.webContents.executeJavaScript(`window.__saChime?.(${JSON.stringify(notice.kind)})`).catch(() => {})
 }
 
+/**
+ * Updates: the service checks twice a day and, with 自动下载并安装 on (the default), downloads the new version in the
+ * background. Once it is staged the app says so once, the tray offers 「重启并更新」, and quitting installs it
+ * (lib/update.cjs). The settings page asks for the same through the bridge (update.install).
+ */
+const ownVersion = () => (app.isPackaged ? app.getVersion() : undefined)
+let staged = null          // status().download when it is ready, and whether it installs on quit (prefs.install)
+let installing = false
+let stopService = false
+let announced = ''
+async function pollUpdate() {
+  try {
+    const status = await api('/api/update')
+    const d = status.download
+    staged = d && d.state === 'ready' && status.available !== false ? { ...d, onQuit: Boolean(status.prefs && status.prefs.install) } : null
+    if (staged && announced !== staged.tag && Notification.isSupported()) {
+      announced = staged.tag
+      const n = new Notification({ title: `糯糯的新版本 v${staged.version} 已经下载好`, body: '退出时会自动安装；点这里现在就重启更新', silent: true })
+      n.on('click', () => void installNow(true))
+      n.show()
+    }
+    refreshTray()
+  } catch { /* the service is restarting; next time */ }
+}
+/** Hands the staged version to the install helper and quits; the helper opens the new version (relaunch) or only restarts the service. */
+function install(relaunch) {
+  if (installing || !staged) return false
+  startInstall({ download: staged, home: home(), daemonPid: readLock()?.pid, relaunch, restartDaemon: !stopService, packaged: app.isPackaged })
+  installing = true
+  return true
+}
+async function installNow(relaunch) {
+  await pollUpdate()
+  try {
+    if (!install(relaunch)) throw new Error('新版本还没下载好')
+  } catch (error) {
+    if (Notification.isSupported()) new Notification({ title: '没能自动安装更新', body: String(error.message || error) }).show()
+    show('/settings/system')
+    return String(error.message || error)
+  }
+  quitting = true
+  app.quit()
+  return 'ok'
+}
+ipcMain.handle('update:install', () => installNow(true))
+
 /** 检查更新 in the tray: asks the service; a newer version turns the item into 「更新到 vX」, which opens 系统和更新. */
 let update = { checking: false, latest: null, error: false }
 async function checkUpdate() {
@@ -239,9 +286,11 @@ async function checkUpdate() {
     if (!update.latest && !update.error && Notification.isSupported()) new Notification({ title: 'Super-assistant', body: `已经是最新版本（${status.current}）`, silent: true }).show()
   } catch { update = { ...update, checking: false, error: true } }
   refreshTray()
+  void pollUpdate()
   if (update.latest) show('/settings/system')
 }
 function updateItem() {
+  if (staged) return { label: `重启并更新到 v${staged.version}`, click: () => void installNow(true) }
   if (update.checking) return { label: '正在检查更新…', enabled: false }
   if (update.latest) return { label: `更新到 v${update.latest}…`, click: () => show('/settings/system') }
   return { label: update.error ? '检查更新（上次没连上）' : '检查更新…', click: () => void checkUpdate() }
@@ -251,7 +300,7 @@ ipcMain.on('badge', (_e, count) => { attention = Number(count) || 0; refreshTray
 
 app.whenReady().then(async () => {
   try {
-    daemon = await ensureDaemon()
+    daemon = await ensureDaemon(console.log, ownVersion())
   } catch (error) {
     const { dialog } = require('electron')
     dialog.showErrorBox('Super-assistant 无法启动', String(error.message || error))
@@ -274,6 +323,8 @@ app.whenReady().then(async () => {
   void pollAttention()
   setInterval(pollAttention, 20_000)
   void followEvents()
+  setTimeout(pollUpdate, 20_000)
+  setInterval(pollUpdate, 5 * 60_000)
   if (mac) app.dock.setIcon(nativeImage.createFromPath(asset('icon.png')))
 
   // Smoke test hook: capture the window and the tray menu, then quit.
@@ -292,6 +343,12 @@ app.whenReady().then(async () => {
 })
 
 app.on('activate', () => show())
-app.on('before-quit', () => { quitting = true })
+app.on('before-quit', () => {
+  quitting = true
+  // 自动下载并安装: a staged version goes in as the app quits (not in the smoke test).
+  if (staged && staged.onQuit && !installing && !process.env.SUPER_ASSISTANT_DESKTOP_SMOKE) {
+    try { install(false) } catch (error) { console.error('[update]', error.message) }
+  }
+})
 app.on('will-quit', () => globalShortcut.unregisterAll())
 app.on('window-all-closed', () => { /* stay in the tray */ })
