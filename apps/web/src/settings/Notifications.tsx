@@ -42,7 +42,7 @@ export function Notifications() {
       {toggle('ideas', '点子', ideas ? CADENCE[ideas.cadence] : undefined)}
       <Row label="等你确认的事" sub="花钱、发出去之前要你点头"><span className="text-[13px] text-faint">一直通知，不能关</span></Row>
     </Section>
-    <Section title="怎么叫你" foot="安静时间在「助理」里设，那段时间只有等你确认的事会叫你。">
+    <Section title="怎么叫你" foot="安静时间在「主动」里设，那段时间只有等你确认的事会叫你。">
       {toggle('banner', '横幅', '关掉后只有等你确认的事会弹出来')}
       {toggle('sound', '声音')}
       {desktop && toggle('badge', isMacDesktop ? 'Dock 图标上的数字' : '任务栏图标上的数字', '有几件事在等你')}

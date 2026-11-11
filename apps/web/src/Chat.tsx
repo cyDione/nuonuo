@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { MotionGrid, MotionGridCells } from '@animate-ui/react/primitives/motion-grid'
 import { Particles, ParticlesEffect } from '@animate-ui/react/primitives/effects/particles'
 import { SplittingText } from '@animate-ui/react/primitives/texts/splitting'
-import { AlarmClock, AlertTriangle, ArrowDown, ArrowUp, ArrowUpRight, Bell, Check, ChevronLeft, Copy, ExternalLink, FileText, Mic, Plane, Plus, Scale, Square, SquarePen, Tag, type LucideIcon } from 'lucide-react'
+import { AlarmClock, AlertTriangle, ArrowDown, ArrowUp, ArrowUpRight, Bell, Check, ChevronLeft, Copy, ExternalLink, FileText, Mic, Plane, Plus, Scale, Square, Tag, type LucideIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -17,7 +17,8 @@ import { api, ApiError, type Artifact, type Conversation, type Message, type Rol
 import { useLive } from './live'
 import { Avatar, usePersona } from './persona'
 import { go } from './route'
-import { NeedsYou, needsOwner, useTickets } from './tasks'
+import { Onboarding, useOnboarding } from './onboarding'
+import { LearnedNote, NeedsYou, needsOwner, useTickets, type Learned } from './tasks'
 import { SOURCE_LABEL, SourceIcon } from './icons'
 import { cx } from './ui'
 
@@ -43,11 +44,13 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const routerBusy = useLive(s => s.routerState === 'running')
   const [error, setError] = useState<string | null>(null)
   const [text, setText] = useState('')
+  const [learned, setLearned] = useState<Learned[]>([])
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   // Only messages that arrive while the page is open animate in; history appears at once.
   const [mountedAt] = useState(() => Date.now() - 1500)
   const noRouter = roles.data && !roles.data.resolved.router
+  const onboarding = useOnboarding()
 
   const messages = (thread.data?.messages ?? []).filter(m => m.role === 'user' || m.role === 'assistant')
   const mine = (tickets.data?.tickets ?? []).filter(t => t.conversationId === id && t.stage !== 'ended')
@@ -133,14 +136,14 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
           : !external && (made ? <a href="#/library" className="shrink-0 text-xs text-muted hover:text-fg">{made} 个成果 ›</a> : <span className="shrink-0 text-xs text-faint max-sm:hidden">做完了就收进成果</span>)}
       </div>
     </div>}
-    {noRouter && <div className="mx-auto mt-4 w-full max-w-3xl px-4 md:px-6"><div className="anim-rise flex items-center gap-3 rounded-2xl bg-sunken px-4 py-3 text-sm">
+    {noRouter && !(main && empty && onboarding.step) && <div className="mx-auto mt-4 w-full max-w-3xl px-4 md:px-6"><div className="anim-rise flex items-center gap-3 rounded-2xl bg-sunken px-4 py-3 text-sm">
       <AlertTriangle size={16} className="shrink-0 text-warn" />
       <span className="flex-1">还没有配置模型</span>
       <a className="press shrink-0 rounded-full bg-ink px-3 py-1.5 text-xs font-medium text-ink-fg" href="#/settings/providers">去设置</a>
     </div></div>}
     <div className="relative min-h-0 flex-1">
     <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
-      {empty ? <Welcome onSend={t => void send(t)} disabled={Boolean(noRouter)} main={Boolean(main)} /> :
+      {main && empty && onboarding.step ? <Onboarding step={onboarding.step} next={onboarding.next} /> : empty ? <Welcome onSend={t => void send(t)} disabled={Boolean(noRouter)} main={Boolean(main)} /> :
         <div className="mx-auto max-w-[680px] px-4 pt-4 pb-4 md:px-8">
           {messages.map((m, i) => <div key={m.id} className={cx(i > 0 && (messages[i - 1]!.role === m.role ? 'mt-1.5' : 'mt-4'))}>
             <When m={m} prev={messages[i - 1]} name={persona.name} />
@@ -149,7 +152,8 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
           </div>)}
           {draft && <div className="mt-1.5"><Bubble fresh><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.text}</ReactMarkdown><span className="caret" /></div></Bubble></div>}
           {busy && <div className="mt-4"><Bubble fresh><Typing /></Bubble></div>}
-          {asks.map(t => <div key={t.id} className="anim-rise mt-2 max-w-[440px]"><NeedsYou t={t} onAnswer={(text, ticketId) => send(text, ticketId)} onEdit={v => { setText(v); requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(v.length, v.length) } }) }} /></div>)}
+          {learned.map(l => <div key={l.id} className="anim-rise mt-2"><LearnedNote l={l} name={persona.name} onUndone={() => setLearned(v => v.filter(x => x.id !== l.id))} /></div>)}
+          {asks.map(t => <div key={t.id} className="anim-rise mt-2 max-w-[440px]"><NeedsYou t={t} onLearned={l => setLearned(v => [...v, l])} onAnswer={(text, ticketId) => send(text, ticketId)} onEdit={v => { setText(v); requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(v.length, v.length) } }) }} /></div>)}
         </div>}
     </div>
     {behind && <button onClick={() => toBottom(true)} className="anim-pop press absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-ink-fg shadow-lg"><ArrowDown size={13} />新消息</button>}
@@ -304,7 +308,7 @@ function Composer({ text, setText, inputRef, onSend, disabled, placeholder }: { 
     <div className={cx('flex items-end gap-1 rounded-[26px] border bg-panel p-1.5 shadow-[0_6px_24px_-12px_rgb(0_0_0/0.14)] transition-[border-color] duration-200',
       voice.listening ? 'border-accent' : 'border-line focus-within:border-faint')}>
       {voice.listening ? <Wave /> : <PlusMenu onPick={prefill} />}
-      <textarea ref={inputRef} value={text} rows={1} autoFocus placeholder={disabled ? '请先在设置中配置模型' : voice.listening ? '在听…' : placeholder}
+      <textarea ref={inputRef} value={text} rows={1} autoFocus placeholder={disabled ? '先接上一个模型，才能聊' : voice.listening ? '在听…' : placeholder}
         disabled={disabled} onChange={e => setText(e.target.value)} aria-label="消息"
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
         className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] outline-none placeholder:text-faint focus-visible:outline-none" />
@@ -337,7 +341,7 @@ function Elapsed() {
   return <span className="flex h-9 shrink-0 items-center px-2 text-xs text-faint tabular-nums">{Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}</span>
 }
 
-/** + in the input bar: start a side chat, or begin a reminder or a watch in your own words. */
+/** + in the input bar: begin a reminder or a watch in your own words. A new side chat has one button, at the bottom of the sidebar. */
 function PlusMenu({ onPick }: { onPick(text: string): void }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -355,7 +359,6 @@ function PlusMenu({ onPick }: { onPick(text: string): void }) {
       className={cx('press flex size-9 shrink-0 items-center justify-center rounded-full text-muted hover:bg-sunken hover:text-fg', open && 'bg-sunken text-fg')}>
       <Plus size={19} className={cx('transition-transform duration-200 ease-out', open && 'rotate-45')} /></button>
     {open && <div role="menu" className="anim-menu absolute bottom-11 left-0 z-20 w-48 rounded-2xl border border-line bg-panel p-1 shadow-xl [transform-origin:bottom_left]">
-      {item(<SquarePen size={15} className="text-muted" />, '开个侧聊', () => go('/new'))}
       {item(<AlarmClock size={15} className="text-muted" />, '定时提醒我…', () => onPick('每天早上 9 点提醒我'))}
       {item(<ArrowUpRight size={15} className="text-muted" />, '帮我盯着…', () => onPick('帮我盯着'))}
     </div>}

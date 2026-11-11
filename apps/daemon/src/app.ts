@@ -357,7 +357,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   })
   api.get('/approvals', c => c.json({ approvals: rt.reviewer.pending() }))
   api.post('/approvals/:id', async c => {
-    const { approve, note, scope } = await body(c, z.object({ approve: z.boolean(), note: z.string().max(500).optional(), scope: z.enum(['once', 'task']).optional() }))
+    const { approve, note, scope } = await body(c, z.object({ approve: z.boolean(), note: z.string().max(500).optional(), scope: z.enum(['once', 'task', 'always']).optional() }))
     return c.json({ approval: guard(() => rt.reviewer.decide(c.req.param('id'), approve, note, scope)) })
   })
   api.get('/grants', c => c.json({ grants: rt.reviewer.grants() }))

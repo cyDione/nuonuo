@@ -4,7 +4,7 @@
  * - everything else — what was done, step by step — is one click away in the activity view, never in the conversation.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, AppWindow, Brain, CheckCircle2, Image as ImageIcon, Table2, ChevronDown, ChevronRight, CircleDot, Clock, CornerUpLeft, Dot, FileText, FolderOpen, Globe, Hand, History, Hourglass, Link2, Loader2, MessageCircleQuestion, MessageSquareText, MousePointerClick, NotebookPen, OctagonX, PencilLine, RotateCcw, ShieldAlert, Sparkles, Square, SquareTerminal, Users, X, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, AppWindow, Brain, CheckCircle2, Image as ImageIcon, Table2, ChevronDown, ChevronRight, CircleDot, Clock, CornerUpLeft, Dot, FileText, FolderOpen, Globe, Hand, History, Hourglass, Link2, Loader2, MessageCircleQuestion, MessageSquareText, MousePointerClick, NotebookPen, OctagonX, PencilLine, Repeat, RotateCcw, ShieldAlert, Sparkles, Square, SquareTerminal, Users, X, type LucideIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -48,11 +48,14 @@ export function StateIcon({ t, size = 14 }: { t: Ticket; size?: number }) {
  * One thing the owner is asked for, as part of the conversation: plain words first, technical detail folded away.
  * Answers to questions are typed in the composer like any message (they reach the right work automatically).
  */
-export function NeedsYou({ t, onAnswer, onEdit }: { t: Ticket; onAnswer(text: string, ticketId: string): void; onEdit?(text: string): void }) {
+export function NeedsYou({ t, onAnswer, onEdit, onLearned }: { t: Ticket; onAnswer(text: string, ticketId: string): void; onEdit?(text: string): void; onLearned?(l: Learned): void }) {
   const qc = useQueryClient()
   const refresh = () => qc.invalidateQueries({ queryKey: ['tickets'] })
-  const decide = useMutation({ mutationFn: (v: { id: string; approve: boolean; note?: string; scope?: 'task' }) => api.post(`/approvals/${v.id}`, { approve: v.approve, ...(v.note ? { note: v.note } : {}), ...(v.scope ? { scope: v.scope } : {}) }),
-    onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ['grants'] }) } })
+  const decide = useMutation({ mutationFn: (v: { id: string; approve: boolean; note?: string; scope?: Scope }) => api.post<Decided>(`/approvals/${v.id}`, { approve: v.approve, ...(v.note ? { note: v.note } : {}), ...(v.scope ? { scope: v.scope } : {}) }),
+    onSuccess: (r, v) => {
+      if (v.scope === 'always' && r.approval.grantId) onLearned?.({ id: v.id, grantId: r.approval.grantId, title: t.approvals[0]?.reason ?? '已同意' })
+      refresh(); qc.invalidateQueries({ queryKey: ['grants'] })
+    } })
   const retry = useMutation({ mutationFn: () => api.post(`/tickets/${t.id}/retry`), onSuccess: refresh })
   const stop = useMutation({ mutationFn: () => api.post(`/tickets/${t.id}/stop`), onSuccess: refresh })
   const [handoff, setHandoff] = useState<string | null>(null)
@@ -60,7 +63,7 @@ export function NeedsYou({ t, onAnswer, onEdit }: { t: Ticket; onAnswer(text: st
 
   const shell = (children: React.ReactNode) => <div className="max-w-xl rounded-[20px] border border-warn/25 bg-card px-4 py-3.5 shadow-[var(--shadow-sheet)]">{children}</div>
 
-  if (t.approvals[0]?.card) return <ApprovalCardView t={t} onEdit={onEdit} />
+  if (t.approvals[0]?.card) return <ApprovalCardView t={t} onEdit={onEdit} onLearned={onLearned} />
   if (t.approvals.length) {
     const a = t.approvals[0]!
     return shell(<>
@@ -71,6 +74,7 @@ export function NeedsYou({ t, onAnswer, onEdit }: { t: Ticket; onAnswer(text: st
       <div className="mt-3 flex flex-wrap gap-1.5">
         <Button size="sm" variant="primary" disabled={decide.isPending} onClick={() => decide.mutate({ id: a.id, approve: true })}>同意这一次</Button>
         {a.risk !== 'destructive' && <Button size="sm" disabled={decide.isPending} title="这件事做完之前，同类操作不再问你" onClick={() => decide.mutate({ id: a.id, approve: true, scope: 'task' })}>这件事里都同意</Button>}
+        {a.standing && <Button size="sm" disabled={decide.isPending} title="以后同类操作不再问你，可以在「权限」里撤销" onClick={() => decide.mutate({ id: a.id, approve: true, scope: 'always' })}>以后这类直接做</Button>}
         <Button size="sm" disabled={decide.isPending} onClick={() => { const note = prompt('不同意的原因（可留空）') ?? undefined; decide.mutate({ id: a.id, approve: false, ...(note ? { note } : {}) }) }}>不同意</Button>
       </div>
       {t.approvals.length > 1 && <div className="mt-1.5 text-xs text-faint">还有 {t.approvals.length - 1} 步也在等你</div>}
@@ -100,14 +104,21 @@ export function NeedsYou({ t, onAnswer, onEdit }: { t: Ticket; onAnswer(text: st
  * a card with exactly what will happen. Only its button confirms: 「好」 in the chat does not. The button draws a check
  * when pressed, then the card goes.
  */
-function ApprovalCardView({ t, onEdit }: { t: Ticket; onEdit?: ((text: string) => void) | undefined }) {
+function ApprovalCardView({ t, onEdit, onLearned }: { t: Ticket; onEdit?: ((text: string) => void) | undefined; onLearned?: ((l: Learned) => void) | undefined }) {
   const qc = useQueryClient()
   const a = t.approvals[0]!
   const card = a.card!
   const [done, setDone] = useState(false)
   const decide = useMutation({
-    mutationFn: (approve: boolean) => api.post(`/approvals/${a.id}`, { approve }),
-    onSuccess: (_r, approve) => { if (approve) { setDone(true); setTimeout(() => qc.invalidateQueries({ queryKey: ['tickets'] }), 750) } else qc.invalidateQueries({ queryKey: ['tickets'] }) },
+    mutationFn: (v: { approve: boolean; scope?: Scope }) => api.post<Decided>(`/approvals/${a.id}`, { approve: v.approve, ...(v.scope ? { scope: v.scope } : {}) }),
+    onSuccess: (r, v) => {
+      if (!v.approve) { qc.invalidateQueries({ queryKey: ['tickets'] }); return }
+      setDone(true)
+      setTimeout(() => {
+        if (v.scope === 'always' && r.approval.grantId) onLearned?.({ id: a.id, grantId: r.approval.grantId, title: card.title })
+        qc.invalidateQueries({ queryKey: ['tickets'] }); qc.invalidateQueries({ queryKey: ['grants'] })
+      }, 750)
+    },
   })
   const [detail, setDetail] = useState(false)
   return <div className="max-w-[440px] overflow-hidden rounded-[18px] border border-line bg-card">
@@ -123,15 +134,38 @@ function ApprovalCardView({ t, onEdit }: { t: Ticket; onEdit?: ((text: string) =
       <button onClick={() => setDetail(v => !v)} className="mt-2 flex items-center gap-0.5 text-xs text-faint hover:text-muted">{detail ? <ChevronDown size={12} /> : <ChevronRight size={12} />}具体操作</button>
       {detail && <pre className="anim-fade mt-1 overflow-x-auto rounded-xl bg-sunken px-3 py-2 font-mono text-xs whitespace-pre-wrap">{a.command}</pre>}
       <div className="mt-3 flex items-center gap-2">
-        <button onClick={() => decide.mutate(true)} disabled={decide.isPending || done}
+        <button onClick={() => decide.mutate({ approve: true })} disabled={decide.isPending || done}
           className="press flex h-8 items-center gap-1.5 rounded-full bg-ink px-4 text-[13px] font-medium text-ink-fg disabled:cursor-default">
           {done && <svg viewBox="0 0 16 16" className="size-3.5" aria-hidden><path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" pathLength={1} className="check-draw" /></svg>}
           {done ? '好了' : card.confirm}
         </button>
-        {!done && <button onClick={() => decide.mutate(false)} disabled={decide.isPending} className="press h-8 rounded-full border border-line px-4 text-[13px] hover:border-faint">先不要</button>}
+        {!done && <button onClick={() => decide.mutate({ approve: false })} disabled={decide.isPending} className="press h-8 rounded-full border border-line px-4 text-[13px] hover:border-faint">先不要</button>}
         {!done && onEdit && <button onClick={() => onEdit('这一步改一下：')} className="ml-auto text-xs text-muted hover:text-fg">改一下</button>}
       </div>
+      {!done && a.standing && <button onClick={() => decide.mutate({ approve: true, scope: 'always' })} disabled={decide.isPending}
+        className="mt-2.5 flex items-center gap-1 text-xs text-muted hover:text-fg"><Repeat size={12} />{card.confirm}，以后这类直接做</button>}
     </div>
+  </div>
+}
+
+type Scope = 'task' | 'always'
+interface Decided { approval: { grantId?: string } }
+
+/** An approval answered with 「以后这类直接做」: what was learned, kept in the conversation with a way to take it back. */
+export interface Learned { id: string; grantId: string; title: string }
+
+/** Figma v7 B2: the answered card folds to one line, and says where to change it later (糯糯's 权限). */
+export function LearnedNote({ l, name, onUndone }: { l: Learned; name: string; onUndone(): void }) {
+  const qc = useQueryClient()
+  const [undone, setUndone] = useState(false)
+  const undo = useMutation({ mutationFn: () => api.del(`/grants/${l.grantId}`), onSuccess: () => { setUndone(true); qc.invalidateQueries({ queryKey: ['grants'] }); setTimeout(onUndone, 1200) } })
+  return <div className="max-w-[440px]">
+    <div className="flex items-center gap-2 rounded-[14px] border border-line bg-card px-3.5 py-2.5 text-sm">
+      <CheckCircle2 size={15} className="shrink-0 text-ok" />
+      <span className="min-w-0 flex-1 truncate">{l.title}<span className="text-faint"> · {undone ? '下次还会先问你' : '以后这类直接做'}</span></span>
+      {!undone && <button onClick={() => undo.mutate()} disabled={undo.isPending} className="shrink-0 text-xs text-muted hover:text-fg">撤销</button>}
+    </div>
+    {!undone && <div className="mt-1.5 px-1 text-xs text-faint">以后这类{name}直接做。想改的话点{name}的头像，在「权限」里。</div>}
   </div>
 }
 

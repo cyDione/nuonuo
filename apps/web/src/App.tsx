@@ -32,6 +32,7 @@ export function App() {
     // Old links to 它 (#/me) open the right pane on 它是谁 over the main chat.
     if (route.page === 'me') { go('/'); setPaneTab('who'); setTimeout(() => openPane(true), 60) }
   }, [JSON.stringify(route)])
+  useWaitingLink(route.page === 'waiting')
 
   const authed = health.isSuccess
   if (health.error instanceof ApiError && health.error.status === 401) return <Login />
@@ -73,6 +74,20 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
     <PaneDrawer />
     <SearchDialog />
   </div>
+}
+
+/**
+ * #/waiting (tray 「等你点头」, approval banners with no chat): lands on the thing itself. One that belongs to a chat opens
+ * that chat, where its card is; otherwise the main chat with the right pane on 活动, where 等你点头 is on top.
+ */
+function useWaitingLink(active: boolean) {
+  const tickets = useTickets()
+  useEffect(() => {
+    if (!active || !tickets.data) return
+    const first = tickets.data.tickets.filter(needsOwner).sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (first?.conversationId) { go(`/c/${first.conversationId}`); return }
+    go('/'); setPaneTab('activity'); setTimeout(() => openPane(true), 60)
+  }, [active, tickets.data])
 }
 
 /** Phones: the menu, the assistant's face and status, and what waits for you (opens the "today" sheet). */

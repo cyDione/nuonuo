@@ -1,13 +1,13 @@
 /** Shapes the domain for the web UI: ticket rows, a ticket's page with its worker transcript, and what waits for the owner. */
 import type { AgentRuntime } from '@super-assistant/agent-runtime'
-import { sourceOfThread, STAGE_LABEL, type Engine, type Ticket } from '@super-assistant/core'
+import { canGrant, sourceOfThread, STAGE_LABEL, type Engine, type Ticket } from '@super-assistant/core'
 import { schema, type Store } from '@super-assistant/db'
 import { desc, eq } from 'drizzle-orm'
 
-export function ticketView(engine: Engine, t: Ticket, approvals: { id: string; input: Record<string, unknown>; reason: string; risk: string; createdAt: number }[] = []) {
+export function ticketView(engine: Engine, t: Ticket, approvals: { id: string; tool: string; input: Record<string, unknown>; reason: string; risk: string; createdAt: number }[] = []) {
   const stage = engine.stage(t)
   return {
-    approvals: approvals.map(a => ({ id: a.id, command: String(a.input.command ?? ''), reason: a.reason, risk: a.risk, createdAt: a.createdAt, card: (a.input.card as object | undefined) ?? null })),
+    approvals: approvals.map(a => ({ id: a.id, command: String(a.input.command ?? ''), reason: a.reason, risk: a.risk, createdAt: a.createdAt, card: (a.input.card as object | undefined) ?? null, standing: canGrant(a) })),
     id: t.id, title: t.title, name: t.name, note: t.note, stage, stageLabel: STAGE_LABEL[stage],
     conversationId: engine.conversationOfThread(t.threadId) ?? null, source: sourceOfThread(t.threadId), directory: t.directory,
     latestReport: t.latestReport, attention: t.attention, ended: t.ended, createdAt: t.createdAt, updatedAt: t.updatedAt,

@@ -12,7 +12,7 @@ import { Engine } from './engine'
 import { Memory } from './memory'
 import type { IncomingTrigger } from './model'
 import { persona, personaPrompt, savePersona } from './persona'
-import { Reviewer } from './review'
+import { canGrant, Reviewer } from './review'
 
 let store: Store
 let runtime: AgentRuntime
@@ -171,5 +171,25 @@ describe('allow for this task (Muse approvals)', () => {
     expect((await reviewer.gateShell(t, ticket.sessionId, 'git push origin feature-3', t.directory)).action).toBe('escalate')
     engine.stopTask(ticket.id, 'person')
     expect(reviewer.grants()).toEqual([])
+  })
+
+  it('「以后这类直接做」 is a standing grant for every task until revoked, never for spending', async () => {
+    const { engine, reviewer } = setup()
+    kvSet(store, 'settings:review', { mode: 'ask' })
+    const main = engine.mainConversation()
+    worker = () => ({ text: 'thinking' })
+    const start = (text: string) => { const { triggerId } = engine.receiveMessage(main, text); const tk = engine.startTask({ triggerIds: [triggerId], title: text }); return { tk, t: engine.ticket(tk.id) } }
+    const a = start('推送我的分支')
+    const first = await reviewer.gateShell(a.t, a.tk.sessionId, 'git push origin feature', a.t.directory)
+    reviewer.decide((first as any).approvalId, true, undefined, 'always')
+    expect(reviewer.grants()).toEqual([expect.objectContaining({ label: '推送到远程仓库', standing: true })])
+    engine.stopTask(a.tk.id, 'person')
+    const b = start('再推一次')
+    expect(await reviewer.gateShell(b.t, b.tk.sessionId, 'git push origin other', b.t.directory)).toMatchObject({ action: 'allow' })
+    reviewer.revokeGrant(reviewer.grants()[0]!.id)
+    expect((await reviewer.gateShell(b.t, b.tk.sessionId, 'git push origin other-2', b.t.directory)).action).toBe('escalate')
+    expect(canGrant({ risk: 'external', tool: 'shell', input: { command: 'curl -X POST https://api.stripe.com/v1/charges' } })).toBe(false)
+    expect(canGrant({ risk: 'destructive', tool: 'shell', input: { command: 'git push --force' } })).toBe(false)
+    expect(canGrant({ risk: 'external', tool: 'shell', input: { command: 'git push origin x' } })).toBe(true)
   })
 })
