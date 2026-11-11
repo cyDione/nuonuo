@@ -39,7 +39,7 @@ super-assistant service install                         # 开机自启（systemd
 **macOS / Windows 桌面端**：下载对应的安装包安装即可。应用自带服务，关掉窗口后留在托盘里继续工作。默认只有应用窗口能用；想在浏览器（或手机等局域网设备）里打开，到「设置 → 系统 → 网页访问」勾选「允许在浏览器里打开」，选「仅本机」或「局域网」并设置端口，点「重启服务」，再复制登录链接。
 
 - macOS 可以不下载 dmg，直接在终端运行 `curl -fsSL https://raw.githubusercontent.com/cyDione/super-assistant/main/install.sh | bash`：它下载对应芯片的 zip，装进 `/Applications`（没有写权限时装进 `~/Applications`），再运行一次就是更新（先退出应用）。curl 下载的文件没有「来自互联网」的隔离标记，所以没有开发者签名时也能直接打开。
-- 发布流程配好 Apple 开发者证书（见下面「macOS 签名和公证」）之前，macOS 包只有 ad-hoc 签名。浏览器下载的 dmg 第一次打开会提示「无法验证开发者」或「已损坏」：运行 `xattr -dr com.apple.quarantine /Applications/Super-assistant.app`，或到「系统设置 → 隐私与安全性」点「仍要打开」。
+- 发布流程配好 Apple 开发者证书（见下面「macOS 签名和公证」）之前，macOS 包只有 ad-hoc 签名。浏览器下载的 dmg 第一次打开会提示「无法验证开发者」或「已损坏」。打开 dmg 之前先运行 `xattr -cr /路径/super-assistant-<版本>-mac-<芯片>.dmg` 清掉隔离标记，从里面拖出来的应用就不会被拦；已经装好的，运行 `xattr -dr com.apple.quarantine /Applications/Super-assistant.app`，或到「系统设置 → 隐私与安全性」点「仍要打开」。
 - Windows 包没有代码签名，SmartScreen 提示时点「更多信息 → 仍要运行」。
 - 桌面端有新版本时，「设置 → 系统 → 版本更新」会提示并给出下载链接，下载新安装包覆盖安装即可。
 
