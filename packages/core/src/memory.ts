@@ -272,6 +272,68 @@ ${profile || '（空）'}`]
     writeFileSync(join(dir, 'MEMORY.md'), parts.join('\n'))
   }
 
+  /**
+   * The active entries as one editable Markdown document: `## 关于你`, `## 项目 · 名字` (one per project), `## 近期`,
+   * `## 经验`, one `- ` line per entry.
+   */
+  markdown(): string {
+    const active = this.list({ status: 'active' })
+    const parts: string[] = []
+    for (const kind of MEMORY_KINDS) {
+      const rows = active.filter(m => m.kind === kind).reverse()
+      if (kind === 'project') {
+        for (const scope of [...new Set(rows.map(r => r.scope ?? ''))]) parts.push(`## ${KIND_LABEL.project} · ${this.scopeName(scope)}\n${rows.filter(r => (r.scope ?? '') === scope).map(r => `- ${r.text}`).join('\n')}`)
+      } else parts.push(`## ${KIND_LABEL[kind]}\n${rows.map(r => `- ${r.text}`).join('\n')}`)
+    }
+    return parts.map(p => p.trimEnd()).join('\n\n') + '\n'
+  }
+
+  /**
+   * Saves an edited `markdown()` document line by line: an active entry whose line is gone is forgotten, a new line is
+   * remembered as the owner's. Lines that did not change keep their history (source, expiry). Nothing is written when a
+   * line is rejected.
+   */
+  applyMarkdown(md: string, by: string): { added: number; removed: number; kept: number } {
+    const active = this.list({ status: 'active' })
+    const scopeByName = new Map<string, string>()
+    for (const m of active) if (m.scope) { scopeByName.set(this.scopeName(m.scope), m.scope); scopeByName.set(m.scope, m.scope) }
+    const LABEL_KIND = Object.fromEntries(MEMORY_KINDS.map(k => [KIND_LABEL[k], k])) as Record<string, MemoryKind>
+    const wanted: { kind: MemoryKind; scope: string | null; text: string }[] = []
+    let kind: MemoryKind = 'profile', scope: string | null = null
+    for (const raw of md.replace(/\r\n/g, '\n').split('\n')) {
+      const line = raw.trim()
+      if (!line || /^>/.test(line) || /^#\s/.test(line)) continue
+      const h = line.match(/^#{2,6}\s+(.+)$/)
+      if (h) {
+        const title = h[1]!.trim()
+        const project = title.match(/^项目\s*[·・:：\-—|/]?\s*(.*)$/)
+        if (project) { kind = 'project'; scope = project[1]!.trim() ? (scopeByName.get(project[1]!.trim()) ?? project[1]!.trim()) : null }
+        else if (LABEL_KIND[title]) { kind = LABEL_KIND[title]; scope = null }
+        else if (kind === 'project' && /^#{3,}/.test(line)) scope = scopeByName.get(title) ?? title
+        else throw new Error(`不认识的分段「${title}」：用 关于你 / 项目 · 名字 / 近期 / 经验`)
+        continue
+      }
+      const text = normalize(line.replace(/^([-*+]|\d+[.)])\s+/, '').replace(/^\[[ xX]\]\s+/, ''))
+      if (text.length < 2) continue
+      if (text.length > 500) throw new Error(`这一条太长了（超过 500 字）：${text.slice(0, 20)}…`)
+      if (SECRET.test(text)) throw new Error(`看起来像凭据，不能写进记忆：${text.slice(0, 20)}…`)
+      if (kind === 'project' && !scope) throw new Error(`项目记忆要写在「## 项目 · 名字」下面：${text.slice(0, 20)}`)
+      wanted.push({ kind, scope: kind === 'project' ? scope : null, text })
+    }
+    const key = (e: { kind: string; scope: string | null; text: string }) => `${e.kind}\u0000${e.scope ?? ''}\u0000${normalize(e.text)}`
+    const want = new Set(wanted.map(key))
+    const have = new Set(active.map(key))
+    const gone = active.filter(m => !want.has(key(m)))
+    const fresh = wanted.filter((e, i) => !have.has(key(e)) && wanted.findIndex(o => key(o) === key(e)) === i)
+    const at = this.now()
+    this.store.atomic(() => {
+      for (const m of gone) this.store.db.update(schema.memories).set({ status: 'deleted', updatedAt: at }).where(eq(schema.memories.id, m.id)).run()
+    })
+    for (const e of fresh) this.add({ kind: e.kind, text: e.text, scope: e.scope ?? undefined, trust: 'user', createdBy: by })
+    if (gone.length) this.changed()
+    return { added: fresh.length, removed: gone.length, kept: active.length - gone.length }
+  }
+
   private exportTimer: NodeJS.Timeout | undefined
   private changed() {
     clearTimeout(this.exportTimer)

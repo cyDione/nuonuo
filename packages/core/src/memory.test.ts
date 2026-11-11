@@ -84,6 +84,36 @@ describe('Memory runtime', () => {
   })
 })
 
+describe('Memory as Markdown', () => {
+  it('shows active entries by kind and saves edits line by line', () => {
+    const { memory } = setup()
+    memory.add({ kind: 'profile', text: '住在上海', trust: 'user', createdBy: 'router' })
+    memory.add({ kind: 'profile', text: '周五下午不开会', trust: 'user', createdBy: 'router' })
+    memory.add({ kind: 'project', scope: 'acme/app', text: '用 pnpm', trust: 'user', createdBy: 'router' })
+    memory.add({ kind: 'profile', text: '可能养猫', trust: 'user', confidence: 0.6, createdBy: 'distiller' })
+    const md = memory.markdown()
+    expect(md).toBe('## 关于你\n- 住在上海\n- 周五下午不开会\n\n## 项目 · acme/app\n- 用 pnpm\n\n## 近期\n\n## 经验\n')
+    const kept = memory.list({ status: 'active' }).find(m => m.text === '住在上海')!
+    const edited = md.replace('- 周五下午不开会\n', '- 对花生过敏\n').replace('## 近期\n', '## 近期\n- 爸妈月底来\n')
+    expect(memory.applyMarkdown(edited, 'owner')).toEqual({ added: 2, removed: 1, kept: 2 })
+    const active = memory.list({ status: 'active' })
+    expect(active.map(m => `${m.kind}:${m.text}`).sort()).toEqual(['episodic:爸妈月底来', 'profile:住在上海', 'profile:对花生过敏', 'project:用 pnpm'])
+    expect(active.find(m => m.text === '住在上海')!.id).toBe(kept.id)
+    expect(active.find(m => m.text === '爸妈月底来')!.expiresAt).not.toBeNull()
+    expect(memory.list({ status: 'pending' })).toHaveLength(1)
+    expect(memory.applyMarkdown(memory.markdown(), 'owner')).toEqual({ added: 0, removed: 0, kept: 4 })
+  })
+
+  it('rejects a document it cannot read, without writing anything', () => {
+    const { memory } = setup()
+    memory.add({ kind: 'profile', text: '住在上海', trust: 'user', createdBy: 'router' })
+    expect(() => memory.applyMarkdown('## 爱好\n- 跑步', 'owner')).toThrow(/不认识的分段/)
+    expect(() => memory.applyMarkdown('## 关于你\n- key sk-abcdefghijklmnop', 'owner')).toThrow(/凭据/)
+    expect(() => memory.applyMarkdown('## 项目\n- 用 pnpm', 'owner')).toThrow(/项目/)
+    expect(memory.list({ status: 'active' }).map(m => m.text)).toEqual(['住在上海'])
+  })
+})
+
 describe('Distiller (memory side path)', () => {
   function withModel(reply: (system: string, prompt: string) => unknown) {
     const { memory } = setup()

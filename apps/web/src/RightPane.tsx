@@ -6,16 +6,15 @@
  * On narrower windows the same pane opens as a drawer, and on phones as a sheet from the bottom.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, ChevronDown, CreditCard, Folder, Globe, Lock, Plus, Send, Shield, ShieldCheck, Smile, Trash2, X } from 'lucide-react'
+import { Activity, Brain, ChevronDown, CreditCard, Folder, Globe, Lock, Plus, ScrollText, Send, Shield, ShieldCheck, Smile, Trash2, X } from 'lucide-react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { api, type AuditEntry, type ExecutionSettings, type InstructionsState, type Level, type Persona, type ReviewSettings, type Routine, type Ticket } from './api'
 import { openActivity, openTask, useActivityOpen, useLive } from './live'
 import { Avatar, isMascot, Mascot, MASCOT, statusLine, usePersona } from './persona'
 import { go } from './route'
-import { InstructionsPage } from './settings/Instructions'
-import { MemoryPage } from './settings/MemoryPage'
+import { LiquidButton, MemorySheet, pickHues, SoulSheet } from './soul'
 import { needsOwner, useTickets } from './tasks'
-import { cx, IconButton, Modal, Seg } from './ui'
+import { cx, IconButton, Seg } from './ui'
 import { usePresence } from './shell'
 
 export type PaneTab = 'activity' | 'who' | 'permissions'
@@ -158,7 +157,8 @@ interface MemoryRow { id: string; kind: string; text: string; status: 'active' |
 interface Memories { memories: MemoryRow[]; kinds: { id: string; label: string }[] }
 /** A few words from the personality, for the little tags under it. */
 const traits = (text: string) => text.split(/[，,；;、。.!！\n]/).map(s => s.trim()).filter(s => s.length >= 2 && s.length <= 8).slice(0, 4)
-const ruleLines = (d: InstructionsState) => d.sections.map(s => d.current.sections[s.id]).flatMap(t => t.split('\n')).map(t => t.replace(/^[-*\d.、\s]+/, '').trim()).filter(Boolean)
+/** How many parts the 灵魂 document has: its ## sections, or 1 for a document without headings. */
+const soulParts = (body: string) => body.trim() ? Math.max(1, (body.match(/^#{1,3}\s/gm) ?? []).length) : 0
 
 function WhoTab() {
   const qc = useQueryClient()
@@ -167,12 +167,15 @@ function WhoTab() {
   const memories = useQuery({ queryKey: ['memories'], queryFn: () => api.get<Memories>('/memories') }).data
   const [editing, setEditing] = useState<string | null>(null)
   const [modal, setModal] = useState<'soul' | 'memory' | null>(null)
+  // A new pair of colours each time 它是谁 opens (Figma section 24).
+  const [hues] = useState(() => pickHues())
   const savePersonality = useMutation({ mutationFn: (personality: string) => api.put('/persona', { ...raw!, personality }), onSuccess: () => { setEditing(null); qc.invalidateQueries({ queryKey: ['persona'] }) } })
   const decide = useMutation({ mutationFn: (v: { id: string; action: 'confirm' | 'reject' }) => api.patch(`/memories/${v.id}`, { action: v.action }), onSuccess: () => qc.invalidateQueries({ queryKey: ['memories'] }) })
   const personality = raw?.personality ?? ''
   const active = memories?.memories.filter(m => m.status === 'active') ?? []
   const pending = memories?.memories.filter(m => m.status === 'pending') ?? []
-  const rules = instructions ? ruleLines(instructions) : []
+  const soul = instructions?.current
+  const parts = soulParts(soul?.body ?? '')
   return <div className="space-y-5">
     {raw && <Identity persona={raw} />}
     <section className="border-t border-line pt-5">
@@ -190,16 +193,11 @@ function WhoTab() {
       </>}
     </section>
     <section className="border-t border-line pt-5">
-      <Head title="灵魂" count={instructions?.current.version ? `V${instructions.current.version}` : undefined} action={<LinkBtn onClick={() => setModal('soul')}>{rules.length ? '看改动' : '写一写'}</LinkBtn>} />
-      {rules.length ? <ol className="space-y-1.5 text-sm">{rules.slice(0, 3).map((r, i) => <li key={i} className="flex gap-3"><span className="w-3 shrink-0 text-faint tabular-nums">{i + 1}</span><span className="min-w-0">{r}</span></li>)}</ol>
-        : <p className="text-sm text-faint">做事的规矩：怎么沟通、能做什么、交付什么。</p>}
-      <p className="mt-2.5 text-[11px] text-faint">只有你能改它的灵魂</p>
-    </section>
-    <section className="border-t border-line pt-5">
-      <Head title="记忆" count={active.length} action={<LinkBtn onClick={() => setModal('memory')}>看全部</LinkBtn>} />
-      <div className="flex flex-wrap gap-1.5">{memories?.kinds.map(k => { const n = active.filter(m => m.kind === k.id).length
-        return n ? <span key={k.id} className="rounded-full bg-sunken px-2.5 py-1 text-xs">{k.label} <span className="tabular-nums text-muted">{n}</span></span> : null })}</div>
-      {!active.length && <p className="text-sm text-faint">它还没记下关于你的事。</p>}
+      <div className="flex gap-3">
+        <LiquidButton hues={hues.soul} icon={<ScrollText size={18} />} title="灵魂" sub={soul?.version ? `第 ${soul.version} 版 · ${parts} 段` : '还没写'} onClick={() => setModal('soul')} />
+        <LiquidButton hues={hues.memory} icon={<Brain size={18} />} title="记忆" sub={`${active.length} 件`} onClick={() => setModal('memory')} />
+      </div>
+      <p className="mt-2.5 text-[11px] text-faint">点开看全文，可以直接改。</p>
     </section>
     {pending.length > 0 && <section className="rounded-2xl bg-sunken px-3.5 py-3">
       <Head title="新学到的，等你确认" count={pending.length} />
@@ -209,8 +207,8 @@ function WhoTab() {
         <button onClick={() => decide.mutate({ id: m.id, action: 'reject' })} disabled={decide.isPending} className="shrink-0 text-xs text-muted hover:text-fg">不要</button>
       </div>)}</div>
     </section>}
-    {modal === 'soul' && <Modal title="灵魂" onClose={() => setModal(null)}><InstructionsPage /></Modal>}
-    {modal === 'memory' && <Modal title="记忆" onClose={() => setModal(null)}><MemoryPage /></Modal>}
+    {modal === 'soul' && <SoulSheet hues={hues.soul} onClose={() => setModal(null)} />}
+    {modal === 'memory' && <MemorySheet hues={hues.memory} count={active.length} onClose={() => setModal(null)} />}
   </div>
 }
 
