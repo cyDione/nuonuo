@@ -18,6 +18,7 @@ import { setPaneTab } from './RightPane'
 import { go } from './route'
 import { openPane } from './Sidebar'
 import { cx, IconButton } from './ui'
+import { tx } from './i18n'
 
 interface Hit { id: string; text: string; at: number; conversationId?: string | null; conversation?: string; main?: boolean; ticketId?: string; kind?: string }
 interface Results { messages: Hit[]; artifacts: Hit[]; memories: Hit[] }
@@ -33,7 +34,7 @@ const useOpen = () => useSyncExternalStore(l => { listeners.add(l); return () =>
 
 /** ⌘K anywhere opens the box; the button sits at the top right of the tabbed pages. */
 export function SearchButton({ className }: { className?: string }) {
-  return <IconButton label={`搜索 (${keyLabel(getPrefs().keys.search).join('')})`} onClick={() => openSearch()} className={cx('size-8', className)}><Search size={17} /></IconButton>
+  return <IconButton label={tx('搜索 ({0})', keyLabel(getPrefs().keys.search).join(''))} onClick={() => openSearch()} className={cx('size-8', className)}><Search size={17} /></IconButton>
 }
 
 export function SearchDialog() {
@@ -50,11 +51,11 @@ export function SearchDialog() {
   </>
 }
 
-const MEMORY_KIND: Record<string, string> = { profile: '关于你', project: '在做的事', episodic: '发生过的事', lesson: '学到的' }
+const MEMORY_KIND: Record<string, string> = { profile: tx('关于你'), project: tx('在做的事'), episodic: tx('发生过的事'), lesson: tx('学到的') }
 const when = (at: number) => {
   const d = new Date(at), now = new Date()
   const hm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
-  if (d.toDateString() === now.toDateString()) return `今天 ${hm}`
+  if (d.toDateString() === now.toDateString()) return tx('今天 {0}', hm)
   return `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}`
 }
 function fileIcon(name: string) {
@@ -81,18 +82,18 @@ function Box({ onFile }: { onFile(f: { id: string; name: string }): void }) {
 
   const rows = useMemo<Row[]>(() => {
     if (!q.trim()) return [
-      ...history.map(h => ({ key: `h:${h}`, group: '最近搜过', icon: <Clock size={15} />, text: h, sub: '', run: () => setQ(h) })),
-      ...(inChat ? [{ key: 'find', group: '', icon: <TextSearch size={15} />, text: '在当前对话里找', sub: '', run: () => { close(); dispatchEvent(new Event(FIND_EVENT)) } }] : []),
+      ...history.map(h => ({ key: `h:${h}`, group: tx('最近搜过'), icon: <Clock size={15} />, text: h, sub: '', run: () => setQ(h) })),
+      ...(inChat ? [{ key: 'find', group: '', icon: <TextSearch size={15} />, text: tx('在当前对话里找'), sub: '', run: () => { close(); dispatchEvent(new Event(FIND_EVENT)) } }] : []),
     ]
     const r = term ? results.data : undefined
     if (!r) return []
     const keep = (run: () => void) => () => { remember(term); run() }
     return ([
-      ...r.messages.map(m => ({ key: m.id, group: '聊天', icon: <MessageCircle size={15} />, text: m.text, sub: [m.main ? '主聊' : m.conversation, when(m.at)].filter(Boolean).join(' · '),
+      ...r.messages.map(m => ({ key: m.id, group: tx('聊天'), icon: <MessageCircle size={15} />, text: m.text, sub: [m.main ? tx('主聊') : m.conversation, when(m.at)].filter(Boolean).join(' · '),
         run: () => { close(); go(m.main || !m.conversationId ? '/' : `/c/${m.conversationId}`) } })),
-      ...r.artifacts.map(a => { const Icon = fileIcon(a.text); return { key: a.id, group: '成果', icon: <Icon size={15} />, text: a.text, sub: when(a.at),
+      ...r.artifacts.map(a => { const Icon = fileIcon(a.text); return { key: a.id, group: tx('成果'), icon: <Icon size={15} />, text: a.text, sub: when(a.at),
         run: () => { close(); onFile({ id: a.id, name: a.text }) } } }),
-      ...r.memories.map(m => ({ key: m.id, group: '记忆', icon: <Brain size={15} />, text: m.text, sub: `${MEMORY_KIND[m.kind ?? ''] ?? '记忆'} · ${when(m.at)} 记住的`,
+      ...r.memories.map(m => ({ key: m.id, group: tx('记忆'), icon: <Brain size={15} />, text: m.text, sub: tx('{0} · {1} 记住的', MEMORY_KIND[m.kind ?? ''] ?? tx('记忆'), when(m.at)),
         run: () => { close(); go('/'); setPaneTab('who'); setTimeout(() => openPane(true), 60) } })),
     ] as Row[]).map(r => ({ ...r, run: keep(r.run) }))
   }, [results.data, term, q, history])
@@ -112,22 +113,22 @@ function Box({ onFile }: { onFile(f: { id: string; name: string }): void }) {
 
   const empty = !!term && results.isSuccess && !results.isPlaceholderData && !rows.length
   return createPortal(<div className="anim-fade fixed inset-0 z-50 flex items-start justify-center bg-[var(--scrim)] px-4 pt-[12vh]" onMouseDown={e => { if (e.target === e.currentTarget) close() }}>
-    <div role="dialog" aria-modal="true" aria-label="搜索" onKeyDown={onKey}
+    <div role="dialog" aria-modal="true" aria-label={tx('搜索')} onKeyDown={onKey}
       className="anim-pop flex max-h-[70vh] w-full max-w-[600px] flex-col overflow-hidden rounded-[22px] bg-card shadow-[0_24px_60px_-20px_rgb(0_0_0/0.4),0_0_0_1px_var(--line)]">
       <div className="flex items-center gap-3 border-b border-line px-5 py-4">
         <Search size={18} className="shrink-0 text-muted" />
-        <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="搜聊天、成果、记忆…" aria-label="搜索"
+        <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={tx('搜聊天、成果、记忆…')} aria-label={tx('搜索')}
           role="combobox" aria-expanded={rows.length > 0} aria-controls="search-list" aria-activedescendant={rows[active] ? `search-${active}` : undefined}
           className="min-w-0 flex-1 bg-transparent text-[17px] outline-none placeholder:text-faint" />
         <kbd className="shrink-0 rounded-md bg-sunken px-1.5 py-0.5 font-sans text-[11px] text-faint">esc</kbd>
       </div>
 
       <div ref={list} id="search-list" role="listbox" className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-        {!q.trim() && !rows.length && <p className="px-3 py-6 text-center text-sm text-faint">想找哪段聊天、哪个文件，或者它记得的哪件事？</p>}
-        {empty && <p className="px-3 py-6 text-center text-sm text-faint">没搜到「{term}」。按 ↵ 直接问{persona.name}。</p>}
+        {!q.trim() && !rows.length && <p className="px-3 py-6 text-center text-sm text-faint">{tx('想找哪段聊天、哪个文件，或者它记得的哪件事？')}</p>}
+        {empty && <p className="px-3 py-6 text-center text-sm text-faint">{tx('没搜到「{0}」。按 ↵ 直接问{1}。', term, persona.name)}</p>}
         {rows.map((r, i) => <div key={r.key}>
           {r.group !== rows[i - 1]?.group && (r.group ? <div className="flex items-center px-3 pt-2.5 pb-1.5 text-xs text-faint"><span className="flex-1">{r.group}</span>
-            {r.group === '最近搜过' && <button onClick={() => forget(null)} className="hover:text-fg">清空</button>}</div> : <div className="mx-3 my-1.5 border-t border-line" />)}
+            {r.group === tx('最近搜过') && <button onClick={() => forget(null)} className="hover:text-fg">{tx('清空')}</button>}</div> : <div className="mx-3 my-1.5 border-t border-line" />)}
           <button id={`search-${i}`} data-i={i} role="option" aria-selected={i === active} onMouseMove={() => setActive(i)} onClick={r.run}
             className="relative flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left">
             {i === active && <motion.span layoutId="search-hl" aria-hidden transition={{ duration: 0.16, ease: [0.23, 1, 0.32, 1] }} className="absolute inset-0 rounded-xl bg-[color-mix(in_srgb,var(--fg)_6%,transparent)]" />}
@@ -137,7 +138,7 @@ function Box({ onFile }: { onFile(f: { id: string; name: string }): void }) {
               {r.sub && <span className="block truncate text-xs text-faint">{r.sub}</span>}
             </span>
             {r.key === 'find' ? <kbd className="relative shrink-0 font-sans text-xs text-faint">{MOD}F</kbd>
-              : r.key.startsWith('h:') ? i === active && <span role="button" tabIndex={-1} aria-label={`删掉「${r.text}」`} onClick={e => { e.stopPropagation(); forget(r.text) }} className="relative flex size-6 shrink-0 items-center justify-center rounded-full text-faint hover:bg-sunken hover:text-fg"><X size={13} /></span>
+              : r.key.startsWith('h:') ? i === active && <span role="button" tabIndex={-1} aria-label={tx('删掉「{0}」', r.text)} onClick={e => { e.stopPropagation(); forget(r.text) }} className="relative flex size-6 shrink-0 items-center justify-center rounded-full text-faint hover:bg-sunken hover:text-fg"><X size={13} /></span>
               : i === active && <CornerDownLeft size={15} className="relative shrink-0 text-faint" />}
           </button>
         </div>)}
@@ -146,7 +147,7 @@ function Box({ onFile }: { onFile(f: { id: string; name: string }): void }) {
       <button onClick={() => q.trim() && ask()} disabled={!q.trim()}
         className="flex items-center gap-2.5 border-t border-line px-5 py-3 text-left text-sm text-muted enabled:hover:text-fg disabled:opacity-60">
         <Sparkles size={15} className="shrink-0 text-accent" />
-        <span className="min-w-0 flex-1 truncate">{q.trim() ? <>直接问{persona.name}「{q.trim()}」…</> : <>问{persona.name}点什么…</>}</span>
+        <span className="min-w-0 flex-1 truncate">{q.trim() ? <>{tx('直接问{0}「{1}」…', persona.name, q.trim())}</> : <>{tx('问{0}点什么…', persona.name)}</>}</span>
         <span className="shrink-0 text-xs text-faint">{MOD} ↵</span>
       </button>
     </div>

@@ -10,18 +10,19 @@ import { useEffect, useState } from 'react'
 import { api, type FieldSpec, type ProactiveSettings, type SourceAction, type SourceInfo } from '../api'
 import { SourceIcon } from '../icons'
 import { Area, Block, Btn, Foot, NumberInput, Page, Pill, Row, SaveBar, Section, SelectInput, TextInput, Toggle } from './kit'
+import { locale, tx } from '../i18n'
 
 /** 「刚刚同步」, 「2 分钟前同步」, 「出错」…: how syncing goes, said in a few words. */
 function syncing(s: SourceInfo) {
-  if (s.health.status === 'error') return <span className="text-danger">出错了</span>
-  if (s.health.status === 'starting') return '在连…'
-  if (s.id === 'cron' || !s.health.at) return s.health.status === 'ok' ? '在线' : HEALTH[s.health.status].label
+  if (s.health.status === 'error') return <span className="text-danger">{tx('出错了')}</span>
+  if (s.health.status === 'starting') return tx('在连…')
+  if (s.id === 'cron' || !s.health.at) return s.health.status === 'ok' ? tx('在线') : HEALTH[s.health.status].label
   const min = Math.floor((Date.now() - s.health.at) / 60_000)
-  return min < 1 ? '刚刚同步' : min < 60 ? `${min} 分钟前同步` : min < 1440 ? `${Math.floor(min / 60)} 小时前同步` : `${Math.floor(min / 1440)} 天前同步`
+  return min < 1 ? tx('刚刚同步') : min < 60 ? tx('{0} 分钟前同步', min) : min < 1440 ? tx('{0} 小时前同步', Math.floor(min / 60)) : tx('{0} 天前同步', Math.floor(min / 1440))
 }
 
 const HEALTH: Record<SourceInfo['health']['status'], { tone: 'neutral' | 'ok' | 'warn' | 'danger'; label: string }> = {
-  off: { tone: 'neutral', label: '没打开' }, starting: { tone: 'warn', label: '启动中' }, ok: { tone: 'ok', label: '运行中' }, error: { tone: 'danger', label: '出错' },
+  off: { tone: 'neutral', label: tx('没打开') }, starting: { tone: 'warn', label: tx('启动中') }, ok: { tone: 'ok', label: tx('运行中') }, error: { tone: 'danger', label: tx('出错') },
 }
 
 export function Sources({ item }: { item?: string }) {
@@ -30,19 +31,19 @@ export function Sources({ item }: { item?: string }) {
   const open = item ? list.find(x => x.id === item) : undefined
   const on = list.filter(s => s.enabled), off = list.filter(s => !s.enabled)
   const href = (s: SourceInfo) => `#/settings/sources/${encodeURIComponent(s.id)}`
-  return <Page title="来源">
-    {on.length > 0 && <Section title="已经连上的" foot={off.length ? undefined : '连上以后，每个账号能做到哪一步（只能看 / 能操作）在右侧栏「权限」里改。'}>
+  return <Page title={tx('来源')}>
+    {on.length > 0 && <Section title={tx('已经连上的')} foot={off.length ? undefined : tx('连上以后，每个账号能做到哪一步（只能看 / 能操作）在右侧栏「权限」里改。')}>
       {on.map(s => <Row key={s.id} href={href(s)} icon={<SourceIcon source={s.id} size={18} />} label={s.title}
         sub={<span className="line-clamp-1">{s.health.status === 'error' && s.health.detail ? <span className="text-danger">{s.health.detail}</span> : s.description}</span>}>
         <span className="text-[13px] text-muted tabular-nums">{syncing(s)}</span>
       </Row>)}
     </Section>}
-    {off.length > 0 && <Section title={on.length ? '还能连' : undefined} foot="连上以后，每个账号能做到哪一步（只能看 / 能操作）在右侧栏「权限」里改。">
+    {off.length > 0 && <Section title={on.length ? tx('还能连') : undefined} foot={tx('连上以后，每个账号能做到哪一步（只能看 / 能操作）在右侧栏「权限」里改。')}>
       {off.map(s => <Row key={s.id} icon={<SourceIcon source={s.id} size={18} />} label={s.title} sub={<span className="line-clamp-1">{s.description}</span>}>
-        <a href={href(s)} className="inline-flex h-[28px] shrink-0 items-center rounded-full border border-line bg-card px-4 text-[13px] font-medium hover:border-faint">连接</a>
+        <a href={href(s)} className="inline-flex h-[28px] shrink-0 items-center rounded-full border border-line bg-card px-4 text-[13px] font-medium hover:border-faint">{tx('连接')}</a>
       </Row>)}
     </Section>}
-    {item && sources.isSuccess && !open && <Foot>找不到来源「{item}」。</Foot>}
+    {item && sources.isSuccess && !open && <Foot>{tx('找不到来源「{0}」。', item)}</Foot>}
     {open && <SourceDetail key={open.id} s={open} />}
   </Page>
 }
@@ -75,22 +76,22 @@ function SourceDetail({ s }: { s: SourceInfo }) {
   const facts = Object.entries(s.facts).filter(([k]) => k !== '账号').map(([k, v]) => `${k}：${v}`)
   return <>
     <Section title={s.title} foot={s.description}>
-      <Row label="启用"><Toggle label="启用" checked={s.enabled} disabled={save.isPending} onChange={enabled => save.mutate({ enabled, config: s.config })} /></Row>
-      {s.id !== 'cron' && proactive && <Row label="主动留意这里" sub="没人找它的事件，也按你的主动策略判断要不要做">
-        <Toggle label="主动留意这里" checked={watching} disabled={watch.isPending} onChange={on => watch.mutate(on)} />
+      <Row label={tx('启用')}><Toggle label={tx('启用')} checked={s.enabled} disabled={save.isPending} onChange={enabled => save.mutate({ enabled, config: s.config })} /></Row>
+      {s.id !== 'cron' && proactive && <Row label={tx('主动留意这里')} sub={tx('没人找它的事件，也按你的主动策略判断要不要做')}>
+        <Toggle label={tx('主动留意这里')} checked={watching} disabled={watch.isPending} onChange={on => watch.mutate(on)} />
       </Row>}
       {s.authorized !== undefined && <Authorization s={s} onDone={() => { void refresh(); if (s.enabled) poll.mutate() }} />}
       {fields.map(f => <FieldRow key={f.key} f={f} value={config[f.key]} onChange={v => set(f.key, v)} />)}
-      {more.length > 0 && <Row label="高级" onClick={() => setAdvanced(v => !v)}><span className="text-[13px] text-muted">{advanced ? '收起' : `${more.length} 项`}</span></Row>}
+      {more.length > 0 && <Row label={tx('高级')} onClick={() => setAdvanced(v => !v)}><span className="text-[13px] text-muted">{advanced ? tx('收起') : tx('{0} 项', more.length)}</span></Row>}
       {advanced && more.map(f => <FieldRow key={f.key} f={f} value={config[f.key]} onChange={v => set(f.key, v)} />)}
-      {other.length > 0 && <Row label="操作">{other.map(a => <Btn key={a.id} disabled={dirty} onClick={async () => {
+      {other.length > 0 && <Row label={tx('操作')}>{other.map(a => <Btn key={a.id} disabled={dirty} onClick={async () => {
         const data = await runAction(s.id, a)
         if (data?.url) location.href = data.url
         else void refresh()
       }}>{a.label}</Btn>)}</Row>}
-      {s.enabled && s.fields.length > 0 && <Row label="上次同步" sub={<>{s.health.at ? new Date(s.health.at).toLocaleString('zh-CN') : '还没有'}{facts.length ? ` · ${facts.join(' · ')}` : ''}
+      {s.enabled && s.fields.length > 0 && <Row label={tx('上次同步')} sub={<>{s.health.at ? new Date(s.health.at).toLocaleString(locale) : tx('还没有')}{facts.length ? ` · ${facts.join(' · ')}` : ''}
         {s.health.detail && <span className={s.health.status === 'error' ? 'block text-danger' : 'block'}>{s.health.detail}</span>}</>}>
-        <Btn onClick={() => poll.mutate()} disabled={poll.isPending || dirty}><RefreshCw size={13} className={poll.isPending ? 'animate-spin' : ''} />立即同步</Btn>
+        <Btn onClick={() => poll.mutate()} disabled={poll.isPending || dirty}><RefreshCw size={13} className={poll.isPending ? 'animate-spin' : ''} />{tx('立即同步')}</Btn>
       </Row>}
     </Section>
     <SaveBar dirty={dirty} pending={save.isPending} error={save.error ?? poll.error} onReset={() => setConfig(s.config)} onSave={() => save.mutate({ enabled: s.enabled, config })} />
@@ -118,14 +119,14 @@ function Authorization({ s, onDone }: { s: SourceInfo; onDone(): void }) {
     const timer = setInterval(async () => {
       const data = await fetch(`/api/sources/${s.id}/http/${device.poll}`, { credentials: 'same-origin' }).then(r => r.json()).catch(() => undefined) as { status: string; error?: string } | undefined
       if (data?.status === 'done') { setDevice(undefined); onDone() }
-      else if (data?.status === 'error') { setDevice(undefined); setError(data.error ?? '授权失败') }
+      else if (data?.status === 'error') { setDevice(undefined); setError(data.error ?? tx('授权失败')) }
     }, 2_000)
-    const expire = setTimeout(() => { setDevice(undefined); setError('验证码已过期，请重新授权') }, device.expiresIn * 1000)
+    const expire = setTimeout(() => { setDevice(undefined); setError(tx('验证码已过期，请重新授权')) }, device.expiresIn * 1000)
     return () => { clearInterval(timer); clearTimeout(expire) }
   }, [device])
   const account = s.facts['账号']
   return <>
-    <Row label="账号授权" sub={<>{s.authorized ? `已授权${account && account !== '未授权' ? ` · ${account}` : ''}` : `还没有授权，点「${s.actions.find(a => a.show === 'unauthorized')?.label ?? '授权'}」用你的 ${s.title} 账号登录`}
+    <Row label={tx('账号授权')} sub={<>{s.authorized ? tx('已授权{0}', account && account !== '未授权' ? ` · ${account}` : '') : tx('还没有授权，点「{0}」用你的 {1} 账号登录', s.actions.find(a => a.show === 'unauthorized')?.label ?? tx('授权'), s.title)}
       {error && <span className="block text-danger">{error}</span>}</>}>
       {s.actions.map(a => <Btn key={a.id} tone={a.primary ? 'ink' : 'plain'} disabled={Boolean(device)} onClick={async () => {
         setError(undefined)
@@ -137,19 +138,19 @@ function Authorization({ s, onDone }: { s: SourceInfo; onDone(): void }) {
       }}>{a.label}</Btn>)}
     </Row>
     {device && <Block className="text-[13px]">
-      <div>在打开的页面（<a href={device.verificationUri} target="_blank" rel="noopener" className="inline-flex items-center gap-0.5 text-accent">{device.verificationUri.replace(/^https?:\/\//, '')}<ExternalLink size={12} /></a>）输入这个验证码并同意授权：</div>
+      <div>{tx('在打开的页面（')}<a href={device.verificationUri} target="_blank" rel="noopener" className="inline-flex items-center gap-0.5 text-accent">{device.verificationUri.replace(/^https?:\/\//, '')}<ExternalLink size={12} /></a>{tx('）输入这个验证码并同意授权：')}</div>
       <div className="mt-2.5 flex items-center gap-3">
         <span className="font-mono text-2xl tracking-widest select-all">{device.userCode}</span>
-        <Btn onClick={() => { void navigator.clipboard?.writeText(device.userCode); setCopied(true) }}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? '已复制' : '复制'}</Btn>
-        <span className="ml-auto text-xs text-muted">等你在 {s.title} 上确认…</span>
-        <Btn onClick={() => setDevice(undefined)}>取消</Btn>
+        <Btn onClick={() => { void navigator.clipboard?.writeText(device.userCode); setCopied(true) }}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? tx('已复制') : tx('复制')}</Btn>
+        <span className="ml-auto text-xs text-muted">{tx('等你在 {0} 上确认…', s.title)}</span>
+        <Btn onClick={() => setDevice(undefined)}>{tx('取消')}</Btn>
       </div>
     </Block>}
   </>
 }
 
 function FieldRow({ f, value, onChange }: { f: FieldSpec; value: any; onChange(v: unknown): void }) {
-  const sub = <>{f.type === 'secret' && value === '••••••' ? '已存在钥匙串里；清空后保存会删除' : f.hint}
+  const sub = <>{f.type === 'secret' && value === '••••••' ? tx('已存在钥匙串里；清空后保存会删除') : f.hint}
     {f.links?.map(l => <a key={l.href} href={l.href} target="_blank" rel="noopener" className="ml-1.5 inline-flex items-center gap-0.5 text-accent">{l.label}<ExternalLink size={11} /></a>)}</>
   switch (f.type) {
     case 'switch': return <Row label={f.label} sub={sub}><Toggle label={f.label} checked={Boolean(value)} onChange={onChange} /></Row>

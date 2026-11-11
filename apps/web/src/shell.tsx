@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { PanelLeft } from 'lucide-react'
 import { getPrefs, matchesKey, MOD } from './prefs'
 import { cx, IconButton } from './ui'
+import { tx } from './i18n'
 
 /** The desktop app's own settings (设置 → 通用 · 快捷键). */
 export interface DesktopPrefs { tray: boolean; close: 'hide' | 'quit'; summon: string; quick: string; openAtLogin: boolean; registered: { summon?: boolean; quick?: boolean } }
@@ -105,7 +106,7 @@ export function Resizer({ side }: { side: PaneSide }) {
       width = Math.round(Math.min(limits.max, Math.max(limits.min, raw)))
       if (pane) { pane.style.width = `${fold ? Math.max(0, raw) : width}px`; pane.style.opacity = fold ? '0.5' : '' }
       if (inner) inner.style.width = `${width}px`
-      if (tip.current) { tip.current.textContent = fold ? '收起' : `${width}`; tip.current.style.opacity = '1' }
+      if (tip.current) { tip.current.textContent = fold ? tx('收起') : `${width}`; tip.current.style.opacity = '1' }
     }
     const up = () => {
       el.removeEventListener('pointermove', move)
@@ -123,7 +124,7 @@ export function Resizer({ side }: { side: PaneSide }) {
     el.addEventListener('pointerup', up, { once: true })
     el.addEventListener('pointercancel', up, { once: true })
   }
-  return <div ref={ref} role="separator" aria-orientation="vertical" aria-label={side === 'left' ? '调整侧栏宽度' : '调整右栏宽度'} title="拖动调整宽度 · 双击恢复"
+  return <div ref={ref} role="separator" aria-orientation="vertical" aria-label={side === 'left' ? tx('调整侧栏宽度') : tx('调整右栏宽度')} title={tx('拖动调整宽度 · 双击恢复')}
     className="resizer no-drag" onPointerDown={onDown} onDoubleClick={() => setPanes(side === 'left' ? { left: limits.initial } : { right: limits.initial })}>
     <span ref={tip} className={cx('pointer-events-none absolute top-1/2 -mt-3 rounded-md bg-ink px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-ink-fg tabular-nums opacity-0 transition-opacity', side === 'left' ? 'left-3' : 'right-3')} />
   </div>
@@ -137,7 +138,7 @@ export function TopBar({ children, right, className }: { children?: React.ReactN
   const { leftOpen } = usePanes()
   return <div className={cx('drag flex h-12 shrink-0 items-center gap-2 px-3', className)}>
     {!leftOpen && <span className={cx('anim-fade flex items-center max-md:hidden', isMacDesktop && 'lights-room pl-[64px]')}>
-      <IconButton label={`展开侧栏 (${MOD}\\)`} onClick={() => togglePane('left', true)} className="size-8"><PanelLeft size={17} /></IconButton>
+      <IconButton label={tx('展开侧栏 ({0}\\)', MOD)} onClick={() => togglePane('left', true)} className="size-8"><PanelLeft size={17} /></IconButton>
     </span>}
     <div className="flex min-w-0 flex-1 items-center gap-2.5">{children}</div>
     {right}

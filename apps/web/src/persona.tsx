@@ -3,19 +3,20 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { api, type Persona, type Ticket } from './api'
 import { cx } from './ui'
+import { tx } from './i18n'
 
 export const MASCOT = 'mascot'
 /** 糯糯's colour follows the theme colour (设置 → 通用 → 主题色); 莓红, the default, gives its own pink (Figma "10 · Logo 重做"). */
 export const BRAND = 'var(--mochi)'
-/** The assistant's official name. 小助 was the old default and is shown as 糯糯. */
-export const OFFICIAL_NAME = '糯糯'
+/** The assistant's official name (Nuonuo in the English interface). 小助 was the old default and is shown as 糯糯. */
+export const OFFICIAL_NAME = tx('糯糯')
 const FALLBACK: Persona = { name: OFFICIAL_NAME, avatar: MASCOT, color: BRAND, personality: '', role: 'all', language: 'auto' }
 
 export const usePersona = () => {
   const p = useQuery({ queryKey: ['persona'], queryFn: () => api.get<{ persona: Persona }>('/persona'), staleTime: 60_000 }).data?.persona
   if (!p) return FALLBACK
   const avatar = p.avatar === '✨' ? MASCOT : p.avatar
-  const name = p.name === '小助' ? OFFICIAL_NAME : p.name
+  const name = p.name === '小助' || p.name === '糯糯' ? OFFICIAL_NAME : p.name
   // One colour for the whole app: the theme colour also colours 糯糯, so the colour saved on the persona is no longer used.
   return { ...p, name, avatar, color: BRAND }
 }
@@ -108,13 +109,13 @@ export function statusLine(tickets: Ticket[]): { text: string; tone: 'idle' | 'w
   const waiting = tickets.filter(t => t.stage.startsWith('person/'))
   const working = tickets.filter(t => t.stage === 'working' || t.stage === 'queued')
   const parts: string[] = []
-  if (working.length) parts.push(working.length === 1 ? `正在做：${working[0]!.title}` : `正在做 ${working.length} 件事`)
-  if (waiting.length) parts.push(`${waiting.length} 件事等你`)
-  return { text: parts.join(' · ') || '在，有事叫我', tone: waiting.length ? 'waiting' : working.length ? 'working' : 'idle' }
+  if (working.length) parts.push(working.length === 1 ? tx('正在做：{0}', working[0]!.title) : tx('正在做 {0} 件事', working.length))
+  if (waiting.length) parts.push(tx('{0} 件事等你', waiting.length))
+  return { text: parts.join(' · ') || tx('在，有事叫我'), tone: waiting.length ? 'waiting' : working.length ? 'working' : 'idle' }
 }
 
 /** 早上好 / 下午好 …, for the greeting on the main conversation's empty screen. */
 export function greeting(now = new Date()) {
   const h = now.getHours()
-  return h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好'
+  return h < 5 ? tx('夜深了') : h < 11 ? tx('早上好') : h < 13 ? tx('中午好') : h < 18 ? tx('下午好') : tx('晚上好')
 }

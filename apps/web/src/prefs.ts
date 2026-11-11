@@ -3,17 +3,18 @@
  * show the raw tool calls. Kept in localStorage and applied to <html> as data-theme / data-accent.
  */
 import { useSyncExternalStore } from 'react'
+import { tx } from './i18n'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type AccentId = 'berry' | 'ink' | 'mint' | 'sea' | 'grape' | 'slate'
 /** The six theme colours (Figma section 22, 设置 → 通用). 莓红 is the default and matches 糯糯. */
 export const ACCENTS: { id: AccentId; label: string; color: string }[] = [
-  { id: 'berry', label: '莓红', color: '#d43d6d' },
-  { id: 'ink', label: '墨', color: '#141414' },
-  { id: 'mint', label: '薄荷', color: '#13857a' },
-  { id: 'sea', label: '海蓝', color: '#3d6fe0' },
-  { id: 'grape', label: '葡萄', color: '#7a5cc8' },
-  { id: 'slate', label: '石板', color: '#5b6b80' },
+  { id: 'berry', label: tx('莓红'), color: '#d43d6d' },
+  { id: 'ink', label: tx('墨'), color: '#141414' },
+  { id: 'mint', label: tx('薄荷'), color: '#13857a' },
+  { id: 'sea', label: tx('海蓝'), color: '#3d6fe0' },
+  { id: 'grape', label: tx('葡萄'), color: '#7a5cc8' },
+  { id: 'slate', label: tx('石板'), color: '#5b6b80' },
 ]
 
 export type TextSize = 'small' | 'normal' | 'large'

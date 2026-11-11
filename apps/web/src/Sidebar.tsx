@@ -17,12 +17,13 @@ import { cx, IconButton } from './ui'
 import { MOD } from './prefs'
 import { isMacDesktop, Pane, Resizer, togglePane, usePanes, usePresence } from './shell'
 import { More } from './More'
+import { tx } from './i18n'
 
 /** The window's title bar row above the sidebar: room for the traffic lights, and the button that folds the sidebar. */
 function TitleRow() {
   return <div className="drag flex h-12 shrink-0 items-center justify-end px-3 pt-1">
     {isMacDesktop && <span className="lights-room mr-auto w-[68px]" aria-hidden />}
-    <IconButton label={`收起侧栏 (${MOD}\\)`} onClick={() => togglePane('left', false)} className="size-8 text-faint"><PanelLeft size={17} /></IconButton>
+    <IconButton label={tx('收起侧栏 ({0}\\)', MOD)} onClick={() => togglePane('left', false)} className="size-8 text-faint"><PanelLeft size={17} /></IconButton>
   </div>
 }
 
@@ -36,7 +37,7 @@ export function Sidebar({ route, open, onClose }: { route: Route; open: boolean;
     </div>
     {drawer.shown && <div className={cx('anim-fade fixed inset-0 z-40 bg-[var(--scrim)] md:hidden', drawer.leaving && 'out-fade')} onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <aside className={cx('anim-drawer-l flex h-full w-[min(18rem,86vw)] flex-col bg-bg pb-[env(safe-area-inset-bottom)] shadow-2xl', drawer.leaving && 'out-l')}>
-        <div className="flex justify-end px-3 pt-3"><IconButton label="关闭菜单" onClick={onClose}><X size={18} /></IconButton></div>
+        <div className="flex justify-end px-3 pt-3"><IconButton label={tx('关闭菜单')} onClick={onClose}><X size={18} /></IconButton></div>
         <SidebarBody route={route} />
       </aside>
     </div>}
@@ -74,12 +75,12 @@ function SidebarBody({ route }: { route: Route }) {
   const mainWaits = main ? ticketsOf(main.id).some(needsOwner) || (activeId !== main.id && (main.unread ?? 0) > 0) : false
   return <div className="flex min-h-0 flex-1 flex-col">
     <div className="px-2.5 pt-1">
-      <button onClick={() => openPane()} aria-expanded={paneOpen} title="看看它在做什么"
+      <button onClick={() => openPane()} aria-expanded={paneOpen} title={tx('看看它在做什么')}
         className={cx('squish press flex w-full min-w-0 items-center gap-3 rounded-2xl p-2.5 text-left transition-colors duration-150', paneOpen ? 'bg-sunken xl:bg-sunken' : 'hover:bg-sunken/70')}>
         <Avatar persona={persona} size={40} mood={mood} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[15px] leading-tight font-semibold">{persona.name}</span>
-          <StatusText text={connected ? status.text : '重连中…'} />
+          <StatusText text={connected ? status.text : tx('重连中…')} />
         </span>
       </button>
     </div>
@@ -89,23 +90,23 @@ function SidebarBody({ route }: { route: Route }) {
         className={cx('press flex items-center gap-3 rounded-2xl px-2.5 py-2.5 transition-colors duration-150', activeId === main.id ? 'bg-accent-soft' : 'hover:bg-sunken/70')}>
         <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-fg"><MessageCircle size={17} /></span>
         <span className="min-w-0 flex-1">
-          <span className={cx('block text-sm font-semibold', activeId === main.id ? 'text-accent' : 'text-fg')}>主聊</span>
-          <span className="mt-0.5 block truncate text-xs text-muted">{main.lastMessage?.replace(/\s+/g, ' ') || '一直在这儿的那段对话'}</span>
+          <span className={cx('block text-sm font-semibold', activeId === main.id ? 'text-accent' : 'text-fg')}>{tx('主聊')}</span>
+          <span className="mt-0.5 block truncate text-xs text-muted">{main.lastMessage?.replace(/\s+/g, ' ') || tx('一直在这儿的那段对话')}</span>
         </span>
-        {mainWaits && <span className="size-2 shrink-0 self-start rounded-full bg-accent mt-1.5" aria-label="有新消息" />}
+        {mainWaits && <span className="size-2 shrink-0 self-start rounded-full bg-accent mt-1.5" aria-label={tx('有新消息')} />}
       </a>}
 
-      <div className="flex items-baseline gap-2 px-2.5 pt-5 pb-1.5 text-xs"><span className="font-medium text-muted">侧聊</span><span className="text-faint">独立的小任务</span></div>
-      {side.length === 0 && <button onClick={() => go('/new')} className="w-full rounded-xl px-2.5 py-2 text-left text-xs text-faint hover:text-muted">独立的小任务会出现在这里，比如一次旅行、一份报告。</button>}
+      <div className="flex items-baseline gap-2 px-2.5 pt-5 pb-1.5 text-xs"><span className="font-medium text-muted">{tx('侧聊')}</span><span className="text-faint">{tx('独立的小任务')}</span></div>
+      {side.length === 0 && <button onClick={() => go('/new')} className="w-full rounded-xl px-2.5 py-2 text-left text-xs text-faint hover:text-muted">{tx('独立的小任务会出现在这里，比如一次旅行、一份报告。')}</button>}
       {side.map(c => <Item key={c.id} c={c} active={c.id === activeId} tickets={ticketsOf(c.id)} onChanged={changed} />)}
       <Archived activeId={activeId} onChanged={changed} />
-      {outside.length > 0 && <div className="px-2.5 pt-5 pb-1.5 text-xs font-medium text-muted">来自外部</div>}
+      {outside.length > 0 && <div className="px-2.5 pt-5 pb-1.5 text-xs font-medium text-muted">{tx('来自外部')}</div>}
       {outside.map(c => <Item key={c.id} c={c} active={c.id === activeId} tickets={ticketsOf(c.id)} onChanged={changed} />)}
     </nav>
 
     <div className="flex items-center justify-between px-3 pt-2 pb-3">
       <More route={route} />
-      <button onClick={() => go('/new')} className="press flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-muted hover:bg-sunken hover:text-fg"><SquarePen size={15} />新侧聊</button>
+      <button onClick={() => go('/new')} className="press flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-muted hover:bg-sunken hover:text-fg"><SquarePen size={15} />{tx('新侧聊')}</button>
     </div>
   </div>
 }
@@ -118,8 +119,7 @@ function Archived({ activeId, onChanged }: { activeId: string | undefined; onCha
   const changed = () => { onChanged(); qc.invalidateQueries({ queryKey: ['conversations', 'archived'] }) }
   if (!list.length) return null
   return <>
-    <button onClick={() => setOpen(v => !v)} aria-expanded={open} className="flex items-center gap-1 px-2.5 pt-3 pb-1 text-xs text-faint hover:text-muted">
-      已归档 {list.length}<ChevronRight size={13} className={cx('transition-transform duration-150', open && 'rotate-90')} />
+    <button onClick={() => setOpen(v => !v)} aria-expanded={open} className="flex items-center gap-1 px-2.5 pt-3 pb-1 text-xs text-faint hover:text-muted"> {tx('已归档 {0}', list.length)}<ChevronRight size={13} className={cx('transition-transform duration-150', open && 'rotate-90')} />
     </button>
     {open && list.map(c => <Item key={c.id} c={c} active={c.id === activeId} tickets={[]} onChanged={changed} />)}
   </>
@@ -162,7 +162,7 @@ function Item({ c, active, tickets, onChanged }: { c: Conversation; active: bool
   const done = !live.length && tickets.length > 0 && tickets.every(t => t.ended?.outcome === 'completed')
   const unread = !active && (c.unread ?? 0) > 0
   const latest = [...tickets].sort((a, b) => b.updatedAt - a.updatedAt)[0]
-  const sub = waiting ? '等你点头' : working ? (latest?.latestReport?.summary || latest?.title || '在做') : done ? `${day(c.updatedAt)} 做完` : c.lastMessage?.replace(/\s+/g, ' ') || day(c.updatedAt)
+  const sub = waiting ? tx('等你点头') : working ? (latest?.latestReport?.summary || latest?.title || tx('在做')) : done ? tx('{0} 做完', day(c.updatedAt)) : c.lastMessage?.replace(/\s+/g, ' ') || day(c.updatedAt)
   return <div ref={ref} className="group relative">
     <a href={`#/c/${c.id}`} aria-current={active ? 'page' : undefined} className={cx('press relative flex items-center gap-2.5 rounded-xl py-2 pr-9 pl-2.5',
       active ? 'bg-sunken' : 'hover:bg-sunken/60')}>
@@ -177,16 +177,16 @@ function Item({ c, active, tickets, onChanged }: { c: Conversation; active: bool
           : done ? <Check size={15} className="text-faint" /> : null}
       </span>
     </a>
-    <button onClick={() => setMenu(v => !v)} aria-label="更多" aria-expanded={menu}
+    <button onClick={() => setMenu(v => !v)} aria-label={tx('更多')} aria-expanded={menu}
       className={cx('absolute top-1/2 right-1.5 flex size-7 -translate-y-1/2 items-center justify-center rounded-lg text-faint hover:bg-panel hover:text-fg max-md:opacity-100',
         menu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100')}>
       <MoreHorizontal size={15} />
     </button>
     {menu && <div role="menu" className="anim-menu absolute top-11 right-1 z-20 w-40 rounded-2xl border border-line bg-card p-1 text-sm shadow-xl">
-      <MenuItem icon={<Pencil size={14} />} onClick={() => { const t = prompt('重命名', c.title)?.trim(); if (t) patch.mutate({ title: t }); setMenu(false) }}>重命名</MenuItem>
-      {!c.archived && <MenuItem icon={c.pinned ? <PinOff size={14} /> : <Pin size={14} />} onClick={() => { patch.mutate({ pinned: !c.pinned }); setMenu(false) }}>{c.pinned ? '取消置顶' : '置顶'}</MenuItem>}
-      <MenuItem icon={c.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />} onClick={() => { patch.mutate({ archived: !c.archived }); setMenu(false); if (active && !c.archived) go('/') }}>{c.archived ? '放回侧聊' : '归档'}</MenuItem>
-      <MenuItem icon={<Trash2 size={14} />} danger onClick={() => { if (confirm(`删除「${c.title}」？此操作不可撤销。`)) remove.mutate(); setMenu(false) }}>删除</MenuItem>
+      <MenuItem icon={<Pencil size={14} />} onClick={() => { const t = prompt(tx('重命名'), c.title)?.trim(); if (t) patch.mutate({ title: t }); setMenu(false) }}>{tx('重命名')}</MenuItem>
+      {!c.archived && <MenuItem icon={c.pinned ? <PinOff size={14} /> : <Pin size={14} />} onClick={() => { patch.mutate({ pinned: !c.pinned }); setMenu(false) }}>{c.pinned ? tx('取消置顶') : tx('置顶')}</MenuItem>}
+      <MenuItem icon={c.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />} onClick={() => { patch.mutate({ archived: !c.archived }); setMenu(false); if (active && !c.archived) go('/') }}>{c.archived ? tx('放回侧聊') : tx('归档')}</MenuItem>
+      <MenuItem icon={<Trash2 size={14} />} danger onClick={() => { if (confirm(tx('删除「{0}」？此操作不可撤销。', c.title))) remove.mutate(); setMenu(false) }}>{tx('删除')}</MenuItem>
     </div>}
   </div>
 }

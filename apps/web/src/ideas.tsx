@@ -11,10 +11,11 @@ import { api, ApiError, type Idea, type IdeaBatch, type IdeaSettings } from './a
 import { Avatar, usePersona } from './persona'
 import { go } from './route'
 import { cx } from './ui'
+import { tx } from './i18n'
 
 export const useIdeas = () => useQuery({ queryKey: ['ideas'], queryFn: () => api.get<{ batch: IdeaBatch | null; settings: IdeaSettings }>('/ideas') })
 
-const CADENCE: Record<IdeaSettings['cadence'], string> = { daily: '每天早上换一批', weekly: '每周换一批', off: '已经关了，不会自己换' }
+const CADENCE: Record<IdeaSettings['cadence'], string> = { daily: tx('每天早上换一批'), weekly: tx('每周换一批'), off: tx('已经关了，不会自己换') }
 
 export function IdeasPage() {
   const persona = usePersona()
@@ -33,8 +34,8 @@ export function IdeasPage() {
   return <div className="h-full overflow-y-auto">
     <div className="mx-auto max-w-[61rem] px-4 pt-8 pb-16 md:px-6">
       <header className="anim-rise">
-        <h1 className="font-display text-3xl font-semibold">给你的点子</h1>
-        <p className="mt-1.5 text-sm text-muted">从你最近聊的、你的目标和它盯着的变化里想到的，{settings ? CADENCE[settings.cadence] : '每天早上换一批'}。点按钮就开一个侧聊。</p>
+        <h1 className="font-display text-3xl font-semibold">{tx('给你的点子')}</h1>
+        <p className="mt-1.5 text-sm text-muted">{tx('从你最近聊的、你的目标和它盯着的变化里想到的，')}{settings ? CADENCE[settings.cadence] : tx('每天早上换一批')}{tx('。点按钮就开一个侧聊。')}</p>
       </header>
 
       {batch && left > 0 && <div className="mt-6 space-y-4">
@@ -48,18 +49,17 @@ export function IdeasPage() {
       </div>}
 
       {data && (!batch || !left) && <div className="mt-8 flex flex-col items-start gap-3 rounded-[22px] bg-sunken px-6 py-6">
-        <p className="text-sm text-muted">{!batch ? `${persona.name}还没想过点子。聊得越多，它想得越准。` : '这一批都处理完了。'}</p>
+        <p className="text-sm text-muted">{!batch ? tx('{0}还没想过点子。聊得越多，它想得越准。', persona.name) : tx('这一批都处理完了。')}</p>
         <button onClick={() => refresh.mutate()} disabled={refresh.isPending}
           className="press flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-medium text-ink-fg disabled:opacity-60">
-          {refresh.isPending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}{refresh.isPending ? '在想…' : '现在想几个'}
+          {refresh.isPending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}{refresh.isPending ? tx('在想…') : tx('现在想几个')}
         </button>
-        {refresh.error && <p className="text-xs text-warn">{refresh.error instanceof ApiError ? refresh.error.message : '没想出来，过会儿再试'}</p>}
+        {refresh.error && <p className="text-xs text-warn">{refresh.error instanceof ApiError ? refresh.error.message : tx('没想出来，过会儿再试')}</p>}
       </div>}
 
       {batch && left > 0 && <div className="mt-8 flex items-center gap-3 text-sm text-muted">
         <Avatar persona={persona} size={28} mood="happy" />
-        {settings?.cadence === 'weekly' ? '这周就这些。' : '今天就这些。'}点子太多会吵的话，在「设置 → 助理」里可以调成每周一次。
-      </div>}
+        {settings?.cadence === 'weekly' ? tx('这周就这些。') : tx('今天就这些。')}{tx('点子太多会吵的话，在「设置 → 助理」里可以调成每周一次。')} </div>}
     </div>
   </div>
 }
@@ -79,13 +79,13 @@ function Card({ idea, wide, index }: { idea: Idea; wide?: boolean; index: number
   return <div data-tone={idea.tone} className={cx('flow feed-in relative flex min-h-[200px] flex-col rounded-[22px] px-5 pt-5 pb-5', wide && 'md:min-h-[200px]')} style={{ animationDelay: `${index * 70}ms` }}>
     <div className="relative flex items-start gap-3">
       <span className="min-w-0 flex-1 truncate text-xs opacity-85">{idea.label}</span>
-      <button onClick={() => dismiss.mutate()} disabled={dismiss.isPending} aria-label="不要这个" title="不要这个（这类会少推）"
+      <button onClick={() => dismiss.mutate()} disabled={dismiss.isPending} aria-label={tx('不要这个')} title={tx('不要这个（这类会少推）')}
         className="press -mt-1 -mr-1.5 flex size-7 shrink-0 items-center justify-center rounded-full opacity-80 hover:bg-white/15 hover:opacity-100"><X size={15} /></button>
     </div>
     <p className={cx('relative mt-3 font-semibold text-pretty', wide ? 'text-[18px] leading-7' : 'text-[16px] leading-[1.65]')}>{idea.text}</p>
     <div className="relative mt-auto pt-5">
       <button onClick={() => start.mutate(idea.id)} disabled={start.isPending}
-        className="press rounded-full bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#1a1a1a] disabled:opacity-70">{start.isPending ? '在开…' : idea.action}</button>
+        className="press rounded-full bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#1a1a1a] disabled:opacity-70">{start.isPending ? tx('在开…') : idea.action}</button>
     </div>
   </div>
 }
@@ -93,7 +93,7 @@ function Card({ idea, wide, index }: { idea: Idea; wide?: boolean; index: number
 function More({ items }: { items: IdeaBatch['more'] }) {
   const start = useGo()
   return <div className="feed-in rounded-[22px] bg-sunken px-5 pt-5 pb-3" style={{ animationDelay: '350ms' }}>
-    <div className="text-xs text-muted">你可能还想</div>
+    <div className="text-xs text-muted">{tx('你可能还想')}</div>
     <div className="mt-2">{items.map(m => <button key={m.id} onClick={() => start.mutate(m.id)} disabled={start.isPending}
       className="group flex w-full items-center gap-2 py-2.5 text-left text-sm">
       <span className="min-w-0 flex-1 truncate">{m.text}</span>

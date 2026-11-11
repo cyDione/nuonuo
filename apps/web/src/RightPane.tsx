@@ -18,6 +18,7 @@ import { LiquidButton, MemorySheet, pickHues, SoulSheet } from './soul'
 import { needsOwner, useTickets } from './tasks'
 import { cx, IconButton, Seg } from './ui'
 import { usePresence } from './shell'
+import { locale, tx } from './i18n'
 
 export type PaneTab = 'activity' | 'who' | 'permissions'
 let tab: PaneTab = 'activity'
@@ -26,22 +27,22 @@ export function setPaneTab(next: PaneTab) { tab = next; for (const l of tabListe
 const usePaneTab = () => useSyncExternalStore(l => { tabListeners.add(l); return () => tabListeners.delete(l) }, () => tab)
 
 const TABS: { id: PaneTab; label: React.ReactNode }[] = [
-  { id: 'activity', label: <span className="flex items-center" title="活动"><Activity size={17} aria-label="活动" /></span> },
-  { id: 'who', label: <span className="flex items-center" title="它是谁"><Smile size={17} aria-label="它是谁" /></span> },
-  { id: 'permissions', label: <span className="flex items-center" title="权限"><Shield size={17} aria-label="权限" /></span> },
+  { id: 'activity', label: <span className="flex items-center" title={tx('活动')}><Activity size={17} aria-label={tx('活动')} /></span> },
+  { id: 'who', label: <span className="flex items-center" title={tx('它是谁')}><Smile size={17} aria-label={tx('它是谁')} /></span> },
+  { id: 'permissions', label: <span className="flex items-center" title={tx('权限')}><Shield size={17} aria-label={tx('权限')} /></span> },
 ]
 
-const hm = (at: number) => new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+const hm = (at: number) => new Date(at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+const WEEK = [tx('周日'), tx('周一'), tx('周二'), tx('周三'), tx('周四'), tx('周五'), tx('周六')]
 function when(at: number) {
   const d = new Date(at), now = new Date()
   const days = Math.round((new Date(d.toDateString()).getTime() - new Date(now.toDateString()).getTime()) / 86_400_000)
-  return `${days === 0 ? '今天' : days === 1 ? '明天' : days < 7 ? WEEK[d.getDay()] : `${d.getMonth() + 1}/${d.getDate()}`} ${hm(at)}`
+  return `${days === 0 ? tx('今天') : days === 1 ? tx('明天') : days < 7 ? WEEK[d.getDay()] : `${d.getMonth() + 1}/${d.getDate()}`} ${hm(at)}`
 }
 
 function ago(at: number) {
   const days = Math.round((new Date(new Date().toDateString()).getTime() - new Date(new Date(at).toDateString()).getTime()) / 86_400_000)
-  return `${days === 0 ? '今天' : days === 1 ? '昨天' : `${new Date(at).getMonth() + 1}/${new Date(at).getDate()}`} ${hm(at)}`
+  return `${days === 0 ? tx('今天') : days === 1 ? tx('昨天') : `${new Date(at).getMonth() + 1}/${new Date(at).getDate()}`} ${hm(at)}`
 }
 
 export function RightPane({ onClose }: { onClose(): void }) {
@@ -52,15 +53,15 @@ export function RightPane({ onClose }: { onClose(): void }) {
   const current = usePaneTab()
   const mood = !connected ? 'sleepy' : status.tone === 'working' ? 'thinking' : status.tone
   return <div className="flex h-full flex-col">
-    <div className="flex h-12 shrink-0 items-center justify-end px-3"><IconButton label="关闭" onClick={onClose}><X size={17} /></IconButton></div>
+    <div className="flex h-12 shrink-0 items-center justify-end px-3"><IconButton label={tx('关闭')} onClick={onClose}><X size={17} /></IconButton></div>
     <div className="flex items-center gap-3.5 px-6">
       <Avatar persona={persona} size={56} mood={mood} track />
       <div className="min-w-0">
         <div className="truncate text-xl font-semibold">{persona.name}</div>
-        <div className="mt-0.5 truncate text-xs text-muted">{connected ? status.text : '重连中…'}</div>
+        <div className="mt-0.5 truncate text-xs text-muted">{connected ? status.text : tx('重连中…')}</div>
       </div>
     </div>
-    <div className="px-6 pt-5 pb-1"><Seg label="右侧栏" value={current} options={TABS} onChange={setPaneTab} className="[&_button]:h-8" /></div>
+    <div className="px-6 pt-5 pb-1"><Seg label={tx('右侧栏')} value={current} options={TABS} onChange={setPaneTab} className="[&_button]:h-8" /></div>
     <div key={current} className="anim-fade min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-6">
       {current === 'activity' ? <ActivityTab /> : current === 'who' ? <WhoTab /> : <PermissionsTab />}
     </div>
@@ -90,21 +91,21 @@ function ActivityTab() {
   const done = all ? finished : finished.filter(t => new Date(t.ended!.at).toDateString() === today)
   const next = routines.filter(r => r.enabled && r.next).sort((a, b) => a.next! - b.next!).slice(0, 4)
   const open = (t: Ticket) => { if (t.conversationId) go(`/c/${t.conversationId}`); else openTask(t.id) }
-  if (!live.length && !next.length && !finished.length) return <div className="flex flex-col items-center gap-1.5 py-12 text-sm text-faint"><ShieldCheck size={20} />现在没事，有事叫我</div>
+  if (!live.length && !next.length && !finished.length) return <div className="flex flex-col items-center gap-1.5 py-12 text-sm text-faint"><ShieldCheck size={20} />{tx('现在没事，有事叫我')}</div>
   return <div className="space-y-6">
     {waiting.length > 0 && <section>
-      <Head title="等你点头" count={waiting.length} />
+      <Head title={tx('等你点头')} count={waiting.length} />
       <div className="space-y-1.5">{waiting.map(t => <button key={t.id} onClick={() => open(t)} className="press flex w-full items-center gap-3 rounded-2xl bg-sunken px-3.5 py-3 text-left">
         <Shield size={16} className="shrink-0 text-muted" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm">{t.title}</span>
-          <span className="mt-0.5 block text-[11px] text-faint tabular-nums">{hm(t.attention?.at ?? t.approvals[0]?.createdAt ?? t.updatedAt)}{t.conversationId ? ' · 在聊天里' : ''}</span>
+          <span className="mt-0.5 block text-[11px] text-faint tabular-nums">{hm(t.attention?.at ?? t.approvals[0]?.createdAt ?? t.updatedAt)}{t.conversationId ? tx(' · 在聊天里') : ''}</span>
         </span>
-        <span className="shrink-0 text-xs font-medium text-accent">去确认</span>
+        <span className="shrink-0 text-xs font-medium text-accent">{tx('去确认')}</span>
       </button>)}</div>
     </section>}
     {going.length > 0 && <section>
-      <Head title="正在做" count={going.length} />
+      <Head title={tx('正在做')} count={going.length} />
       <div className="space-y-3">{going.map(t => <div key={t.id}>
         <button onClick={() => openTask(t.id)} className="block w-full text-left">
           <span className="block truncate text-sm font-semibold">{t.title}</span>
@@ -115,16 +116,16 @@ function ActivityTab() {
       </div>)}</div>
     </section>}
     {next.length > 0 && <section>
-      <Head title="接下来" count={next.length} />
+      <Head title={tx('接下来')} count={next.length} />
       <div className="space-y-2">{next.map(r => <a key={r.id} href={r.conversationId ? `#/c/${r.conversationId}` : '#/settings/routines'} className="flex gap-4 text-sm hover:text-accent">
         <span className="w-[96px] shrink-0 font-medium whitespace-nowrap tabular-nums">{when(r.next!)}</span><span className="min-w-0 flex-1 truncate">{r.name}</span>
       </a>)}</div>
     </section>}
     {(done.length > 0 || finished.length > 0) && <section className="border-t border-line pt-5">
-      <Head title={all ? '做过' : '今天做过'} count={done.length}
-        action={finished.length > done.length || all ? <LinkBtn onClick={() => setAll(v => !v)}>{all ? '收起' : '展开'}</LinkBtn> : undefined} />
+      <Head title={all ? tx('做过') : tx('今天做过')} count={done.length}
+        action={finished.length > done.length || all ? <LinkBtn onClick={() => setAll(v => !v)}>{all ? tx('收起') : tx('展开')}</LinkBtn> : undefined} />
       {all ? <Done tickets={done} /> : done.length > 0 ? <Rows tickets={done.slice(0, 6)} />
-        : <p className="text-sm text-faint">今天还没做完什么。</p>}
+        : <p className="text-sm text-faint">{tx('今天还没做完什么。')}</p>}
     </section>}
   </div>
 }
@@ -153,7 +154,7 @@ function Done({ tickets }: { tickets: Ticket[] }) {
 function dayName(at: number) {
   const d = new Date(at), now = new Date()
   const days = Math.round((new Date(now.toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86_400_000)
-  return days === 0 ? '今天' : days === 1 ? '昨天' : `${d.getMonth() + 1} 月 ${d.getDate()} 日 · ${WEEK[d.getDay()]}`
+  return days === 0 ? tx('今天') : days === 1 ? tx('昨天') : tx('{0} 月 {1} 日 · {2}', d.getMonth() + 1, d.getDate(), WEEK[d.getDay()])
 }
 
 // ── 它是谁 ──────────────────────────────────────────────────────────────────
@@ -184,33 +185,33 @@ function WhoTab() {
   return <div className="space-y-5">
     {raw && <Identity persona={raw} />}
     <section className="border-t border-line pt-5">
-      <Head title="性格" action={editing == null && <LinkBtn onClick={() => setEditing(personality)}>改一改</LinkBtn>} />
+      <Head title={tx('性格')} action={editing == null && <LinkBtn onClick={() => setEditing(personality)}>{tx('改一改')}</LinkBtn>} />
       {editing != null ? <div className="space-y-2">
-        <textarea autoFocus value={editing} onChange={e => setEditing(e.target.value)} placeholder="说话直接，先说结论，偶尔开个玩笑。"
+        <textarea autoFocus value={editing} onChange={e => setEditing(e.target.value)} placeholder={tx('说话直接，先说结论，偶尔开个玩笑。')}
           className="min-h-20 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm leading-6 outline-none focus:border-faint" />
         <div className="flex justify-end gap-1.5">
-          <button onClick={() => setEditing(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">取消</button>
-          <button onClick={() => savePersonality.mutate(editing.trim())} disabled={savePersonality.isPending || !raw} className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-50">保存</button>
+          <button onClick={() => setEditing(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">{tx('取消')}</button>
+          <button onClick={() => savePersonality.mutate(editing.trim())} disabled={savePersonality.isPending || !raw} className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-50">{tx('保存')}</button>
         </div>
       </div> : <>
-        <p className={cx('text-[15px] leading-relaxed', personality ? 'font-medium' : 'text-faint')}>{personality || '还没写它的性格，点「改一改」告诉它该怎么说话。'}</p>
+        <p className={cx('text-[15px] leading-relaxed', personality ? 'font-medium' : 'text-faint')}>{personality || tx('还没写它的性格，点「改一改」告诉它该怎么说话。')}</p>
         {traits(personality).length > 0 && <div className="mt-2.5 flex flex-wrap gap-1.5">{traits(personality).map(t => <span key={t} className="rounded-full border border-line px-2.5 py-0.5 text-xs">{t}</span>)}</div>}
       </>}
     </section>
     <section className="border-t border-line pt-5">
       <div className="flex gap-3">
-        <LiquidButton hues={hues.soul} icon={<ScrollText size={18} />} title="灵魂" sub={soul?.version ? `第 ${soul.version} 版 · ${parts} 段` : '还没写'} onClick={() => setModal('soul')} />
-        <LiquidButton hues={hues.memory} icon={<Brain size={18} />} title="记忆" sub={`${active.length} 件`} onClick={() => setModal('memory')} />
+        <LiquidButton hues={hues.soul} icon={<ScrollText size={18} />} title={tx('灵魂')} sub={soul?.version ? tx('第 {0} 版 · {1} 段', soul.version, parts) : tx('还没写')} onClick={() => setModal('soul')} />
+        <LiquidButton hues={hues.memory} icon={<Brain size={18} />} title={tx('记忆')} sub={tx('{0} 件', active.length)} onClick={() => setModal('memory')} />
       </div>
-      <p className="mt-2.5 text-[11px] text-faint">点开看全文，可以直接改。</p>
+      <p className="mt-2.5 text-[11px] text-faint">{tx('点开看全文，可以直接改。')}</p>
     </section>
     <SkillsSection Head={Head} LinkBtn={LinkBtn} />
     {pending.length > 0 && <section className="rounded-2xl bg-sunken px-3.5 py-3">
-      <Head title="新学到的，等你确认" count={pending.length} />
+      <Head title={tx('新学到的，等你确认')} count={pending.length} />
       <div className="space-y-2.5">{pending.slice(0, 5).map(m => <div key={m.id} className="flex items-start gap-3 text-sm">
         <span className="min-w-0 flex-1">{m.text}</span>
-        <button onClick={() => decide.mutate({ id: m.id, action: 'confirm' })} disabled={decide.isPending} className="shrink-0 text-xs font-medium text-accent">记住</button>
-        <button onClick={() => decide.mutate({ id: m.id, action: 'reject' })} disabled={decide.isPending} className="shrink-0 text-xs text-muted hover:text-fg">不要</button>
+        <button onClick={() => decide.mutate({ id: m.id, action: 'confirm' })} disabled={decide.isPending} className="shrink-0 text-xs font-medium text-accent">{tx('记住')}</button>
+        <button onClick={() => decide.mutate({ id: m.id, action: 'reject' })} disabled={decide.isPending} className="shrink-0 text-xs text-muted hover:text-fg">{tx('不要')}</button>
       </div>)}</div>
     </section>}
     {modal === 'soul' && <SoulSheet hues={hues.soul} onClose={() => setModal(null)} />}
@@ -218,7 +219,7 @@ function WhoTab() {
   </div>
 }
 
-const ROLES: { id: Persona['role']; label: string }[] = [{ id: 'all', label: '什么都帮' }, { id: 'life', label: '生活助理' }, { id: 'work', label: '工作助理' }, { id: 'study', label: '学习伙伴' }]
+const ROLES: { id: Persona['role']; label: string }[] = [{ id: 'all', label: tx('什么都帮') }, { id: 'life', label: tx('生活助理') }, { id: 'work', label: tx('工作助理') }, { id: 'study', label: tx('学习伙伴') }]
 const AVATARS = ['🦊', '🐱', '🐼', '🦉', '🐙', '🌱']
 
 /** 名字和样子 (Figma v7 D): who it is, set where you look at it. Settings no longer has a copy. */
@@ -233,23 +234,23 @@ function Identity({ persona }: { persona: Persona }) {
   useEffect(() => setName(persona.name), [persona.name])
   const field = 'h-8 w-[150px] rounded-[10px] border border-line bg-card px-3 text-[13px] outline-none focus:border-faint'
   return <section>
-    <Head title="名字和样子" />
+    <Head title={tx('名字和样子')} />
     <div className="rounded-2xl bg-sunken px-3.5 py-1.5">
-      <label className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">名字</span>
-        <input value={name} maxLength={24} aria-label="名字" onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+      <label className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">{tx('名字')}</span>
+        <input value={name} maxLength={24} aria-label={tx('名字')} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
           onBlur={() => { if (name.trim() && name.trim() !== persona.name) save.mutate({ name: name.trim() }); else setName(persona.name) }} className={field} />
       </label>
-      <label className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">角色</span>
+      <label className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">{tx('角色')}</span>
         <span className="relative">
-          <select value={persona.role} aria-label="角色" onChange={e => save.mutate({ role: e.target.value as Persona['role'] })} className={cx(field, 'cursor-pointer appearance-none pr-8')}>
+          <select value={persona.role} aria-label={tx('角色')} onChange={e => save.mutate({ role: e.target.value as Persona['role'] })} className={cx(field, 'cursor-pointer appearance-none pr-8')}>
             {ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
           <ChevronDown size={13} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-muted" />
         </span>
       </label>
-      <div className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">样子</span>
+      <div className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">{tx('样子')}</span>
         <span className="flex items-center gap-0.5">
-          <button type="button" aria-label="糯糯" aria-pressed={isMascot(persona)} onClick={() => save.mutate({ avatar: MASCOT })}
+          <button type="button" aria-label={tx('糯糯')} aria-pressed={isMascot(persona)} onClick={() => save.mutate({ avatar: MASCOT })}
             className={cx('flex size-7 items-center justify-center rounded-lg', isMascot(persona) ? 'bg-card ring-1 ring-line' : 'hover:bg-card')}><Mascot color={persona.color} size={20} /></button>
           {AVATARS.map(a => <button key={a} type="button" aria-pressed={persona.avatar === a} onClick={() => save.mutate({ avatar: a })}
             className={cx('size-7 rounded-lg text-sm', persona.avatar === a ? 'bg-card ring-1 ring-line' : 'hover:bg-card')}>{a}</button>)}
@@ -261,11 +262,11 @@ function Identity({ persona }: { persona: Persona }) {
 
 // ── 权限 ────────────────────────────────────────────────────────────────────
 
-const LEVEL_LABEL: Record<Level, string> = { allow: '直接做', review: '它判断', ask: '先问你', deny: '不行' }
+const LEVEL_LABEL: Record<Level, string> = { allow: tx('直接做'), review: tx('它判断'), ask: tx('先问你'), deny: tx('不行') }
 
 type Grant = { id: string; ticketId: string; label: string; title: string; createdAt: number; standing: boolean }
 const lines = (v: string) => v.split('\n').map(x => x.trim()).filter(Boolean)
-const DECISION: Record<string, { label: string; cls: string }> = { allow: { label: '自己做了', cls: 'text-ok' }, block: { label: '没做', cls: 'text-danger' }, escalate: { label: '问了你', cls: 'text-warn' } }
+const DECISION: Record<string, { label: string; cls: string }> = { allow: { label: tx('自己做了'), cls: 'text-ok' }, block: { label: tx('没做'), cls: 'text-danger' }, escalate: { label: tx('问了你'), cls: 'text-warn' } }
 
 function PermissionsTab() {
   const qc = useQueryClient()
@@ -294,72 +295,72 @@ function PermissionsTab() {
   const forTask = grants.filter(g => !g.standing)
   return <div className="space-y-5">
     <section>
-      <Head title="它能自己做什么" />
+      <Head title={tx('它能自己做什么')} />
       <div className="space-y-1">
-        <Row icon={<Globe size={16} />} label="查网页、看资料"><span className="px-3 text-xs text-muted">直接做</span></Row>
-        <Row icon={<Send size={16} />} label="往外发：评论、发消息">
-          <LevelPick value={review.external} options={['allow', 'review', 'ask', 'deny']} onChange={external => saveReview.mutate({ external })} label="往外发" />
+        <Row icon={<Globe size={16} />} label={tx('查网页、看资料')}><span className="px-3 text-xs text-muted">{tx('直接做')}</span></Row>
+        <Row icon={<Send size={16} />} label={tx('往外发：评论、发消息')}>
+          <LevelPick value={review.external} options={['allow', 'review', 'ask', 'deny']} onChange={external => saveReview.mutate({ external })} label={tx('往外发')} />
         </Row>
-        <Row icon={<Trash2 size={16} />} label="删除、强推、合并">
-          <LevelPick value={review.destructive} options={['review', 'ask', 'deny']} onChange={destructive => saveReview.mutate({ destructive: destructive as ReviewSettings['destructive'] })} label="删除、强推、合并" />
+        <Row icon={<Trash2 size={16} />} label={tx('删除、强推、合并')}>
+          <LevelPick value={review.destructive} options={['review', 'ask', 'deny']} onChange={destructive => saveReview.mutate({ destructive: destructive as ReviewSettings['destructive'] })} label={tx('删除、强推、合并')} />
         </Row>
-        <Row icon={<CreditCard size={16} />} label="花钱">
-          <span className="flex h-7 items-center gap-1 rounded-full border border-accent/40 px-3 text-xs text-accent">每次都问<Lock size={12} /></span>
+        <Row icon={<CreditCard size={16} />} label={tx('花钱')}>
+          <span className="flex h-7 items-center gap-1 rounded-full border border-accent/40 px-3 text-xs text-accent">{tx('每次都问')}<Lock size={12} /></span>
         </Row>
       </div>
       {standing.length > 0 && <div className="mt-3 space-y-1.5">{standing.map(g => <div key={g.id} className="anim-rise flex items-center gap-3 rounded-2xl bg-accent-soft px-3.5 py-2.5">
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{g.label} · 直接做</span>
-          <span className="block text-[11px] text-muted">{ago(g.createdAt)} 你在审批卡里定的</span>
+          <span className="block truncate text-sm font-medium">{tx('{0} · 直接做', g.label)}</span>
+          <span className="block text-[11px] text-muted">{tx('{0} 你在审批卡里定的', ago(g.createdAt))}</span>
         </span>
-        <button onClick={() => revoke.mutate(g.id)} disabled={revoke.isPending} className="shrink-0 text-xs font-medium text-accent">撤销</button>
+        <button onClick={() => revoke.mutate(g.id)} disabled={revoke.isPending} className="shrink-0 text-xs font-medium text-accent">{tx('撤销')}</button>
       </div>)}</div>}
-      <p className="mt-3 text-[11px] leading-5 text-faint">「花钱」这一条锁着，永远先问你。其他的点一下就能改，审批卡上点「以后这类直接做」也会记在这里。</p>
+      <p className="mt-3 text-[11px] leading-5 text-faint">{tx('「花钱」这一条锁着，永远先问你。其他的点一下就能改，审批卡上点「以后这类直接做」也会记在这里。')}</p>
     </section>
     <FoldersSection execution={execution} onRoots={roots => setRoots.mutate(roots)} />
     <AppsSection />
     <AccountsSection />
     {forTask.length > 0 && <section className="border-t border-line pt-5">
-      <Head title="这件事里你都同意过的" count={forTask.length} />
+      <Head title={tx('这件事里你都同意过的')} count={forTask.length} />
       <div className="space-y-1">{forTask.map(g => <div key={g.id} className="flex items-center gap-2.5 py-1.5 text-sm">
         <span className="min-w-0 flex-1 truncate">{g.label}<span className="text-faint"> · {g.title}</span></span>
-        <button onClick={() => revoke.mutate(g.id)} disabled={revoke.isPending} className="shrink-0 text-xs text-muted hover:text-fg">撤回</button>
+        <button onClick={() => revoke.mutate(g.id)} disabled={revoke.isPending} className="shrink-0 text-xs text-muted hover:text-fg">{tx('撤回')}</button>
       </div>)}</div>
     </section>}
     <section className="border-t border-line pt-5">
-      <Head title="规则" count={review.rules.length || undefined} action={rules == null && <LinkBtn onClick={() => setRules(review.rules.join('\n'))}>{review.rules.length ? '展开' : '写一条'}</LinkBtn>} />
+      <Head title={tx('规则')} count={review.rules.length || undefined} action={rules == null && <LinkBtn onClick={() => setRules(review.rules.join('\n'))}>{review.rules.length ? tx('展开') : tx('写一条')}</LinkBtn>} />
       {rules != null ? <div className="space-y-2">
-        <textarea autoFocus value={rules} onChange={e => setRules(e.target.value)} placeholder={'发邮件、发评论之前先让我看一眼。\n不要删任何文件。'} aria-label="规则，每行一条"
+        <textarea autoFocus value={rules} onChange={e => setRules(e.target.value)} placeholder={tx('发邮件、发评论之前先让我看一眼。\n不要删任何文件。')} aria-label={tx('规则，每行一条')}
           className="min-h-24 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm leading-6 outline-none focus:border-faint" />
         <div className="flex justify-end gap-1.5">
-          <button onClick={() => setRules(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">收起</button>
+          <button onClick={() => setRules(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">{tx('收起')}</button>
           <button onClick={() => saveReview.mutate({ rules: lines(rules) }, { onSuccess: () => setRules(null) })} disabled={saveReview.isPending || lines(rules).join() === review.rules.join()}
-            className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-50">保存</button>
+            className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-50">{tx('保存')}</button>
         </div>
       </div> : review.rules.length > 0 && <ol className="space-y-1.5 text-sm">{review.rules.slice(0, 3).map((r, i) => <li key={i} className="flex gap-3"><span className="w-3 shrink-0 text-faint tabular-nums">{i + 1}</span><span className="min-w-0">{r}</span></li>)}</ol>}
       <div className="mt-2 flex min-h-10 items-center gap-3 text-sm">
-        <span className="min-w-0 flex-1 text-muted">拿不准的事，交给它判断还是问你</span>
+        <span className="min-w-0 flex-1 text-muted">{tx('拿不准的事，交给它判断还是问你')}</span>
         <span className="relative shrink-0">
-          <select value={review.mode} onChange={e => saveReview.mutate({ mode: e.target.value as ReviewSettings['mode'] })} aria-label="拿不准的事"
+          <select value={review.mode} onChange={e => saveReview.mutate({ mode: e.target.value as ReviewSettings['mode'] })} aria-label={tx('拿不准的事')}
             className="h-7 cursor-pointer appearance-none rounded-full bg-sunken pr-7 pl-3 text-xs font-medium outline-none hover:bg-hero-2 focus-visible:ring-2 focus-visible:ring-accent">
-            <option value="model">它判断</option><option value="ask">问你</option>
+            <option value="model">{tx('它判断')}</option><option value="ask">{tx('问你')}</option>
           </select>
           <ChevronDown size={12} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-muted" />
         </span>
       </div>
     </section>
     <section className="border-t border-line pt-5">
-      <Head title="最近 7 天" action={<LinkBtn onClick={() => setLog(v => !v)}>{log ? '收起' : '看记录'}</LinkBtn>} />
-      <p className="text-sm tabular-nums">自己做了 {self} 次 · 问过你 {asked} 次 · 你拒绝了 {refused} 次</p>
+      <Head title={tx('最近 7 天')} action={<LinkBtn onClick={() => setLog(v => !v)}>{log ? tx('收起') : tx('看记录')}</LinkBtn>} />
+      <p className="text-sm tabular-nums">{tx('自己做了 {0} 次 · 问过你 {1} 次 · 你拒绝了 {2} 次', self, asked, refused)}</p>
       {log && <div className="mt-3 space-y-0.5">
-        {!week.length ? <p className="py-2 text-sm text-faint">这 7 天没有要审核的事。</p> : week.slice(0, 40).map(e => <div key={e.id} className="flex gap-3 py-1.5 text-[13px]">
+        {!week.length ? <p className="py-2 text-sm text-faint">{tx('这 7 天没有要审核的事。')}</p> : week.slice(0, 40).map(e => <div key={e.id} className="flex gap-3 py-1.5 text-[13px]">
           <span className="w-[70px] shrink-0 text-xs text-faint tabular-nums">{ago(e.at)}</span>
           <span className="min-w-0 flex-1">
             <span className="block truncate font-mono text-xs">{e.input}</span>
             <span className={cx('text-xs', DECISION[e.decision]?.cls ?? 'text-muted')}>{DECISION[e.decision]?.label ?? e.decision}</span>{e.reason && <span className="text-xs text-faint"> · {e.reason}</span>}
           </span>
         </div>)}
-        {week.length > 40 && <p className="pt-1 text-[11px] text-faint">更早的在 设置 · 数据和隐私 · 原始记录。</p>}
+        {week.length > 40 && <p className="pt-1 text-[11px] text-faint">{tx('更早的在 设置 · 数据和隐私 · 原始记录。')}</p>}
       </div>}
     </section>
   </div>
@@ -428,43 +429,43 @@ function FoldersSection({ execution, onRoots }: { execution: ExecutionSettings |
     setAdding(null)
   }
   return <section className="border-t border-line pt-5">
-    <Head title="文件夹" action={adding == null && <LinkBtn onClick={() => setAdding({ path: '', kind: 'read' })}><span className="flex items-center gap-0.5"><Plus size={12} />添加</span></LinkBtn>} />
-    <div className="mb-1 text-[11px] text-faint">能看的</div>
+    <Head title={tx('文件夹')} action={adding == null && <LinkBtn onClick={() => setAdding({ path: '', kind: 'read' })}><span className="flex items-center gap-0.5"><Plus size={12} />{tx('添加')}</span></LinkBtn>} />
+    <div className="mb-1 text-[11px] text-faint">{tx('能看的')}</div>
     <div className="space-y-1">
-      {!settings.folders.length && <p className="py-1 text-xs text-faint">还没有。它只在每件事自己的工作目录里做事。</p>}
+      {!settings.folders.length && <p className="py-1 text-xs text-faint">{tx('还没有。它只在每件事自己的工作目录里做事。')}</p>}
       {settings.folders.map(f => <Row key={f.path} icon={<Folder size={16} />} label={short(f.path)} sub={f.path}>
-        <Pick value={f.write ? 'write' : 'read'} label={`${f.path} 的权限`} onChange={v => v === 'remove' ? setFolders(settings.folders.filter(x => x.path !== f.path)) : setFolders(settings.folders.map(x => x.path === f.path ? { ...x, write: v === 'write' } : x))}
-          options={[{ id: 'read', label: '只能看' }, { id: 'write', label: '能改' }, { id: 'remove', label: '不让碰了' }]} />
+        <Pick value={f.write ? 'write' : 'read'} label={tx('{0} 的权限', f.path)} onChange={v => v === 'remove' ? setFolders(settings.folders.filter(x => x.path !== f.path)) : setFolders(settings.folders.map(x => x.path === f.path ? { ...x, write: v === 'write' } : x))}
+          options={[{ id: 'read', label: tx('只能看') }, { id: 'write', label: tx('能改') }, { id: 'remove', label: tx('不让碰了') }]} />
       </Row>)}
     </div>
-    <div className="mt-3 mb-1 text-[11px] text-faint">永远不碰</div>
+    <div className="mt-3 mb-1 text-[11px] text-faint">{tx('永远不碰')}</div>
     <div className="space-y-1">
       {settings.never.map(p => <Row key={p} icon={<Ban size={16} />} tone="danger" label={short(p)} sub={p}>
-        <button onClick={() => save.mutate({ never: settings.never.filter(x => x !== p) })} aria-label={`不再禁止 ${p}`} className="press flex size-7 items-center justify-center rounded-full text-faint hover:bg-sunken hover:text-fg"><X size={14} /></button>
+        <button onClick={() => save.mutate({ never: settings.never.filter(x => x !== p) })} aria-label={tx('不再禁止 {0}', p)} className="press flex size-7 items-center justify-center rounded-full text-faint hover:bg-sunken hover:text-fg"><X size={14} /></button>
       </Row>)}
-      <Row icon={<Ban size={16} />} tone="danger" label="钥匙串和密钥" sub={settings.locked.slice(0, 3).join(' · ')}>
-        <span className="flex h-7 items-center gap-1 px-3 text-xs" title={settings.locked.join('\n')}>默认<Lock size={12} /></span>
+      <Row icon={<Ban size={16} />} tone="danger" label={tx('钥匙串和密钥')} sub={settings.locked.slice(0, 3).join(' · ')}>
+        <span className="flex h-7 items-center gap-1 px-3 text-xs" title={settings.locked.join('\n')}>{tx('默认')}<Lock size={12} /></span>
       </Row>
     </div>
     {adding != null && <form className="anim-rise mt-2 space-y-1.5" onSubmit={e => { e.preventDefault(); add() }}>
-      <input autoFocus value={adding.path} onChange={e => setAdding({ ...adding, path: e.target.value })} placeholder="~/Documents/工作" aria-label="文件夹路径"
+      <input autoFocus value={adding.path} onChange={e => setAdding({ ...adding, path: e.target.value })} placeholder={tx('~/Documents/工作')} aria-label={tx('文件夹路径')}
         className="h-8 w-full rounded-full border border-line bg-panel px-3 font-mono text-[13px] outline-none focus:border-faint" />
       <div className="flex items-center gap-1.5">
-        <Pick value={adding.kind} label="这个文件夹" onChange={kind => setAdding({ ...adding, kind })} options={[{ id: 'read', label: '只能看' }, { id: 'write', label: '能改' }, { id: 'never', label: '永远不碰' }]} />
+        <Pick value={adding.kind} label={tx('这个文件夹')} onChange={kind => setAdding({ ...adding, kind })} options={[{ id: 'read', label: tx('只能看') }, { id: 'write', label: tx('能改') }, { id: 'never', label: tx('永远不碰') }]} />
         <span className="flex-1" />
-        <button type="button" onClick={() => setAdding(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">取消</button>
-        <button type="submit" className="press h-8 rounded-full bg-ink px-3 text-[13px] font-medium text-ink-fg">加上</button>
+        <button type="button" onClick={() => setAdding(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">{tx('取消')}</button>
+        <button type="submit" className="press h-8 rounded-full bg-ink px-3 text-[13px] font-medium text-ink-fg">{tx('加上')}</button>
       </div>
     </form>}
   </section>
 }
 
 const APPS: { id: LocalApp; label: string; icon: React.ReactNode }[] = [
-  { id: 'calendar', label: '日历', icon: <CalendarDays size={16} /> }, { id: 'reminders', label: '提醒事项', icon: <ListChecks size={16} /> },
-  { id: 'notes', label: '备忘录', icon: <FileText size={16} /> }, { id: 'contacts', label: '通讯录', icon: <Users size={16} /> }, { id: 'photos', label: '照片', icon: <Image size={16} /> },
+  { id: 'calendar', label: tx('日历'), icon: <CalendarDays size={16} /> }, { id: 'reminders', label: tx('提醒事项'), icon: <ListChecks size={16} /> },
+  { id: 'notes', label: tx('备忘录'), icon: <FileText size={16} /> }, { id: 'contacts', label: tx('通讯录'), icon: <Users size={16} /> }, { id: 'photos', label: tx('照片'), icon: <Image size={16} /> },
 ]
-const APP_LEVELS: { id: AppLevel; label: string }[] = [{ id: 'auto', label: '直接做' }, { id: 'ask', label: '先问你' }, { id: 'read', label: '只能看' }, { id: 'off', label: '不允许' }]
-const APP_SUB: Partial<Record<AppLevel, string>> = { ask: '看直接看，改要问你' }
+const APP_LEVELS: { id: AppLevel; label: string }[] = [{ id: 'auto', label: tx('直接做') }, { id: 'ask', label: tx('先问你') }, { id: 'read', label: tx('只能看') }, { id: 'off', label: tx('不允许') }]
+const APP_SUB: Partial<Record<AppLevel, string>> = { ask: tx('看直接看，改要问你') }
 
 /** 电脑上的 App: each of the owner's own apps at one level. Off a Mac only 日历 is here, through Google Calendar. */
 function AppsSection() {
@@ -473,16 +474,16 @@ function AppsSection() {
   const mac = platform === 'darwin'
   const apps = mac ? APPS : APPS.filter(a => a.id === 'calendar')
   return <section className="border-t border-line pt-5">
-    <Head title={mac ? '电脑上的 App' : '日历'} />
-    <div className="space-y-1">{apps.map(a => <Row key={a.id} icon={a.icon} label={mac ? a.label : 'Google 日历'} sub={mac ? APP_SUB[settings.apps[a.id]] : '在 设置 · 来源 连上 Gmail 就能用'}>
+    <Head title={mac ? tx('电脑上的 App') : tx('日历')} />
+    <div className="space-y-1">{apps.map(a => <Row key={a.id} icon={a.icon} label={mac ? a.label : tx('Google 日历')} sub={mac ? APP_SUB[settings.apps[a.id]] : tx('在 设置 · 来源 连上 Gmail 就能用')}>
       <Pick value={settings.apps[a.id]} label={a.label} options={APP_LEVELS} onChange={level => save.mutate({ apps: { ...settings.apps, [a.id]: level } })} />
     </Row>)}</div>
-    {mac && <p className="mt-2 text-[11px] leading-5 text-faint">第一次用某个 App 时，macOS 会再问你一次。</p>}
+    {mac && <p className="mt-2 text-[11px] leading-5 text-faint">{tx('第一次用某个 App 时，macOS 会再问你一次。')}</p>}
   </section>
 }
 
 const SOURCE_ICON: Record<string, React.ReactNode> = { gmail: <Mail size={16} />, github: <GitBranch size={16} />, gdrive: <Cloud size={16} /> }
-const SOURCE_SUB: Record<string, string> = { gmail: '发邮件仍然每次问你', github: '发评论、推代码按上面的「往外发」' }
+const SOURCE_SUB: Record<string, string> = { gmail: tx('发邮件仍然每次问你'), github: tx('发评论、推代码按上面的「往外发」') }
 
 /** 连接的账号: what it may do in each account the owner connected (connecting happens in 设置 · 来源). */
 function AccountsSection() {
@@ -490,9 +491,9 @@ function AccountsSection() {
   const sources = (useQuery({ queryKey: ['sources'], queryFn: () => api.get<{ sources: SourceInfo[] }>('/sources') }).data?.sources ?? []).filter(x => x.enabled && x.id !== 'cron')
   if (!settings || !sources.length) return null
   return <section className="border-t border-line pt-5">
-    <Head title="连接的账号" />
+    <Head title={tx('连接的账号')} />
     <div className="space-y-1">{sources.map(x => <Row key={x.id} icon={SOURCE_ICON[x.id] ?? <Globe size={16} />} label={x.title} sub={SOURCE_SUB[x.id]}>
-      <Pick value={settings.sources[x.id] ?? 'act'} label={x.title} options={[{ id: 'read', label: '只能看' }, { id: 'act', label: '能操作' }]}
+      <Pick value={settings.sources[x.id] ?? 'act'} label={x.title} options={[{ id: 'read', label: tx('只能看') }, { id: 'act', label: tx('能操作') }]}
         onChange={v => save.mutate({ sources: { ...settings.sources, [x.id]: v } })} />
     </Row>)}</div>
   </section>
@@ -526,7 +527,7 @@ export function PaneDrawer() {
   if (!shown) return null
   const close = () => openActivity(false)
   return <div className={cx('anim-fade fixed inset-0 z-30 flex bg-[var(--scrim)]', phone ? 'items-end' : 'justify-end', leaving && 'out-fade pointer-events-none')} onMouseDown={e => { if (e.target === e.currentTarget) close() }}>
-    <div role="dialog" aria-modal="true" aria-label="糯糯" className={phone
+    <div role="dialog" aria-modal="true" aria-label={tx('糯糯')} className={phone
       ? cx('anim-sheet flex h-[86dvh] w-full flex-col overflow-hidden rounded-t-[28px] bg-panel pb-[env(safe-area-inset-bottom)] shadow-2xl', leaving && 'out-sheet')
       : cx('anim-drawer-r flex h-full w-[360px] flex-col overflow-hidden border-l border-line bg-panel shadow-2xl', leaving && 'out-r')}>
       <RightPane onClose={close} />

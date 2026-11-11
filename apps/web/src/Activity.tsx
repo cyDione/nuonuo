@@ -14,13 +14,14 @@ import { Avatar, usePersona } from './persona'
 import { SourceIcon, SOURCE_LABEL } from './icons'
 import { cx } from './ui'
 import { go } from './route'
+import { locale, tx } from './i18n'
 
 const ICONS: Record<FeedIcon, LucideIcon> = { bell: Bell, tag: Tag, weather: CloudSun, mail: Mail, wifi: Wifi, plane: Plane, calendar: Calendar, package: Package, chart: ChartLine, news: Newspaper, home: House, heart: Heart }
 const hm = (at: number) => { const d = new Date(at); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 function dayLabel(at: number) {
   const d = new Date(at), today = new Date()
   const days = Math.round((new Date(today.toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86_400_000)
-  return days === 0 ? '今天' : days === 1 ? '昨天' : `${d.getMonth() + 1} 月 ${d.getDate()} 日`
+  return days === 0 ? tx('今天') : days === 1 ? tx('昨天') : tx('{0} 月 {1} 日', d.getMonth() + 1, d.getDate())
 }
 
 export const useFeed = () => useQuery({ queryKey: ['feed'], queryFn: () => api.get<{ items: FeedItem[]; unseen: number }>('/feed') })
@@ -65,12 +66,12 @@ export function Activity() {
     <div className="mx-auto max-w-[37.5rem] px-4 pt-8 pb-16 md:px-0">
       <header className="anim-rise flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-3xl font-semibold">动态</h1>
-          <p className="mt-1.5 text-sm text-muted">{onlySaved ? '你收藏的，不会过期' : '它替你盯着的事，有变化才出现在这里'}</p>
+          <h1 className="font-display text-3xl font-semibold">{tx('动态')}</h1>
+          <p className="mt-1.5 text-sm text-muted">{onlySaved ? tx('你收藏的，不会过期') : tx('它替你盯着的事，有变化才出现在这里')}</p>
         </div>
         {(savedCount > 0 || onlySaved) && <button onClick={() => setOnlySaved(v => !v)} aria-pressed={onlySaved}
           className={cx('press mt-1.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px]', onlySaved ? 'border-ink bg-ink text-ink-fg' : 'border-line text-muted hover:border-faint hover:text-fg')}>
-          <Bookmark size={13} fill={onlySaved ? 'currentColor' : 'none'} />收藏 {savedCount}</button>}
+          <Bookmark size={13} fill={onlySaved ? 'currentColor' : 'none'} />{tx('收藏 {0}', savedCount)}</button>}
       </header>
 
       {groups.map((g, gi) => <section key={g.day} className="mt-8">
@@ -85,11 +86,11 @@ export function Activity() {
 
       {loaded && <div className="mt-8 flex items-center gap-3 text-sm text-muted">
         <Avatar persona={persona} size={28} mood="happy" />
-        {empty && onlySaved ? '还没收藏过。把鼠标放到一条上，点书签就能留下它。' : empty ? `还没有变化。想让${persona.name}帮你盯着什么，在聊天里说一声，比如「XM6 降到 2000 以下告诉我」。` : '就这些。有新的我再叫你，不会一直推。'}
+        {empty && onlySaved ? tx('还没收藏过。把鼠标放到一条上，点书签就能留下它。') : empty ? tx('还没有变化。想让{0}帮你盯着什么，在聊天里说一声，比如「XM6 降到 2000 以下告诉我」。', persona.name) : tx('就这些。有新的我再叫你，不会一直推。')}
       </div>}
 
     </div>
-    {undo && <Toast key={undo.id} text={`好，「${undo.title.length > 12 ? undo.title.slice(0, 12) + '…' : undo.title}」这类以后少告诉你一些`}
+    {undo && <Toast key={undo.id} text={tx('好，「{0}」这类以后少告诉你一些', undo.title.length > 12 ? undo.title.slice(0, 12) + '…' : undo.title)}
       onUndo={() => { void api.post(`/feed/${undo.id}/react`, { reaction: null }).then(() => qc.invalidateQueries({ queryKey: ['feed'] })); setUndo(null) }} />}
   </div>
 }
@@ -98,7 +99,7 @@ function Toast({ text, onUndo }: { text: string; onUndo(): void }) {
   return <div role="status" className="anim-rise fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
     <div className="flex max-w-full items-center gap-6 rounded-full bg-ink py-2.5 pr-3 pl-5 text-[13px] text-ink-fg shadow-xl">
       <span className="min-w-0 truncate">{text}</span>
-      <button onClick={onUndo} className="press shrink-0 rounded-full px-3 py-1 font-medium text-accent hover:bg-white/10">撤销</button>
+      <button onClick={onUndo} className="press shrink-0 rounded-full px-3 py-1 font-medium text-accent hover:bg-white/10">{tx('撤销')}</button>
     </div>
   </div>
 }
@@ -124,16 +125,16 @@ function Hero({ item }: { item: FeedItem }) {
             <SlidingNumber number={shown} decimalPlaces={decimals} thousandSeparator="," transition={{ stiffness: 160, damping: 26, mass: 0.6 }} />
             {!money && card.unit && <span className="ml-1.5 text-base font-normal opacity-85">{card.unit}</span>}
           </span>
-          {card.was !== undefined && <span className="text-lg line-through opacity-60 tabular-nums">{money ? '¥' : ''}{card.was.toLocaleString('zh-CN')}</span>}
+          {card.was !== undefined && <span className="text-lg line-through opacity-60 tabular-nums">{money ? '¥' : ''}{card.was.toLocaleString(locale)}</span>}
         </div>
         {(card.note || item.text) && <p className="mt-3 flex items-center gap-1.5 text-sm opacity-95">{card.was !== undefined && <Trend size={15} className="shrink-0" />}{card.note || item.text}</p>}
       </div>
       {card.series && card.series.length > 1 && <Spark values={card.series} className="mt-8 hidden w-44 shrink-0 sm:block" />}
-      <button onClick={() => dismiss.mutate()} aria-label="收起" className="press -mt-1 -mr-2 flex size-7 shrink-0 items-center justify-center rounded-full opacity-80 hover:bg-white/15 hover:opacity-100"><X size={16} /></button>
+      <button onClick={() => dismiss.mutate()} aria-label={tx('收起')} className="press -mt-1 -mr-2 flex size-7 shrink-0 items-center justify-center rounded-full opacity-80 hover:bg-white/15 hover:opacity-100"><X size={16} /></button>
     </div>
     {item.action && <div className="relative mt-4 flex items-center gap-2">
       <ActionButton item={item} variant="white" />
-      <button onClick={() => dismiss.mutate()} className="press rounded-full px-3 py-1.5 text-[13px] opacity-90 hover:bg-white/15">先不要</button>
+      <button onClick={() => dismiss.mutate()} className="press rounded-full px-3 py-1.5 text-[13px] opacity-90 hover:bg-white/15">{tx('先不要')}</button>
     </div>}
   </div>
 }
@@ -165,14 +166,14 @@ function Row({ item, onDown }: { item: FeedItem; onDown(item: FeedItem): void })
       <span className="block truncate text-[15px] font-medium">{item.title}</span>
       {item.text && <span className="mt-0.5 block truncate text-[13px] text-muted">{item.text}</span>}
     </button>
-    {item.saved && <Bookmark size={14} fill="currentColor" className="shrink-0 text-accent group-hover:hidden group-focus-within:hidden" aria-label="收藏了" />}
+    {item.saved && <Bookmark size={14} fill="currentColor" className="shrink-0 text-accent group-hover:hidden group-focus-within:hidden" aria-label={tx('收藏了')} />}
     <div className="anim-fade hidden shrink-0 items-center gap-0.5 rounded-full border border-line bg-panel p-0.5 group-hover:flex group-focus-within:flex max-md:flex">
-      <button onClick={() => react.mutate(item.reaction === 'up' ? null : 'up')} aria-pressed={item.reaction === 'up'} aria-label="有用" title="有用" className={cx(tool, item.reaction === 'up' ? 'text-accent' : 'text-muted hover:text-fg')}><ThumbsUp size={14} fill={item.reaction === 'up' ? 'currentColor' : 'none'} /></button>
-      <button onClick={() => react.mutate('down')} aria-label="这类少告诉我" title="这类少告诉我" className={cx(tool, 'text-muted hover:text-fg')}><ThumbsDown size={14} /></button>
-      <button onClick={() => save.mutate(!item.saved)} aria-pressed={item.saved} aria-label={item.saved ? '取消收藏' : '收藏'} title={item.saved ? '取消收藏' : '收藏'} className={cx(tool, item.saved ? 'text-accent' : 'text-muted hover:text-fg')}><Bookmark size={14} fill={item.saved ? 'currentColor' : 'none'} /></button>
+      <button onClick={() => react.mutate(item.reaction === 'up' ? null : 'up')} aria-pressed={item.reaction === 'up'} aria-label={tx('有用')} title={tx('有用')} className={cx(tool, item.reaction === 'up' ? 'text-accent' : 'text-muted hover:text-fg')}><ThumbsUp size={14} fill={item.reaction === 'up' ? 'currentColor' : 'none'} /></button>
+      <button onClick={() => react.mutate('down')} aria-label={tx('这类少告诉我')} title={tx('这类少告诉我')} className={cx(tool, 'text-muted hover:text-fg')}><ThumbsDown size={14} /></button>
+      <button onClick={() => save.mutate(!item.saved)} aria-pressed={item.saved} aria-label={item.saved ? tx('取消收藏') : tx('收藏')} title={item.saved ? tx('取消收藏') : tx('收藏')} className={cx(tool, item.saved ? 'text-accent' : 'text-muted hover:text-fg')}><Bookmark size={14} fill={item.saved ? 'currentColor' : 'none'} /></button>
     </div>
     {item.action ? <ActionButton item={item} /> : <span className="flex shrink-0 items-center gap-2 text-xs text-faint tabular-nums group-hover:hidden group-focus-within:hidden max-md:hidden">
-      {!item.seen && <span className="size-1.5 rounded-full bg-accent" aria-label="新的" />}{hm(item.at)}
+      {!item.seen && <span className="size-1.5 rounded-full bg-accent" aria-label={tx('新的')} />}{hm(item.at)}
     </span>}
   </div>
 }
@@ -206,8 +207,8 @@ function Noticed({ e }: { e: ActivityEvent }) {
       <div className="truncate text-[15px] font-medium">{e.proactive?.title ?? e.text.slice(0, 60)}</div>
       <div className="mt-0.5 truncate text-[13px] text-muted">{e.proactive?.reason || `${SOURCE_LABEL[e.source] ?? e.source} · ${e.actor}`}</div>
     </div>
-    <button onClick={() => ignore.mutate()} disabled={ignore.isPending} title="以后不管这类" aria-label="以后不管这类"
+    <button onClick={() => ignore.mutate()} disabled={ignore.isPending} title={tx('以后不管这类')} aria-label={tx('以后不管这类')}
       className="press flex size-7 shrink-0 items-center justify-center rounded-full text-faint opacity-0 group-hover:opacity-100 hover:bg-panel hover:text-fg focus-visible:opacity-100 max-md:opacity-100"><X size={14} /></button>
-    <button onClick={() => act.mutate()} disabled={act.isPending} className="press shrink-0 rounded-full bg-panel px-3.5 py-1.5 text-[13px] font-medium shadow-[0_0_0_1px_var(--line)] hover:shadow-[0_0_0_1px_var(--faint)]">帮我处理</button>
+    <button onClick={() => act.mutate()} disabled={act.isPending} className="press shrink-0 rounded-full bg-panel px-3.5 py-1.5 text-[13px] font-medium shadow-[0_0_0_1px_var(--line)] hover:shadow-[0_0_0_1px_var(--faint)]">{tx('帮我处理')}</button>
   </div>
 }
