@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 import { api, type ModelRef, type Provider, type RoleConfig, type RoleSpec, type RolesResponse } from '../api'
 import { fmtNum, fmtUsd } from '../ui'
 import { Block, Btn, Foot, NumberInput, Page, Row, SaveBar, Section, SelectInput, Toggle } from './kit'
-import { useCatalog, useModelOptions, useProviders } from './hooks'
+import { modelTag, useCatalog, useModelOptions, useProviders } from './hooks'
 import { ModelPicker } from './ModelPicker'
 import { tx } from '../i18n'
 
@@ -81,9 +81,6 @@ function RoleDetail({ spec, labelOf, levels, config, resolved, providers }: { sp
   </Page>
 }
 
-// Same rule as isDecisionModel in @super-assistant/models: TypeSafe Jev under a gateway's name, not jev-router.
-const JEV = /(^|[/:])jev(?![-_]?router)([-_.:@]|$)/i
-
 function ChainRow({ index, value, role, kind, providers, onChange, onRemove }: { index: number; value: ModelRef; role: string; kind: RoleSpec['kind']; providers: Provider[]; onChange(v: ModelRef): void; onRemove(): void }) {
   const provider = providers.find(p => p.id === value.providerId)
   const options = useModelOptions(provider, role)
@@ -95,7 +92,7 @@ function ChainRow({ index, value, role, kind, providers, onChange, onRemove }: {
         {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </SelectInput>
       <ModelPicker className="min-w-48 flex-1" value={value.model} onChange={model => onChange({ ...value, model })} models={options.models} loading={options.loading}
-        error={options.error} onRefresh={options.refresh} tag={m => (provider?.kind === 'typesafe' || JEV.test(m) ? tx('决策模型') : undefined)} />
+        error={options.error} onRefresh={options.refresh} tag={m => modelTag(options.types[m])} />
       <Btn disabled={!value.model || test.isPending} onClick={() => test.mutate()}>
         {test.isPending ? <Loader2 size={13} className="animate-spin" /> : test.data ? (test.data.ok ? <><CheckCircle2 size={13} className="text-ok" />{test.data.latencyMs}ms</> : <XCircle size={13} className="text-danger" />) : tx('试一下')}
       </Btn>

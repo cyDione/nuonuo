@@ -341,19 +341,69 @@ describe('Jev through a multi-provider gateway', () => {
     }
     const hub = new ModelHub(store, new MemorySecrets(), factory)
     const gw = hub.createProvider({ kind: 'openai-compatible', name: '聚合网关', baseUrl: 'https://gw.example/v1', apiKey: 'k' })
-    expect((await hub.modelOptions(gw.id, 'reviewer')).models).toEqual(['jev-latest', 'group/deepseek-v4.1-flash', 'gpt-x'])
-    expect((await hub.modelOptions(gw.id, 'router')).models).toEqual(['group/deepseek-v4.1-flash', 'gpt-x'])
+    expect((await hub.modelOptions(gw.id, 'reviewer')).models).toEqual(['jev-latest', 'gpt-x', 'group/deepseek-v4.1-flash'])
+    expect((await hub.modelOptions(gw.id, 'router')).models).toEqual(['gpt-x', 'group/deepseek-v4.1-flash'])
     live = ['gpt-x', 'typesafe/jev-1.13']
-    expect((await hub.modelOptions(gw.id, 'reviewer')).models).toEqual(['jev-latest', 'typesafe/jev-1.13', 'gpt-x'])
+    // The gateway names its own Jev, so the generic suggestion is not added beside it.
+    expect((await hub.modelOptions(gw.id, 'reviewer')).models).toEqual(['typesafe/jev-1.13', 'gpt-x'])
     expect((await hub.modelOptions(gw.id, 'worker')).models).toEqual(['gpt-x'])
     // A failure keeps the suggestions and says why; every call asks the provider again, so a retry picks up a fixed key.
     live = new Error('401 Unauthorized')
-    expect(await hub.modelOptions(gw.id, 'reviewer')).toEqual({ models: ['jev-latest'], error: '401 Unauthorized' })
+    expect(await hub.modelOptions(gw.id, 'reviewer')).toMatchObject({ models: ['jev-latest'], error: '401 Unauthorized' })
     live = ['gpt-y']
-    expect(await hub.modelOptions(gw.id, 'reviewer')).toEqual({ models: ['jev-latest', 'gpt-y'] })
+    expect(await hub.modelOptions(gw.id, 'reviewer')).toMatchObject({ models: ['jev-latest', 'gpt-y'] })
     expect(calls).toBe(6)
     const ts = hub.createProvider({ kind: 'typesafe', name: 'TypeSafe', apiKey: 'k' })
     expect((await hub.modelOptions(ts.id, 'reviewer')).models).toEqual(['jev-latest', 'gpt-y'])
+  })
+
+  it('lists every model of an aggregation gateway with its type, and puts the layer\'s kind first', async () => {
+    store = openStore(':memory:')
+    const live = [{ id: 'group/deepseek-v4.1-flash', type: 'chat' as const }, { id: 'siliconflow/BAAI/bge-m3', type: 'embedding' as const },
+      { id: 'siliconflow/BAAI/bge-reranker-v2-m3', type: 'rerank' as const }, { id: 'typesafe/jev-latest', type: 'decision' as const }]
+    const factory: ModelFactory = { language: () => { throw new Error('unused') }, embedding: () => { throw new Error('unused') }, listModels: async () => live }
+    const hub = new ModelHub(store, new MemorySecrets(), factory)
+    const gw = hub.createProvider({ kind: 'openai-compatible', name: '聚合网关', baseUrl: 'https://gw.example/v1', apiKey: 'k' })
+    const all = await hub.modelOptions(gw.id)
+    expect(all.models).toEqual(['group/deepseek-v4.1-flash', 'siliconflow/BAAI/bge-m3', 'siliconflow/BAAI/bge-reranker-v2-m3', 'typesafe/jev-latest'])
+    expect(all.types).toMatchObject({ 'siliconflow/BAAI/bge-m3': 'embedding', 'typesafe/jev-latest': 'decision', 'group/deepseek-v4.1-flash': 'chat' })
+    expect((await hub.modelOptions(gw.id, 'embedding')).models).toEqual(['siliconflow/BAAI/bge-m3', 'group/deepseek-v4.1-flash', 'siliconflow/BAAI/bge-reranker-v2-m3'])
+    expect((await hub.modelOptions(gw.id, 'reviewer')).models[0]).toBe('typesafe/jev-latest')
+    expect((await hub.modelOptions(gw.id, 'router')).models[0]).toBe('group/deepseek-v4.1-flash')
+  })
+
+  it('finds embedding models OpenRouter keeps off /models, and the Jev a gateway serves on its decision endpoint', async () => {
+    const { listProviderModels } = await import('./factory')
+    const hits: string[] = []
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      hits.push(`${init?.method ?? 'GET'} ${url}`)
+      if (url.endsWith('/v1/models')) return Response.json({ data: [{ id: 'openai/gpt-x', architecture: { modality: 'text->text', output_modalities: ['text'] } }] })
+      if (url.endsWith('/embeddings/models')) return Response.json({ data: [{ id: 'cohere/embed-5-fast', architecture: { modality: 'text+image->embeddings', output_modalities: ['embeddings'] } }, { id: 'qwen/qwen3-emb-8b' }] })
+      if (url.endsWith('/v1/systemone')) return Response.json({ error: { message: 'magpie knows no Jev model "?"; name the provider before it, like typesafe/jev-latest' } }, { status: 404 })
+      return Response.json({ error: { message: 'not found' } }, { status: 404 })
+    }) as typeof fetch
+    const p = { id: 'p', kind: 'openai-compatible' as const, name: 'gw', baseUrl: 'https://gw.example/v1', secretRef: null, options: {} }
+    expect(await listProviderModels(p, 'k', fetchImpl)).toEqual([
+      { id: 'cohere/embed-5-fast', type: 'embedding' }, { id: 'openai/gpt-x', type: 'chat' },
+      { id: 'qwen/qwen3-emb-8b', type: 'embedding' }, { id: 'typesafe/jev-latest', type: 'decision' }])
+    expect(hits).toContain('POST https://gw.example/v1/systemone')
+    // No decision endpoint and no embeddings list: just /models, and a failed /models still fails.
+    const plain = (async (url: string) => url.endsWith('/v1/models') ? Response.json({ data: [{ id: 'm' }] }) : new Response('<html>', { status: 404 })) as typeof fetch
+    expect(await listProviderModels(p, 'k', plain)).toEqual([{ id: 'm', type: 'chat' }])
+    await expect(listProviderModels(p, 'k', (async () => new Response('', { status: 401, statusText: 'Unauthorized' })) as typeof fetch)).rejects.toThrow('401')
+  })
+
+  it('types models from list metadata and from their ids', async () => {
+    const { parseModelCatalog, typeFromId, jevIdsIn } = await import('./discovery')
+    expect(parseModelCatalog({ data: [
+      { id: 'a', type: 'embedding' }, { id: 'b', sub_type: 'reranker' }, { id: 'c', type: 'model', native_endpoints: ['/v1/chat/completions'] },
+      { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] }, { id: 'siliconflow/BAAI/bge-m3', type: 'model' },
+    ] })).toEqual([{ id: 'a', type: 'embedding' }, { id: 'b', type: 'rerank' }, { id: 'c', type: 'chat' },
+      { id: 'siliconflow/BAAI/bge-m3', type: 'embedding' }, { id: 'text-embedding-004', type: 'embedding' }])
+    expect(['gpt-6', 'deepseek-v4.1-flash', 'claude-sonnet-5-5', 'jev-router'].map(m => typeFromId(m))).toEqual(['chat', 'chat', 'chat', 'chat'])
+    expect(['BAAI/bge-reranker-v2-m3', 'jev-latest', 'whisper-1', 'dall-e-3', 'sora-2'].map(m => typeFromId(m))).toEqual(['rerank', 'decision', 'audio', 'image', 'video'])
+    expect(jevIdsIn('name the provider before it, like typesafe/jev-latest.')).toEqual(['typesafe/jev-latest'])
+    expect(jevIdsIn('unknown model gpt-x')).toEqual([])
   })
 
   it('reads model lists in the shapes gateways send', async () => {

@@ -14,6 +14,7 @@ import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOpt
 import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
 import { DECISION_ROLES, resolveRole, roleSpec, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId } from './roles'
 import type { SecretStore } from './secrets'
+import { mergeCatalogs, MODEL_TYPES, typeFromId, type ModelInfo, type ModelType } from './discovery'
 import { decisionEndpoints, systemOneClient, type SystemOneRequest, type SystemOneResponse } from './systemone'
 
 export class ModelError extends Error {
@@ -127,28 +128,39 @@ export class ModelHub {
     return true
   }
 
-  async listModels(id: string): Promise<string[]> {
+  /** Every model the provider serves, tagged by type (chat, embedding, rerank, decision…). */
+  async listModels(id: string): Promise<ModelInfo[]> {
     const p = this.getProvider(id)
-    return this.factory.listModels ? this.factory.listModels(p, this.key(p)) : listProviderModels(p, this.key(p))
+    const list = this.factory.listModels ? await this.factory.listModels(p, this.key(p)) : await listProviderModels(p, this.key(p))
+    return mergeCatalogs(list.map(m => (typeof m === 'string' ? { id: m, type: typeFromId(m, p.kind) } : m)))
   }
 
   /**
-   * What the settings page offers for a provider on a layer: the provider's live models plus its preset's suggestions, and
-   * on a decision layer (the reviewer) the decision models first, since gateways serve Jev without listing it on `/models`.
-   * A decision model is never offered on a layer that cannot use it. A failed live list still returns the suggestions, with
-   * the reason in `error`, and is fetched again on the next call (nothing is cached here).
+   * What the settings page offers for a provider: all its models (chat, embedding, rerank, Jev…) with each one's type, plus
+   * its preset's suggestions. With a layer, the models of the kind that layer runs come first: embedding models on the
+   * embedding layer, decision models on the reviewer, chat models elsewhere. The reviewer is always offered Jev, since
+   * gateways serve it without listing it, and a decision model is never offered on a layer that cannot use it. A failed live
+   * list still returns the suggestions, with the reason in `error`, and is fetched again on the next call (nothing is cached).
    */
-  async modelOptions(id: string, role?: RoleId): Promise<{ models: string[]; error?: string }> {
+  async modelOptions(id: string, role?: RoleId): Promise<{ models: string[]; types: Record<string, ModelType>; error?: string }> {
     const p = this.getProvider(id)
-    let live: string[] = []
+    let live: ModelInfo[] = []
     let error: string | undefined
     try { live = await this.listModels(id) } catch (e) { error = describeError(e) }
     const decisionLayer = role !== undefined && DECISION_ROLES.includes(role)
-    const all = [...new Set([...(decisionLayer ? DECISION_MODEL_SUGGESTIONS : []), ...(presetOf(p.kind, p.baseUrl)?.suggestedModels ?? []), ...live])]
-    const models = role === undefined ? all
-      : decisionLayer ? [...all.filter(m => isDecisionModel(p.kind, m)), ...all.filter(m => !isDecisionModel(p.kind, m))]
-      : all.filter(m => !isDecisionModel(p.kind, m))
-    return error === undefined ? { models } : { models, error }
+    const typed = (m: string): ModelInfo => ({ id: m, type: typeFromId(m, p.kind) })
+    const suggested = [
+      ...(decisionLayer && !live.some(m => m.type === 'decision') ? DECISION_MODEL_SUGGESTIONS : []),
+      ...(presetOf(p.kind, p.baseUrl)?.suggestedModels ?? []),
+    ].map(typed)
+    const seen = new Set<string>()
+    let all = [...suggested, ...live].filter(m => !seen.has(m.id) && seen.add(m.id))
+    if (role !== undefined && !decisionLayer) all = all.filter(m => m.type !== 'decision')
+    const first: ModelType = role === undefined ? 'chat' : decisionLayer ? 'decision' : roleSpec(role).kind === 'embedding' ? 'embedding' : 'chat'
+    const rank = (t: ModelType) => (t === first ? -1 : t === 'chat' ? 0 : MODEL_TYPES.indexOf(t) + 1)
+    all = all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m.type) - rank(b.m.type) || a.i - b.i).map(({ m }) => m)
+    const result = { models: all.map(m => m.id), types: Object.fromEntries(all.map(m => [m.id, m.type])) as Record<string, ModelType> }
+    return error === undefined ? result : { ...result, error }
   }
 
   /**
@@ -389,7 +401,7 @@ export function describeError(error: unknown): string {
 
 /** Whether a model id names an embedding model (text-embedding-3-small, BAAI/bge-m3, nomic-embed-text, …). */
 export function guessModelKind(model: string): 'language' | 'embedding' {
-  return /embed|(^|[/_.:-])(bge|e5|gte)([-_.:]|$)/i.test(model) ? 'embedding' : 'language'
+  return typeFromId(model) === 'embedding' ? 'embedding' : 'language'
 }
 
 /** Adds a hint to "model does not exist" style failures, the usual sign of a chat model on the embedding layer or the reverse. */
