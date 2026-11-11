@@ -11,7 +11,7 @@ import { motion } from 'motion/react'
 import { api } from './api'
 import { prefillComposer } from './Chat'
 import { usePersona } from './persona'
-import { getPrefs, keyLabel, matchesKey } from './prefs'
+import { getPrefs, keyLabel, matchesKey, MOD } from './prefs'
 import { ArtifactModal, previewKind } from './preview'
 import { setPaneTab } from './RightPane'
 import { go } from './route'
@@ -130,7 +130,7 @@ function Box({ onFile }: { onFile(f: { id: string; name: string }): void }) {
         className="flex items-center gap-2.5 border-t border-line px-5 py-3 text-left text-sm text-muted enabled:hover:text-fg disabled:opacity-60">
         <Sparkles size={15} className="shrink-0 text-accent" />
         <span className="min-w-0 flex-1 truncate">{q.trim() ? <>直接问{persona.name}「{q.trim()}」…</> : <>问{persona.name}点什么…</>}</span>
-        <span className="shrink-0 text-xs text-faint">⌘ ↵</span>
+        <span className="shrink-0 text-xs text-faint">{MOD} ↵</span>
       </button>
     </div>
   </div>, document.body)

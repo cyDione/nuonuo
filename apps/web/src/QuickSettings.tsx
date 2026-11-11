@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronRight, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type IdeaSettings, type ProactiveSettings, type UpdateStatus } from './api'
-import { ACCENTS, getPrefs, matchesKey, setPrefs, usePrefs, type Theme } from './prefs'
+import { ACCENTS, getPrefs, keyLabel, matchesKey, MOD, setPrefs, usePrefs, type Theme } from './prefs'
 import { go } from './route'
 import { cx, Seg } from './ui'
 
@@ -93,7 +93,7 @@ function Body({ update, onDone }: { update: string | null; onDone(): void }) {
     <button onClick={() => all('/settings/persona')} className="group flex w-full items-center gap-2 rounded-b-[20px] border-t border-line px-5 py-3.5 text-left hover:bg-sunken/60">
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium">全部设置…</span>
-        <span className="mt-0.5 block text-xs text-muted">主动、来源、模型、审核都在这里 · ⌘,</span>
+        <span className="mt-0.5 block text-xs text-muted">主动、来源、模型、审核都在这里{prefs.keys.settings ? ` · ${keyLabel(prefs.keys.settings).join(MOD === 'Ctrl' ? '+' : '')}` : ''}</span>
       </span>
       <ChevronRight size={15} className="text-faint transition-transform duration-200 ease-out group-hover:translate-x-0.5" />
     </button>

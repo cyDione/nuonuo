@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { PanelLeft } from 'lucide-react'
-import { getPrefs, matchesKey } from './prefs'
+import { getPrefs, matchesKey, MOD } from './prefs'
 import { cx, IconButton } from './ui'
 
 /** The desktop app's own settings (设置 → 通用 · 快捷键). */
@@ -137,7 +137,7 @@ export function TopBar({ children, right, className }: { children?: React.ReactN
   const { leftOpen } = usePanes()
   return <div className={cx('drag flex h-12 shrink-0 items-center gap-2 px-3', className)}>
     {!leftOpen && <span className={cx('anim-fade flex items-center max-md:hidden', isMacDesktop && 'lights-room pl-[64px]')}>
-      <IconButton label="展开侧栏 (⌘\)" onClick={() => togglePane('left', true)} className="size-8"><PanelLeft size={17} /></IconButton>
+      <IconButton label={`展开侧栏 (${MOD}\\)`} onClick={() => togglePane('left', true)} className="size-8"><PanelLeft size={17} /></IconButton>
     </span>}
     <div className="flex min-w-0 flex-1 items-center gap-2.5">{children}</div>
     {right}

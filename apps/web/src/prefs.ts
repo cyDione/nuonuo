@@ -76,6 +76,8 @@ export function matchesKey(e: KeyboardEvent, combo: string): boolean {
   return e.key.length === 1 ? e.key.toUpperCase() === key.toUpperCase() || e.code === `Key${key.toUpperCase()}` || e.code === `Digit${key}` : e.key === key
 }
 /** "Mod+Shift+K" → "⌘ ⇧ K" on macOS, "Ctrl Shift K" elsewhere. */
+/** ⌘ on a Mac, Ctrl elsewhere, for labels that name the main modifier. */
+export const MOD = isMac ? '⌘' : 'Ctrl'
 export function keyLabel(combo: string): string[] {
   if (!combo) return []
   return combo.split('+').map(k => k === 'Mod' ? (isMac ? '⌘' : 'Ctrl') : k === 'Shift' ? (isMac ? '⇧' : 'Shift') : k === 'Alt' ? (isMac ? '⌥' : 'Alt')

@@ -11,6 +11,7 @@ import remarkGfm from 'remark-gfm'
 import { api, type Conversation, type Message, type Routine } from './api'
 import { useLive } from './live'
 import { Avatar, usePersona } from './persona'
+import { MOD } from './prefs'
 import { desktop } from './shell'
 import { needsOwner, useTickets } from './tasks'
 import { cx } from './ui'
@@ -92,7 +93,7 @@ export function QuickAsk() {
         </button>)}
       </div>}
       <div className="flex gap-4 border-t border-line bg-sunken/40 px-4 py-2 text-[11px] text-faint">
-        <span>↵ 交给{persona.name}</span><span>⌘↵ 在主窗口打开</span><span>esc 收起</span>
+        <span>↵ 交给{persona.name}</span><span>{MOD}↵ 在主窗口打开</span><span>esc 收起</span>
       </div>
     </div>
   </div>
