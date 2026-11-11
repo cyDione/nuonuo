@@ -5,21 +5,19 @@ import { api, type Persona, type Ticket } from './api'
 import { cx } from './ui'
 
 export const MASCOT = 'mascot'
-/** 糯糯's own pink (Figma "10 · Logo 重做"): reads on both the pure white and the pure black window. */
-export const BRAND = '#ff7a9a'
+/** 糯糯's colour follows the theme colour (设置 → 通用 → 主题色); 莓红, the default, gives its own pink (Figma "10 · Logo 重做"). */
+export const BRAND = 'var(--mochi)'
 /** The assistant's official name. 小助 was the old default and is shown as 糯糯. */
 export const OFFICIAL_NAME = '糯糯'
 const FALLBACK: Persona = { name: OFFICIAL_NAME, avatar: MASCOT, color: BRAND, personality: '', role: 'all', language: 'auto' }
-// Earlier default colours: shown as the current brand pink.
-const OLD_DEFAULTS = new Set(['#4f46e5', '#2f6bff', '#2b4bff', '#2b3cff', '#5c7bff', '#7d8bf0', '#e9845a'])
 
 export const usePersona = () => {
   const p = useQuery({ queryKey: ['persona'], queryFn: () => api.get<{ persona: Persona }>('/persona'), staleTime: 60_000 }).data?.persona
   if (!p) return FALLBACK
   const avatar = p.avatar === '✨' ? MASCOT : p.avatar
   const name = p.name === '小助' ? OFFICIAL_NAME : p.name
-  const old = OLD_DEFAULTS.has(p.color.toLowerCase())
-  return avatar !== p.avatar || old || name !== p.name ? { ...p, name, avatar, color: old ? BRAND : p.color } : p
+  // One colour for the whole app: the theme colour also colours 糯糯, so the colour saved on the persona is no longer used.
+  return { ...p, name, avatar, color: BRAND }
 }
 
 export const isMascot = (p: Persona) => !p.avatar || p.avatar === MASCOT || p.avatar === '✨'
@@ -30,7 +28,7 @@ export const moodOf = (tone: 'idle' | 'working' | 'waiting'): Mood => tone
 export function Avatar({ persona, size = 28, className, mood = 'idle', track }: { persona: Persona; size?: number; className?: string; mood?: Mood; track?: boolean }) {
   if (isMascot(persona)) return <Mascot color={persona.color} size={size} mood={mood} {...(className ? { className } : {})} {...(track ? { track } : {})} />
   return <span className={cx('inline-flex shrink-0 items-center justify-center rounded-[32%] leading-none select-none', className)}
-    style={{ width: size, height: size, background: `${persona.color}22`, boxShadow: `inset 0 0 0 1px ${persona.color}44`, fontSize: size * 0.55 }} aria-hidden>
+    style={{ width: size, height: size, background: `color-mix(in oklab, ${persona.color} 13%, transparent)`, boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${persona.color} 27%, transparent)`, fontSize: size * 0.55 }} aria-hidden>
     {persona.avatar || persona.name.slice(0, 1)}
   </span>
 }
@@ -86,7 +84,7 @@ export function Mascot({ color, size = 28, mood = 'idle', className, track }: { 
   return <svg ref={root} viewBox="0 0 100 100" width={size} height={size} className={cx('mascot shrink-0 overflow-visible', className)} data-mood={m} data-blink={blink || undefined} aria-hidden>
     <ellipse className="m-shadow" cx="50" cy="93" rx="28" ry="3.4" fill="currentColor" opacity="0.08" />
     <g className="m-body">
-      <path d={BODY} fill={color} />
+      <path d={BODY} style={{ fill: color }} />
       {closed ? <g {...line} strokeWidth={3.3}>
         {m === 'happy' ? <><path d="M35 56 Q39.5 49.4 44 56" /><path d="M56 56 Q60.5 49.4 65 56" /></>
           : <><path d="M35 55 Q39.5 59.5 44 55" /><path d="M56 55 Q60.5 59.5 65 55" /></>}

@@ -29,7 +29,7 @@ export function General() {
   return <Page title="通用">
     <Section title="外观" foot="外观、主题色和下面的字号、动效只改这台设备。">
       <Row label="外观"><Choice<Theme> label="外观" value={prefs.theme} onChange={theme => setPrefs({ theme })} options={THEMES} className="w-[260px]" /></Row>
-      <Row label="主题色" sub={`按钮、你的消息气泡和选中的地方都用这个颜色 · 现在是${accent.label}`}>
+      <Row label="主题色" sub={`按钮、你的消息气泡、选中的地方和糯糯都用这个颜色 · 现在是${accent.label}`}>
         <span role="radiogroup" aria-label="主题色" className="flex items-center gap-1.5">
           {ACCENTS.map(a => { const on = a.id === prefs.accent
             return <button key={a.id} type="button" role="radio" aria-checked={on} aria-label={a.label} title={a.label} onClick={() => setPrefs({ accent: a.id })}

@@ -99,5 +99,13 @@ export function setPrefs(patch: Partial<Prefs>) {
   for (const l of listeners) l()
 }
 
+// Another window of the app (the quick-ask window, a second tab) changed them: follow along without a reload.
+if (typeof window !== 'undefined') window.addEventListener('storage', e => {
+  if (e.key !== KEY) return
+  prefs = load()
+  applyPrefs()
+  for (const l of listeners) l()
+})
+
 export const getPrefs = () => prefs
 export const usePrefs = () => useSyncExternalStore(l => { listeners.add(l); return () => listeners.delete(l) }, () => prefs)

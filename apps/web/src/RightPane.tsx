@@ -214,7 +214,6 @@ function WhoTab() {
 
 const ROLES: { id: Persona['role']; label: string }[] = [{ id: 'all', label: '什么都帮' }, { id: 'life', label: '生活助理' }, { id: 'work', label: '工作助理' }, { id: 'study', label: '学习伙伴' }]
 const AVATARS = ['🦊', '🐱', '🐼', '🦉', '🐙', '🌱']
-const COLORS = ['#ff7a9a', '#5db49c', '#f2be45', '#d0583a', '#3f8f9c', '#5c5c5c']
 
 /** 名字和样子 (Figma v7 D): who it is, set where you look at it. Settings no longer has a copy. */
 function Identity({ persona }: { persona: Persona }) {
@@ -248,12 +247,6 @@ function Identity({ persona }: { persona: Persona }) {
             className={cx('flex size-7 items-center justify-center rounded-lg', isMascot(persona) ? 'bg-card ring-1 ring-line' : 'hover:bg-card')}><Mascot color={persona.color} size={20} /></button>
           {AVATARS.map(a => <button key={a} type="button" aria-pressed={persona.avatar === a} onClick={() => save.mutate({ avatar: a })}
             className={cx('size-7 rounded-lg text-sm', persona.avatar === a ? 'bg-card ring-1 ring-line' : 'hover:bg-card')}>{a}</button>)}
-        </span>
-      </div>
-      <div className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">颜色</span>
-        <span className="flex items-center gap-2">
-          {COLORS.map(c => <button key={c} type="button" aria-label={`颜色 ${c}`} aria-pressed={persona.color === c} onClick={() => save.mutate({ color: c })}
-            className={cx('size-[18px] rounded-full', persona.color === c && 'ring-2 ring-offset-2 ring-offset-sunken')} style={{ background: c, ['--tw-ring-color' as string]: c }} />)}
         </span>
       </div>
     </div>
