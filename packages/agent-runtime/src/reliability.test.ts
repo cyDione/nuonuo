@@ -103,3 +103,21 @@ describe('runtime reliability', () => {
     expect(runtime.interruptedCalls(id)).toEqual([])
   })
 })
+
+describe('jobs a crash left behind', () => {
+  it('stops a command the previous process left running, and picks a shell per platform', async () => {
+    const { Jobs, shellFor } = await import('./jobs')
+    const { spawn } = await import('node:child_process')
+    store = openStore(':memory:')
+    const jobs = new Jobs(store, () => {})
+    // What a crash leaves: a detached command still running, and its row marked running with its pid.
+    const child = spawn('bash', ['-lc', 'sleep 30'], { detached: true, stdio: 'ignore', env: { ...process.env, SUPER_ASSISTANT_JOB: 'job_left' } })
+    const exited = new Promise(r => child.on('exit', r))
+    store.db.insert(schema.jobs).values({ id: 'job_left', sessionId: 's', command: 'sleep 30', cwd: '/', status: 'running', startedAt: Date.now(), pid: child.pid! }).run()
+    store.db.insert(schema.jobs).values({ id: 'job_other', sessionId: 's', command: 'x', cwd: '/', status: 'running', startedAt: Date.now(), pid: process.pid }).run()
+    expect(jobs.recover().map(j => j.id).sort()).toEqual(['job_left', 'job_other'])
+    await exited
+    expect(child.signalCode).toBe('SIGKILL')
+    expect(shellFor('ls', 'linux')).toEqual(['bash', ['-lc', 'ls']])
+  })
+})

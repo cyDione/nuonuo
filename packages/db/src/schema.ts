@@ -204,6 +204,7 @@ export const jobs = sqliteTable('jobs', {
   output: text('output').notNull().default(''),
   startedAt: integer('started_at').notNull(),
   endedAt: integer('ended_at'),
+  pid: integer('pid'),
 })
 
 export const blobs = sqliteTable('blobs', {

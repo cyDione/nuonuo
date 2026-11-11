@@ -122,7 +122,7 @@ export class PluginManager {
         if (this.registry.has(kind.id)) throw new Error(`来源 id "${kind.id}" 已被占用`)
         if (!kind.schema || typeof kind.start !== 'function') throw new Error(`来源 ${kind.id} 缺少 schema 或 start`)
       }
-      for (const kind of plugin.sources ?? []) this.registry.register(kind)
+      for (const kind of plugin.sources ?? []) this.registry.register(kind, { thirdParty: true })
       this.loaded.set(manifest.id, { plugin, manifest })
       for (const kind of plugin.sources ?? []) if (this.registry.settings(kind.id).enabled) await this.registry.save(kind.id, this.registry.settings(kind.id))
     } catch (error) {

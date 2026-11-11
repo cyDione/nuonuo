@@ -4,7 +4,9 @@
  * session's inbox as a new event.
  */
 import { newId, schema, type Store } from '@super-assistant/db'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { readdirSync, readFileSync } from 'node:fs'
+import { uptime } from 'node:os'
 import { and, eq } from 'drizzle-orm'
 
 const OUTPUT_CAP = 400_000
@@ -18,10 +20,14 @@ export class Jobs {
 
   constructor(private store: Store, private onBackgroundDone: (sessionId: string, result: JobResult, command: string) => void) {}
 
-  /** Marks jobs a previous process left running as killed; returns them so their sessions can be told. */
+  /**
+   * Stops the commands a previous process left running (a crash leaves detached ones alive), marks them killed and returns
+   * them so their sessions can be told.
+   */
   recover(): { id: string; sessionId: string; command: string }[] {
     const rows = this.store.db.select().from(schema.jobs).where(eq(schema.jobs.status, 'running')).all()
     for (const row of rows) {
+      if (row.pid && stillOurs(row.id, row.pid, row.startedAt)) killGroup(row.pid, 'SIGKILL')
       this.store.db.update(schema.jobs).set({ status: 'killed', endedAt: Date.now(), output: `${row.output}\n[服务重启，任务被终止]` })
         .where(eq(schema.jobs.id, row.id)).run()
     }
@@ -33,7 +39,9 @@ export class Jobs {
     const id = newId('job')
     const started = Date.now()
     this.store.db.insert(schema.jobs).values({ id, sessionId: opts.sessionId, command: opts.command, cwd: opts.cwd, status: 'running', startedAt: started }).run()
-    const child = spawn('bash', ['-lc', opts.command], { cwd: opts.cwd, env: opts.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const [bin, args] = shellFor(opts.command)
+    const child = spawn(bin, args, { cwd: opts.cwd, env: { ...opts.env, SUPER_ASSISTANT_JOB: id }, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    if (child.pid) this.store.db.update(schema.jobs).set({ pid: child.pid }).where(eq(schema.jobs.id, id)).run()
     const live: Live = { child, output: '', started, background: false, sessionId: opts.sessionId, done: undefined as never }
     const append = (chunk: Buffer) => {
       live.output += chunk.toString('utf8')
@@ -110,7 +118,47 @@ export class Jobs {
 
   private killTree(child: ChildProcess) {
     if (child.exitCode !== null || child.pid === undefined) return
-    try { process.kill(-child.pid, 'SIGTERM') } catch { /* gone */ }
-    setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL') } catch { /* gone */ } }, 3_000).unref()
+    const pid = child.pid
+    killGroup(pid, 'SIGTERM')
+    if (process.platform !== 'win32') setTimeout(() => killGroup(pid, 'SIGKILL'), 3_000).unref()
   }
+}
+
+let windowsShell: [string, (command: string) => string[]] | undefined
+
+/**
+ * The command line a job runs in: bash everywhere it exists (on Windows, Git Bash or WSL's bash on PATH), else PowerShell,
+ * so a Windows machine without bash still runs commands instead of failing every one.
+ */
+export function shellFor(command: string, platform = process.platform): [string, string[]] {
+  if (platform !== 'win32') return ['bash', ['-lc', command]]
+  windowsShell ??= spawnSync('where', ['bash'], { windowsHide: true }).status === 0
+    ? ['bash', c => ['-lc', c]]
+    : ['powershell.exe', c => ['-NoProfile', '-NonInteractive', '-Command', c]]
+  return [windowsShell[0], windowsShell[1](command)]
+}
+
+/** Stops a job's whole process tree: its process group on Unix (jobs start detached, so pid = group), taskkill on Windows. */
+function killGroup(pid: number, signal: NodeJS.Signals): void {
+  if (process.platform === 'win32') {
+    try { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }) } catch { /* gone */ }
+    return
+  }
+  try { process.kill(-pid, signal) } catch { /* gone */ }
+}
+
+/**
+ * Whether `pid` is still the job a previous run started, so a restart never stops an unrelated process that reused the id:
+ * it must have started since the machine booted and, where /proc exists, carry the job's own id in its environment.
+ */
+function stillOurs(jobId: string, pid: number, startedAt: number): boolean {
+  if (startedAt < Date.now() - uptime() * 1000) return false
+  if (process.platform === 'win32') { try { process.kill(pid, 0); return true } catch { return false } }
+  try { process.kill(-pid, 0) } catch { return false }
+  if (process.platform !== 'linux') return true
+  // The group leader may be gone while its children run on; any of them carries the marker.
+  const marker = `SUPER_ASSISTANT_JOB=${jobId}`
+  try {
+    return readdirSync('/proc').some(n => /^\d+$/.test(n) && (() => { try { return readFileSync(`/proc/${n}/environ`, 'utf8').split('\0').includes(marker) } catch { return false } })())
+  } catch { return false }
 }

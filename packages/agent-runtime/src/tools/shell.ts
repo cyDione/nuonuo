@@ -1,7 +1,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import type { Blobs } from '../blobs'
-import type { Jobs } from '../jobs'
+import { shellFor, type Jobs } from '../jobs'
 
 export interface ShellOptions {
   sessionId: string
@@ -35,7 +35,7 @@ export function shellTools(jobs: Jobs, blobs: Blobs, opts: ShellOptions) {
   }
   return {
     shell: tool({
-      description: `Run a bash command in the task's working directory. With background: true it starts and returns at once (use it for builds, test suites, servers, downloads); otherwise commands still running after ${Math.round(opts.foregroundMs / 1000)}s move to the background. A background command's result arrives later as a message — never sleep or poll in a loop; job_stop ends it. Hard limit ${Math.round(opts.timeoutMs / 60000)} minutes.`,
+      description: `Run a ${shellFor('')[0] === 'powershell.exe' ? 'PowerShell' : 'bash'} command in the task's working directory. With background: true it starts and returns at once (use it for builds, test suites, servers, downloads); otherwise commands still running after ${Math.round(opts.foregroundMs / 1000)}s move to the background. A background command's result arrives later as a message — never sleep or poll in a loop; job_stop ends it. Hard limit ${Math.round(opts.timeoutMs / 60000)} minutes.`,
       inputSchema: z.object({ command: z.string().min(1), background: z.boolean().optional().describe('Start it and return immediately (asynchronous start)') }),
       execute: async ({ command, background }) => {
         const hit = firstWords(command).find(word => opts.blocked.includes(word))

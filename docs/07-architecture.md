@@ -119,3 +119,11 @@
 | 允许的工作目录按字符串前缀比较，符号链接能指到外面 | 先解析真实路径再比较 | `engine.ts` 的 `chooseDirectory` |
 | 没有 Docker 沙箱时 shell 能改任何文件 | 命令写到任务目录和"能看能改"的文件夹之外时，按"往外发"的级别交给审核层（启发式，不是沙箱） | `access.ts` 的 `shellWritesOutside`、`review.ts` |
 | 开了沙箱后，权限里允许的文件夹在容器里看不到 | 沙箱按权限挂载允许的文件夹（只能看的只读挂载）和附件目录；里面的"永远不碰"目录用空目录盖住 | `sandbox.ts`、daemon `runtime.ts` 的 `sandboxFolders` |
+| 运行时自己的数据只增不减（已取的收件箱、命令输出、工具输出 blob、工具调用标记） | 每小时清理：已取收件箱 7 天、结束的命令 30 天、工具调用标记 30 天、溢出的工具输出 90 天。任务、汇报、产物和聊天不动（聊天按「数据和隐私」的保留期） | daemon `data.ts` 的 `pruneRuntime` |
+| 第三方插件拿到整个 Engine 和数据库 | 第三方插件的 `ctx.engine` 只剩 receive / follow / followed / threadClosed / mainConversation / conversationOfThread，且只能用自己 `<id>:` 开头的线程；`ctx.store` 不可用 | `sources/src/registry.ts` 的 `outsiderContext` |
+| 插件工具与自带工具同名时会顶替自带的（比如一个叫 `shell` 的插件工具绕过审核） | 扩展工具先放、自带工具后放，自带的总是赢；第三方插件工具名必须以 `<id>_` 开头；第三方插件的写操作每次先问你 | `agents.ts`、`registry.ts`、`localapps.ts` 的 `gateSourceTools` |
+| 进程崩溃后，后台命令还在跑却被标成已终止 | 记录每条命令的进程号；重启时确认还是原来那条命令（开机之后启动，Linux 上再核对环境变量里的任务号）后杀掉整个进程组 | `agent-runtime/src/jobs.ts` 的 `recover` |
+| Windows 上没有 bash 时每条命令都失败 | 有 bash（Git Bash）用 bash，没有就用 PowerShell；终止用 `taskkill /T /F` | `jobs.ts` 的 `shellFor` / `killGroup` |
+| 主 Agent 的记忆信任状态是模块级全局变量 | 改为按 Engine 实例保存 | `agents.ts` 的 `routerContextOf` |
+
+还没做：按任务筛选给 Worker 的来源工具（内置来源的工具现在对所有任务可见，这是"帮我看下邮件"这类任务需要的），以及运行指标（可以从用量账本和审计日志里看到大部分）。

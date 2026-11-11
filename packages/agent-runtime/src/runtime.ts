@@ -91,7 +91,7 @@ export class AgentRuntime {
     this.jobs = new Jobs(store, (sessionId, result, command) => this.jobFinished(sessionId, result, command))
     this.registerResolver('blob', (ref, page) => {
       const p = this.blobs.page(ref, page)
-      return p && `${ref} 第 ${p.page}/${p.pages} 页：\n${p.text}`
+      return p ? `${ref} 第 ${p.page}/${p.pages} 页：\n${p.text}` : `${ref} 已不在了（较早的工具输出会按保留期清理）`
     })
   }
 

@@ -348,4 +348,7 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE goals ADD COLUMN parent_id TEXT;
   ALTER TABLE goals ADD COLUMN position REAL;
   `,
+  /* 12: a job's process id, so a restart can stop commands the previous process left behind */ `
+  ALTER TABLE jobs ADD COLUMN pid INTEGER;
+  `,
 ]

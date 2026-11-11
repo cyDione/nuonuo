@@ -64,3 +64,23 @@ export function clearChats(store: Store, keep: string[]): number {
     return n
   })
 }
+
+/** How long the runtime's own bookkeeping is kept; the owner's chats follow 聊天记录保留 instead. */
+export const RUNTIME_KEEP = { inboxDays: 7, jobsDays: 30, markersDays: 30, blobsDays: 90 } as const
+
+/**
+ * Trims what the runtime piles up on its own: delivered inbox rows, finished background commands, tool-call markers
+ * (only needed to spot calls a crash interrupted) and spilled tool output. Task records, reports, artifacts and
+ * conversation history are left alone. A `recall` of a removed blob answers that it is gone.
+ */
+export function pruneRuntime(store: Store, now = Date.now(), keep = RUNTIME_KEEP): Record<string, number> {
+  const before = (days: number) => now - days * DAY
+  return store.atomic(() => ({
+    inbox: store.sqlite.prepare('DELETE FROM session_inbox WHERE taken_at IS NOT NULL AND taken_at < ?').run(before(keep.inboxDays)).changes,
+    jobs: store.sqlite.prepare("DELETE FROM jobs WHERE status != 'running' AND COALESCE(ended_at, started_at) < ?").run(before(keep.jobsDays)).changes,
+    markers: store.sqlite.prepare(`DELETE FROM session_events WHERE kind = 'marker' AND at < ?
+      AND json_extract(payload, '$.type') IN ('tool-start', 'tool-end')
+      AND session_id NOT IN (SELECT id FROM sessions WHERE state = 'running')`).run(before(keep.markersDays)).changes,
+    blobs: store.sqlite.prepare('DELETE FROM blobs WHERE created_at < ?').run(before(keep.blobsDays)).changes,
+  }))
+}
