@@ -48,7 +48,7 @@
   --fg: #141414; --muted: #636363; --faint: #9a9a9a;
   --ink: #141414; --ink-fg: #ffffff;
   --accent: var(--a-l); --accent-fg: var(--a-fg-l); --accent-soft: color-mix(in oklab, var(--accent) 10%, var(--bg));
-  --mochi: #ff7a9a;
+  --mochi: var(--m-l);
   --thumb: rgb(20 20 20 / 0.2); --thumb-hover: rgb(20 20 20 / 0.36);
   --ok: #2f7a55; --warn: #a8611a; --warn-soft: #f8ecd9; --danger: #c23b33;
   --lime: #2f9e6e; --coral: #d2535a; --sun: #f6c04e; --sky: #3d86e0; --grape: #8a7fc0;
@@ -63,7 +63,7 @@
     --fg: #f2f2f2; --muted: #9a9a9a; --faint: #666666;
     --ink: #f2f2f2; --ink-fg: #141414;
     --accent: var(--a-d); --accent-fg: var(--a-fg-d); --accent-soft: color-mix(in oklab, var(--accent) 22%, var(--bg));
-    --mochi: #ff7a9a;
+    --mochi: var(--m-d);
     --thumb: rgb(255 255 255 / 0.2); --thumb-hover: rgb(255 255 255 / 0.36);
     --ok: #6fcf9c; --warn: #f2c06b; --warn-soft: #2e2414; --danger: #f2877d;
     --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #6fa8ef; --grape: #b1a8dc;
@@ -78,7 +78,7 @@
   --fg: #f2f2f2; --muted: #9a9a9a; --faint: #666666;
   --ink: #f2f2f2; --ink-fg: #141414;
   --accent: var(--a-d); --accent-fg: var(--a-fg-d); --accent-soft: color-mix(in oklab, var(--accent) 22%, var(--bg));
-  --mochi: #ff7a9a;
+  --mochi: var(--m-d);
   --thumb: rgb(255 255 255 / 0.2); --thumb-hover: rgb(255 255 255 / 0.36);
   --ok: #6fcf9c; --warn: #f2c06b; --warn-soft: #2e2414; --danger: #f2877d;
   --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #6fa8ef; --grape: #b1a8dc;
@@ -88,13 +88,14 @@
   color-scheme: dark;
 }
 
-/* The theme colour (prefs.ts): -l on the white window, -d on the black one. */
-:root, :root[data-accent="berry"] { --a-l: #d43d6d; --a-d: #dc4a78; --a-fg-l: #ffffff; --a-fg-d: #ffffff; }
-:root[data-accent="ink"] { --a-l: #141414; --a-d: #f2f2f2; --a-fg-l: #ffffff; --a-fg-d: #141414; }
-:root[data-accent="mint"] { --a-l: #13857a; --a-d: #179384; --a-fg-l: #ffffff; --a-fg-d: #ffffff; }
-:root[data-accent="sea"] { --a-l: #3d6fe0; --a-d: #4b7be6; --a-fg-l: #ffffff; --a-fg-d: #ffffff; }
-:root[data-accent="grape"] { --a-l: #7a5cc8; --a-d: #8869d6; --a-fg-l: #ffffff; --a-fg-d: #ffffff; }
-:root[data-accent="slate"] { --a-l: #5b6b80; --a-d: #6a7b91; --a-fg-l: #ffffff; --a-fg-d: #ffffff; }
+/* The theme colour (prefs.ts): -l on the white window, -d on the black one. --m-* is 糯糯 in the same colour family, a softer step
+   so it still reads as the mascot (莓红 gives its own pink). */
+:root, :root[data-accent="berry"] { --a-l: #d43d6d; --a-d: #dc4a78; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #ff7a9a; --m-d: #ff7a9a; }
+:root[data-accent="ink"] { --a-l: #141414; --a-d: #f2f2f2; --a-fg-l: #ffffff; --a-fg-d: #141414; --m-l: #3a3a3a; --m-d: #e6e6e6; }
+:root[data-accent="mint"] { --a-l: #13857a; --a-d: #179384; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #4fb39c; --m-d: #5cc2aa; }
+:root[data-accent="sea"] { --a-l: #3d6fe0; --a-d: #4b7be6; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #6f9bf2; --m-d: #7ea7f5; }
+:root[data-accent="grape"] { --a-l: #7a5cc8; --a-d: #8869d6; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #a38be6; --m-d: #b09aeb; }
+:root[data-accent="slate"] { --a-l: #5b6b80; --a-d: #6a7b91; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #8696ab; --m-d: #97a6ba; }
 
 @layer base {
   html, body, #root { height: 100%; }
