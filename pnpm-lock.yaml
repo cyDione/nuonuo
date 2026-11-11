@@ -47,25 +47,25 @@ importers:
       '@napi-rs/keyring':
         specifier: ^2.1.2
         version: 2.1.2
-      '@super-assistant/agent-runtime':
+      '@nuonuo/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
-      '@super-assistant/core':
+      '@nuonuo/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@super-assistant/db':
+      '@nuonuo/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@super-assistant/models':
+      '@nuonuo/models':
         specifier: workspace:*
         version: link:../../packages/models
-      '@super-assistant/plugin-sdk':
+      '@nuonuo/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
-      '@super-assistant/plugins':
+      '@nuonuo/plugins':
         specifier: workspace:*
         version: link:../../packages/plugins
-      '@super-assistant/sources':
+      '@nuonuo/sources':
         specifier: workspace:*
         version: link:../../packages/sources
       ai:
@@ -169,10 +169,10 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.2
         version: 1.32.2(zod@4.6.7)
-      '@super-assistant/db':
+      '@nuonuo/db':
         specifier: workspace:*
         version: link:../db
-      '@super-assistant/models':
+      '@nuonuo/models':
         specifier: workspace:*
         version: link:../models
       ai:
@@ -193,13 +193,13 @@ importers:
       '@ai-sdk/provider':
         specifier: ^4.0.35
         version: 4.0.35
-      '@super-assistant/agent-runtime':
+      '@nuonuo/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
-      '@super-assistant/db':
+      '@nuonuo/db':
         specifier: workspace:*
         version: link:../db
-      '@super-assistant/models':
+      '@nuonuo/models':
         specifier: workspace:*
         version: link:../models
       ai:
@@ -251,7 +251,7 @@ importers:
       '@napi-rs/keyring':
         specifier: ^2.1.2
         version: 2.1.2
-      '@super-assistant/db':
+      '@nuonuo/db':
         specifier: workspace:*
         version: link:../db
       ai:
@@ -266,10 +266,10 @@ importers:
 
   packages/plugin-sdk:
     dependencies:
-      '@super-assistant/core':
+      '@nuonuo/core':
         specifier: workspace:*
         version: link:../core
-      '@super-assistant/sources':
+      '@nuonuo/sources':
         specifier: workspace:*
         version: link:../sources
       ai:
@@ -281,26 +281,26 @@ importers:
 
   packages/plugins:
     dependencies:
-      '@super-assistant/plugin-sdk':
+      '@nuonuo/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
     devDependencies:
       '@ai-sdk/provider':
         specifier: ^4.0.35
         version: 4.0.35
-      '@super-assistant/agent-runtime':
+      '@nuonuo/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
-      '@super-assistant/core':
+      '@nuonuo/core':
         specifier: workspace:*
         version: link:../core
-      '@super-assistant/db':
+      '@nuonuo/db':
         specifier: workspace:*
         version: link:../db
-      '@super-assistant/models':
+      '@nuonuo/models':
         specifier: workspace:*
         version: link:../models
-      '@super-assistant/sources':
+      '@nuonuo/sources':
         specifier: workspace:*
         version: link:../sources
       ai:
@@ -309,13 +309,13 @@ importers:
 
   packages/sources:
     dependencies:
-      '@super-assistant/agent-runtime':
+      '@nuonuo/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
-      '@super-assistant/core':
+      '@nuonuo/core':
         specifier: workspace:*
         version: link:../core
-      '@super-assistant/db':
+      '@nuonuo/db':
         specifier: workspace:*
         version: link:../db
       ai:
@@ -331,7 +331,7 @@ importers:
       '@ai-sdk/provider':
         specifier: ^4.0.35
         version: 4.0.35
-      '@super-assistant/models':
+      '@nuonuo/models':
         specifier: workspace:*
         version: link:../models
 

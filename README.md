@@ -2,10 +2,10 @@
 
 <img src="docs/assets/mascot.svg" width="104" alt="糯糯" />
 
-# Super-assistant
+# Nuonuo
 
-[![CI](https://github.com/cyDione/super-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/cyDione/super-assistant/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/cyDione/super-assistant)](https://github.com/cyDione/super-assistant/releases)
+[![CI](https://github.com/cyDione/nuonuo/actions/workflows/ci.yml/badge.svg)](https://github.com/cyDione/nuonuo/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/cyDione/nuonuo)](https://github.com/cyDione/nuonuo/releases)
 ![Node version](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -17,7 +17,7 @@
 
 </div>
 
-Super-assistant 是一个**主动的个人助理**。它不是写代码的 Agent，也不是要你一直盯着的控制台。你面对的只有一个助理：糯糯。服务和执行都在你自己的机器上，模型用你自己的 key。
+Nuonuo 是一个**主动的个人助理**。它不是写代码的 Agent，也不是要你一直盯着的控制台。你面对的只有一个助理：糯糯。服务和执行都在你自己的机器上，模型用你自己的 key。
 
 你在主聊、桌面端、Telegram、GitHub 或邮件里交代一件事，糯糯先回你一句，再把事情交给后台的执行者去做：查资料、排行程、整理文件、盯一个 PR、每天早上给你一份摘要。做完以后它只回你一段话，完整的成果在聊天里直接打开。没人找它的时候，它也会留意你接进来的来源，把值得看的东西放进「动态」，把想到的事放进「点子」。
 
@@ -86,18 +86,18 @@ Super-assistant 是一个**主动的个人助理**。它不是写代码的 Agent
 **macOS 桌面端**（Apple 芯片、Intel 自动识别）：在终端里运行下面这行，装进「应用程序」，打开时不会被 Gatekeeper 拦下。以后再运行一次就是更新。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cyDione/super-assistant/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cyDione/nuonuo/main/install.sh | bash
 ```
 
-也可以从 [Releases](https://github.com/cyDione/super-assistant/releases) 下载 dmg 手动安装。
+也可以从 [Releases](https://github.com/cyDione/nuonuo/releases) 下载 dmg 手动安装。
 
-**Windows 桌面端**：从 [Releases](https://github.com/cyDione/super-assistant/releases) 下载 x64 / arm64 的 setup.exe。桌面端都自带服务和 Node.js，装好直接打开。
+**Windows 桌面端**：从 [Releases](https://github.com/cyDione/nuonuo/releases) 下载 x64 / arm64 的 setup.exe。桌面端都自带服务和 Node.js，装好直接打开。
 
 **Linux 服务器 / 无桌面**（x64、arm64 自动识别，不需要登录 GitHub）：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cyDione/super-assistant/main/install.sh | bash
-super-assistant start -d
+curl -fsSL https://raw.githubusercontent.com/cyDione/nuonuo/main/install.sh | bash
+nuonuo start -d
 ```
 
 `start -d` 在后台启动服务，并打印一个登录链接（`http://127.0.0.1:7420/auth?token=…`），用浏览器打开就行。
@@ -105,15 +105,15 @@ super-assistant start -d
 第一次打开时，糯糯会在主聊里带你走三步：接模型（填你自己的 API key，兼容 OpenAI 或 Anthropic 接口的供应商都可以）、接来源、选主动程度。每一步都能跳过，之后在「设置 · 模型供应商」「设置 · 来源」「设置 · 主动」里改。
 
 > [!NOTE]
-> 发布流程配好 Apple 开发者证书之前，macOS 包只有 ad-hoc 签名，浏览器下载的 dmg 第一次打开会被拦（「无法验证开发者」或「已损坏」）。用上面的 curl 命令安装就不会；已经下载了 dmg 的话，打开 dmg 之前先运行 `xattr -cr ~/Downloads/super-assistant-<版本>-mac-<芯片>.dmg`（换成你的 dmg 路径，清掉隔离标记），再照常安装；已经装好的，运行 `xattr -dr com.apple.quarantine /Applications/Super-assistant.app`，或到「系统设置 → 隐私与安全性」点「仍要打开」。Windows 包未签名，SmartScreen 提示时点「更多信息 → 仍要运行」。
+> 发布流程配好 Apple 开发者证书之前，macOS 包只有 ad-hoc 签名，浏览器下载的 dmg 第一次打开会被拦（「无法验证开发者」或「已损坏」）。用上面的 curl 命令安装就不会；已经下载了 dmg 的话，打开 dmg 之前先运行 `xattr -cr ~/Downloads/nuonuo-<版本>-mac-<芯片>.dmg`（换成你的 dmg 路径，清掉隔离标记），再照常安装；已经装好的，运行 `xattr -dr com.apple.quarantine /Applications/Nuonuo.app`，或到「系统设置 → 隐私与安全性」点「仍要打开」。Windows 包未签名，SmartScreen 提示时点「更多信息 → 仍要运行」。
 
 > [!TIP]
-> 想让局域网里的手机、电脑也能打开：Linux 运行 `super-assistant start -d --host 0.0.0.0 --port 8080`；桌面端在「设置 · 系统和更新」里把访问改成「局域网」。登录链接就相当于密码，只在可信的网络里这样用。
+> 想让局域网里的手机、电脑也能打开：Linux 运行 `nuonuo start -d --host 0.0.0.0 --port 8080`；桌面端在「设置 · 系统和更新」里把访问改成「局域网」。登录链接就相当于密码，只在可信的网络里这样用。
 
 > [!WARNING]
 > 任务的命令以运行服务的用户身份执行，不要以 root 运行。想更放心，在「设置 · 安全和执行」里把 Docker 沙箱设为「所有任务」：开了沙箱只挂载你允许的文件夹；没开时，往允许的文件夹以外写文件要先过审核。
 
-**升级**：运行 `super-assistant update`，或者在桌面端托盘里点「检查更新」、在「设置 · 系统和更新」里更新。数据目录 `~/.super-assistant` 不受影响。
+**升级**：运行 `nuonuo update`，或者在桌面端托盘里点「检查更新」、在「设置 · 系统和更新」里更新。数据目录 `~/.nuonuo` 不受影响。
 
 从源码部署、开机自启、远程访问、GitHub / Gmail / Google 日历授权，见 [部署与运维](docs/deploy.md)。
 
@@ -141,13 +141,13 @@ super-assistant start -d
 
 | 命令 | 作用 |
 |---|---|
-| `super-assistant start [-d] [--host 地址] [--port 端口]` | 启动服务，加 `-d` 在后台运行 |
-| `super-assistant stop` / `restart` / `status` | 停止 / 重启服务，查看运行状态 |
-| `super-assistant config --host 地址 --port 端口` | 保存默认的监听地址和端口 |
-| `super-assistant token [--rotate]` | 重新打印登录链接，加 `--rotate` 时轮换令牌 |
-| `super-assistant service install` | 开机自启（macOS 用 launchd，Linux 用 systemd） |
-| `super-assistant update [--check]` | 检查并安装新版本 |
-| `super-assistant doctor` | 检查运行环境 |
+| `nuonuo start [-d] [--host 地址] [--port 端口]` | 启动服务，加 `-d` 在后台运行 |
+| `nuonuo stop` / `restart` / `status` | 停止 / 重启服务，查看运行状态 |
+| `nuonuo config --host 地址 --port 端口` | 保存默认的监听地址和端口 |
+| `nuonuo token [--rotate]` | 重新打印登录链接，加 `--rotate` 时轮换令牌 |
+| `nuonuo service install` | 开机自启（macOS 用 launchd，Linux 用 systemd） |
+| `nuonuo update [--check]` | 检查并安装新版本 |
+| `nuonuo doctor` | 检查运行环境 |
 
 完整的命令说明见 [部署与运维](docs/deploy.md#命令行)。
 

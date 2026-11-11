@@ -23,7 +23,7 @@ const CANDIDATES = [
 ]
 
 export async function findBrowser(): Promise<string | undefined> {
-  if (process.env.SUPER_ASSISTANT_BROWSER) return process.env.SUPER_ASSISTANT_BROWSER
+  if (process.env.NUONUO_BROWSER) return process.env.NUONUO_BROWSER
   try {
     const { chromium } = await import('playwright-core')
     const bundled = chromium.executablePath()
@@ -65,7 +65,7 @@ export class BrowserManager {
       this.context = (async () => {
         const { chromium } = await import('playwright-core')
         const executablePath = await (this.executablePath ?? findBrowser)()
-        if (!executablePath) throw new Error('找不到可用的 Chromium/Chrome。安装 Google Chrome，或设置 SUPER_ASSISTANT_BROWSER 指向浏览器可执行文件')
+        if (!executablePath) throw new Error('找不到可用的 Chromium/Chrome。安装 Google Chrome，或设置 NUONUO_BROWSER 指向浏览器可执行文件')
         mkdirSync(this.profileDir, { recursive: true })
         const context = await chromium.launchPersistentContext(this.profileDir, {
           executablePath, headless: true, viewport: { width: 1280, height: 800 }, locale: 'zh-CN',

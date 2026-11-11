@@ -145,8 +145,8 @@ function Login() {
   return <Centered>
     <div className="flex justify-center"><Mascot color={BRAND} size={88} mood="waiting" track /></div>
     <h1 className="font-display text-2xl font-semibold text-balance">{tx('先打个招呼')}</h1>
-    <p className="text-sm text-pretty text-muted">{tx('Super-assistant 只接受带访问令牌的请求。在终端运行下面的命令，打开它输出的链接：')}</p>
-    <pre className="rounded-2xl bg-ink px-4 py-3 text-left font-mono text-sm text-ink-fg">super-assistant token</pre>
+    <p className="text-sm text-pretty text-muted">{tx('Nuonuo 只接受带访问令牌的请求。在终端运行下面的命令，打开它输出的链接：')}</p>
+    <pre className="rounded-2xl bg-ink px-4 py-3 text-left font-mono text-sm text-ink-fg">nuonuo token</pre>
   </Centered>
 }
 
@@ -154,7 +154,7 @@ function Offline({ message }: { message: string }) {
   return <Centered>
     <div className="flex justify-center"><Mascot color={BRAND} size={88} mood="sleepy" /></div>
     <h1 className="font-display text-2xl font-semibold text-balance">{tx('连不上本机服务')}</h1>
-    <p className="text-sm text-pretty text-muted">{tx('请确认')} <code className="rounded bg-sunken px-1.5 py-0.5 font-mono">super-assistant start</code> {tx('正在运行。')}</p>
+    <p className="text-sm text-pretty text-muted">{tx('请确认')} <code className="rounded bg-sunken px-1.5 py-0.5 font-mono">nuonuo start</code> {tx('正在运行。')}</p>
     <p className="text-xs break-words text-faint">{message}</p>
   </Centered>
 }

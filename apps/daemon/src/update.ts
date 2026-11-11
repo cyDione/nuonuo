@@ -16,15 +16,15 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { VERSION } from './config'
 
-export const REPO = 'cyDione/super-assistant'
-/** SUPER_ASSISTANT_UPDATE_API points the check at another server with the same API (used by tests). */
-const api = (env: NodeJS.ProcessEnv) => (env.SUPER_ASSISTANT_UPDATE_API || `https://api.github.com/repos/${REPO}`).replace(/\/$/, '')
+export const REPO = 'cyDione/nuonuo'
+/** NUONUO_UPDATE_API points the check at another server with the same API (used by tests). */
+const api = (env: NodeJS.ProcessEnv) => (env.NUONUO_UPDATE_API || `https://api.github.com/repos/${REPO}`).replace(/\/$/, '')
 
 /** The release file for this machine: the headless tar.gz on Linux, the installer for the desktop app. */
 export function assetPattern(desktop: boolean, platform: NodeJS.Platform = process.platform, arch: string = process.arch): RegExp {
-  if (!desktop) return new RegExp(`^super-assistant-.+-linux-${arch}\\.tar\\.gz$`)
+  if (!desktop) return new RegExp(`^nuonuo-.+-linux-${arch}\\.tar\\.gz$`)
   const os = platform === 'darwin' ? 'mac' : platform === 'win32' ? 'win' : 'linux'
-  return new RegExp(`^super-assistant-.+-${os}-${arch}[.-]`)
+  return new RegExp(`^nuonuo-.+-${os}-${arch}[.-]`)
 }
 
 /**
@@ -32,18 +32,18 @@ export function assetPattern(desktop: boolean, platform: NodeJS.Platform = proce
  * way install.sh installs it), the NSIS installer on Windows (run silently). Other systems have none.
  */
 export function installerPattern(platform: NodeJS.Platform = process.platform, arch: string = process.arch): RegExp | null {
-  if (platform === 'darwin') return new RegExp(`^super-assistant-.+-mac-${arch}\\.zip$`)
-  if (platform === 'win32') return new RegExp(`^super-assistant-.+-win-${arch}-setup\\.exe$`)
+  if (platform === 'darwin') return new RegExp(`^nuonuo-.+-mac-${arch}\\.zip$`)
+  if (platform === 'win32') return new RegExp(`^nuonuo-.+-win-${arch}-setup\\.exe$`)
   return null
 }
 
 /** How this process was installed: from the release package (can update itself) or run from a source checkout. */
 export type Install = { kind: 'package'; prefix: string } | { kind: 'source'; root: string } | { kind: 'desktop' } | { kind: 'other' }
 
-/** `entry` is the running cli.mjs. A package is laid out as <prefix>/{bin/super-assistant,lib/cli.mjs,runtime/node}. */
+/** `entry` is the running cli.mjs. A package is laid out as <prefix>/{bin/nuonuo,lib/cli.mjs,runtime/node}. */
 export function detectInstall(entry: string): Install {
   const prefix = resolve(dirname(entry), '..')
-  if (existsSync(join(prefix, 'bin/super-assistant')) && existsSync(join(prefix, 'runtime/node')) && existsSync(join(prefix, 'lib/cli.mjs'))) {
+  if (existsSync(join(prefix, 'bin/nuonuo')) && existsSync(join(prefix, 'runtime/node')) && existsSync(join(prefix, 'lib/cli.mjs'))) {
     return { kind: 'package', prefix }
   }
   const root = resolve(dirname(entry), '../../..')
@@ -51,14 +51,15 @@ export function detectInstall(entry: string): Install {
 }
 
 /**
- * Whether this process is the super-assistant systemd user service, so that install.sh's `systemctl restart` brings it
+ * Whether this process is the nuonuo systemd user service, so that install.sh's `systemctl restart` brings it
  * back on the new version. INVOCATION_ID is not enough: GNOME Terminal runs as a systemd user service itself, so every
- * shell in it carries one. The unit sets SUPER_ASSISTANT_SERVICE=1; units written by older versions don't, so the cgroup
+ * shell in it carries one. The unit sets NUONUO_SERVICE=1; units written by older versions don't, so the cgroup
  * name is checked too.
  */
 export function runsAsService(env: NodeJS.ProcessEnv = process.env, cgroupFile = '/proc/self/cgroup'): boolean {
-  if (env.SUPER_ASSISTANT_SERVICE === '1') return true
-  try { return /\/super-assistant\.service(\/|$)/m.test(readFileSync(cgroupFile, 'utf8')) } catch { return false }
+  if (env.NUONUO_SERVICE === '1') return true
+  // super-assistant.service: the unit name from before the project was renamed (install.sh moves it to nuonuo.service).
+  try { return /\/(nuonuo|super-assistant)\.service(\/|$)/m.test(readFileSync(cgroupFile, 'utf8')) } catch { return false }
 }
 
 /** Compares dotted versions ("v0.2.0", "0.10.1"); a pre-release ("1.0.0-rc.1") sorts before its release. */
@@ -84,7 +85,7 @@ export function githubToken(env: NodeJS.ProcessEnv = process.env): string | unde
 }
 
 const headers = (token: string | undefined, accept: string) =>
-  ({ ...(token ? { authorization: `Bearer ${token}` } : {}), accept, 'user-agent': 'super-assistant-updater' })
+  ({ ...(token ? { authorization: `Bearer ${token}` } : {}), accept, 'user-agent': 'nuonuo-updater' })
 
 export interface Asset { name: string; url: string; size: number; digest: string | null }
 export interface Release { tag: string; version: string; url: string; notes: string; publishedAt: string | null; hasPackage: boolean
@@ -128,7 +129,7 @@ export interface Run { state: 'running' | 'installed' | 'failed'; target: string
 
 /**
  * The desktop app's new version, downloaded by the service. `path` (once ready) is what the app installs from: the
- * unpacked Super-assistant.app on macOS, the setup .exe on Windows.
+ * unpacked Nuonuo.app on macOS, the setup .exe on Windows.
  */
 export interface Download { state: 'downloading' | 'ready' | 'failed'; tag: string; version: string; received: number; size: number; path?: string; error?: string }
 
@@ -174,7 +175,7 @@ const DAY = 24 * 60 * 60 * 1000
 export interface UpdatePrefs { auto: boolean; channel: 'stable' | 'beta'; install: boolean }
 export const DEFAULT_UPDATE_PREFS: UpdatePrefs = { auto: true, channel: 'stable', install: true }
 /** The name of the app inside the macOS zip. */
-export const MAC_APP = 'Super-assistant.app'
+export const MAC_APP = 'Nuonuo.app'
 
 export class Updater {
   readonly install: Install
@@ -203,9 +204,9 @@ export class Updater {
     this.restore()
   }
 
-  /** Checks shortly after start and then twice a day. SUPER_ASSISTANT_UPDATE_CHECK=0 turns the background check off. */
+  /** Checks shortly after start and then twice a day. NUONUO_UPDATE_CHECK=0 turns the background check off. */
   startBackgroundChecks(): void {
-    if (this.env.SUPER_ASSISTANT_UPDATE_CHECK === '0' || (this.install.kind !== 'package' && this.install.kind !== 'desktop')) return
+    if (this.env.NUONUO_UPDATE_CHECK === '0' || (this.install.kind !== 'package' && this.install.kind !== 'desktop')) return
     const tick = () => {
       if (!this.prefs.auto) return
       void this.check().then(s => {
@@ -278,7 +279,7 @@ export class Updater {
       if (existsSync(bundled)) return readFileSync(bundled, 'utf8')
       throw error
     })
-    return { tag, script, env: { ...this.env, ...(token ? { GITHUB_TOKEN: token } : {}), SUPER_ASSISTANT_PREFIX: prefix, SUPER_ASSISTANT_VERSION: tag } }
+    return { tag, script, env: { ...this.env, ...(token ? { GITHUB_TOKEN: token } : {}), NUONUO_PREFIX: prefix, NUONUO_VERSION: tag } }
   }
 
   /**
@@ -346,7 +347,7 @@ export class Updater {
         // Older versions and half-finished downloads go; only this one is kept.
         rmSync(this.updatesDir(), { recursive: true, force: true })
         mkdirSync(dir, { recursive: true })
-        const res = await this.fetchImpl(asset.url, { headers: { 'user-agent': 'super-assistant-updater' }, redirect: 'follow', signal: AbortSignal.timeout(30 * 60_000) })
+        const res = await this.fetchImpl(asset.url, { headers: { 'user-agent': 'nuonuo-updater' }, redirect: 'follow', signal: AbortSignal.timeout(30 * 60_000) })
         if (!res.ok || !res.body) throw new Error(`下载 ${asset.name} 失败：GitHub 返回 ${res.status}`)
         const hash = createHash('sha256')
         const progress = this.download

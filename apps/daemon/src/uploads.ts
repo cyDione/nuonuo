@@ -1,6 +1,6 @@
 /** Files the owner attaches to messages: kept under <home>/uploads/<id>/<name>, listed in the uploads table. */
-import { newId, schema, type Store } from '@super-assistant/db'
-import type { Attachment } from '@super-assistant/core'
+import { newId, schema, type Store } from '@nuonuo/db'
+import type { Attachment } from '@nuonuo/core'
 import { eq, inArray } from 'drizzle-orm'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'

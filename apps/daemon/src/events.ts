@@ -2,7 +2,7 @@
  * Turns bus events into what browsers need over SSE. The router's `reply` tool input is parsed while it streams, so the
  * owner sees the answer being written instead of waiting for the whole tool call.
  */
-import type { BusEvent } from '@super-assistant/agent-runtime'
+import type { BusEvent } from '@nuonuo/agent-runtime'
 
 export type ClientEvent =
   | { type: 'message.created'; conversationId: string; messageId: string }

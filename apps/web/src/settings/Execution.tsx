@@ -63,7 +63,7 @@ function Patterns() {
   const regex = (key: 'allow' | 'deny', label: string) => <>
     <Row label={label} sub={tx('正则，每行一条')} onClick={() => setOpen(o => (o === key ? null : key))}><span className="text-[13px] text-muted">{tx('{0} 条', lines(draft[key]).length)}</span></Row>
     {open === key && <Block><Area className="font-mono" value={draft[key]} onChange={e => setDraft({ ...draft, [key]: e.target.value })}
-      placeholder={key === 'allow' ? '^git push origin super-assistant/' : 'push .*\\b(main|master)\\b'} /></Block>}
+      placeholder={key === 'allow' ? '^git push origin nuonuo/' : 'push .*\\b(main|master)\\b'} /></Block>}
   </>
   return <>
     <Section title={tx('审核捷径')} foot={tx('命令对上这些正则时不再交给审核模型。读取密码和密钥的命令一律禁止，不能改。')}>

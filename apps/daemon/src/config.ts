@@ -1,9 +1,10 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { isIP } from 'node:net'
-import { homedir, networkInterfaces } from 'node:os'
+import { networkInterfaces } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import pkg from '../package.json' with { type: 'json' }
+import { resolveHome } from './legacy'
 
 /** From apps/daemon/package.json; a release tag must match it (the release workflow checks). */
 export const VERSION: string = pkg.version
@@ -32,10 +33,11 @@ export interface DaemonConfig {
   devOrigins: string[]
 }
 
-/** What the settings page (or `super-assistant config`) saves in `<home>/config.json`; applied on the next start. */
+/** What the settings page (or `nuonuo config`) saves in `<home>/config.json`; applied on the next start. */
 export interface SavedConfig { host?: string; port?: number; web?: boolean }
 
-export const homeDir = () => resolve(process.env.SUPER_ASSISTANT_HOME || join(homedir(), '.super-assistant'))
+/** NUONUO_HOME, else ~/.nuonuo (or ~/.super-assistant until `start` moves it; see legacy.ts). */
+export const homeDir = () => resolveHome()
 
 export function readSavedConfig(home: string): SavedConfig {
   try {
@@ -82,10 +84,10 @@ export function networkUrls(host: string, port: number): string[] {
 export function resolveConfig(opts: { port?: number; host?: string; dev?: boolean; desktop?: boolean } = {}): DaemonConfig {
   const home = homeDir()
   const saved = readSavedConfig(home)
-  const envPort = Number(process.env.SUPER_ASSISTANT_PORT)
-  const envHost = process.env.SUPER_ASSISTANT_HOST?.trim()
+  const envPort = Number(process.env.NUONUO_PORT)
+  const envHost = process.env.NUONUO_HOST?.trim()
   const [port, portSource]: [number, ConfigSource] = opts.port !== undefined ? [opts.port, 'flag']
-    : validPort(envPort) && process.env.SUPER_ASSISTANT_PORT ? [envPort, 'env']
+    : validPort(envPort) && process.env.NUONUO_PORT ? [envPort, 'env']
     : saved.port !== undefined ? [saved.port, 'file'] : [DEFAULT_PORT, 'default']
   let [host, hostSource]: [string, ConfigSource] = opts.host ? [opts.host, 'flag']
     : envHost ? [envHost, 'env'] : saved.host ? [saved.host, 'file'] : [DEFAULT_HOST, 'default']

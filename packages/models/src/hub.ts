@@ -5,7 +5,7 @@
  */
 import type { LanguageModelV4, LanguageModelV4CallOptions, LanguageModelV4StreamPart, LanguageModelV4Usage } from '@ai-sdk/provider'
 import { APICallError } from '@ai-sdk/provider'
-import { newId, schema, type Store } from '@super-assistant/db'
+import { newId, schema, type Store } from '@nuonuo/db'
 import { embed, generateText } from 'ai'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import { DECISION_MODEL_SUGGESTIONS, isDecisionModel, presetOf, type ProviderKind } from './catalog'
@@ -260,7 +260,7 @@ export class ModelHub {
 
     return {
       specificationVersion: 'v4',
-      provider: `super-assistant.${role}`,
+      provider: `nuonuo.${role}`,
       modelId: first.model,
       supportedUrls: {},
       doGenerate: options => attempt(async (model, ref) => {

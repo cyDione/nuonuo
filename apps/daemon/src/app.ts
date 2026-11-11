@@ -1,6 +1,6 @@
 /** HTTP surface of the daemon: the JSON API under /api, the login link under /auth, and the web UI's static files. */
 import { serveStatic } from '@hono/node-server/serve-static'
-import { describeError, ModelError, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type ProviderKind, type RoleId } from '@super-assistant/models'
+import { describeError, ModelError, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type ProviderKind, type RoleId } from '@nuonuo/models'
 import { Hono, type Context } from 'hono'
 import { setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
@@ -13,9 +13,9 @@ import { connectHost, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, 
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
-import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@super-assistant/core'
-import { kvGet, kvSet, newId, schema } from '@super-assistant/db'
-import { fireRoutine } from '@super-assistant/sources'
+import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@nuonuo/core'
+import { kvGet, kvSet, newId, schema } from '@nuonuo/db'
+import { fireRoutine } from '@nuonuo/sources'
 import { runDoctor } from './doctor'
 import { MAX_UPLOAD, Uploads } from './uploads'
 import { search } from './search'
@@ -71,9 +71,9 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json({ error: { code: 'internal', message: describeError(error) } }, 500)
   })
 
-  /** The link `super-assistant start` prints: it trades the token for an HttpOnly cookie and goes to the app. */
+  /** The link `nuonuo start` prints: it trades the token for an HttpOnly cookie and goes to the app. */
   app.get('/auth', c => {
-    if (c.req.query('token') !== token) return c.text('令牌无效。运行 super-assistant token 获取新的登录链接。', 401)
+    if (c.req.query('token') !== token) return c.text('令牌无效。运行 nuonuo token 获取新的登录链接。', 401)
     setCookie(c, COOKIE, token, { httpOnly: true, sameSite: 'Strict', path: '/', maxAge: 60 * 60 * 24 * 400 })
     return c.redirect('/')
   })
@@ -96,7 +96,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   })
 
   // Network access: where the service listens and whether browsers may open it. Saved to <home>/config.json and applied
-  // when the service starts again; a --host/--port flag or SUPER_ASSISTANT_HOST/PORT overrides the saved value.
+  // when the service starts again; a --host/--port flag or NUONUO_HOST/PORT overrides the saved value.
   const access = () => {
     const cfg = rt.config
     const saved = readSavedConfig(cfg.home)
@@ -560,9 +560,9 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.get('/settings/privacy', c => c.json({ settings: privacySettings(rt.store) }))
   api.put('/settings/privacy', async c => c.json({ settings: savePrivacySettings(rt.store, await body(c, PrivacySchema.partial())) }))
   api.get('/export', c => {
-    const data = exportAll(rt.store, { app: 'super-assistant', version: VERSION, persona: persona(rt.store) })
+    const data = exportAll(rt.store, { app: 'nuonuo', version: VERSION, persona: persona(rt.store) })
     const day = new Date().toISOString().slice(0, 10)
-    c.header('content-disposition', `attachment; filename="super-assistant-${day}.json"`)
+    c.header('content-disposition', `attachment; filename="nuonuo-${day}.json"`)
     return c.json(data)
   })
   api.delete('/memories', c => {

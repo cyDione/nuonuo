@@ -2,11 +2,11 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MockLanguageModelV4 } from 'ai/test'
-import { generateOf, lastUserText, streamOf, systemText } from '@super-assistant/agent-runtime/src/testing'
+import { generateOf, lastUserText, streamOf, systemText } from '@nuonuo/agent-runtime/src/testing'
 import { EventMapper, partialString } from './events'
-import { ModelHub } from '@super-assistant/models'
+import { ModelHub } from '@nuonuo/models'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { schema } from '@super-assistant/db'
+import { schema } from '@nuonuo/db'
 import { createApp } from './app'
 import { resolveConfig } from './config'
 import { createRuntime, type Runtime } from './runtime'
@@ -19,8 +19,8 @@ const headers = { host: '127.0.0.1:7420', authorization: `Bearer ${TOKEN}`, 'con
 const call = (path: string, init: RequestInit = {}) => app.request(`${base}${path}`, { ...init, headers: { ...headers, ...(init.headers as object) } })
 
 beforeEach(async () => {
-  process.env.SUPER_ASSISTANT_HOME = mkdtempSync(join(tmpdir(), 'sa-home-'))
-  process.env.SUPER_ASSISTANT_SECRETS = 'file'
+  process.env.NUONUO_HOME = mkdtempSync(join(tmpdir(), 'sa-home-'))
+  process.env.NUONUO_SECRETS = 'file'
   rt = await createRuntime(resolveConfig({ port: 7420 }), { lock: false })
   // Swap in a hub whose models are scripted mocks, keeping the runtime's store and secrets.
   const script = (opts: any) => {
@@ -61,7 +61,7 @@ describe('access control', () => {
     ;(rt.config as any).web = false
     const desktop = createApp(rt, TOKEN)
     expect((await desktop.request(`${base}/auth?token=${TOKEN}`, { headers: { host: '127.0.0.1:7420' } })).status).toBe(403)
-    expect((await desktop.request(`${base}/auth?token=${TOKEN}`, { headers: { host: '127.0.0.1:7420', 'x-super-assistant-client': 'desktop' } })).status).toBe(302)
+    expect((await desktop.request(`${base}/auth?token=${TOKEN}`, { headers: { host: '127.0.0.1:7420', 'x-nuonuo-client': 'desktop' } })).status).toBe(302)
     expect((await desktop.request(`${base}/api/health`, { headers })).status).toBe(200)
   })
   it('saves the listening address for the next start and says a restart is needed', async () => {

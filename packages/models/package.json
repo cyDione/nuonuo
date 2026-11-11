@@ -1,5 +1,5 @@
 {
-  "name": "@super-assistant/models",
+  "name": "@nuonuo/models",
   "version": "0.2.4",
   "license": "MIT",
   "private": true,
@@ -8,7 +8,7 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "tsc -p tsconfig.json" },
   "dependencies": {
-    "@super-assistant/db": "workspace:*",
+    "@nuonuo/db": "workspace:*",
     "@ai-sdk/anthropic": "^4.0.96",
     "@ai-sdk/deepseek": "^3.0.79",
     "@ai-sdk/google": "^4.0.111",

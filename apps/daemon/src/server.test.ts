@@ -9,8 +9,8 @@ import { startDaemon } from './server'
 
 describe('shutdown', () => {
   it('stops even while a web UI tab holds the event stream open', async () => {
-    process.env.SUPER_ASSISTANT_HOME = mkdtempSync(join(tmpdir(), 'sa-home-'))
-    process.env.SUPER_ASSISTANT_SECRETS = 'file'
+    process.env.NUONUO_HOME = mkdtempSync(join(tmpdir(), 'sa-home-'))
+    process.env.NUONUO_SECRETS = 'file'
     const config = resolveConfig({ port: 0 })
     const started = await startDaemon(config)
     const port = (started.server.address() as AddressInfo).port

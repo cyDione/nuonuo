@@ -1,6 +1,6 @@
 /** The router and worker agent definitions: tool sets (enforced by code, not prompt) and how their inbox items read. */
-import { fsTools, recallTool, type FsAccess, shellTools, today, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type BrowserManager, type InboxItem, type McpManager, type TurnContext } from '@super-assistant/agent-runtime'
-import { schema, type Store } from '@super-assistant/db'
+import { fsTools, recallTool, type FsAccess, shellTools, today, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type BrowserManager, type InboxItem, type McpManager, type TurnContext } from '@nuonuo/agent-runtime'
+import { schema, type Store } from '@nuonuo/db'
 import { tool, type ToolSet } from 'ai'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { z } from 'zod'
@@ -18,7 +18,7 @@ import type { Reviewer } from './review'
 const CONTEXT_MESSAGES = 6
 /** Retries of a failed router turn, the first after routerRetryMs(), then doubling. */
 const ROUTER_RETRIES = 3
-const routerRetryMs = () => Number(process.env.SUPER_ASSISTANT_ROUTER_RETRY_MS) || 5_000
+const routerRetryMs = () => Number(process.env.NUONUO_ROUTER_RETRY_MS) || 5_000
 /** Chat channels keep replies short (article §4.2: ≤ 100 words); the full result stays in the work's details. */
 const CHAT_SOURCES = new Set(['webchat', 'telegram', 'watchdog', 'cron'])
 const CHAT_LIMIT = 120
@@ -429,7 +429,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket)),
         ...shellTools(runtime.jobs, runtime.blobs, {
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
-          env: workerEnv({ SUPER_ASSISTANT_TICKET: ticket.id, SUPER_ASSISTANT_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
+          env: workerEnv({ NUONUO_TICKET: ticket.id, NUONUO_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
           foregroundMs: exec.foregroundSeconds * 1000, timeoutMs: exec.timeoutMinutes * 60_000,
           ...(ext.gateShell ? { gate: (command: string) => ext.gateShell!(ticket, ctx.session.id, command, ticket.directory) } : {}),
           ...(ext.wrapShell?.(ticket) ? { wrap: ext.wrapShell(ticket)! } : {}),
@@ -586,7 +586,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket)),
         ...shellTools(runtime.jobs, runtime.blobs, {
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
-          env: workerEnv({ SUPER_ASSISTANT_TICKET: ticket.id, SUPER_ASSISTANT_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
+          env: workerEnv({ NUONUO_TICKET: ticket.id, NUONUO_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
           foregroundMs: exec.foregroundSeconds * 1000, timeoutMs: exec.timeoutMinutes * 60_000,
           ...(ext.gateShell ? { gate: (command: string) => ext.gateShell!(ticket, ctx.session.id, command, ticket.directory) } : {}),
           ...(ext.wrapShell?.(ticket) ? { wrap: ext.wrapShell(ticket)! } : {}),

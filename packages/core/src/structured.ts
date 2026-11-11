@@ -6,8 +6,8 @@
  * where it exists, and the reply is parsed tolerantly. Failures say what actually went wrong: no model configured, budget,
  * a failed call, or a reply that could not be read.
  */
-import type { ModelHub, RoleId } from '@super-assistant/models'
-import { describeError, ModelError, roleSpec } from '@super-assistant/models'
+import type { ModelHub, RoleId } from '@nuonuo/models'
+import { describeError, ModelError, roleSpec } from '@nuonuo/models'
 import { APICallError, generateText, NoObjectGeneratedError, Output, RetryError } from 'ai'
 import type { z } from 'zod'
 

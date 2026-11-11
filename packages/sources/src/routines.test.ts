@@ -1,4 +1,4 @@
-import { openStore, schema, type Store } from '@super-assistant/db'
+import { openStore, schema, type Store } from '@nuonuo/db'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cronMatches, lastRunBetween, nextRun, parseCron } from './cron'
 import { Routines } from './routines'

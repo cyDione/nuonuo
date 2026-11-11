@@ -154,7 +154,7 @@ export function ChatCard({ card }: { card: Card }) {
   const app = APP_LABEL[card.app] ?? card.app
   return <div className={shell}>
     {head(<CalendarDays size={15} />, tx('要看你的{0}，macOS 得先同意', app))}
-    <p className="px-4 pt-3 text-sm leading-6 text-pretty">{tx('点下面的按钮会打开「系统设置 › 隐私与安全性 › {0}」，把 super-assistant 打开就行，回到这里不用重启。', app)}</p>
+    <p className="px-4 pt-3 text-sm leading-6 text-pretty">{tx('点下面的按钮会打开「系统设置 › 隐私与安全性 › {0}」，把 nuonuo 打开就行，回到这里不用重启。', app)}</p>
     <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-4">
       <a href={`x-apple.systempreferences:com.apple.preference.security?${PRIVACY[card.app]}`} className="press h-9 rounded-full bg-ink px-4 text-[13px] leading-9 font-medium text-ink-fg">{tx('去系统设置打开')}</a>
       <button onClick={() => setGone(true)} className="press h-9 rounded-full border border-line px-4 text-[13px] hover:border-faint">{tx('先不用')}</button>

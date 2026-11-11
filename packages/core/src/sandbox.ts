@@ -35,13 +35,13 @@ export function sandboxCommand(settings: SandboxSettings, ticket: Ticket, comman
     `--network ${settings.network}`,
     `--user ${uid}:${gid}`,
     '-e HOME=/tmp -e CI=1',
-    `-e SUPER_ASSISTANT_TICKET=${ticket.id}`,
+    `-e NUONUO_TICKET=${ticket.id}`,
     `-v ${quote(`${dir}:${dir}`)}`,
     ...mounts.filter(m => m.path !== dir).map(m => `-v ${quote(`${m.path}:${m.path}${m.write ? '' : ':ro'}`)}`),
     ...hidden.map(h => `--mount ${quote(`type=tmpfs,destination=${h}`)}`),
     `-w ${quote(dir)}`,
     '--memory 4g --pids-limit 512',
-    `--label super-assistant.ticket=${ticket.id}`,
+    `--label nuonuo.ticket=${ticket.id}`,
     quote(settings.image),
     'bash -lc', quote(command)].join(' ')
 }

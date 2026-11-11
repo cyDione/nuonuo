@@ -3,8 +3,8 @@
  * writer. Sources call `receiveMessage`; the router's tools call the router commands; workers' tools and turn hooks call
  * the worker facts; people call the people commands. Each command is one transaction; agent wake-ups run after commit.
  */
-import type { AgentRuntime, Bus } from '@super-assistant/agent-runtime'
-import { kvGet, kvSet, newId, schema, type Store } from '@super-assistant/db'
+import type { AgentRuntime, Bus } from '@nuonuo/agent-runtime'
+import { kvGet, kvSet, newId, schema, type Store } from '@nuonuo/db'
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'

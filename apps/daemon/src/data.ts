@@ -2,7 +2,7 @@
  * 数据和隐私 (设置 → 数据和隐私): how long chats are kept, exporting everything as one JSON file, and clearing memories
  * or chats. Secrets never leave the keychain, so an export holds no API keys.
  */
-import { kvGet, kvSet, type Store } from '@super-assistant/db'
+import { kvGet, kvSet, type Store } from '@nuonuo/db'
 import { z } from 'zod'
 
 export const RETENTION = ['forever', '365', '90', '30'] as const

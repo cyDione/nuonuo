@@ -4,7 +4,7 @@
 
 ## 安装与启用
 
-1. 把插件文件夹放进 `~/.super-assistant/plugins/<名字>/`。
+1. 把插件文件夹放进 `~/.nuonuo/plugins/<名字>/`。
 2. 到「设置 → 插件」里启用它。在启用之前，只会读取它的 `package.json`，**不会执行插件代码**。插件以本机服务的权限运行，所以启用前要确认你信任它。
 3. 到「设置 → 来源」里配置并打开它提供的来源。
 
@@ -14,7 +14,7 @@
 {
   "name": "rss-watch",
   "version": "0.1.0",
-  "super-assistant": { "plugin": "./index.mjs", "name": "RSS 订阅", "apiVersion": 1 }
+  "nuonuo": { "plugin": "./index.mjs", "name": "RSS 订阅", "apiVersion": 1 }
 }
 ```
 
@@ -41,7 +41,7 @@ export default function plugin({ definePlugin, z, tool }) {
 }
 ```
 
-完整的示例见 [`examples/plugins/rss-watch`](../examples/plugins/rss-watch/index.mjs)。用 TypeScript 写插件时，从 `@super-assistant/plugin-sdk` 导入类型即可。
+完整的示例见 [`examples/plugins/rss-watch`](../examples/plugins/rss-watch/index.mjs)。用 TypeScript 写插件时，从 `@nuonuo/plugin-sdk` 导入类型即可。
 
 ## SourceKind 接口
 

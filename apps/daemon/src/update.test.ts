@@ -18,7 +18,7 @@ describe('compareVersions', () => {
 
 function fakePackage() {
   const prefix = mkdtempSync(join(tmpdir(), 'sa-pkg-'))
-  for (const f of ['bin/super-assistant', 'runtime/node', 'lib/cli.mjs']) {
+  for (const f of ['bin/nuonuo', 'runtime/node', 'lib/cli.mjs']) {
     mkdirSync(join(prefix, f, '..'), { recursive: true })
     writeFileSync(join(prefix, f), '')
   }
@@ -35,7 +35,7 @@ describe('detectInstall', () => {
 })
 
 describe('Updater', () => {
-  const release = (tag: string, assets = [`super-assistant-${tag.slice(1)}-linux-${process.arch}.tar.gz`]) =>
+  const release = (tag: string, assets = [`nuonuo-${tag.slice(1)}-linux-${process.arch}.tar.gz`]) =>
     ({ tag_name: tag, html_url: `https://github.com/x/releases/${tag}`, body: 'notes', published_at: '2026-11-05T00:00:00Z', assets: assets.map(name => ({ name })) })
   const make = (body: unknown, status = 200, env: NodeJS.ProcessEnv = { GITHUB_TOKEN: 't' }) => {
     const calls: string[] = []
@@ -51,7 +51,7 @@ describe('Updater', () => {
     const { updater, calls, home } = make(release('v99.0.0'))
     const s = await updater.check()
     expect(s).toMatchObject({ current: VERSION, install: 'package', available: true, checkError: null, latest: { tag: 'v99.0.0', hasPackage: true } })
-    expect(calls[0]).toBe('https://api.github.com/repos/cyDione/super-assistant/releases/latest Bearer t')
+    expect(calls[0]).toBe('https://api.github.com/repos/cyDione/nuonuo/releases/latest Bearer t')
     const again = new Updater({ home, entry: join(fakePackage(), 'lib/cli.mjs'), env: {} })
     expect(again.status().latest?.tag).toBe('v99.0.0')
   })
@@ -64,17 +64,17 @@ describe('Updater', () => {
   it('needs no token (the repository is public) and explains GitHub errors instead of throwing', async () => {
     const none = make(release('v99.0.0'), 200, {})
     expect(await none.updater.check()).toMatchObject({ available: true, checkError: null })
-    expect(none.calls[0]).toBe('https://api.github.com/repos/cyDione/super-assistant/releases/latest undefined')
+    expect(none.calls[0]).toBe('https://api.github.com/repos/cyDione/nuonuo/releases/latest undefined')
     expect((await make({}, 404).updater.check()).checkError).toMatch(/还没有发布/)
     expect((await make({}, 403).updater.check()).checkError).toMatch(/频率/)
   })
 
   it('only counts the package for this machine, and the desktop app only reports', async () => {
     const other = process.arch === 'arm64' ? 'x64' : 'arm64'
-    expect((await make(release('v99.0.0', [`super-assistant-99.0.0-linux-${other}.tar.gz`])).updater.check()).available).toBe(false)
-    expect(assetPattern(true, 'darwin', 'arm64').test('super-assistant-1.0.0-mac-arm64.dmg')).toBe(true)
-    expect(assetPattern(true, 'win32', 'x64').test('super-assistant-1.0.0-win-x64-setup.exe')).toBe(true)
-    expect(assetPattern(true, 'win32', 'x64').test('super-assistant-1.0.0-win-arm64-setup.exe')).toBe(false)
+    expect((await make(release('v99.0.0', [`nuonuo-99.0.0-linux-${other}.tar.gz`])).updater.check()).available).toBe(false)
+    expect(assetPattern(true, 'darwin', 'arm64').test('nuonuo-1.0.0-mac-arm64.dmg')).toBe(true)
+    expect(assetPattern(true, 'win32', 'x64').test('nuonuo-1.0.0-win-x64-setup.exe')).toBe(true)
+    expect(assetPattern(true, 'win32', 'x64').test('nuonuo-1.0.0-win-arm64-setup.exe')).toBe(false)
     const desktop = new Updater({ home: mkdtempSync(join(tmpdir(), 'sa-home-')), entry: join(fakePackage(), 'lib/cli.mjs'), env: {}, desktop: true })
     expect(desktop.status()).toMatchObject({ install: 'desktop', canUpdate: false })
   })
@@ -84,7 +84,7 @@ describe('Updater', () => {
     if (process.platform !== 'linux') return
     const p = await updater.prepare()
     expect(p.script).toBe('echo hi')
-    expect(p.env).toMatchObject({ GITHUB_TOKEN: 't', SUPER_ASSISTANT_VERSION: 'v99.0.0', SUPER_ASSISTANT_PREFIX: updater.install.kind === 'package' ? updater.install.prefix : '' })
+    expect(p.env).toMatchObject({ GITHUB_TOKEN: 't', NUONUO_VERSION: 'v99.0.0', NUONUO_PREFIX: updater.install.kind === 'package' ? updater.install.prefix : '' })
     await expect(make(release(`v${VERSION}`)).updater.prepare()).rejects.toThrow(/已是最新/)
   })
 })
@@ -92,14 +92,14 @@ describe('Updater', () => {
 describe('desktop download', () => {
   const payload = Buffer.from('MZ fake installer '.repeat(1000))
   const sha = `sha256:${createHash('sha256').update(payload).digest('hex')}`
-  const setup = 'super-assistant-99.0.0-win-x64-setup.exe'
+  const setup = 'nuonuo-99.0.0-win-x64-setup.exe'
   const make = (digest: string | null = sha, home = mkdtempSync(join(tmpdir(), 'sa-home-'))) => {
     const calls: string[] = []
     const fetchImpl = (async (url: string) => {
       calls.push(url)
       if (url.endsWith('.exe')) return new Response(payload)
       return new Response(JSON.stringify({ tag_name: 'v99.0.0', html_url: 'u', assets: [
-        { name: 'super-assistant-99.0.0-win-x64.zip', browser_download_url: 'https://dl/x.zip', size: 1 },
+        { name: 'nuonuo-99.0.0-win-x64.zip', browser_download_url: 'https://dl/x.zip', size: 1 },
         { name: setup, browser_download_url: `https://dl/${setup}`, size: payload.length, digest },
       ] }))
     }) as unknown as typeof fetch
@@ -108,10 +108,10 @@ describe('desktop download', () => {
   }
 
   it('picks the installer this app updates from', () => {
-    expect(installerPattern('darwin', 'arm64')?.test('super-assistant-1.0.0-mac-arm64.zip')).toBe(true)
-    expect(installerPattern('darwin', 'arm64')?.test('super-assistant-1.0.0-mac-arm64.dmg')).toBe(false)
-    expect(installerPattern('win32', 'x64')?.test('super-assistant-1.0.0-win-x64-setup.exe')).toBe(true)
-    expect(installerPattern('win32', 'x64')?.test('super-assistant-1.0.0-win-x64.zip')).toBe(false)
+    expect(installerPattern('darwin', 'arm64')?.test('nuonuo-1.0.0-mac-arm64.zip')).toBe(true)
+    expect(installerPattern('darwin', 'arm64')?.test('nuonuo-1.0.0-mac-arm64.dmg')).toBe(false)
+    expect(installerPattern('win32', 'x64')?.test('nuonuo-1.0.0-win-x64-setup.exe')).toBe(true)
+    expect(installerPattern('win32', 'x64')?.test('nuonuo-1.0.0-win-x64.zip')).toBe(false)
     expect(installerPattern('linux', 'x64')).toBeNull()
   })
 
@@ -161,7 +161,7 @@ describe('update settings', () => {
       calls.push(url)
       return new Response(JSON.stringify([
         { tag_name: 'v99.1.0-beta.1', html_url: 'u', draft: true, assets: [] },
-        { tag_name: 'v99.0.0-beta.2', html_url: 'u', assets: [{ name: `super-assistant-99.0.0-beta.2-linux-${process.arch}.tar.gz` }] },
+        { tag_name: 'v99.0.0-beta.2', html_url: 'u', assets: [{ name: `nuonuo-99.0.0-beta.2-linux-${process.arch}.tar.gz` }] },
       ]))
     }) as unknown as typeof fetch
     const home = mkdtempSync(join(tmpdir(), 'sa-home-'))
@@ -169,7 +169,7 @@ describe('update settings', () => {
     expect(updater.status().prefs).toEqual({ auto: true, channel: 'stable', install: true })
     updater.setPrefs({ channel: 'beta', install: false })
     const s = await updater.check()
-    expect(calls[0]).toBe('https://api.github.com/repos/cyDione/super-assistant/releases?per_page=15')
+    expect(calls[0]).toBe('https://api.github.com/repos/cyDione/nuonuo/releases?per_page=15')
     expect(s.latest?.tag).toBe('v99.0.0-beta.2')
     expect(new Updater({ home, entry: join(fakePackage(), 'lib/cli.mjs'), env: {} }).status().prefs).toEqual({ auto: true, channel: 'beta', install: false })
   })
@@ -178,8 +178,8 @@ describe('update settings', () => {
 describe('runsAsService', () => {
   const cgroup = (text: string) => { const f = join(mkdtempSync(join(tmpdir(), 'sa-cg-')), 'cgroup'); writeFileSync(f, text); return f }
   it('is true for the unit (by its variable, or by its cgroup for units from older versions)', () => {
-    expect(runsAsService({ SUPER_ASSISTANT_SERVICE: '1' }, '/nonexistent')).toBe(true)
-    expect(runsAsService({}, cgroup('0::/user.slice/user-1000.slice/user@1000.service/app.slice/super-assistant.service\n'))).toBe(true)
+    expect(runsAsService({ NUONUO_SERVICE: '1' }, '/nonexistent')).toBe(true)
+    expect(runsAsService({}, cgroup('0::/user.slice/user-1000.slice/user@1000.service/app.slice/nuonuo.service\n'))).toBe(true)
   })
   it('is false in a terminal, even one GNOME Terminal runs as a systemd service (INVOCATION_ID set)', () => {
     const terminal = cgroup('0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-org.gnome.Terminal.slice/vte-spawn-1.scope\n')

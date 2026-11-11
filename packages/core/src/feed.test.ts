@@ -1,4 +1,4 @@
-import { openStore, type Store } from '@super-assistant/db'
+import { openStore, type Store } from '@nuonuo/db'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Feed, feedExtension } from './feed'
 

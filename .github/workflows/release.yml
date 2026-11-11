@@ -1,9 +1,9 @@
 name: Release
 
 # Builds every release package on its own machine (native modules come from the build machine):
-#   Linux headless (service + web UI, own Node.js)   x64, arm64        super-assistant-<v>-linux-<arch>.tar.gz
-#   macOS desktop app (own Node.js and service)      arm64, x64        super-assistant-<v>-mac-<arch>.dmg / .zip
-#   Windows desktop app (own Node.js and service)    x64, arm64        super-assistant-<v>-win-<arch>-setup.exe / .zip
+#   Linux headless (service + web UI, own Node.js)   x64, arm64        nuonuo-<v>-linux-<arch>.tar.gz
+#   macOS desktop app (own Node.js and service)      arm64, x64        nuonuo-<v>-mac-<arch>.dmg / .zip
+#   Windows desktop app (own Node.js and service)    x64, arm64        nuonuo-<v>-win-<arch>-setup.exe / .zip
 # On a v* tag the packages are published as the GitHub Release that install.sh and the update check read.
 #
 # Releasing without anyone clicking: run this workflow by hand (Actions → Release → Run workflow, or the API) with a
@@ -116,23 +116,23 @@ jobs:
       - name: Smoke test the package (background start on all interfaces, stop)
         run: |
           mkdir -p "$RUNNER_TEMP/pkg"
-          tar -xzf dist/super-assistant-*-linux-${{ matrix.arch }}.tar.gz -C "$RUNNER_TEMP/pkg"
-          bin="$(echo "$RUNNER_TEMP"/pkg/*/bin/super-assistant)"
-          export SUPER_ASSISTANT_HOME="$RUNNER_TEMP/home" SUPER_ASSISTANT_SECRETS=file
+          tar -xzf dist/nuonuo-*-linux-${{ matrix.arch }}.tar.gz -C "$RUNNER_TEMP/pkg"
+          bin="$(echo "$RUNNER_TEMP"/pkg/*/bin/nuonuo)"
+          export NUONUO_HOME="$RUNNER_TEMP/home" NUONUO_SECRETS=file
           "$bin" start -d --host 0.0.0.0 --port 7431
-          token="$(cat "$SUPER_ASSISTANT_HOME/token")"
+          token="$(cat "$NUONUO_HOME/token")"
           curl -fsS -H "authorization: Bearer $token" http://127.0.0.1:7431/api/health
           lan="$(hostname -I | awk '{print $1}')"
           curl -fsS -o /dev/null -H "authorization: Bearer $token" "http://$lan:7431/api/health"
           curl -fsS -o /dev/null http://127.0.0.1:7431/
           "$bin" status
           "$bin" stop
-          cat "$SUPER_ASSISTANT_HOME/logs/daemon.log"
+          cat "$NUONUO_HOME/logs/daemon.log"
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.arch }}
-          path: dist/super-assistant-*-linux-${{ matrix.arch }}.tar.gz
+          path: dist/nuonuo-*-linux-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   desktop:
@@ -257,24 +257,42 @@ jobs:
           [ -n "$resources" ] || { echo "no unpacked app in apps/desktop/dist"; ls -R apps/desktop/dist | head -50; exit 1; }
           node_bin="$resources/node/node"; [ -f "$node_bin.exe" ] && node_bin="$node_bin.exe"
           tmp="$RUNNER_TEMP"; command -v cygpath >/dev/null && tmp="$(cygpath -m "$RUNNER_TEMP")"
-          export SUPER_ASSISTANT_HOME="$tmp/home" SUPER_ASSISTANT_SECRETS=file
+          export NUONUO_HOME="$tmp/home" NUONUO_SECRETS=file
           "$node_bin" --version
           "$node_bin" "$resources/daemon/cli.mjs" start -d --desktop --port 7432
-          token="$(cat "$SUPER_ASSISTANT_HOME/token")"
+          token="$(cat "$NUONUO_HOME/token")"
           curl -fsS -H "authorization: Bearer $token" http://127.0.0.1:7432/api/health
           # Browser access is off by default in the desktop app; its window is let in.
           test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:7432/auth?token=$token")" = 403
-          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'x-super-assistant-client: desktop' "http://127.0.0.1:7432/auth?token=$token")" = 302
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'x-nuonuo-client: desktop' "http://127.0.0.1:7432/auth?token=$token")" = 302
           "$node_bin" "$resources/daemon/cli.mjs" stop
-          cat "$SUPER_ASSISTANT_HOME/logs/daemon.log"
+          cat "$NUONUO_HOME/logs/daemon.log"
+
+      # Up to v0.2.4 the project was called super-assistant, and those versions update themselves only from a zip named
+      # super-assistant-<v>-mac-<arch>.zip holding Super-assistant.app. The same signed app under that bundle name
+      # (renaming the folder leaves the signature intact) lets them update; the new app moves itself to Nuonuo.app on
+      # its next update. Keep this for a few releases.
+      - name: Legacy-named zip for super-assistant ≤ 0.2.4
+        if: matrix.os == 'mac'
+        working-directory: apps/desktop/dist
+        run: |
+          for zip in nuonuo-*-mac-*.zip; do
+            work="$(mktemp -d)"
+            ditto -x -k "$zip" "$work"
+            mv "$work/Nuonuo.app" "$work/Super-assistant.app"
+            ditto -c -k --sequesterRsrc --keepParent "$work/Super-assistant.app" "super-assistant-${zip#nuonuo-}"
+            rm -rf "$work"
+          done
+          ls -l super-assistant-*.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            apps/desktop/dist/super-assistant-*.dmg
-            apps/desktop/dist/super-assistant-*.zip
-            apps/desktop/dist/super-assistant-*-setup.exe
+            apps/desktop/dist/super-assistant-*-mac-*.zip
+            apps/desktop/dist/nuonuo-*.dmg
+            apps/desktop/dist/nuonuo-*.zip
+            apps/desktop/dist/nuonuo-*-setup.exe
           if-no-files-found: error
 
   publish:
@@ -288,6 +306,16 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # Versions up to v0.2.4 (named super-assistant) look for super-assistant-* files; same files under the old names.
+      # The mac zip is made in the desktop job, since it needs the bundle renamed inside.
+      - name: Legacy-named copies for super-assistant ≤ 0.2.4
+        working-directory: dist
+        run: |
+          for f in nuonuo-*-linux-x64.tar.gz nuonuo-*-linux-arm64.tar.gz nuonuo-*-win-*-setup.exe; do
+            [ -f "$f" ] && cp "$f" "super-assistant-${f#nuonuo-}"
+          done
+          ls -l
+
       - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

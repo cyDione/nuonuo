@@ -1,4 +1,4 @@
-// Super-assistant desktop: the web UI in a window, plus what only a desktop app can do —
+// Nuonuo desktop: the web UI in a window, plus what only a desktop app can do —
 // a tray icon showing what needs you, native notifications, a global shortcut, and starting at login.
 const { app, BrowserWindow, Menu, Notification, Tray, globalShortcut, nativeImage, nativeTheme, screen, shell, ipcMain, session } = require('electron')
 const { existsSync, readFileSync, writeFileSync } = require('node:fs')
@@ -17,7 +17,13 @@ const DEFAULT_PREFS = { tray: true, close: 'hide', summon: process.platform === 
 let prefs = { ...DEFAULT_PREFS }
 let registered = {}
 const prefsFile = () => path.join(app.getPath('userData'), 'desktop-prefs.json')
-function loadPrefs() { try { prefs = { ...DEFAULT_PREFS, ...JSON.parse(readFileSync(prefsFile(), 'utf8')) } } catch { /* first run */ } }
+// The app's own folder was named Super-assistant before the rename; its settings are read from there once.
+const legacyPrefsFile = () => path.join(app.getPath('appData'), 'Super-assistant', 'desktop-prefs.json')
+function loadPrefs() {
+  for (const file of [prefsFile(), legacyPrefsFile()]) {
+    try { prefs = { ...DEFAULT_PREFS, ...JSON.parse(readFileSync(file, 'utf8')) }; return } catch { /* first run */ }
+  }
+}
 
 if (!app.requestSingleInstanceLock()) app.quit()
 app.on('second-instance', () => show())
@@ -45,7 +51,7 @@ const windowColor = () => (nativeTheme.shouldUseDarkColors ? '#000000' : '#fffff
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1280, height: 860, minWidth: 720, minHeight: 520, title: 'Super-assistant', show: false, backgroundColor: windowColor(),
+    width: 1280, height: 860, minWidth: 720, minHeight: 520, title: 'Nuonuo', show: false, backgroundColor: windowColor(),
     icon: nativeImage.createFromPath(asset('icon-256.png')),
     ...(mac ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 19 } } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
@@ -58,7 +64,7 @@ function createWindow() {
   win.on('enter-full-screen', () => tell('fullscreen', true))
   win.on('leave-full-screen', () => tell('fullscreen', false))
   win.webContents.on('did-finish-load', () => { tell('focus', win.isFocused()); tell('fullscreen', win.isFullScreen()) })
-  win.once('ready-to-show', () => { if (!process.env.SUPER_ASSISTANT_DESKTOP_HIDDEN) win.show() })
+  win.once('ready-to-show', () => { if (!process.env.NUONUO_DESKTOP_HIDDEN) win.show() })
   // Links to other sites open in the default browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
   win.webContents.on('will-navigate', (event, url) => { if (!url.startsWith(base())) { event.preventDefault(); shell.openExternal(url) } })
@@ -80,7 +86,7 @@ function createQuick() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   })
   quick.loadURL(`${base()}/#/quick`)
-  quick.on('blur', () => { if (!process.env.SUPER_ASSISTANT_DESKTOP_SMOKE) quick.hide() })
+  quick.on('blur', () => { if (!process.env.NUONUO_DESKTOP_SMOKE) quick.hide() })
   quick.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
   quick.on('closed', () => { quick = undefined })
 }
@@ -145,10 +151,10 @@ function refreshTray() {
   app.setBadgeCount(badgeOn ? attention : 0)
   if (!tray) return
   tray.setImage(trayImage())
-  tray.setToolTip(attention ? `Super-assistant · ${attention} 件事等你处理` : 'Super-assistant')
+  tray.setToolTip(attention ? `Nuonuo · ${attention} 件事等你处理` : 'Nuonuo')
   if (process.platform === 'darwin') tray.setTitle(attention && badgeOn ? String(attention) : '')
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '打开 Super-assistant', click: () => show() },
+    { label: '打开 Nuonuo', click: () => show() },
     { label: '快问…', ...(prefs.quick ? { accelerator: prefs.quick } : {}), click: () => toggleQuick() },
     { label: '新侧聊', click: () => show('/new') },
     { type: 'separator' },
@@ -223,7 +229,7 @@ async function followEvents() {
 /** The service decided this is worth a banner (设置 → 通知); shown unless the window is in front (a test always shows). */
 function showNotice(notice) {
   if (!Notification.isSupported() || (notice.kind !== 'test' && win && win.isFocused())) return
-  const n = new Notification({ title: notice.title || 'Super-assistant', body: notice.body, silent: Boolean(notice.silent) })
+  const n = new Notification({ title: notice.title || 'Nuonuo', body: notice.body, silent: Boolean(notice.silent) })
   n.on('click', () => show(notice.hash))
   n.show()
   // 糯糯's own sound (设置 → 通知 → 提示音) is played by the page, which keeps running while the window is hidden.
@@ -283,7 +289,7 @@ async function checkUpdate() {
   try {
     const status = await api('/api/update/check', { method: 'POST' })
     update = { checking: false, latest: status.available && status.latest ? status.latest.version : null, error: Boolean(status.checkError) }
-    if (!update.latest && !update.error && Notification.isSupported()) new Notification({ title: 'Super-assistant', body: `已经是最新版本（${status.current}）`, silent: true }).show()
+    if (!update.latest && !update.error && Notification.isSupported()) new Notification({ title: 'Nuonuo', body: `已经是最新版本（${status.current}）`, silent: true }).show()
   } catch { update = { ...update, checking: false, error: true } }
   refreshTray()
   void pollUpdate()
@@ -303,14 +309,14 @@ app.whenReady().then(async () => {
     daemon = await ensureDaemon(console.log, ownVersion())
   } catch (error) {
     const { dialog } = require('electron')
-    dialog.showErrorBox('Super-assistant 无法启动', String(error.message || error))
+    dialog.showErrorBox('Nuonuo 无法启动', String(error.message || error))
     app.quit()
     return
   }
   // Marks the window's requests as the desktop app's: with browser access off, the daemon serves pages only to it.
   session.defaultSession.webRequest.onBeforeSendHeaders((details, done) => {
     const headers = details.requestHeaders
-    if (details.url.startsWith(base())) headers['x-super-assistant-client'] = 'desktop'
+    if (details.url.startsWith(base())) headers['x-nuonuo-client'] = 'desktop'
     done({ requestHeaders: headers })
   })
   loadPrefs()
@@ -328,13 +334,13 @@ app.whenReady().then(async () => {
   if (mac) app.dock.setIcon(nativeImage.createFromPath(asset('icon.png')))
 
   // Smoke test hook: capture the window and the tray menu, then quit.
-  if (process.env.SUPER_ASSISTANT_DESKTOP_SMOKE) {
+  if (process.env.NUONUO_DESKTOP_SMOKE) {
     win.webContents.once('did-finish-load', async () => {
       await new Promise(r => setTimeout(r, 2_500))
       const image = await win.webContents.capturePage()
-      writeFileSync(process.env.SUPER_ASSISTANT_DESKTOP_SMOKE, image.toPNG())
+      writeFileSync(process.env.NUONUO_DESKTOP_SMOKE, image.toPNG())
       console.log(JSON.stringify({ ok: true, url: win.webContents.getURL(), title: await win.webContents.executeJavaScript('document.title'),
-        desktopFlag: await win.webContents.executeJavaScript('Boolean(window.superAssistantDesktop && window.superAssistantDesktop.isDesktop)'),
+        desktopFlag: await win.webContents.executeJavaScript('Boolean(window.nuonuoDesktop && window.nuonuoDesktop.isDesktop)'),
         shortcut: Boolean(registered.quick), tray: Boolean(tray && !tray.isDestroyed()), attention, started: daemon.started }))
       quitting = true
       app.quit()
@@ -346,7 +352,7 @@ app.on('activate', () => show())
 app.on('before-quit', () => {
   quitting = true
   // 自动下载并安装: a staged version goes in as the app quits (not in the smoke test).
-  if (staged && staged.onQuit && !installing && !process.env.SUPER_ASSISTANT_DESKTOP_SMOKE) {
+  if (staged && staged.onQuit && !installing && !process.env.NUONUO_DESKTOP_SMOKE) {
     try { install(false) } catch (error) { console.error('[update]', error.message) }
   }
 })

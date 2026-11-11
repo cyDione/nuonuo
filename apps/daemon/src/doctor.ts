@@ -1,4 +1,4 @@
-/** Environment checks shown by `super-assistant doctor` and Settings → System. */
+/** Environment checks shown by `nuonuo doctor` and Settings → System. */
 import { execFileSync } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
 import type { Runtime } from './runtime'
@@ -22,7 +22,7 @@ export async function runDoctor(rt: Runtime): Promise<Check[]> {
   catch { checks.push({ id: 'home', label: '数据目录', status: 'error', detail: `${rt.config.home} 不可写` }) }
   const root = process.getuid?.() === 0
   checks.push({ id: 'user', label: '运行身份', status: root ? 'warn' : 'ok', detail: root ? 'root' : `uid ${process.getuid?.() ?? '?'}`,
-    fix: root ? '任务的命令以服务的身份执行。建议用一个单独的普通用户运行 super-assistant，只给它需要的权限；或在 设置 → 执行 里把沙箱设为「全部」' : undefined })
+    fix: root ? '任务的命令以服务的身份执行。建议用一个单独的普通用户运行 nuonuo，只给它需要的权限；或在 设置 → 执行 里把沙箱设为「全部」' : undefined })
   const sqlite = rt.store.sqlite.prepare('select sqlite_version() as v').get() as { v: string }
   checks.push({ id: 'sqlite', label: 'SQLite', status: 'ok', detail: sqlite.v })
   // macOS uses the encrypted file on purpose (packages/models/src/secrets.ts), so it is not a warning there.
@@ -52,6 +52,6 @@ export async function runDoctor(rt: Runtime): Promise<Check[]> {
     fix: cli ? '启动 Docker Desktop / OrbStack / Colima 后点「重新检查」；仍连不上时可在数据目录的 env 文件里设置 DOCKER_HOST'
       : '安装并启动 Docker（macOS：Docker Desktop / OrbStack），沙箱执行档需要它' })
   checks.push({ id: 'browser', label: '浏览器', status: rt.browserPath ? 'ok' : 'warn', detail: rt.browserPath ?? '未找到',
-    fix: '安装 Google Chrome，或设置 SUPER_ASSISTANT_BROWSER 指向 Chromium/Chrome 可执行文件' })
+    fix: '安装 Google Chrome，或设置 NUONUO_BROWSER 指向 Chromium/Chrome 可执行文件' })
   return checks
 }

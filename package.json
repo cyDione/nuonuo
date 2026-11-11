@@ -1,5 +1,5 @@
 {
-  "name": "super-assistant",
+  "name": "nuonuo",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -8,9 +8,9 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter @super-assistant/daemon --filter @super-assistant/web dev",
-    "start": "pnpm --filter @super-assistant/daemon start",
-    "build": "pnpm --filter @super-assistant/web build && pnpm --filter @super-assistant/daemon build",
+    "dev": "pnpm --parallel --filter @nuonuo/daemon --filter @nuonuo/web dev",
+    "start": "pnpm --filter @nuonuo/daemon start",
+    "build": "pnpm --filter @nuonuo/web build && pnpm --filter @nuonuo/daemon build",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm test && pnpm build",

@@ -18,7 +18,7 @@ const MAC_APP: Record<LocalApp, string> = { calendar: 'Calendar', reminders: 'Re
 
 export class MacPermissionError extends Error {
   constructor(readonly app: LocalApp) {
-    super(`macOS 还没允许访问「${APP_NAME[app]}」。请主人在 系统设置 → 隐私与安全性 → 自动化（以及 ${APP_NAME[app]}）里允许 super-assistant，然后再试`)
+    super(`macOS 还没允许访问「${APP_NAME[app]}」。请主人在 系统设置 → 隐私与安全性 → 自动化（以及 ${APP_NAME[app]}）里允许 nuonuo，然后再试`)
   }
 }
 

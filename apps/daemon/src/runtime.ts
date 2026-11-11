@@ -1,12 +1,12 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
 import { pruneChats, pruneRuntime } from './data'
 import { Notices } from './notices'
-import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-assistant/agent-runtime'
-import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
-import { Effects, kvGet, kvSet, openStore, type Store } from '@super-assistant/db'
-import { gmailPlugin, telegramPlugin } from '@super-assistant/plugins'
-import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-assistant/sources'
-import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-assistant/models'
+import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@nuonuo/agent-runtime'
+import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@nuonuo/core'
+import { Effects, kvGet, kvSet, openStore, type Store } from '@nuonuo/db'
+import { gmailPlugin, telegramPlugin } from '@nuonuo/plugins'
+import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@nuonuo/sources'
+import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@nuonuo/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import type { ToolSet } from 'ai'
@@ -70,7 +70,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
   const lockFile = join(config.home, 'daemon.json')
   if (options.lock !== false) {
     const running = readLock(config.home)
-    if (running && running.pid !== process.pid) throw new Error(`另一个 super-assistant 正在运行（pid ${running.pid}，端口 ${running.port}）`)
+    if (running && running.pid !== process.pid) throw new Error(`另一个 nuonuo 正在运行（pid ${running.pid}，端口 ${running.port}）`)
     writeFileSync(lockFile, JSON.stringify({ pid: process.pid, port: config.port, host: config.host, desktop: config.desktop, startedAt: Date.now() }))
   }
   const store = openStore(join(config.home, 'state.db'))
@@ -108,7 +108,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     sources.engine = engine
     agents.options.maxWorkers = engine.execution().maxWorkers
     const reviewer = new Reviewer(store, hub, engine, agents, bus)
-    reviewer.envFor = ticket => workerEnv({ SUPER_ASSISTANT_TICKET: ticket.id, SUPER_ASSISTANT_DIR: ticket.directory })
+    reviewer.envFor = ticket => workerEnv({ NUONUO_TICKET: ticket.id, NUONUO_DIR: ticket.directory })
     const access = new LocalAccess(store)
     const skills = new Skills(store, Date.now, () => bus.emit({ type: 'skills.updated' }))
     reviewer.access = access
@@ -234,7 +234,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
 }
 
 /** How long a conversation stays quiet before its new messages are distilled into memory. */
-const DISTILL_QUIET_MS = Number(process.env.SUPER_ASSISTANT_DISTILL_DELAY_MS) || 120_000
+const DISTILL_QUIET_MS = Number(process.env.NUONUO_DISTILL_DELAY_MS) || 120_000
 
 /** Calls `after` once a tool succeeded (ok !== false). */
 function announced(tools: ToolSet, after: (name: string, result: unknown) => void): ToolSet {
@@ -251,13 +251,13 @@ function announced(tools: ToolSet, after: (name: string, result: unknown) => voi
 }
 
 /**
- * Registers providers for `*_API_KEY` variables. On first start (no layer configured yet), SUPER_ASSISTANT_MODEL puts the layers on
+ * Registers providers for `*_API_KEY` variables. On first start (no layer configured yet), NUONUO_MODEL puts the layers on
  * that model of the first provider found in the environment, e.g. for a quick test setup without opening Settings.
  */
 export async function bootstrapModels(hub: ModelHub, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   hub.syncEnvProviders()
-  const model = env.SUPER_ASSISTANT_MODEL?.trim()
+  const model = env.NUONUO_MODEL?.trim()
   const provider = hub.listProviders().find(p => p.keyEnv && p.hasKey && !DECISION_KINDS.includes(p.kind))
   if (!model || !provider) return
-  if (hub.applyDefaultModel(provider.id, model)) console.log(`已将各层模型设为 ${provider.name} 的 ${model}（SUPER_ASSISTANT_MODEL）`)
+  if (hub.applyDefaultModel(provider.id, model)) console.log(`已将各层模型设为 ${provider.name} 的 ${model}（NUONUO_MODEL）`)
 }

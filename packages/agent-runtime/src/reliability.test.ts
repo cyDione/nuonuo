@@ -1,5 +1,5 @@
-import { openStore, schema, type Store } from '@super-assistant/db'
-import { MemorySecrets, ModelHub } from '@super-assistant/models'
+import { openStore, schema, type Store } from '@nuonuo/db'
+import { MemorySecrets, ModelHub } from '@nuonuo/models'
 import { MockLanguageModelV4 } from 'ai/test'
 import { tool } from 'ai'
 import { eq } from 'drizzle-orm'
@@ -111,7 +111,7 @@ describe('jobs a crash left behind', () => {
     store = openStore(':memory:')
     const jobs = new Jobs(store, () => {})
     // What a crash leaves: a detached command still running, and its row marked running with its pid.
-    const child = spawn('bash', ['-lc', 'sleep 30'], { detached: true, stdio: 'ignore', env: { ...process.env, SUPER_ASSISTANT_JOB: 'job_left' } })
+    const child = spawn('bash', ['-lc', 'sleep 30'], { detached: true, stdio: 'ignore', env: { ...process.env, NUONUO_JOB: 'job_left' } })
     const exited = new Promise(r => child.on('exit', r))
     store.db.insert(schema.jobs).values({ id: 'job_left', sessionId: 's', command: 'sleep 30', cwd: '/', status: 'running', startedAt: Date.now(), pid: child.pid! }).run()
     store.db.insert(schema.jobs).values({ id: 'job_other', sessionId: 's', command: 'x', cwd: '/', status: 'running', startedAt: Date.now(), pid: process.pid }).run()

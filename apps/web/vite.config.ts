@@ -2,7 +2,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-const daemon = `http://127.0.0.1:${process.env.SUPER_ASSISTANT_PORT || 7420}`
+const daemon = `http://127.0.0.1:${process.env.NUONUO_PORT || 7420}`
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

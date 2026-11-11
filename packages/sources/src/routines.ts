@@ -3,7 +3,7 @@
  * arrives at the router as the owner's request from the `cron` source, and the results land in that conversation.
  * A laptop that slept through a run catches up once on waking (if the run is less than 12 hours old).
  */
-import { newId, schema, type Store } from '@super-assistant/db'
+import { newId, schema, type Store } from '@nuonuo/db'
 import { tool } from 'ai'
 import { asc, eq } from 'drizzle-orm'
 import { z } from 'zod'

@@ -6,7 +6,7 @@
  */
 import { homedir, tmpdir } from 'node:os'
 import { resolve, sep } from 'node:path'
-import { kvGet, kvSet, type Store } from '@super-assistant/db'
+import { kvGet, kvSet, type Store } from '@nuonuo/db'
 
 export type AppLevel = 'auto' | 'ask' | 'read' | 'off'
 export const LOCAL_APPS = ['calendar', 'reminders', 'notes', 'contacts', 'photos'] as const

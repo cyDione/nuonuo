@@ -2,7 +2,7 @@
  * ⌘K search: one box over the conversations, what was made (成果) and what 糯糯 remembers. Plain substring matching,
  * newest first, a handful per group: the box is for finding something you half remember, not for browsing.
  */
-import { schema, type Store } from '@super-assistant/db'
+import { schema, type Store } from '@nuonuo/db'
 import { and, desc, eq, inArray, sql, type SQLWrapper } from 'drizzle-orm'
 
 export interface SearchHit { id: string; text: string; at: number; conversationId?: string | null; conversation?: string; main?: boolean; ticketId?: string; kind?: string }

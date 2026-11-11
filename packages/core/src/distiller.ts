@@ -3,8 +3,8 @@
  * (keep / review / drop), and only what passes is distilled into one to three entries with their source messages.
  * It runs off the reply path, so answering the owner never waits for it.
  */
-import { kvGet, kvSet, schema, type Store } from '@super-assistant/db'
-import type { ModelHub } from '@super-assistant/models'
+import { kvGet, kvSet, schema, type Store } from '@nuonuo/db'
+import type { ModelHub } from '@nuonuo/models'
 import { and, asc, eq, gt } from 'drizzle-orm'
 import { z } from 'zod'
 import { MEMORY_KINDS, type Memory, type MemoryTrust } from './memory'
