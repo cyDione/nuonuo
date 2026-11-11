@@ -14,7 +14,7 @@
 import { newId, schema, type Store } from '@super-assistant/db'
 import type { EmbeddingModelV4 } from '@ai-sdk/provider'
 import { embed, embedMany, tool } from 'ai'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -131,7 +131,7 @@ export class Memory {
     const statuses = filter.status ? (Array.isArray(filter.status) ? filter.status : [filter.status]) : undefined
     const where = [statuses ? inArray(schema.memories.status, statuses) : undefined, filter.kind ? eq(schema.memories.kind, filter.kind) : undefined,
       filter.scope ? eq(schema.memories.scope, filter.scope) : undefined].filter(Boolean)
-    const rows = this.store.db.select().from(schema.memories).where(and(...where as any)).orderBy(desc(schema.memories.updatedAt)).all()
+    const rows = this.store.db.select().from(schema.memories).where(and(...where as any)).orderBy(desc(schema.memories.updatedAt), sql`rowid DESC`).all()
     const now = this.now()
     return rows.filter(m => m.status !== 'active' || !m.expiresAt || m.expiresAt > now)
   }
