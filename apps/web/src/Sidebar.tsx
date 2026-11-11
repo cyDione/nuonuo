@@ -14,6 +14,7 @@ import { go, type Route } from './route'
 import { needsOwner, useTickets } from './tasks'
 import { SourceIcon } from './icons'
 import { cx, IconButton } from './ui'
+import { MOD } from './prefs'
 import { isMacDesktop, Pane, Resizer, togglePane, usePanes, usePresence } from './shell'
 import { QuickSettings } from './QuickSettings'
 
@@ -21,7 +22,7 @@ import { QuickSettings } from './QuickSettings'
 function TitleRow() {
   return <div className="drag flex h-12 shrink-0 items-center justify-end px-3 pt-1">
     {isMacDesktop && <span className="lights-room mr-auto w-[68px]" aria-hidden />}
-    <IconButton label="收起侧栏 (⌘\)" onClick={() => togglePane('left', false)} className="size-8 text-faint"><PanelLeft size={17} /></IconButton>
+    <IconButton label={`收起侧栏 (${MOD}\\)`} onClick={() => togglePane('left', false)} className="size-8 text-faint"><PanelLeft size={17} /></IconButton>
   </div>
 }
 
