@@ -20,7 +20,7 @@ export const api = {
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
-  del: (path: string) => request<void>('DELETE', path),
+  del: <T = void>(path: string) => request<T>('DELETE', path),
 }
 
 // ── Shapes returned by the daemon ────────────────────────────────────────────
@@ -43,7 +43,7 @@ export interface Check { id: string; label: string; status: 'ok' | 'warn' | 'err
 export interface Release { tag: string; version: string; url: string; notes: string; publishedAt: string | null; hasPackage: boolean }
 export interface UpdateStatus { current: string; install: 'package' | 'source' | 'desktop' | 'other'; canUpdate: boolean; checkedAt: number | null; latest: Release | null
   available: boolean; checkError: string | null; hint: string
-  run: { state: 'running' | 'installed' | 'failed'; target: string; startedAt: number; log: string; error?: string } | null }
+  run: { state: 'running' | 'installed' | 'failed'; target: string; startedAt: number; log: string; error?: string } | null; prefs?: UpdatePrefs }
 export interface AccessStatus {
   desktop: boolean
   running: { host: string; port: number; web: boolean }
@@ -83,7 +83,11 @@ export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: numb
 export type Level = 'allow' | 'review' | 'ask' | 'deny'
 export interface ReviewSettings { external: Level; destructive: Exclude<Level, 'allow'>; mode: 'model' | 'ask'; rules: string[]; allow: string[]; deny: string[] }
 export interface AuditEntry { id: number; at: number; ticketId: string | null; actor: string; action: string; tool: string | null; input: string | null; risk: string | null; decision: string; reason: string | null }
-export interface Persona { name: string; avatar: string; color: string; personality: string }
+export interface Persona { name: string; avatar: string; color: string; personality: string; role: 'all' | 'life' | 'work' | 'study'; language: 'zh' | 'en' | 'auto' }
+export interface NotifySettings { message: boolean; price: boolean; feed: boolean; ideas: boolean; banner: boolean; sound: boolean; badge: boolean; quiet: { on: boolean; from: string; to: string } }
+export interface PrivacySettings { keep: 'forever' | '365' | '90' | '30' }
+export interface UpdatePrefs { auto: boolean; channel: 'stable' | 'beta'; install: boolean }
+export interface Notice { type: 'notice'; id: string; kind: 'message' | 'price' | 'feed' | 'ideas' | 'approval' | 'test'; title: string; body: string; hash: string; silent: boolean }
 
 export type ServerEvent =
   | { type: 'message.created'; conversationId: string; messageId: string }
@@ -96,6 +100,7 @@ export type ServerEvent =
   | { type: 'persona.updated' }
   | { type: 'goals.updated' }
   | { type: 'feed.updated' }
+  | Notice
   | { type: 'message.updated'; conversationId: string; messageId: string }
   | { type: 'ideas.updated' }
 

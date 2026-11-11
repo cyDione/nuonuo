@@ -1,61 +1,78 @@
+/** MCP 工具 (Figma 21 · 05): MCP services whose tools go to its work. The list with each one's state, the open one below. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Server, Trash2 } from 'lucide-react'
+import { Plus, Server } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type McpServer, type McpStatus } from '../api'
-import { Badge, Button, Card, Empty, Field, Input, Select } from '../ui'
+import { usePersona } from '../persona'
+import { Area, Block, Btn, Choice, Page, Pill, Row, Section, TextInput, Toggle } from './kit'
 
 const blank = (): McpServer => ({ name: '', enabled: true, transport: 'stdio', command: 'npx', args: [], env: {}, roles: ['worker'], review: true })
 const kv = (o?: Record<string, string>) => Object.entries(o ?? {}).map(([k, v]) => `${k}=${v}`).join('\n')
 const parseKv = (s: string) => Object.fromEntries(s.split('\n').map(l => l.trim()).filter(l => l.includes('=')).map(l => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()]))
+const STATE: Record<McpStatus['state'], { tone: 'ok' | 'danger' | 'warn' | 'neutral'; label: string }> = {
+  connected: { tone: 'ok', label: '已连接' }, error: { tone: 'danger', label: '出错' }, connecting: { tone: 'warn', label: '连接中' }, off: { tone: 'neutral', label: '没打开' },
+}
+const where = (s: McpServer) => s.transport === 'http' ? `HTTP · ${(s.url ?? '').replace(/^https?:\/\//, '')}` : `本地命令 · ${[s.command, ...(s.args ?? [])].filter(Boolean).join(' ')}`
 
-export function Mcp() {
+export function Mcp({ item }: { item?: string }) {
   const qc = useQueryClient()
+  const persona = usePersona()
   const query = useQuery({ queryKey: ['mcp'], queryFn: () => api.get<{ servers: McpServer[]; status: McpStatus[] }>('/settings/mcp'), refetchInterval: 10_000 })
   const [draft, setDraft] = useState<McpServer[] | null>(null)
-  useEffect(() => { if (query.data && !draft) setDraft(query.data.servers) }, [query.data])
+  const [sel, setSel] = useState<number | null>(null)
+  useEffect(() => {
+    if (!query.data || draft) return
+    setDraft(query.data.servers)
+    const i = item ? query.data.servers.findIndex(s => s.name === item) : 0
+    if (i >= 0 && query.data.servers.length) setSel(i)
+  }, [query.data])
   const save = useMutation({ mutationFn: (servers: McpServer[]) => api.put<{ servers: McpServer[]; status: McpStatus[] }>('/settings/mcp', servers),
     onSuccess: d => { qc.setQueryData(['mcp'], d); setDraft(d.servers) } })
-  if (!draft || !query.data) return null
-  const dirty = JSON.stringify(draft) !== JSON.stringify(query.data.servers)
-  const set = (i: number, patch: Partial<McpServer>) => setDraft(d => d!.map((s, j) => (j === i ? { ...s, ...patch } : s)))
+  if (!draft || !query.data) return <Page title="MCP 工具"><div /></Page>
+  const saved = query.data.servers
   const statusOf = (name: string) => query.data!.status.find(s => s.name === name)
-  return <>
-    <div className="flex justify-end"><Button variant="primary" onClick={() => setDraft(d => [...d!, blank()])}><Plus size={16} />添加 MCP 服务</Button></div>
-    {!draft.length && <Card><Empty icon={<Server size={28} />} title="还没有 MCP 服务">MCP 服务提供的工具会交给任务使用，例如文件系统、数据库、日历、Notion。</Empty></Card>}
-    {draft.map((s, i) => {
-      const st = statusOf(s.name)
-      return <Card key={i} className="space-y-3 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Server size={16} className="text-muted" />
-          <div className="w-48"><Input className="h-8 font-mono text-xs" value={s.name} placeholder="名称（如 notion）" onChange={e => set(i, { name: e.target.value })} /></div>
-          {st && <Badge tone={st.state === 'connected' ? 'ok' : st.state === 'error' ? 'danger' : 'neutral'}>{st.state === 'connected' ? `已连接 · ${st.tools.length} 个工具` : st.state === 'error' ? '连接失败' : st.state === 'connecting' ? '连接中' : '未启用'}</Badge>}
-          <label className="ml-auto flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.enabled} onChange={e => set(i, { enabled: e.target.checked })} />启用</label>
-          <button onClick={() => setDraft(d => d!.filter((_, j) => j !== i))} className="text-faint hover:text-danger" aria-label="删除"><Trash2 size={15} /></button>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="连接方式"><Select value={s.transport} onChange={e => set(i, { transport: e.target.value as McpServer['transport'] })}><option value="stdio">本地命令（stdio）</option><option value="http">HTTP 地址</option></Select></Field>
-          {s.transport === 'stdio' ? <>
-            <Field label="命令"><Input className="font-mono text-xs" value={s.command ?? ''} onChange={e => set(i, { command: e.target.value })} placeholder="npx" /></Field>
-            <Field label="参数（空格分隔）"><Input className="font-mono text-xs" value={(s.args ?? []).join(' ')} onChange={e => set(i, { args: e.target.value.split(' ').filter(Boolean) })} placeholder="-y @modelcontextprotocol/server-filesystem ~/notes" /></Field>
-          </> : <Field label="URL"><Input className="font-mono text-xs" value={s.url ?? ''} onChange={e => set(i, { url: e.target.value })} placeholder="https://…/mcp" /></Field>}
-        </div>
-        <Field label={s.transport === 'stdio' ? '环境变量（每行 KEY=VALUE）' : '请求头（每行 Name=Value）'} hint="值可以写成 ${NAME}，从本机服务的环境变量读取，不必把密钥写进设置。">
-          <textarea className="min-h-16 w-full rounded-xl border border-line bg-panel px-3 py-2 font-mono text-xs outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none"
-            value={kv(s.transport === 'stdio' ? s.env : s.headers)} onChange={e => set(i, s.transport === 'stdio' ? { env: parseKv(e.target.value) } : { headers: parseKv(e.target.value) })} />
-        </Field>
-        <div className="flex flex-wrap gap-4 text-sm">
-          <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.roles.includes('worker')} onChange={e => set(i, { roles: e.target.checked ? [...new Set([...s.roles, 'worker' as const])] : s.roles.filter(r => r !== 'worker') })} />任务（Worker）可用</label>
-          <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.roles.includes('router')} onChange={e => set(i, { roles: e.target.checked ? [...new Set([...s.roles, 'router' as const])] : s.roles.filter(r => r !== 'router') })} />主 Agent 可用</label>
-          <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.review} onChange={e => set(i, { review: e.target.checked })} />任务的调用先经过审核</label>
-        </div>
-        {st?.error && <p className="text-xs text-danger">{st.error}</p>}
-        {st?.tools.length ? <p className="text-xs text-faint">工具：{st.tools.map(t => t.name).join('、')}</p> : null}
-      </Card>
-    })}
-    {(dirty || save.error) && <div className="flex items-center justify-end gap-2">
-      {save.error && <span className="mr-auto text-xs text-danger">{(save.error as Error).message}</span>}
-      <Button size="sm" variant="ghost" onClick={() => setDraft(query.data!.servers)}>还原</Button>
-      <Button size="sm" variant="primary" disabled={save.isPending} onClick={() => save.mutate(draft)}>保存并连接</Button>
-    </div>}
-  </>
+  const set = (patch: Partial<McpServer>) => setDraft(d => d!.map((s, j) => (j === sel ? { ...s, ...patch } : s)))
+  const role = (r: 'worker' | 'router', on: boolean) => { const s = draft[sel!]!; set({ roles: on ? [...new Set([...s.roles, r])] : s.roles.filter(x => x !== r) }) }
+  const s = sel !== null ? draft[sel] : undefined
+  const st = s && statusOf(s.name)
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
+  return <Page title="MCP 工具" action={<Btn tone="ink" className="h-[32px] rounded-[10px]" onClick={() => { setDraft(d => [...d!, blank()]); setSel(draft.length) }}><Plus size={15} />添加</Btn>}>
+    <Section foot="接入 MCP 服务，它们的工具会交给任务用。会对外产生影响的服务，建议保留「先经过审核」。">
+      {draft.map((x, i) => { const status = statusOf(x.name); const state = status && STATE[status.state]
+        return <Row key={i} icon={<Server size={18} />} label={x.name || '新的服务'} onClick={() => setSel(i)}
+          sub={<span className="line-clamp-1">{status?.state === 'error' ? `没连上，点进去看原因` : where(x)}</span>}>
+          {i === sel && <span className="text-xs text-faint">正在看</span>}
+          {state ? <Pill tone={state.tone}>{state.label}</Pill> : <Pill>没保存</Pill>}
+        </Row> })}
+      {!draft.length && <Row label="还没有 MCP 服务" sub="比如文件系统、数据库、日历、Notion。点右上角「添加」。" />}
+    </Section>
+
+    {s && <Section title={s.name || '新的服务'}>
+      <Row label="名称"><TextInput className="font-mono" value={s.name} placeholder="notion" onChange={e => set({ name: e.target.value })} /></Row>
+      <Row label="启用"><Toggle label="启用" checked={s.enabled} onChange={enabled => set({ enabled })} /></Row>
+      <Row label="连接方式"><Choice label="连接方式" value={s.transport} onChange={transport => set({ transport })} options={[{ id: 'stdio', label: '本地命令' }, { id: 'http', label: 'HTTP 地址' }]} /></Row>
+      {s.transport === 'http'
+        ? <Row label="URL"><TextInput className="w-[300px] font-mono" value={s.url ?? ''} placeholder="https://…/mcp" onChange={e => set({ url: e.target.value })} /></Row>
+        : <>
+          <Row label="命令"><TextInput className="font-mono" value={s.command ?? ''} placeholder="npx" onChange={e => set({ command: e.target.value })} /></Row>
+          <Row label="参数" sub="空格分隔"><TextInput className="w-[300px] font-mono" value={(s.args ?? []).join(' ')} placeholder="-y @modelcontextprotocol/server-filesystem ~/notes" onChange={e => set({ args: e.target.value.split(' ').filter(Boolean) })} /></Row>
+        </>}
+      <Block>
+        <div className="text-sm">{s.transport === 'stdio' ? '环境变量' : '请求头'}</div>
+        <div className="mt-0.5 mb-2 text-xs text-muted">每行一个 KEY=VALUE；值可以写成 {'${NAME}'}，从本机服务的环境变量读，不用把密钥写进设置</div>
+        <Area className="min-h-[56px] font-mono" value={kv(s.transport === 'stdio' ? s.env : s.headers)} onChange={e => set(s.transport === 'stdio' ? { env: parseKv(e.target.value) } : { headers: parseKv(e.target.value) })} />
+      </Block>
+      <Row label="任务可以用"><Toggle label="任务可以用" checked={s.roles.includes('worker')} onChange={on => role('worker', on)} /></Row>
+      <Row label={`${persona.name}自己也可以用`} sub="主聊里直接调用"><Toggle label="主聊可以用" checked={s.roles.includes('router')} onChange={on => role('router', on)} /></Row>
+      <Row label="调用前先经过审核" sub="会对外产生影响时建议打开"><Toggle label="调用前先经过审核" checked={s.review} onChange={review => set({ review })} /></Row>
+      {st && (st.error || st.tools.length > 0) && <Row label={st.error ? '没连上' : `${st.tools.length} 个工具`} sub={<span className={st.error ? 'text-danger' : ''}>{st.error ?? st.tools.map(t => t.name).join('、')}</span>} />}
+      <Block className="flex flex-wrap items-center justify-end gap-2">
+        {save.error && <span className="mr-auto text-xs text-danger">{(save.error as Error).message}</span>}
+        <Btn tone="danger" onClick={() => { if (!s.name || confirm(`删除「${s.name}」？`)) { setDraft(d => d!.filter((_, j) => j !== sel)); setSel(null) } }}>删除</Btn>
+        {dirty && <Btn onClick={() => { setDraft(saved); setSel(null) }}>还原</Btn>}
+        <Btn tone="ink" disabled={!dirty || save.isPending || draft.some(x => !x.name.trim())} onClick={() => save.mutate(draft)}>保存并连接</Btn>
+      </Block>
+    </Section>}
+    {!s && dirty && <div className="flex justify-end gap-2"><Btn onClick={() => setDraft(saved)}>还原</Btn><Btn tone="ink" disabled={save.isPending} onClick={() => save.mutate(draft)}>保存</Btn></div>}
+  </Page>
 }

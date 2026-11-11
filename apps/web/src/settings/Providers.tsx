@@ -1,80 +1,125 @@
+/**
+ * 模型供应商 (Figma 21 · 08): the providers and whether each answers; the open one below — name, address, key, a
+ * connection test and prices. Adding one picks a preset, then asks only what that preset needs.
+ */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, ExternalLink, KeyRound, Loader2, Plus, Trash2, XCircle } from 'lucide-react'
-import { useState } from 'react'
+import { ExternalLink, KeyRound, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { api, type Preset, type Price, type Provider } from '../api'
-import { Badge, Button, Card, Empty, Field, Input, Modal } from '../ui'
+import { go } from '../route'
+import { Block, Btn, NumberInput, Page, Pill, Row, Section, TextInput } from './kit'
 import { useCatalog, useModelOptions, useProviders } from './hooks'
-import { ModelPicker } from './ModelPicker'
 
-const KIND_LABEL: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Gemini', deepseek: 'DeepSeek', 'openai-compatible': 'OpenAI 兼容', typesafe: 'TypeSafe（决策模型）' }
+const KIND_LABEL: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Gemini', deepseek: 'DeepSeek', 'openai-compatible': 'OpenAI 兼容', typesafe: '决策接口' }
+const host = (url: string | null) => (url ?? '').replace(/^https?:\/\//, '').replace(/\/$/, '')
+const keyWhere = (p: Provider) => p.keyEnv ? `环境变量 ${p.keyEnv}` : p.hasKey ? '密钥在钥匙串里' : '没有密钥'
 
-export function Providers() {
+export function Providers({ item }: { item?: string }) {
   const providers = useProviders()
   const [adding, setAdding] = useState(false)
   const list = providers.data?.providers ?? []
+  const open = item ? list.find(p => p.id === item) : undefined
+  return <Page title="模型供应商" action={<Btn tone="ink" className="h-[32px] rounded-[10px]" onClick={() => { setAdding(true); if (item) go('/settings/providers') }}><Plus size={15} />添加</Btn>}>
+    <Section foot="API key 存在系统钥匙串里（或加密文件），不进数据库、不进模型上下文，也不会传给任务的命令行。">
+      {list.map(p => <ProviderRow key={p.id} p={p} />)}
+      {providers.isSuccess && !list.length && <Row label="还没有模型供应商" sub="先加一个（Anthropic、OpenAI，或本机的 Ollama），再到「分层模型」给主 Agent 选模型。" />}
+    </Section>
+    {adding && !open && <AddProvider onDone={id => { setAdding(false); if (id) go(`/settings/providers/${id}`) }} />}
+    {open && <ProviderDetail key={open.id} p={open} />}
+  </Page>
+}
+
+function ProviderRow({ p }: { p: Provider }) {
+  const live = useModelOptions(p)
+  const state = p.kind === 'typesafe' ? null : live.loading ? <Pill>在试</Pill> : live.error ? <Pill tone="danger">连不上</Pill> : live.models.length ? <Pill tone="ok">连得上</Pill> : null
+  return <Row href={`#/settings/providers/${p.id}`} icon={<KeyRound size={18} />} label={p.name}
+    sub={<span className="line-clamp-1">{[KIND_LABEL[p.kind], host(p.baseUrl), p.kind === 'typesafe' ? '只给审核用' : keyWhere(p)].filter(Boolean).join(' · ')}</span>}>
+    {p.keyEnv && !p.hasKey ? <span className="text-[13px] text-faint">没设置</span> : state}
+  </Row>
+}
+
+function ProviderDetail({ p }: { p: Provider }) {
+  const qc = useQueryClient()
+  const live = useModelOptions(p)
+  const [name, setName] = useState(p.name)
+  const [baseUrl, setBaseUrl] = useState(p.baseUrl ?? '')
+  const [decisions, setDecisions] = useState(p.options.decisionsUrl ?? '')
+  const [key, setKey] = useState<string | null>(null)
+  const [prices, setPrices] = useState(false)
+  useEffect(() => { setName(p.name); setBaseUrl(p.baseUrl ?? ''); setDecisions(p.options.decisionsUrl ?? '') }, [p.name, p.baseUrl, p.options.decisionsUrl])
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['providers'] }); qc.invalidateQueries({ queryKey: ['models', p.id] }); qc.invalidateQueries({ queryKey: ['roles'] }) }
+  const patch = useMutation({ mutationFn: (body: Record<string, unknown>) => api.patch(`/providers/${p.id}`, body), onSuccess: () => { refresh(); setKey(null) } })
+  const remove = useMutation({ mutationFn: () => api.del(`/providers/${p.id}`), onSuccess: () => { refresh(); go('/settings/providers') } })
+  const [tested, setTested] = useState<{ at: number; ok: boolean; latencyMs: number; error?: string } | null>(null)
+  const test = useMutation({
+    mutationFn: () => api.post<{ ok: boolean; latencyMs: number; error?: string }>('/models/test', { providerId: p.id, model: live.models[0] }),
+    onSuccess: r => { setTested({ ...r, at: Date.now() }); live.refresh() },
+  })
+  const compatible = p.kind === 'openai-compatible' || p.kind === 'typesafe' || Boolean(p.baseUrl)
+  const priced = Object.keys(p.options.prices ?? {}).length
   return <>
-    <div className="flex justify-end"><Button variant="primary" onClick={() => setAdding(true)}><Plus size={16} />添加供应商</Button></div>
-    {providers.isSuccess && list.length === 0 && <Card><Empty icon={<KeyRound size={28} />} title="还没有模型供应商">
-      添加至少一个供应商（例如 Anthropic、OpenAI，或本地的 Ollama），然后到「分层模型」为主 Agent 选择模型。</Empty></Card>}
-    <div className="space-y-3">{list.map(p => <ProviderCard key={p.id} p={p} />)}</div>
-    {adding && <AddProvider onClose={() => setAdding(false)} />}
+    <Section title={p.name} foot={patch.error || remove.error ? <span className="text-danger">{((patch.error ?? remove.error) as Error).message}</span> : undefined}>
+      <Row label="名称"><TextInput value={name} onChange={e => setName(e.target.value)} onBlur={() => name.trim() && name.trim() !== p.name && patch.mutate({ name: name.trim() })} /></Row>
+      {compatible && <Row label="Base URL" sub="自动补上 /v1"><TextInput className="w-[300px] font-mono" value={baseUrl} placeholder="https://…/v1"
+        onChange={e => setBaseUrl(e.target.value)} onBlur={() => baseUrl.trim() !== (p.baseUrl ?? '') && patch.mutate({ baseUrl: baseUrl.trim() || null })} /></Row>}
+      {p.keyEnv ? <Row label="API key" sub={`从环境变量 ${p.keyEnv} 读取${p.hasKey ? ` · ${p.keyHint}` : '（现在没设置）'}`} />
+        : <Row label="API key" sub={p.hasKey ? `在钥匙串里 · ${p.keyHint}` : '还没有密钥'}>
+          {p.hasKey && <Btn tone="danger" onClick={() => { if (confirm(`从钥匙串删掉「${p.name}」的密钥？`)) patch.mutate({ apiKey: null }) }}>移除密钥</Btn>}
+          <Btn onClick={() => setKey(k => (k === null ? '' : null))}>{p.hasKey ? '更换密钥' : '填入密钥'}</Btn>
+        </Row>}
+      {key !== null && <Row label="新的 API key">
+        <TextInput type="password" autoComplete="off" autoFocus value={key} onChange={e => setKey(e.target.value)} placeholder="sk-…" />
+        <Btn tone="ink" disabled={!key || patch.isPending} onClick={() => patch.mutate({ apiKey: key })}>保存</Btn>
+      </Row>}
+      {p.kind !== 'typesafe' && <Row label="连通测试" sub={test.isPending || live.loading ? '在试…'
+        : tested ? (tested.ok ? `刚刚 · ${tested.latencyMs}ms · 读到 ${live.models.length} 个模型` : <span className="text-danger">{tested.error?.slice(0, 160)}</span>)
+        : live.error ? <span className="text-danger">读不到模型列表：{live.error.slice(0, 160)}</span> : live.models.length ? `读到 ${live.models.length} 个模型` : '还没试过'}>
+        <Btn disabled={test.isPending || !live.models.length} onClick={() => test.mutate()}>{tested ? '再测一次' : '测一次'}</Btn>
+      </Row>}
+      {p.kind === 'openai-compatible' && <Row label="决策接口" sub="网关上的 Jev 决策接口；留空会自动找 /systemone、/decisions 等常见路径">
+        <TextInput className="w-[260px] font-mono" value={decisions} placeholder="自动查找" onChange={e => setDecisions(e.target.value)}
+          onBlur={() => decisions.trim() !== (p.options.decisionsUrl ?? '') && patch.mutate({ options: { ...p.options, decisionsUrl: decisions.trim() || undefined } })} />
+      </Row>}
+      <Row label="价格" sub={`美元 / 百万 token · ${priced ? `${priced} 个模型填了价格` : '还没填'}，用量页才算得出费用`}><Btn onClick={() => setPrices(v => !v)}>{prices ? '收起' : '编辑价格'}</Btn></Row>
+      {prices && <Prices p={p} onDone={() => setPrices(false)} />}
+      <Row label="删除这个供应商" sub="用到它的分层会去掉这个模型，密钥也从钥匙串删除">
+        <Btn tone="danger" disabled={remove.isPending} onClick={() => { if (confirm(`删除「${p.name}」？`)) remove.mutate() }}>删除</Btn>
+      </Row>
+    </Section>
   </>
 }
 
-function ProviderCard({ p }: { p: Provider }) {
+function Prices({ p, onDone }: { p: Provider; onDone(): void }) {
   const qc = useQueryClient()
-  const [modal, setModal] = useState<'key' | 'prices' | null>(null)
-  const remove = useMutation({ mutationFn: () => api.del(`/providers/${p.id}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['providers'] }); qc.invalidateQueries({ queryKey: ['roles'] }) } })
-  // Jev via a gateway: the decisions endpoint is found automatically; this pins it when the gateway uses another path.
-  const decisions = useMutation({ mutationFn: (url: string) => api.patch(`/providers/${p.id}`, { options: { ...p.options, decisionsUrl: url || undefined } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['providers'] }); qc.invalidateQueries({ queryKey: ['models', p.id] }) } })
-  const editDecisions = () => {
-    const url = prompt('Jev 决策接口的完整地址（留空则自动查找 /systemone、/decisions 等常见路径）', p.options.decisionsUrl ?? '')
-    if (url !== null) decisions.mutate(url.trim())
-  }
-  return <Card className="p-4">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0 space-y-1">
-        <div className="flex items-center gap-2"><span className="font-medium">{p.name}</span><Badge>{KIND_LABEL[p.kind]}</Badge></div>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-          {p.baseUrl && <span className="font-mono">{p.baseUrl}</span>}
-          <span>{p.keyEnv ? <>环境变量 <span className="font-mono">{p.keyEnv}</span>{p.hasKey ? <> · <span className="font-mono">{p.keyHint}</span></> : ' · 当前未设置'}</>
-            : p.hasKey ? <>密钥 <span className="font-mono">{p.keyHint}</span></> : '未设置密钥'}</span>
-          {p.options.decisionsUrl && <span>决策接口 <span className="font-mono">{p.options.decisionsUrl}</span></span>}
-          {p.options.prices && Object.keys(p.options.prices).length > 0 && <span>已填 {Object.keys(p.options.prices).length} 个模型价格</span>}
-        </div>
-      </div>
-      <div className="flex gap-1.5">
-        {!p.keyEnv && <Button size="sm" onClick={() => setModal('key')}>更换密钥</Button>}
-        <Button size="sm" onClick={() => setModal('prices')}>价格</Button>
-        {p.kind === 'openai-compatible' && <Button size="sm" onClick={editDecisions}>Jev 接口</Button>}
-        <Button size="sm" variant="danger" onClick={() => { if (confirm(`删除「${p.name}」？使用它的分层配置会一并移除该模型，密钥也会从钥匙串删除。`)) remove.mutate() }}><Trash2 size={13} /></Button>
-      </div>
+  const { models } = useModelOptions(p)
+  const [rows, setRows] = useState<(Price & { model: string })[]>(() => Object.entries(p.options.prices ?? {}).map(([model, price]) => ({ model, ...price })))
+  const save = useMutation({
+    mutationFn: () => api.patch(`/providers/${p.id}`, { options: { ...p.options, prices: Object.fromEntries(rows.filter(r => r.model.trim()).map(({ model, ...price }) => [model.trim(), price])) } }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['providers'] }); onDone() },
+  })
+  const set = (i: number, patch: Partial<Price & { model: string }>) => setRows(rs => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const num = (v: string) => (v === '' ? undefined : Number(v))
+  const grid = 'grid grid-cols-[1fr_72px_72px_72px_24px] items-center gap-1.5'
+  return <Block className="space-y-1.5">
+    <datalist id={`price-models-${p.id}`}>{models.map(m => <option key={m} value={m} />)}</datalist>
+    <div className={`${grid} text-xs text-faint`}><span>模型</span><span>输入</span><span>输出</span><span>缓存读</span><span /></div>
+    {rows.map((r, i) => <div key={i} className={grid}>
+      <TextInput list={`price-models-${p.id}`} className="w-full font-mono" value={r.model} onChange={e => set(i, { model: e.target.value })} />
+      {(['input', 'output', 'cacheRead'] as const).map(k => <NumberInput key={k} className="w-full" min={0} step="any" value={r[k] ?? ''} onChange={e => set(i, { [k]: num(e.target.value) })} aria-label={k} />)}
+      <button type="button" onClick={() => setRows(rs => rs.filter((_, j) => j !== i))} aria-label="删掉这一行" className="text-faint hover:text-danger"><Trash2 size={14} /></button>
+    </div>)}
+    <div className="flex items-center gap-2 pt-1">
+      <Btn onClick={() => setRows(rs => [...rs, { model: '' }])}><Plus size={13} />加一行</Btn>
+      {save.error && <span className="text-xs text-danger">{(save.error as Error).message}</span>}
+      <span className="flex-1" />
+      <Btn onClick={onDone}>取消</Btn>
+      <Btn tone="ink" disabled={save.isPending} onClick={() => save.mutate()}>保存价格</Btn>
     </div>
-    <TestRow p={p} />
-    {modal === 'key' && <KeyModal p={p} onClose={() => setModal(null)} />}
-    {modal === 'prices' && <PricesModal p={p} onClose={() => setModal(null)} />}
-  </Card>
+  </Block>
 }
 
-function TestRow({ p }: { p: Provider }) {
-  const { models, error, loading, refresh } = useModelOptions(p)
-  const [model, setModel] = useState('')
-  const test = useMutation({ mutationFn: () => api.post<{ ok: boolean; latencyMs: number; text?: string; error?: string }>('/models/test', { providerId: p.id, model: model || models[0] }) })
-  return <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-    <span className="text-xs text-muted">连通测试</span>
-    <ModelPicker className="w-64 max-w-full" value={model} onChange={setModel} models={models} loading={loading} error={error} onRefresh={refresh} placeholder={models[0] ?? '模型 id'} />
-    <Button size="sm" onClick={() => test.mutate()} disabled={test.isPending || !(model || models[0])}>
-      {test.isPending ? <Loader2 size={13} className="animate-spin" /> : '测试'}
-    </Button>
-    {!loading && error && <span className="text-xs text-faint" title={error}>未能读取模型列表，可手动输入或点 ↻ 重试</span>}
-    {test.data && (test.data.ok
-      ? <span className="flex items-center gap-1 text-xs text-ok"><CheckCircle2 size={13} />{test.data.latencyMs} ms · {test.data.text}</span>
-      : <span className="flex items-center gap-1 text-xs text-danger" title={test.data.error}><XCircle size={13} />{test.data.error?.slice(0, 120)}</span>)}
-  </div>
-}
-
-function AddProvider({ onClose }: { onClose(): void }) {
+/** 添加: pick a preset, then only what it needs. */
+function AddProvider({ onDone }: { onDone(id?: string): void }) {
   const qc = useQueryClient()
   const catalog = useCatalog()
   const [preset, setPreset] = useState<Preset | null>(null)
@@ -82,68 +127,29 @@ function AddProvider({ onClose }: { onClose(): void }) {
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const create = useMutation({
-    mutationFn: () => api.post('/providers', { kind: preset!.kind, name: name || preset!.label, baseUrl: baseUrl || null, apiKey: apiKey || null }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['providers'] }); onClose() },
+    mutationFn: () => api.post<{ provider: Provider }>('/providers', { kind: preset!.kind, name: name || preset!.label, baseUrl: baseUrl || null, apiKey: apiKey || null }),
+    onSuccess: r => { qc.invalidateQueries({ queryKey: ['providers'] }); onDone(r.provider?.id) },
   })
-  const pick = (p: Preset) => { setPreset(p); setName(p.label); setBaseUrl(p.baseUrl ?? '') }
-  const compatible = preset?.kind === 'openai-compatible'
-  return <Modal title={preset ? `添加 ${preset.label}` : '选择供应商'} onClose={onClose} footer={preset && <>
-    <Button variant="ghost" onClick={() => setPreset(null)}>返回</Button>
-    <Button variant="primary" disabled={create.isPending || (preset.keyRequired && !apiKey) || (compatible && !baseUrl)} onClick={() => create.mutate()}>保存</Button>
-  </>}>
-    {!preset && <div className="grid grid-cols-2 gap-2">
-      {catalog.data?.presets.map(p => <button key={p.id} onClick={() => pick(p)} className="rounded-lg border border-line px-3 py-2.5 text-left text-sm hover:border-accent">
-        <div className="font-medium">{p.label}</div><div className="text-xs text-faint">{KIND_LABEL[p.kind]}</div>
+  const compatible = preset?.kind === 'openai-compatible' || preset?.kind === 'typesafe'
+  if (!preset) return <Section title="添加供应商" foot={<button type="button" className="text-muted hover:text-fg" onClick={() => onDone()}>取消</button>}>
+    <Block className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {catalog.data?.presets.map(p => <button key={p.id} type="button" onClick={() => { setPreset(p); setName(p.label); setBaseUrl(p.baseUrl ?? '') }}
+        className="rounded-[10px] border border-line bg-card px-3 py-2.5 text-left hover:border-faint">
+        <div className="text-sm font-medium">{p.label}</div><div className="text-xs text-faint">{KIND_LABEL[p.kind]}</div>
       </button>)}
-    </div>}
-    {preset && <>
-      <Field label="名称"><Input value={name} onChange={e => setName(e.target.value)} /></Field>
-      {compatible && <Field label="Base URL" hint="OpenAI 兼容接口的地址，通常以 /v1 结尾"><Input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://…/v1" /></Field>}
-      <Field label={preset.keyRequired ? 'API key' : 'API key（本地服务可留空）'}
-        hint={preset.docsUrl && <a href={preset.docsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent">获取 API key <ExternalLink size={11} /></a>}>
-        <Input type="password" autoComplete="off" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-…" />
-      </Field>
-      {create.error && <p className="text-sm text-danger">{(create.error as Error).message}</p>}
-    </>}
-  </Modal>
-}
-
-function KeyModal({ p, onClose }: { p: Provider; onClose(): void }) {
-  const qc = useQueryClient()
-  const [apiKey, setApiKey] = useState('')
-  const save = useMutation({ mutationFn: (key: string | null) => api.patch(`/providers/${p.id}`, { apiKey: key }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['providers'] }); qc.invalidateQueries({ queryKey: ['models', p.id] }); onClose() } })
-  return <Modal title={`更换密钥 · ${p.name}`} onClose={onClose} footer={<>
-    {p.hasKey && <Button variant="danger" onClick={() => save.mutate(null)}>移除密钥</Button>}
-    <Button variant="primary" disabled={!apiKey || save.isPending} onClick={() => save.mutate(apiKey)}>保存</Button>
-  </>}>
-    <Field label="新的 API key"><Input type="password" autoComplete="off" value={apiKey} onChange={e => setApiKey(e.target.value)} autoFocus /></Field>
-  </Modal>
-}
-
-function PricesModal({ p, onClose }: { p: Provider; onClose(): void }) {
-  const qc = useQueryClient()
-  const { models } = useModelOptions(p)
-  const [rows, setRows] = useState<(Price & { model: string })[]>(() => Object.entries(p.options.prices ?? {}).map(([model, price]) => ({ model, ...price })))
-  const save = useMutation({
-    mutationFn: () => api.patch(`/providers/${p.id}`, { options: { ...p.options, prices: Object.fromEntries(rows.filter(r => r.model.trim()).map(({ model, ...price }) => [model.trim(), price])) } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['providers'] }); onClose() },
-  })
-  const set = (i: number, patch: Partial<Price & { model: string }>) => setRows(rs => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
-  const num = (v: string) => (v === '' ? undefined : Number(v))
-  return <Modal title={`模型价格 · ${p.name}`} onClose={onClose} footer={<Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending}>保存</Button>}>
-    <p className="text-xs text-muted">美元 / 百万 token</p>
-    <datalist id={`price-models-${p.id}`}>{models.map(m => <option key={m} value={m} />)}</datalist>
-    <div className="space-y-2">
-      <div className="grid grid-cols-[1fr_70px_70px_70px_24px] gap-1.5 text-[11px] text-faint"><span>模型</span><span>输入</span><span>输出</span><span>缓存读</span><span /></div>
-      {rows.map((r, i) => <div key={i} className="grid grid-cols-[1fr_70px_70px_70px_24px] items-center gap-1.5">
-        <Input list={`price-models-${p.id}`} className="h-8 text-xs" value={r.model} onChange={e => set(i, { model: e.target.value })} />
-        <Input className="h-8 text-xs" type="number" min={0} step="any" value={r.input ?? ''} onChange={e => set(i, { input: num(e.target.value) })} />
-        <Input className="h-8 text-xs" type="number" min={0} step="any" value={r.output ?? ''} onChange={e => set(i, { output: num(e.target.value) })} />
-        <Input className="h-8 text-xs" type="number" min={0} step="any" value={r.cacheRead ?? ''} onChange={e => set(i, { cacheRead: num(e.target.value) })} />
-        <button onClick={() => setRows(rs => rs.filter((_, j) => j !== i))} className="text-faint hover:text-danger"><Trash2 size={14} /></button>
-      </div>)}
-      <Button size="sm" onClick={() => setRows(rs => [...rs, { model: '' }])}><Plus size={13} />添加一行</Button>
-    </div>
-  </Modal>
+    </Block>
+  </Section>
+  return <Section title={`添加 ${preset.label}`}>
+    <Row label="名称"><TextInput value={name} onChange={e => setName(e.target.value)} /></Row>
+    {compatible && <Row label="Base URL" sub="接口地址，通常以 /v1 结尾"><TextInput className="w-[300px] font-mono" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://…/v1" /></Row>}
+    <Row label="API key" sub={<>{preset.keyRequired ? '存进系统钥匙串' : '本机服务可以留空'}{preset.docsUrl && <a href={preset.docsUrl} target="_blank" rel="noreferrer" className="ml-1.5 inline-flex items-center gap-0.5 text-accent">去拿一个<ExternalLink size={11} /></a>}</>}>
+      <TextInput type="password" autoComplete="off" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-…" />
+    </Row>
+    <Block className="flex flex-wrap items-center justify-end gap-2">
+      {create.error && <span className="mr-auto text-xs text-danger">{(create.error as Error).message}</span>}
+      <Btn onClick={() => setPreset(null)}>换一个</Btn>
+      <Btn onClick={() => onDone()}>取消</Btn>
+      <Btn tone="ink" disabled={create.isPending || (preset.keyRequired && !apiKey) || (compatible && !baseUrl)} onClick={() => create.mutate()}>添加</Btn>
+    </Block>
+  </Section>
 }

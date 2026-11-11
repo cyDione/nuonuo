@@ -1,76 +1,83 @@
+/**
+ * 来源 (Figma 21 · 03): where it hears from and answers in. The list with each one's state; the open one's own settings
+ * below it: on/off, 主动留意这里 (its events go through the proactive strategy), the account, its fields, and syncing.
+ */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ChevronDown, Copy, ExternalLink, RefreshCw } from 'lucide-react'
+import { Check, Copy, ExternalLink, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api, type FieldSpec, type SourceAction, type SourceInfo } from '../api'
+import { api, type FieldSpec, type ProactiveSettings, type SourceAction, type SourceInfo } from '../api'
 import { SourceIcon } from '../icons'
-import { Badge, Button, Card, DetailHeader, Field, Input, ListRow, Select, cx } from '../ui'
+import { Area, Block, Btn, Foot, NumberInput, Page, Pill, Row, SaveBar, Section, SelectInput, TextInput, Toggle } from './kit'
+
+const HEALTH: Record<SourceInfo['health']['status'], { tone: 'neutral' | 'ok' | 'warn' | 'danger'; label: string }> = {
+  off: { tone: 'neutral', label: '没打开' }, starting: { tone: 'warn', label: '启动中' }, ok: { tone: 'ok', label: '运行中' }, error: { tone: 'danger', label: '出错' },
+}
 
 export function Sources({ item }: { item?: string }) {
   const sources = useQuery({ queryKey: ['sources'], queryFn: () => api.get<{ sources: SourceInfo[] }>('/sources'), refetchInterval: 10_000 })
-  if (!sources.data) return null
-  if (item) {
-    const s = sources.data.sources.find(x => x.id === item)
-    return s ? <SourceDetail key={s.id} s={s} /> : <Card className="p-5 text-sm text-muted">找不到来源「{item}」。<a href="#/settings/sources" className="text-accent">返回来源列表</a></Card>
-  }
-  return <Card className="divide-y divide-line overflow-hidden">{sources.data.sources.map(s => {
-    const health = HEALTH[s.health.status]
-    return <ListRow key={s.id} href={`#/settings/sources/${encodeURIComponent(s.id)}`} icon={<SourceIcon source={s.id} size={18} />} title={s.title}
-      badge={<Badge tone={health.tone}>{health.label}</Badge>}
-      {...(s.health.status === 'error' && s.health.detail ? { detail: <span className="text-danger">{s.health.detail}</span> } : {})} />
-  })}</Card>
+  const list = sources.data?.sources ?? []
+  const open = item ? list.find(x => x.id === item) : undefined
+  return <Page title="来源">
+    <Section foot="它从这些地方接收事件，也在原处回复。在 GitHub 上用唤起词叫它，它用你的账号回复并带上机器人标记。">
+      {list.map(s => { const h = HEALTH[s.health.status]
+        return <Row key={s.id} href={`#/settings/sources/${encodeURIComponent(s.id)}`} icon={<SourceIcon source={s.id} size={18} />} label={s.title}
+          sub={<span className="line-clamp-1">{s.health.status === 'error' && s.health.detail ? <span className="text-danger">{s.health.detail}</span> : s.description}</span>}>
+          <Pill tone={h.tone}>{h.label}</Pill>
+        </Row> })}
+    </Section>
+    {item && sources.isSuccess && !open && <Foot>找不到来源「{item}」。</Foot>}
+    {open && <SourceDetail key={open.id} s={open} />}
+  </Page>
 }
 
-const HEALTH: Record<SourceInfo['health']['status'], { tone: 'neutral' | 'ok' | 'warn' | 'danger'; label: string }> = {
-  off: { tone: 'neutral', label: '未启用' }, starting: { tone: 'warn', label: '启动中' }, ok: { tone: 'ok', label: '运行中' }, error: { tone: 'danger', label: '出错' },
-}
-
-/** One source's own settings page, generated from its field specs. */
+/** One source's own settings, generated from its field specs. */
 function SourceDetail({ s }: { s: SourceInfo }) {
   const qc = useQueryClient()
-  const [draft, setDraft] = useState({ enabled: s.enabled, config: s.config })
+  const [config, setConfig] = useState(s.config)
   const [advanced, setAdvanced] = useState(false)
-  useEffect(() => setDraft({ enabled: s.enabled, config: s.config }), [JSON.stringify([s.enabled, s.config])])
-  const dirty = JSON.stringify(draft) !== JSON.stringify({ enabled: s.enabled, config: s.config })
-  const save = useMutation({ mutationFn: () => api.put(`/sources/${s.id}`, draft), onSuccess: () => qc.invalidateQueries({ queryKey: ['sources'] }) })
-  const poll = useMutation({ mutationFn: () => api.post(`/sources/${s.id}/poll`), onSuccess: () => qc.invalidateQueries({ queryKey: ['sources'] }) })
-  const set = (key: string, value: unknown) => setDraft(d => ({ ...d, config: { ...d.config, [key]: value } }))
-  const health = HEALTH[s.health.status]
+  useEffect(() => setConfig(s.config), [JSON.stringify(s.config)])
+  const dirty = JSON.stringify(config) !== JSON.stringify(s.config)
+  const refresh = () => qc.invalidateQueries({ queryKey: ['sources'] })
+  const save = useMutation({ mutationFn: (body: { enabled: boolean; config: Record<string, unknown> }) => api.put(`/sources/${s.id}`, body), onSuccess: refresh })
+  const poll = useMutation({ mutationFn: () => api.post(`/sources/${s.id}/poll`), onSuccess: refresh })
+  const proactive = useQuery({ queryKey: ['proactive'], queryFn: () => api.get<{ settings: ProactiveSettings }>('/settings/proactive') }).data?.settings
+  const all = (useQuery({ queryKey: ['sources'], queryFn: () => api.get<{ sources: SourceInfo[] }>('/sources') }).data?.sources ?? []).filter(x => x.id !== 'cron').map(x => x.id)
+  const watch = useMutation({
+    mutationFn: (on: boolean) => {
+      const cur = proactive!.sources.length ? proactive!.sources : all
+      const next = on ? [...new Set([...cur, s.id])] : cur.filter(x => x !== s.id)
+      return api.put('/settings/proactive', { ...proactive!, sources: next.length === all.length ? [] : next })
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['proactive'] }),
+  })
+  const watching = Boolean(proactive && (!proactive.sources.length || proactive.sources.includes(s.id)))
+  const set = (key: string, value: unknown) => setConfig(c => ({ ...c, [key]: value }))
   const fields = s.fields.filter(f => !f.advanced)
   const more = s.fields.filter(f => f.advanced)
-  // Authorization buttons live on their own card; the rest stay in the footer.
   const other = s.authorized === undefined ? s.actions : []
-  return <div className="space-y-4">
-    <DetailHeader back="#/settings/sources" backLabel="来源" icon={<SourceIcon source={s.id} size={20} />} title={s.title} badge={<Badge tone={health.tone}>{health.label}</Badge>}>{s.description}</DetailHeader>
-    {s.authorized !== undefined && <Authorization s={s} onDone={() => { void qc.invalidateQueries({ queryKey: ['sources'] }); if (s.enabled) poll.mutate() }} />}
-    {(s.health.detail || Object.keys(s.facts).length > 0) && <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-faint">
-      {Object.entries(s.facts).map(([k, v]) => <span key={k}>{k}：<span className="font-mono">{v}</span></span>)}
-      {s.health.detail && <span className={s.health.status === 'error' ? 'text-danger' : ''}>{s.health.detail}</span>}
-    </div>}
-    <Card className="p-4">
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={draft.enabled} onChange={e => setDraft(d => ({ ...d, enabled: e.target.checked }))} className="size-4 accent-[var(--accent)]" />启用这个来源
-      </label>
-      {fields.length > 0 && <div className="mt-4 grid gap-3 sm:grid-cols-2">{fields.map(f => <FieldInput key={f.key} f={f} value={draft.config[f.key]} onChange={v => set(f.key, v)} />)}</div>}
-      {more.length > 0 && <>
-        <button onClick={() => setAdvanced(v => !v)} className="mt-4 flex items-center gap-1 text-xs text-muted hover:text-fg">高级 <ChevronDown size={13} className={cx(advanced && 'rotate-180')} /></button>
-        {advanced && <div className="mt-2 grid gap-3 sm:grid-cols-2">{more.map(f => <FieldInput key={f.key} f={f} value={draft.config[f.key]} onChange={v => set(f.key, v)} />)}</div>}
-      </>}
-      {(dirty || save.error || poll.error || other.length > 0 || (s.enabled && s.fields.length > 0)) && <div className="mt-4 flex items-center justify-end gap-2 border-t border-line pt-3">
-        {(save.error || poll.error) && <span className="mr-auto text-xs text-danger">{((save.error ?? poll.error) as Error).message}</span>}
-        {!dirty && other.map(a => <Button key={a.id} size="sm" onClick={async () => {
-          const data = await runAction(s.id, a)
-          if (data?.url) location.href = data.url
-          else void qc.invalidateQueries({ queryKey: ['sources'] })
-        }}>{a.label}</Button>)}
-        {s.enabled && s.fields.length > 0 && !dirty && <Button size="sm" variant="ghost" onClick={() => poll.mutate()} disabled={poll.isPending}>
-          <RefreshCw size={13} className={poll.isPending ? 'animate-spin' : ''} />立即同步</Button>}
-        {dirty && <>
-          <Button size="sm" variant="ghost" onClick={() => setDraft({ enabled: s.enabled, config: s.config })}>还原</Button>
-          <Button size="sm" variant="primary" onClick={() => save.mutate()} disabled={save.isPending}>保存</Button>
-        </>}
-      </div>}
-    </Card>
-  </div>
+  const facts = Object.entries(s.facts).filter(([k]) => k !== '账号').map(([k, v]) => `${k}：${v}`)
+  return <>
+    <Section title={s.title} foot={s.description}>
+      <Row label="启用"><Toggle label="启用" checked={s.enabled} disabled={save.isPending} onChange={enabled => save.mutate({ enabled, config: s.config })} /></Row>
+      {s.id !== 'cron' && proactive && <Row label="主动留意这里" sub="没人找它的事件，也按你的主动策略判断要不要做">
+        <Toggle label="主动留意这里" checked={watching} disabled={watch.isPending} onChange={on => watch.mutate(on)} />
+      </Row>}
+      {s.authorized !== undefined && <Authorization s={s} onDone={() => { void refresh(); if (s.enabled) poll.mutate() }} />}
+      {fields.map(f => <FieldRow key={f.key} f={f} value={config[f.key]} onChange={v => set(f.key, v)} />)}
+      {more.length > 0 && <Row label="高级" onClick={() => setAdvanced(v => !v)}><span className="text-[13px] text-muted">{advanced ? '收起' : `${more.length} 项`}</span></Row>}
+      {advanced && more.map(f => <FieldRow key={f.key} f={f} value={config[f.key]} onChange={v => set(f.key, v)} />)}
+      {other.length > 0 && <Row label="操作">{other.map(a => <Btn key={a.id} disabled={dirty} onClick={async () => {
+        const data = await runAction(s.id, a)
+        if (data?.url) location.href = data.url
+        else void refresh()
+      }}>{a.label}</Btn>)}</Row>}
+      {s.enabled && s.fields.length > 0 && <Row label="上次同步" sub={<>{s.health.at ? new Date(s.health.at).toLocaleString('zh-CN') : '还没有'}{facts.length ? ` · ${facts.join(' · ')}` : ''}
+        {s.health.detail && <span className={s.health.status === 'error' ? 'block text-danger' : 'block'}>{s.health.detail}</span>}</>}>
+        <Btn onClick={() => poll.mutate()} disabled={poll.isPending || dirty}><RefreshCw size={13} className={poll.isPending ? 'animate-spin' : ''} />立即同步</Btn>
+      </Row>}
+    </Section>
+    <SaveBar dirty={dirty} pending={save.isPending} error={save.error ?? poll.error} onReset={() => setConfig(s.config)} onSave={() => save.mutate({ enabled: s.enabled, config })} />
+  </>
 }
 
 /** Calls an action endpoint; alerts and returns undefined on an error. */
@@ -84,7 +91,7 @@ async function runAction(id: string, a: SourceAction): Promise<Record<string, an
 
 type Device = { userCode: string; verificationUri: string; expiresIn: number; poll: string }
 
-/** The account authorization: its state, the sign-in / disconnect buttons, and the device-flow code while one is pending. */
+/** 账号授权: its state and the sign-in / disconnect buttons, then the device-flow code while one is pending. */
 function Authorization({ s, onDone }: { s: SourceInfo; onDone(): void }) {
   const [device, setDevice] = useState<Device>()
   const [error, setError] = useState<string>()
@@ -100,51 +107,43 @@ function Authorization({ s, onDone }: { s: SourceInfo; onDone(): void }) {
     return () => { clearInterval(timer); clearTimeout(expire) }
   }, [device])
   const account = s.facts['账号']
-  return <Card className="p-4">
-    <div className="flex flex-wrap items-center gap-3">
-      <div className="mr-auto text-sm">
-        <div className="font-medium">账号授权</div>
-        <div className="mt-0.5 text-xs text-muted">{s.authorized
-          ? <>已授权{account && account !== '未授权' ? <>：<span className="font-mono">{account}</span></> : ''}</>
-          : `还没有授权。点「${s.actions.find(a => a.show === 'unauthorized')?.label ?? '授权'}」用你的 ${s.title} 账号登录并同意访问。`}</div>
-      </div>
-      {s.actions.map(a => <Button key={a.id} size="sm" variant={a.primary ? 'primary' : a.show === 'authorized' && a.confirm ? 'ghost' : 'secondary'} disabled={Boolean(device)} onClick={async () => {
+  return <>
+    <Row label="账号授权" sub={<>{s.authorized ? `已授权${account && account !== '未授权' ? ` · ${account}` : ''}` : `还没有授权，点「${s.actions.find(a => a.show === 'unauthorized')?.label ?? '授权'}」用你的 ${s.title} 账号登录`}
+      {error && <span className="block text-danger">{error}</span>}</>}>
+      {s.actions.map(a => <Btn key={a.id} tone={a.primary ? 'ink' : 'plain'} disabled={Boolean(device)} onClick={async () => {
         setError(undefined)
         const data = await runAction(s.id, a)
         if (!data) return
         if (data.url) location.href = data.url
         else if (data.device) { setDevice(data.device); setCopied(false); window.open(data.device.verificationUri, '_blank', 'noopener') }
         else onDone()
-      }}>{a.label}</Button>)}
-    </div>
-    {device && <div className="mt-4 rounded-lg border border-line bg-panel p-4 text-sm">
+      }}>{a.label}</Btn>)}
+    </Row>
+    {device && <Block className="text-[13px]">
       <div>在打开的页面（<a href={device.verificationUri} target="_blank" rel="noopener" className="inline-flex items-center gap-0.5 text-accent">{device.verificationUri.replace(/^https?:\/\//, '')}<ExternalLink size={12} /></a>）输入这个验证码并同意授权：</div>
-      <div className="mt-3 flex items-center gap-3">
-        <span className="select-all font-mono text-2xl tracking-widest">{device.userCode}</span>
-        <Button size="sm" variant="ghost" onClick={() => { void navigator.clipboard?.writeText(device.userCode); setCopied(true) }}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? '已复制' : '复制'}</Button>
+      <div className="mt-2.5 flex items-center gap-3">
+        <span className="font-mono text-2xl tracking-widest select-all">{device.userCode}</span>
+        <Btn onClick={() => { void navigator.clipboard?.writeText(device.userCode); setCopied(true) }}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? '已复制' : '复制'}</Btn>
+        <span className="ml-auto text-xs text-muted">等你在 {s.title} 上确认…</span>
+        <Btn onClick={() => setDevice(undefined)}>取消</Btn>
       </div>
-      <div className="mt-3 flex items-center gap-2 text-xs text-muted"><RefreshCw size={12} className="animate-spin" />等待你在 {s.title} 上确认…
-        <button className="ml-auto text-muted hover:text-fg" onClick={() => setDevice(undefined)}>取消</button></div>
-    </div>}
-    {error && <div className="mt-3 text-xs text-danger">{error}</div>}
-  </Card>
+    </Block>}
+  </>
 }
 
-function FieldInput({ f: spec, value, onChange }: { f: FieldSpec; value: any; onChange(v: unknown): void }) {
-  // Links ride along in the hint, so every field type shows them.
-  const f = spec.links?.length ? { ...spec, hint: <>{spec.hint}{spec.hint && ' '}{spec.links.map(l => <a key={l.href} href={l.href} target="_blank" rel="noopener"
-    className="mr-2 inline-flex items-center gap-0.5 text-accent hover:underline" onClick={e => e.stopPropagation()}>{l.label}<ExternalLink size={11} /></a>)}</> } : spec
+function FieldRow({ f, value, onChange }: { f: FieldSpec; value: any; onChange(v: unknown): void }) {
+  const sub = <>{f.type === 'secret' && value === '••••••' ? '已存在钥匙串里；清空后保存会删除' : f.hint}
+    {f.links?.map(l => <a key={l.href} href={l.href} target="_blank" rel="noopener" className="ml-1.5 inline-flex items-center gap-0.5 text-accent">{l.label}<ExternalLink size={11} /></a>)}</>
   switch (f.type) {
-    case 'list': return <Field label={f.label} {...(f.hint ? { hint: f.hint } : {})}>
-      <textarea className="min-h-20 w-full rounded-xl border border-line bg-panel px-3 py-2 font-mono text-sm outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:ring-4 focus:ring-accent/15 focus-visible:outline-none" placeholder={f.placeholder}
-        value={(value ?? []).join('\n')} onChange={e => onChange(e.target.value.split('\n').map(s => s.trim()).filter(Boolean))} />
-    </Field>
-    case 'secret': return <Field label={f.label} hint={value === '••••••' ? '已保存在钥匙串里；留空保存会清除' : f.hint ?? '保存在系统钥匙串里，不写入数据库'}>
-      <Input type="password" autoComplete="off" value={value ?? ''} placeholder={f.placeholder} onChange={e => onChange(e.target.value)} onFocus={e => { if (value === '••••••') e.target.select() }} />
-    </Field>
-    case 'number': return <Field label={f.label} {...(f.hint ? { hint: f.hint } : {})}><Input type="number" min={f.min} max={f.max} value={value ?? ''} onChange={e => onChange(Number(e.target.value))} /></Field>
-    case 'switch': return <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(value)} onChange={e => onChange(e.target.checked)} />{f.label}</label>
-    case 'select': return <Field label={f.label} {...(f.hint ? { hint: f.hint } : {})}><Select value={value ?? ''} onChange={e => onChange(e.target.value)}>{f.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</Select></Field>
-    default: return <Field label={f.label} {...(f.hint ? { hint: f.hint } : {})}><Input value={value ?? ''} placeholder={f.placeholder} onChange={e => onChange(e.target.value)} /></Field>
+    case 'switch': return <Row label={f.label} sub={sub}><Toggle label={f.label} checked={Boolean(value)} onChange={onChange} /></Row>
+    case 'list': return <Block>
+      <div className="mb-1 text-sm">{f.label}</div>
+      {(f.hint || f.links) && <div className="mb-2 text-xs text-muted">{sub}</div>}
+      <Area className="font-mono" placeholder={f.placeholder} value={(value ?? []).join('\n')} onChange={e => onChange(e.target.value.split('\n').map(x => x.trim()).filter(Boolean))} />
+    </Block>
+    case 'number': return <Row label={f.label} sub={sub}><NumberInput min={f.min} max={f.max} value={value ?? ''} onChange={e => onChange(Number(e.target.value))} aria-label={f.label} /></Row>
+    case 'select': return <Row label={f.label} sub={sub}><SelectInput value={value ?? ''} onChange={e => onChange(e.target.value)}>{f.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</SelectInput></Row>
+    case 'secret': return <Row label={f.label} sub={sub}><TextInput type="password" autoComplete="off" value={value ?? ''} placeholder={f.placeholder} onChange={e => onChange(e.target.value)} onFocus={e => { if (value === '••••••') e.target.select() }} /></Row>
+    default: return <Row label={f.label} sub={sub}><TextInput value={value ?? ''} placeholder={f.placeholder} onChange={e => onChange(e.target.value)} /></Row>
   }
 }

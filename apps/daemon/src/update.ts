@@ -74,13 +74,17 @@ const headers = (token: string | undefined, accept: string) =>
 export interface Release { tag: string; version: string; url: string; notes: string; publishedAt: string | null; hasPackage: boolean }
 
 export async function fetchLatestRelease(token: string | undefined, fetchImpl: typeof fetch = fetch, env: NodeJS.ProcessEnv = process.env,
-  asset: RegExp = assetPattern(false)): Promise<Release> {
-  const res = await fetchImpl(`${api(env)}/releases/latest`, { headers: headers(token, 'application/vnd.github+json'), signal: AbortSignal.timeout(20_000) })
+  asset: RegExp = assetPattern(false), prerelease = false): Promise<Release> {
+  // The beta channel takes the newest release, pre-releases included; /releases/latest skips them.
+  const res = await fetchImpl(`${api(env)}/releases${prerelease ? '?per_page=15' : '/latest'}`, { headers: headers(token, 'application/vnd.github+json'), signal: AbortSignal.timeout(20_000) })
   if (res.status === 404) throw new Error('还没有发布任何版本')
   if (res.status === 401) throw new Error('GITHUB_TOKEN 无效或已过期（检查更新不需要令牌，可以删掉它）')
   if (res.status === 403 || res.status === 429) throw new Error('GitHub 访问频率受限，稍后再试（或在数据目录的 env 文件里设置 GITHUB_TOKEN）')
   if (!res.ok) throw new Error(`GitHub 返回 ${res.status}`)
-  const r = await res.json() as { tag_name: string; html_url: string; body?: string | null; published_at?: string | null; assets?: { name: string }[] }
+  type Raw = { tag_name: string; html_url: string; body?: string | null; published_at?: string | null; draft?: boolean; assets?: { name: string }[] }
+  const data = await res.json() as Raw | Raw[]
+  const r = Array.isArray(data) ? data.find(x => !x.draft) : data
+  if (!r) throw new Error('还没有发布任何版本')
   return {
     tag: r.tag_name, version: r.tag_name.replace(/^v/i, ''), url: r.html_url, notes: (r.body ?? '').slice(0, 4000),
     publishedAt: r.published_at ?? null, hasPackage: (r.assets ?? []).some(a => asset.test(a.name)),
@@ -110,6 +114,7 @@ export interface UpdateStatus {
   /** The update run started from this process, if any. */
   run: Run | null
   hint: string
+  prefs: UpdatePrefs
 }
 
 export interface UpdaterOptions {
@@ -127,6 +132,10 @@ export interface UpdaterOptions {
 
 const DAY = 24 * 60 * 60 * 1000
 
+/** 设置 → 系统和更新: check by itself, which channel, and whether a found update installs by itself (package installs only). */
+export interface UpdatePrefs { auto: boolean; channel: 'stable' | 'beta'; install: boolean }
+export const DEFAULT_UPDATE_PREFS: UpdatePrefs = { auto: true, channel: 'stable', install: false }
+
 export class Updater {
   readonly install: Install
   private latest: Release | null = null
@@ -138,6 +147,7 @@ export class Updater {
   private readonly env: NodeJS.ProcessEnv
   private readonly fetchImpl: typeof fetch
   private readonly service: boolean
+  private prefs: UpdatePrefs = DEFAULT_UPDATE_PREFS
 
   constructor(private readonly opts: UpdaterOptions) {
     this.install = opts.desktop ? { kind: 'desktop' } : detectInstall(opts.entry)
@@ -150,7 +160,11 @@ export class Updater {
   /** Checks shortly after start and then twice a day. SUPER_ASSISTANT_UPDATE_CHECK=0 turns the background check off. */
   startBackgroundChecks(): void {
     if (this.env.SUPER_ASSISTANT_UPDATE_CHECK === '0' || (this.install.kind !== 'package' && this.install.kind !== 'desktop')) return
-    const tick = () => { void this.check().catch(() => { /* recorded in checkError */ }) }
+    const tick = () => {
+      if (!this.prefs.auto) return
+      void this.check().then(s => { if (this.prefs.install && s.available && s.canUpdate && this.run?.state !== 'running') return this.update() })
+        .catch(() => { /* recorded in checkError or run */ })
+    }
     const first = setTimeout(tick, 15_000)
     first.unref()
     this.timer = setInterval(tick, DAY / 2)
@@ -169,7 +183,7 @@ export class Updater {
     if (this.run?.state === 'running') this.run = { ...this.run, log: tail(join(this.opts.home, 'logs/update.log')) }
     return {
       current: VERSION, install: this.install.kind, canUpdate: this.install.kind === 'package' && process.platform === 'linux',
-      checkedAt: this.checkedAt, latest: this.latest, available, checkError: this.checkError, run: this.run, hint,
+      checkedAt: this.checkedAt, latest: this.latest, available, checkError: this.checkError, run: this.run, hint, prefs: this.prefs,
     }
   }
 
@@ -178,7 +192,7 @@ export class Updater {
     if (!this.checking) {
       this.checking = (async () => {
         try {
-          this.latest = await fetchLatestRelease(githubToken(this.env), this.fetchImpl, this.env, assetPattern(this.install.kind === 'desktop'))
+          this.latest = await fetchLatestRelease(githubToken(this.env), this.fetchImpl, this.env, assetPattern(this.install.kind === 'desktop'), this.prefs.channel === 'beta')
           this.checkError = null
         } catch (error) {
           this.checkError = (error as Error).message
@@ -249,7 +263,14 @@ export class Updater {
     return this.status()
   }
 
+  setPrefs(patch: Partial<UpdatePrefs>): UpdateStatus {
+    this.prefs = { ...this.prefs, ...patch }
+    try { writeFileSync(this.prefsFile(), JSON.stringify(this.prefs)) } catch { /* best effort */ }
+    return this.status()
+  }
+
   private cacheFile() { return join(this.opts.home, 'update-check.json') }
+  private prefsFile() { return join(this.opts.home, 'update-settings.json') }
 
   private persist() {
     try { writeFileSync(this.cacheFile(), JSON.stringify({ latest: this.latest, checkedAt: this.checkedAt, checkError: this.checkError })) } catch { /* best effort */ }
@@ -262,6 +283,7 @@ export class Updater {
       this.checkedAt = saved.checkedAt
       this.checkError = saved.checkError
     } catch { /* first run */ }
+    try { this.prefs = { ...DEFAULT_UPDATE_PREFS, ...JSON.parse(readFileSync(this.prefsFile(), 'utf8')) as Partial<UpdatePrefs> } } catch { /* defaults */ }
   }
 }
 

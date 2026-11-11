@@ -9,7 +9,7 @@ export const MASCOT = 'mascot'
 export const BRAND = '#ff7a9a'
 /** The assistant's official name. 小助 was the old default and is shown as 糯糯. */
 export const OFFICIAL_NAME = '糯糯'
-const FALLBACK: Persona = { name: OFFICIAL_NAME, avatar: MASCOT, color: BRAND, personality: '' }
+const FALLBACK: Persona = { name: OFFICIAL_NAME, avatar: MASCOT, color: BRAND, personality: '', role: 'all', language: 'auto' }
 // Earlier default colours: shown as the current brand pink.
 const OLD_DEFAULTS = new Set(['#4f46e5', '#2f6bff', '#2b4bff', '#2b3cff', '#5c7bff', '#7d8bf0', '#e9845a'])
 

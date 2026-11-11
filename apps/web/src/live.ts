@@ -1,7 +1,9 @@
 /** One EventSource per tab: keeps react-query caches fresh and holds the transient state (streaming replies, live worker text). */
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useSyncExternalStore } from 'react'
-import type { ServerEvent } from './api'
+import type { Notice, ServerEvent } from './api'
+import { getPrefs } from './prefs'
+import { speak } from './voice'
 
 interface LiveState {
   connected: boolean
@@ -57,7 +59,7 @@ export function useLiveEvents() {
     const handle = (e: ServerEvent) => {
       switch (e.type) {
         case 'message.created':
-          void maybeNotify(e.conversationId, e.messageId)
+          void readAloud(e.conversationId, e.messageId)
           void qc.invalidateQueries({ queryKey: ['messages', e.conversationId] }).then(() => clearDraftAfterMessage(e.conversationId))
           soon('conversations', () => qc.invalidateQueries({ queryKey: ['conversations'] }))
           break
@@ -66,6 +68,9 @@ export function useLiveEvents() {
           break
         case 'conversation.updated':
           qc.invalidateQueries({ queryKey: ['conversations'] })
+          break
+        case 'notice':
+          showNotice(e)
           break
         case 'persona.updated':
           qc.invalidateQueries({ queryKey: ['persona'] })
@@ -147,19 +152,29 @@ export async function setNotifications(on: boolean): Promise<boolean> {
   try { localStorage.setItem('sa-notify', on ? '1' : '0') } catch { /* private mode */ }
   return on
 }
-const notified = new Set<string>()
-async function maybeNotify(conversationId: string, messageId: string) {
-  // Inside the desktop app, the app shows native notifications itself.
+/** The service decided this is worth a banner (设置 → 通知). A browser tab shows it while in the background; the desktop app shows its own. */
+function showNotice(n: Notice) {
   if ((window as { superAssistantDesktop?: unknown }).superAssistantDesktop) return
-  if (!notificationsEnabled() || document.visibilityState === 'visible' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
-  if (notified.has(messageId)) return
-  notified.add(messageId)
+  if (!notificationsEnabled() || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  if (n.kind !== 'test' && document.visibilityState === 'visible') return
   try {
+    const note = new Notification(n.title || 'Super-assistant', { body: n.body, tag: n.id, silent: n.silent })
+    note.onclick = () => { window.focus(); location.hash = n.hash; note.close() }
+  } catch { /* best effort */ }
+}
+
+/** 设置 → 语音 → 把回复读出来: what it says in the chat on screen. */
+async function readAloud(conversationId: string, messageId: string) {
+  if (!getPrefs().readAloud || document.visibilityState !== 'visible' || typeof speechSynthesis === 'undefined') return
+  const hash = location.hash.replace(/^#\/?/, '')
+  const here = hash.match(/^c\/([^/]+)/)?.[1]
+  if (!here && hash !== '') return
+  try {
+    if (here && here !== conversationId) return
     const res = await fetch(`/api/messages/${messageId}`, { credentials: 'same-origin' })
-    const { message } = await res.json() as { message: { role: string; content: string; meta: Record<string, any> } }
-    const fromOwner = message.role === 'user' && (message.meta.source ?? 'webchat') === 'webchat'
-    if (fromOwner || message.role === 'event' || message.meta.delivery) return
-    const n = new Notification(message.role === 'assistant' ? 'Super-assistant' : `${message.meta.actor ?? message.meta.source}`, { body: message.content.slice(0, 160), tag: conversationId })
-    n.onclick = () => { window.focus(); location.hash = `/c/${conversationId}`; n.close() }
+    const { message } = await res.json() as { message: { role: string; content: string; conversationId: string; meta: Record<string, any> } }
+    if (message.role !== 'assistant' || message.meta.delivery) return
+    if (!here) { const main = await fetch('/api/conversations/main', { credentials: 'same-origin' }).then(r => r.json()) as { id: string }; if (main.id !== conversationId) return }
+    speak(message.content)
   } catch { /* best effort */ }
 }

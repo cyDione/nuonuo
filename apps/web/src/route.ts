@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 
 export type Route = { page: 'chat'; id?: string; main?: boolean } | { page: 'activity' } | { page: 'library' } | { page: 'goals' } | { page: 'ideas' } | { page: 'settings'; tab: SettingsTab; item?: string } | { page: 'me' } | { page: 'quick' }
-export type SettingsTab = 'persona' | 'providers' | 'roles' | 'instructions' | 'proactive' | 'sources' | 'plugins' | 'mcp' | 'routines' | 'review' | 'memory' | 'execution' | 'usage' | 'system'
+export const SETTINGS_TABS = ['persona', 'routines', 'sources', 'plugins', 'mcp', 'review', 'execution', 'providers', 'roles', 'usage',
+  'general', 'notifications', 'voice', 'shortcuts', 'data', 'system'] as const
+export type SettingsTab = (typeof SETTINGS_TABS)[number]
 
 function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/')
@@ -10,7 +12,8 @@ function parse(hash: string): Route {
   if (parts[0] === 'quick') return { page: 'quick' }
   if (parts[0] === 'settings' && (parts[1] === 'instructions' || parts[1] === 'memory')) return { page: 'me' }
   if (parts[0] === 'settings') {
-    const tab = (['persona', 'providers', 'roles', 'instructions', 'proactive', 'sources', 'plugins', 'mcp', 'routines', 'review', 'memory', 'execution', 'usage', 'system'] as const).find(t => t === parts[1]) ?? 'persona'
+    // 主动 became part of 助理.
+    const tab = SETTINGS_TABS.find(t => t === parts[1]) ?? 'persona'
     return parts[2] ? { page: 'settings', tab, item: decodeURIComponent(parts[2]) } : { page: 'settings', tab }
   }
   if (parts[0] === 'c' && parts[1]) return { page: 'chat', id: parts[1] }
@@ -33,3 +36,8 @@ export function useRoute(): Route {
 }
 
 export const go = (path: string) => { location.hash = path }
+
+// Where 返回聊天 (and Esc) in the settings window goes: the last page outside settings.
+let outside = typeof location !== 'undefined' && !location.hash.startsWith('#/settings') ? location.hash : ''
+if (typeof window !== 'undefined') addEventListener('hashchange', () => { if (!location.hash.startsWith('#/settings')) outside = location.hash })
+export const leaveSettings = () => { location.hash = outside && outside !== '#' ? outside : '#/' }

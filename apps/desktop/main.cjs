@@ -1,14 +1,22 @@
 // Super-assistant desktop: the web UI in a window, plus what only a desktop app can do —
 // a tray icon showing what needs you, native notifications, a global shortcut, and starting at login.
 const { app, BrowserWindow, Menu, Notification, Tray, globalShortcut, nativeImage, nativeTheme, screen, shell, ipcMain, session } = require('electron')
-const { writeFileSync } = require('node:fs')
+const { existsSync, readFileSync, writeFileSync } = require('node:fs')
 const path = require('node:path')
 const { ensureDaemon, stopDaemon, readLock } = require('./lib/daemon.cjs')
 
 const SHORTCUT = 'CommandOrControl+Shift+Space'
 let win, quick, tray, daemon
 let attention = 0
+let badgeOn = true
 let quitting = false
+
+// What the owner set in 设置 (通用 · 快捷键): kept next to the app's own data, applied at once.
+const DEFAULT_PREFS = { tray: true, close: 'hide', summon: process.platform === 'darwin' ? 'Alt+Space' : '', quick: SHORTCUT }
+let prefs = { ...DEFAULT_PREFS }
+let registered = {}
+const prefsFile = () => path.join(app.getPath('userData'), 'desktop-prefs.json')
+function loadPrefs() { try { prefs = { ...DEFAULT_PREFS, ...JSON.parse(readFileSync(prefsFile(), 'utf8')) } } catch { /* first run */ } }
 
 if (!app.requestSingleInstanceLock()) app.quit()
 app.on('second-instance', () => show())
@@ -53,8 +61,13 @@ function createWindow() {
   // Links to other sites open in the default browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
   win.webContents.on('will-navigate', (event, url) => { if (!url.startsWith(base())) { event.preventDefault(); shell.openExternal(url) } })
-  // Closing the window hides it; the agent keeps working in the tray.
-  win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide() } })
+  // Closing the window hides it (the agent keeps working in the background), or quits the app when the owner chose that;
+  // the background service keeps running either way.
+  win.on('close', event => {
+    if (quitting) return
+    if (prefs.close === 'quit') { quitting = true; app.quit(); return }
+    event.preventDefault(); win.hide()
+  })
 }
 
 /** Quick ask (⌘⇧Space): a small floating box over whatever you are doing; it tucks away when you click elsewhere. */
@@ -94,22 +107,55 @@ function trayImage() {
   return image
 }
 
+/** The global shortcuts: 叫出 (the main window) and 快速问一句 (the quick box). Returns which ones the system took. */
+function applyShortcuts() {
+  globalShortcut.unregisterAll()
+  registered = {}
+  for (const [key, run] of [['summon', () => show()], ['quick', () => toggleQuick()]]) {
+    if (!prefs[key]) continue
+    try { registered[key] = globalShortcut.register(prefs[key], run) } catch { registered[key] = false }
+  }
+}
+
+function applyTray() {
+  if (prefs.tray && !tray) { tray = new Tray(trayImage()); tray.on('click', () => show()) }
+  else if (!prefs.tray && tray) { tray.destroy(); tray = undefined }
+  refreshTray()
+}
+
+const desktopPrefs = () => ({ ...prefs, openAtLogin: app.getLoginItemSettings().openAtLogin, registered })
+ipcMain.handle('prefs:get', () => desktopPrefs())
+ipcMain.handle('prefs:set', (_e, patch) => {
+  if (!patch || typeof patch !== 'object') return desktopPrefs()
+  if (typeof patch.openAtLogin === 'boolean') app.setLoginItemSettings({ openAtLogin: patch.openAtLogin, openAsHidden: true })
+  for (const key of ['summon', 'quick']) if (typeof patch[key] === 'string') prefs[key] = patch[key].slice(0, 60)
+  if (typeof patch.tray === 'boolean') prefs.tray = patch.tray
+  if (patch.close === 'hide' || patch.close === 'quit') prefs.close = patch.close
+  try { writeFileSync(prefsFile(), JSON.stringify(prefs)) } catch { /* best effort */ }
+  if ('summon' in patch || 'quick' in patch) applyShortcuts()
+  if ('tray' in patch) applyTray()
+  refreshTray()
+  return desktopPrefs()
+})
+// 在访达中显示: opens a folder the page names (the data directory, plugins/), if it exists.
+ipcMain.handle('reveal', (_e, target) => (typeof target === 'string' && path.isAbsolute(target) && existsSync(target) ? shell.openPath(target) : 'missing'))
+
 function refreshTray() {
+  app.setBadgeCount(badgeOn ? attention : 0)
   if (!tray) return
   tray.setImage(trayImage())
   tray.setToolTip(attention ? `Super-assistant · ${attention} 件事等你处理` : 'Super-assistant')
-  if (process.platform === 'darwin') tray.setTitle(attention ? String(attention) : '')
-  app.setBadgeCount(attention)
+  if (process.platform === 'darwin') tray.setTitle(attention && badgeOn ? String(attention) : '')
   const login = app.getLoginItemSettings().openAtLogin
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开 Super-assistant', click: () => show() },
-    { label: '快问…', accelerator: SHORTCUT, click: () => toggleQuick() },
+    { label: '快问…', ...(prefs.quick ? { accelerator: prefs.quick } : {}), click: () => toggleQuick() },
     { label: '新对话', click: () => show('/new') },
     { type: 'separator' },
     { label: attention ? `待你处理：${attention} 件` : '没有需要你处理的事', enabled: attention > 0, click: () => show() },
     { type: 'separator' },
     { label: '开机时启动', type: 'checkbox', checked: login, click: item => { app.setLoginItemSettings({ openAtLogin: item.checked, openAsHidden: true }); refreshTray() } },
-    { label: '设置', click: () => show('/settings/providers') },
+    { label: '设置', click: () => show('/settings/persona') },
     { type: 'separator' },
     { label: '退出（后台服务继续运行）', click: () => { quitting = true; app.quit() } },
     { label: '退出并停止后台服务', click: () => { stopDaemon(); quitting = true; app.quit() } },
@@ -119,7 +165,8 @@ function refreshTray() {
 async function pollAttention() {
   try {
     const { items } = await api('/api/inbox')
-    if (items.length !== attention) { attention = items.length; refreshTray() }
+    const badge = await api('/api/settings/notifications').then(r => r.settings.badge !== false).catch(() => badgeOn)
+    if (items.length !== attention || badge !== badgeOn) { attention = items.length; badgeOn = badge; refreshTray() }
   } catch { void reconnect() }
 }
 
@@ -165,7 +212,7 @@ async function followEvents() {
           if (!data || !block.includes('event: message')) continue
           const event = JSON.parse(data)
           if (event.type === 'ticket.updated') void pollAttention()
-          if (event.type === 'message.created') void notifyMessage(event)
+          if (event.type === 'notice') showNotice(event)
         }
       }
     } catch { /* reconnect below */ }
@@ -173,19 +220,12 @@ async function followEvents() {
   }
 }
 
-const notified = new Set()
-async function notifyMessage({ conversationId, messageId }) {
-  if (notified.has(messageId) || (win && win.isFocused()) || !Notification.isSupported()) return
-  notified.add(messageId)
-  try {
-    const { message } = await api(`/api/messages/${messageId}`)
-    const fromOwner = message.role === 'user' && (message.meta.source || 'webchat') === 'webchat'
-    if (fromOwner || message.role === 'event' || message.meta.delivery) return
-    const name = await api('/api/persona').then(r => r.persona.name).catch(() => 'Super-assistant')
-    const n = new Notification({ title: message.role === 'assistant' ? name : String(message.meta.actor || message.meta.source || name), body: message.content.slice(0, 200), silent: false })
-    n.on('click', () => show(`/c/${conversationId}`))
-    n.show()
-  } catch { /* best effort */ }
+/** The service decided this is worth a banner (设置 → 通知); shown unless the window is in front (a test always shows). */
+function showNotice(notice) {
+  if (!Notification.isSupported() || (notice.kind !== 'test' && win && win.isFocused())) return
+  const n = new Notification({ title: notice.title || 'Super-assistant', body: notice.body, silent: Boolean(notice.silent) })
+  n.on('click', () => show(notice.hash))
+  n.show()
 }
 
 ipcMain.on('badge', (_e, count) => { attention = Number(count) || 0; refreshTray() })
@@ -205,11 +245,10 @@ app.whenReady().then(async () => {
     if (details.url.startsWith(base())) headers['x-super-assistant-client'] = 'desktop'
     done({ requestHeaders: headers })
   })
-  tray = new Tray(trayImage())
-  tray.on('click', () => show())
-  refreshTray()
+  loadPrefs()
+  applyTray()
   createWindow()
-  globalShortcut.register(SHORTCUT, () => toggleQuick())
+  applyShortcuts()
   // The quick box shares the main window's sign-in, so it loads once the main window has.
   win.webContents.once('did-finish-load', () => { if (!quick) createQuick() })
   nativeTheme.on('updated', () => { if (win && !win.isDestroyed()) win.setBackgroundColor(windowColor()) })
@@ -226,7 +265,7 @@ app.whenReady().then(async () => {
       writeFileSync(process.env.SUPER_ASSISTANT_DESKTOP_SMOKE, image.toPNG())
       console.log(JSON.stringify({ ok: true, url: win.webContents.getURL(), title: await win.webContents.executeJavaScript('document.title'),
         desktopFlag: await win.webContents.executeJavaScript('Boolean(window.superAssistantDesktop && window.superAssistantDesktop.isDesktop)'),
-        shortcut: globalShortcut.isRegistered(SHORTCUT), tray: Boolean(tray && !tray.isDestroyed()), attention, started: daemon.started }))
+        shortcut: Boolean(registered.quick), tray: Boolean(tray && !tray.isDestroyed()), attention, started: daemon.started }))
       quitting = true
       app.quit()
     })

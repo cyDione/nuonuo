@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronRight, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type IdeaSettings, type ProactiveSettings, type UpdateStatus } from './api'
-import { ACCENTS, setPrefs, usePrefs, type Theme } from './prefs'
+import { ACCENTS, getPrefs, matchesKey, setPrefs, usePrefs, type Theme } from './prefs'
 import { go } from './route'
 import { cx, Seg } from './ui'
 
@@ -21,7 +21,7 @@ const MODES: { id: ProactiveSettings['mode']; label: string }[] = [{ id: 'off', 
 export function useSettingsShortcut() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === ',') { e.preventDefault(); go('/settings/persona') }
+      if (matchesKey(e, getPrefs().keys.settings)) { e.preventDefault(); go('/settings/persona') }
     }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
