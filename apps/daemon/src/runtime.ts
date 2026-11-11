@@ -2,7 +2,7 @@
 import { pruneChats } from './data'
 import { Notices } from './notices'
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-assistant/agent-runtime'
-import { browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
+import { accessExtension, LocalAccess, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@super-assistant/db'
 import { gmailPlugin, telegramPlugin } from '@super-assistant/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-assistant/sources'
@@ -15,6 +15,10 @@ import type { DaemonConfig } from './config'
 export interface Runtime {
   config: DaemonConfig
   store: Store
+  /** 权限: folders and local apps the assistant may use. */
+  access: LocalAccess
+  /** Where the owner's attachments are kept. */
+  uploadsDir: string
   secrets: SecretStore
   secretsNote?: string
   hub: ModelHub
@@ -103,6 +107,9 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     agents.options.maxWorkers = engine.execution().maxWorkers
     const reviewer = new Reviewer(store, hub, engine, agents, bus)
     reviewer.envFor = ticket => workerEnv({ SUPER_ASSISTANT_TICKET: ticket.id, SUPER_ASSISTANT_DIR: ticket.directory })
+    const access = new LocalAccess(store)
+    reviewer.access = access
+    const uploadsDir = join(config.home, 'uploads')
     const conversationTitle = (id: string) => store.sqlite.prepare('SELECT title FROM conversations WHERE id = ?').get(id) as { title: string } | undefined
     const memory = new Memory(store, config.home, { embedder: () => hub.embeddingModel(), label: scope => (scope.startsWith('cnv_') ? conversationTitle(scope)?.title : undefined) })
     memory.importLegacy()
@@ -146,6 +153,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       proactiveExtension(store, engine),
       browserExtension(browser, engine, agents),
       sandboxExtension(engine),
+      accessExtension(access, uploadsDir),
       mcpExtension(mcp, engine, reviewer),
       { gateShell: (ticket, sessionId, command, cwd) => reviewer.gateShell(ticket, sessionId, command, cwd) },
     ))
@@ -163,7 +171,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
+      config, store, secrets, access, uploadsDir, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
       startAgents() {
         engine.mainConversation()
         agents.recover(session => engine.recoveryNote(session.id, session.role))

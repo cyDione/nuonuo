@@ -252,6 +252,18 @@ export const artifacts = sqliteTable('artifacts', {
   createdAt: integer('created_at').notNull(),
 })
 
+/** A file the owner attached to a message; kept under <home>/uploads/<id>/ and readable by workers. */
+export const uploads = sqliteTable('uploads', {
+  id: text('id').primaryKey(),
+  conversationId: text('conversation_id'),
+  messageId: text('message_id'),
+  name: text('name').notNull(),
+  mime: text('mime').notNull(),
+  size: integer('size').notNull(),
+  path: text('path').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
 /** One long-term memory entry: what it says, where it came from, how far it is trusted, and how long it holds. */
 export const memories = sqliteTable('memories', {
   id: text('id').primaryKey(),

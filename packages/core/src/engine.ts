@@ -333,15 +333,25 @@ export class Engine {
    * The owner wrote in a conversation. Fast path: a message aimed at one task (`replyTo`, or the conversation's only open
    * task) goes straight to that task's worker, and the router only gets a follow-up notice. Everything else goes to the router.
    */
-  receiveMessage(conversationId: string, text: string, opts: { replyTo?: string } = {}) {
+  receiveMessage(conversationId: string, text: string, opts: { replyTo?: string; attachments?: Attachment[]; quote?: { messageId: string; text: string } } = {}) {
     return this.store.atomic(() => {
       const threadId = this.ensureThread(conversationId)
       const at = this.now()
       const triggerId = newId('trg')
-      this.store.db.insert(schema.triggers).values({ id: triggerId, threadId, source: 'webchat', actor: 'owner', human: true, text, at }).run()
+      const files = opts.attachments ?? []
+      // The agent reads the attachments by path (the file tools reach the uploads folder); the chat shows them as chips.
+      const quoted = opts.quote ? `> ${clip(opts.quote.text, 400).replace(/\n/g, '\n> ')}\n\n` : ''
+      const listed = files.length ? `\n\n[附件]\n${files.map(f => `- ${f.name}（${f.mime}，${formatSize(f.size)}）：${f.path}`).join('\n')}` : ''
+      const triggerText = `${quoted}${text || (files.length ? '（发来了附件）' : '')}${listed}`
+      this.store.db.insert(schema.triggers).values({ id: triggerId, threadId, source: 'webchat', actor: 'owner', human: true, text: triggerText, at,
+        meta: files.length || opts.quote ? { ...(files.length ? { attachments: files.map(f => f.id) } : {}), ...(opts.quote ? { quote: opts.quote.messageId } : {}) } : {} }).run()
       const messageAt = this.stamp()
       const messageId = newId('msg')
-      this.store.db.insert(schema.messages).values({ id: messageId, conversationId, role: 'user', content: text, triggerId, meta: { source: 'webchat' }, createdAt: messageAt }).run()
+      const meta: Record<string, unknown> = { source: 'webchat' }
+      if (files.length) meta.attachments = files.map(({ id, name, mime, size }) => ({ id, name, mime, size }))
+      if (opts.quote) meta.quote = opts.quote
+      this.store.db.insert(schema.messages).values({ id: messageId, conversationId, role: 'user', content: text, triggerId, meta, createdAt: messageAt }).run()
+      if (files.length) this.store.db.update(schema.uploads).set({ messageId, conversationId }).where(inArray(schema.uploads.id, files.map(f => f.id))).run()
       this.store.db.update(schema.conversations).set({ updatedAt: at }).where(eq(schema.conversations.id, conversationId)).run()
 
       // The watchdog's own conversation talks to the watchdog, not the router.
@@ -826,3 +836,12 @@ export class Engine {
 export const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n)}…` : text)
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every(x => b.includes(x))
 export type TicketRow = Row
+
+/** A file the owner attached to a message (an uploads row). */
+export interface Attachment { id: string; name: string; mime: string; size: number; path: string }
+
+export function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`
+}

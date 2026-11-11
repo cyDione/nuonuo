@@ -146,7 +146,7 @@ describe('workspace safety', () => {
     expect(() => resolveInside(dir, '../outside')).toThrow(/不在工作目录内/)
     expect(() => resolveInside(dir, '/etc/passwd')).toThrow(/不在工作目录内/)
     expect(() => resolveInside(dir, 'link/passwd')).toThrow(/不在工作目录内/)
-    expect(Object.keys(fsTools(dir, null as any))).toEqual(['read_file', 'write_file', 'edit_file', 'list_dir'])
+    expect(Object.keys(fsTools(dir, null as any))).toEqual(['read_file', 'write_file', 'edit_file', 'list_dir', 'find_files', 'move_path', 'view_image'])
   })
   it('strips credentials from the worker environment', () => {
     const env = workerEnv({ X: '1' }, { PATH: '/bin', OPENAI_API_KEY: 'k', GITHUB_TOKEN: 't', AWS_SECRET_ACCESS_KEY: 's', HOME: '/h' })

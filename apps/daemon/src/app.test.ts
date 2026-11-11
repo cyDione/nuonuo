@@ -160,6 +160,47 @@ describe('conversations', () => {
   })
 })
 
+describe('attachments and folder access', () => {
+  it('uploads a file, sends it with a quoted message, serves it and lists it for the agent', async () => {
+    const { provider } = await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
+    await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
+    const { conversation } = await (await call('/api/conversations', { method: 'POST', body: '{}' })).json() as any
+    rt.store.db.insert(schema.messages).values({ id: 'msg_q', conversationId: conversation.id, role: 'assistant', content: '周五前要交报告', createdAt: 1 }).run()
+    const form = new FormData()
+    form.set('file', new File([new Uint8Array([137, 80, 78, 71])], '../收据 1.png', { type: 'image/png' }))
+    form.set('conversation', conversation.id)
+    const up = await app.request(`${base}/api/uploads`, { method: 'POST', body: form, headers: { host: headers.host, authorization: headers.authorization } })
+    expect(up.status).toBe(201)
+    const { upload } = await up.json() as any
+    expect(upload).toMatchObject({ name: '收据 1.png', mime: 'image/png', size: 4 })
+    const file = await call(`/api/uploads/${upload.id}`)
+    expect(file.headers.get('content-type')).toBe('image/png')
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array([137, 80, 78, 71]))
+    expect((await call(`/api/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '' }) })).status).toBe(400)
+    const res = await call(`/api/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '看看这个', attachments: [upload.id], quote: 'msg_q' }) })
+    expect(res.status).toBe(201)
+    const { message } = await res.json() as any
+    expect(message.meta.attachments).toEqual([{ id: upload.id, name: '收据 1.png', mime: 'image/png', size: 4 }])
+    expect(message.meta.quote).toMatchObject({ messageId: 'msg_q' })
+    const trigger = rt.store.db.select().from(schema.triggers).all().at(-1)!
+    expect(trigger.text).toContain('> 周五前要交报告')
+    expect(trigger.text).toContain(`[附件]\n- 收据 1.png（image/png，4B）：${join(rt.uploadsDir, upload.id, '收据 1.png')}`)
+    // Sent once: a second send and deleting it are refused.
+    expect((await call(`/api/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: 'again', attachments: [upload.id] }) })).status).toBe(400)
+    expect((await call(`/api/uploads/${upload.id}`, { method: 'DELETE' })).status).toBe(409)
+    await rt.agents.idle()
+  })
+
+  it('saves folder and app permissions, keeping the locked never-touch folders', async () => {
+    const got = await (await call('/api/settings/access')).json() as any
+    expect(got.settings.locked).toContain('~/.ssh')
+    const put = await call('/api/settings/access', { method: 'PUT', body: JSON.stringify({ folders: [{ path: '~/Documents', write: true }], never: ['~/.ssh', '~/Taxes'], apps: { calendar: 'auto' } }) })
+    const { settings } = await put.json() as any
+    expect(settings).toMatchObject({ folders: [{ path: '~/Documents', write: true }], never: ['~/Taxes'], apps: { calendar: 'auto', photos: 'off' } })
+    expect((await call('/api/settings/access', { method: 'PUT', body: JSON.stringify({ apps: { mail: 'auto' } }) })).status).toBe(400)
+  })
+})
+
 describe('reply streaming', () => {
   it('reads partial JSON strings', () => {
     expect(partialString('{"conversation_id":"cnv_1","text":"你好\\n世', 'text')).toBe('你好\n世')
