@@ -4,7 +4,7 @@
  * File tools check every path outside the task's own directory here; the shell gate blocks commands that name a
  * never-touch folder. Credential stores are locked in the never-touch list and cannot be removed.
  */
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { resolve, sep } from 'node:path'
 import { kvGet, kvSet, type Store } from '@super-assistant/db'
 
@@ -40,7 +40,8 @@ export function expandHome(path: string, home = process.env.HOME ?? homedir()): 
 const inside = (path: string, root: string) => path === root || path.startsWith(root.endsWith(sep) ? root : root + sep)
 
 export class LocalAccess {
-  constructor(private store: Store, private home = () => process.env.HOME ?? homedir()) {}
+  /** `scratch`: places any command may write to (temporary files). */
+  constructor(private store: Store, private home = () => process.env.HOME ?? homedir(), private scratch = [tmpdir(), '/tmp']) {}
 
   settings(): AccessSettings & { locked: string[] } {
     const saved = kvGet<Partial<AccessSettings>>(this.store, KEY) ?? {}
@@ -101,6 +102,22 @@ export class LocalAccess {
     return undefined
   }
 
+  /**
+   * A path outside the task's directory and the folders the owner allowed changing that a shell command looks like it
+   * writes to (a redirect, rm/mv/cp/tee/touch/…, sed -i, dd of=). Only paths spelled out (absolute, ~, $HOME, or with
+   * ..) are judged; it is a heuristic that sends such commands to the review layer, not a sandbox.
+   */
+  shellWritesOutside(command: string, cwd: string): string | undefined {
+    const home = this.home()
+    const writable = [resolve(cwd), ...this.scratch.map(p => resolve(p)), '/dev', ...this.settings().folders.filter(f => f.write).map(f => expandHome(f.path, home))]
+    for (const target of shellWriteTargets(command)) {
+      if (!/^(\/|~|\$HOME\b|\$\{HOME\})/.test(target) && !target.split(/[\\/]/).includes('..')) continue
+      const abs = resolve(cwd, expandHome(target.replace(/^\$\{?HOME\}?(?=$|\/)/, '~'), home))
+      if (!writable.some(root => inside(abs, root))) return target
+    }
+    return undefined
+  }
+
   app(name: LocalApp): AppLevel { return this.settings().apps[name] }
 
   /** Folders the assistant may use, for the worker prompt. */
@@ -115,3 +132,35 @@ export class LocalAccess {
   }
 }
 
+
+/** Programs whose path arguments are all written (or removed), and those where only the last one is the destination. */
+const WRITES_ALL = new Set(['rm', 'rmdir', 'unlink', 'shred', 'touch', 'mkdir', 'chmod', 'chown', 'chgrp', 'truncate', 'tee'])
+const WRITES_LAST = new Set(['mv', 'cp', 'ln', 'install', 'rsync'])
+const WRAPPERS = new Set(['sudo', 'env', 'command', 'nohup', 'exec', 'time', 'nice', 'xargs'])
+
+/** The paths a command line looks like it writes to (see `shellWritesOutside`). */
+export function shellWriteTargets(command: string): string[] {
+  const out: string[] = []
+  const unquote = (w: string) => w.replace(/^['"]|['"]$/g, '')
+  for (const segment of command.split(/&&|\|\||[;|\n]/)) {
+    const words = segment.trim().split(/\s+/).filter(Boolean).map(unquote)
+    // Redirections: `> f`, `>> f`, `>f`, `2>f`, `&>f`.
+    for (let i = 0; i < words.length; i++) {
+      const m = /^(?:\d|&)?>>?(.*)$/.exec(words[i]!)
+      if (!m) continue
+      const target = m[1] || words[i + 1]
+      if (target && !target.startsWith('&')) out.push(unquote(target))
+    }
+    const args = words.filter(w => !/^(?:\d|&)?>/.test(w))
+    let i = args.findIndex(w => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && !WRAPPERS.has(w.split('/').pop()!))
+    if (i < 0) continue
+    const program = args[i]!.split('/').pop()!
+    const rest = args.slice(i + 1)
+    const paths = rest.filter(w => !w.startsWith('-'))
+    if (WRITES_ALL.has(program)) out.push(...paths)
+    else if (WRITES_LAST.has(program) && paths.length) out.push(paths.at(-1)!)
+    else if (program === 'sed' && rest.some(w => /^-i|^--in-place/.test(w))) out.push(...paths.slice(1))
+    else if (program === 'dd') out.push(...rest.filter(w => w.startsWith('of=')).map(w => w.slice(3)))
+  }
+  return out
+}

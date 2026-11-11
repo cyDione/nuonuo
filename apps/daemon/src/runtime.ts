@@ -2,13 +2,13 @@
 import { pruneChats } from './data'
 import { Notices } from './notices'
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-assistant/agent-runtime'
-import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
+import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@super-assistant/db'
 import { gmailPlugin, telegramPlugin } from '@super-assistant/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-assistant/sources'
 import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@super-assistant/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import type { ToolSet } from 'ai'
 import type { DaemonConfig } from './config'
 
@@ -112,7 +112,15 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const access = new LocalAccess(store)
     const skills = new Skills(store, Date.now, () => bus.emit({ type: 'skills.updated' }))
     reviewer.access = access
+    reviewer.sandboxed = ticket => sandboxApplies(engine.execution().sandbox, ticket)
     const uploadsDir = join(config.home, 'uploads')
+    /** What the sandbox mounts: the folders allowed in 权限 and the attachments (read-only); never-touch ones inside them are covered. */
+    const sandboxFolders = () => {
+      const s = access.settings()
+      const mounts = [...s.folders.map(f => ({ path: expandHome(f.path), write: f.write })), { path: uploadsDir, write: false }].filter(m => existsSync(m.path))
+      const hidden = [...s.locked, ...s.never].map(p => expandHome(p)).filter(p => existsSync(p) && mounts.some(m => p.startsWith(m.path + sep)))
+      return { mounts, hidden }
+    }
     const conversationTitle = (id: string) => store.sqlite.prepare('SELECT title FROM conversations WHERE id = ?').get(id) as { title: string } | undefined
     const memory = new Memory(store, config.home, { embedder: () => hub.embeddingModel(), label: scope => (scope.startsWith('cnv_') ? conversationTitle(scope)?.title : undefined) })
     memory.importLegacy()
@@ -155,7 +163,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       feedExtension(feed),
       proactiveExtension(store, engine),
       browserExtension(browser, engine, agents),
-      sandboxExtension(engine),
+      sandboxExtension(engine, sandboxFolders),
       accessExtension(access, uploadsDir),
       skillsExtension(skills),
       localAppsExtension(new LocalApps(access, reviewer)),
@@ -182,7 +190,8 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         agents.recover(session => engine.recoveryNote(session.id, session.role))
         void plugins.loadEnabled().finally(() => sources.startAll())
         void mcp.sync()
-        watchdogTimer = setInterval(() => { try { if (hub.resolve('watchdog')) watchdog.tick() } catch (e) { console.error('[watchdog]', e) } }, 60_000)
+        // Healing the main agent needs no model; the watchdog agent's judgement does.
+        watchdogTimer = setInterval(() => { try { const healed = watchdog.healRouter() ?? null; if (hub.resolve('watchdog')) watchdog.tick(healed) } catch (e) { console.error('[watchdog]', e) } }, 60_000)
         // Nightly memory upkeep (expire episodes, merge duplicates); also on start when the last run is over a day old.
         const upkeep = () => {
           try { if (Date.now() - (kvGet<number>(store, 'memory:consolidated') ?? 0) > 20 * 3_600_000) { memory.consolidate(); kvSet(store, 'memory:consolidated', Date.now()) } } catch (e) { console.error('[memory]', e) }

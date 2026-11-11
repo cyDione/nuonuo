@@ -12,10 +12,13 @@ import { gateSourceTools, type LocalApps } from './localapps'
 import type { Instructions } from './instructions'
 import { proactiveSettings, saveProactiveSettings } from './proactive'
 import type { Memory, MemoryTrust } from './memory'
-import { sandboxApplies, sandboxCommand } from './sandbox'
+import { sandboxApplies, sandboxCommand, type SandboxMount } from './sandbox'
 import type { Reviewer } from './review'
 
 const CONTEXT_MESSAGES = 6
+/** Retries of a failed router turn, the first after routerRetryMs(), then doubling. */
+const ROUTER_RETRIES = 3
+const routerRetryMs = () => Number(process.env.SUPER_ASSISTANT_ROUTER_RETRY_MS) || 5_000
 /** Chat channels keep replies short (article §4.2: ≤ 100 words); the full result stays in the work's details. */
 const CHAT_SOURCES = new Set(['webchat', 'telegram', 'watchdog', 'cron'])
 const CHAT_LIMIT = 120
@@ -173,6 +176,10 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
   let spoke = false
   let answerable = false
   let reminded = false
+  // The router is the single point every request passes (article §2.1), so a failed turn is retried with backoff, and
+  // after the last attempt the owner is told in each conversation whose message went unanswered — never silence.
+  let failures = 0
+  let unanswered: string[] = []
   const router: AgentDefinition = {
     role: 'router',
     pool: 'router',
@@ -182,16 +189,24 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       if (items.some(i => ANSWERABLE.has(i.payload.type) && (i.payload.type !== 'report' || ['ready', 'blocked', 'failed'].includes(i.payload.status) || i.payload.humanAction))) answerable = true
       // What the router may remember directly depends on whose words this batch carries, decided here in code.
       const requests = items.filter(i => i.payload.type === 'trigger' || i.payload.type === 'handback' || i.payload.type === 'proactive').map(i => String(i.payload.triggerId))
+      unanswered.push(...items.filter(i => i.payload.type === 'trigger').map(i => String(i.payload.triggerId)))
       if (requests.length) {
         routerContext.trust = requests.every(id => engine.isOwnerChat(id)) ? 'user' : 'external'
         routerContext.source = requests.at(-1)!
         const last = store.db.select({ threadId: schema.triggers.threadId }).from(schema.triggers).where(eq(schema.triggers.id, requests.at(-1)!)).get()
         routerContext.scope = last ? engine.scopeOfThread(last.threadId) : undefined
+      } else if (!items.every(i => i.payload.type === 'retry')) {
+        // A batch without the owner's own words (reports, approvals, notices) carries other sessions' text, which may
+        // quote other people: what it suggests remembering goes to the review queue. Trust never carries over from
+        // the previous batch. (A retry continues the batch that failed, so it keeps that batch's trust.)
+        routerContext.trust = 'external'
+        routerContext.source = items.map(i => i.payload.ticketId).find(Boolean) ?? 'router'
       }
       const body = items.map(item => renderRouterItem(item)).join('\n\n')
       return `${body}${await recallFor(requests)}`
     },
     onTurnEnd: (_session, info) => {
+      if (!info.cancelled) { failures = 0; unanswered = [] }
       const remind = answerable && !spoke && !reminded && !info.cancelled && info.lastText.trim().length > 0
       spoke = false
       answerable = false
@@ -299,7 +314,27 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       ...recallTool(runtime),
       ...(ext.routerTools?.() ?? {}),
     }),
-    onTurnError: (_s, error) => { spoke = false; answerable = false; console.error('[router] turn failed:', error instanceof Error ? error.message : error) },
+    onTurnError: (_s, error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('[router] turn failed:', message)
+      failures++
+      if (failures <= ROUTER_RETRIES) {
+        // `answerable` stays set: the retry still owes the owner an answer.
+        const timer = setTimeout(() => { try { store.atomic(() => runtime.push(ROUTER_SESSION, { type: 'retry', attempt: failures, error: clip(message, 300) })) } catch { /* closed */ } },
+          routerRetryMs() * 2 ** (failures - 1))
+        timer.unref?.()
+        return
+      }
+      spoke = false
+      answerable = false
+      const conversations = new Set(unanswered.filter(id => engine.isOwnerChat(id)).map(id => store.db.select({ threadId: schema.triggers.threadId }).from(schema.triggers).where(eq(schema.triggers.id, id)).get())
+        .map(t => t && engine.conversationOfThread(t.threadId)).filter((c): c is string => Boolean(c)))
+      failures = 0
+      unanswered = []
+      for (const conversationId of conversations) {
+        try { engine.reply({ conversationId, text: `抱歉，我这边出了点问题，刚才的消息没能处理（${clip(message, 80)}）。等一会儿再发一次试试；一直这样的话，看看「设置 → 模型供应商」。` }) } catch { /* conversation gone */ }
+      }
+    },
   }
 
   /** Marks the turn as having spoken when a speaking tool succeeds. */
@@ -355,6 +390,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       case 'proactive': return triggerCard(p.triggerId, 'proactive', ` filter_reason="${String(p.reason ?? '').replace(/"/g, "'")}"${p.title ? ` suggested_title="${String(p.title).replace(/"/g, "'")}"` : ''}${p.goal ? ` suggested_goal="${String(p.goal).replace(/"/g, "'")}"` : ''}`)
       case 'ticket-ended': return `<task_ended ticket_id="${p.ticketId}" outcome="${p.outcome}" by="${p.by}" />`
       case 'recovery': return '<recovery>服务刚刚重启。检查 list_tasks，不要重复已经发出的消息或已经开始的任务。</recovery>'
+      case 'retry': return `<retry attempt="${p.attempt ?? ''}">上一轮处理时出错${p.error ? `（${String(p.error).replace(/</g, '‹')}）` : ''}，现在重试。上面还没回复的消息仍然需要处理；已经发出的消息和已经开始的任务不要重复。</retry>`
       case 'unsent': return `<unsent>Your last turn ended with plain text and no message, so the owner saw NOTHING. Only the reply tool posts messages. If the text below was meant for the owner, send it now with reply (conversation_id, and ticket_id when it is about finished work); if not, end your turn without output.\n---\n${p.text}\n</unsent>`
       case 'recalled': return `<owner_recalled trigger_id="${p.triggerId}" conversation_id="${p.conversationId}">The owner took this message back${p.edited ? ' and sent a corrected one (it follows)' : ''}. Do not act on it; if you already started something for it, stop it or say so in one line.</owner_recalled>`
       case 'regenerate': return `<regenerate conversation_id="${p.conversationId}" message_id="${p.messageId}">The owner asked you to answer this again, differently (it is hidden from the chat now):\n${clip(String(p.text), 2_000)}\nPost the new answer with reply.</regenerate>`
@@ -654,14 +690,16 @@ export function memoryExtension(memory: Memory, engine: Engine): AgentExtensions
 }
 
 /** Runs worker shell commands in the Docker sandbox when the execution settings say so. */
-export function sandboxExtension(engine: Engine): AgentExtensions {
+export function sandboxExtension(engine: Engine, folders?: () => { mounts: SandboxMount[]; hidden: string[] }): AgentExtensions {
   return {
     wrapShell: ticket => {
       const settings = engine.execution().sandbox
-      return sandboxApplies(settings, ticket) ? (command: string) => sandboxCommand(settings, ticket, command) : undefined
+      if (!sandboxApplies(settings, ticket)) return undefined
+      const { mounts, hidden } = folders?.() ?? { mounts: [], hidden: [] }
+      return (command: string) => sandboxCommand(settings, ticket, command, undefined, undefined, mounts, hidden)
     },
     workerPrompt: ticket => sandboxApplies(engine.execution().sandbox, ticket)
-      ? `## Sandbox\nYour shell commands run in a Docker container (${engine.execution().sandbox.image}, network ${engine.execution().sandbox.network}) that only sees your working directory. Tools you need must be installed inside it.`
+      ? `## Sandbox\nYour shell commands run in a Docker container (${engine.execution().sandbox.image}, network ${engine.execution().sandbox.network}) that only sees your working directory and the folders the owner allowed. Tools you need must be installed inside it.`
       : undefined,
   }
 }

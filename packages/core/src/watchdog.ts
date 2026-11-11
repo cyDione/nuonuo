@@ -8,7 +8,7 @@ import { kvGet, kvSet, schema, type Store } from '@super-assistant/db'
 import { tool, type ToolSet } from 'ai'
 import { desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
-import { clip, type Engine } from './engine'
+import { clip, ROUTER_SESSION, type Engine } from './engine'
 import type { Ticket } from './model'
 
 export const WATCHDOG_SESSION = 'ses_watchdog'
@@ -29,6 +29,8 @@ export interface WatchdogOptions {
   maxTokensPerTask: number
   /** A finding is not raised again for the same task within this window. */
   quietMs: number
+  /** Input waiting this long while the main agent sits idle wakes it again. */
+  wakeAfterMs: number
   /** System problems from outside the domain (failing queues, sources). */
   systemProblems?: () => string[]
   /** Tools that let the watchdog correct the system online (edit instructions, the proactive strategy). */
@@ -36,7 +38,7 @@ export interface WatchdogOptions {
   now?: () => number
 }
 
-const DEFAULTS: WatchdogOptions = { stuckMs: 10 * 60_000, maxStepsPerTurn: 60, repeats: 4, stalledMs: 30 * 60_000, maxTokensPerTask: 3_000_000, quietMs: 30 * 60_000 }
+const DEFAULTS: WatchdogOptions = { stuckMs: 10 * 60_000, maxStepsPerTurn: 60, repeats: 4, stalledMs: 30 * 60_000, maxTokensPerTask: 3_000_000, quietMs: 30 * 60_000, wakeAfterMs: 2 * 60_000 }
 
 const WATCHDOG_PROMPT = `You are the watchdog of the owner's personal Super-assistant: an outside observer of the main agent and its task workers.
 You receive findings from deterministic probes (a stuck turn, a loop of identical tool calls, a very long turn, a task that has used a lot of tokens, a task that said it would continue but nothing will wake it, failing system parts), with the task's recent transcript. Judge whether the task is actually making progress toward its goal.
@@ -100,9 +102,35 @@ export class Watchdog {
     return findings.filter(f => this.fresh(f, now))
   }
 
-  /** Probes and hands the findings to the watchdog agent. */
-  tick(): Finding[] {
+  /**
+   * The main agent is the single point every request passes, so it is watched without a model: a turn that recorded
+   * nothing for `stuckMs` is cut and retried; input waiting while it sits idle (a lost wake-up) wakes it. Returns what
+   * it did, for the findings.
+   */
+  healRouter(): string | undefined {
+    const now = this.now()
+    const session = this.runtime.session(ROUTER_SESSION)
+    if (!session) return undefined
+    if (this.runtime.isRunning(ROUTER_SESSION)) {
+      const last = this.runtime.lastActivity(ROUTER_SESSION)
+      if (last === undefined || now - last < this.options.stuckMs) return undefined
+      const minutes = Math.round((now - last) / 60_000)
+      this.runtime.cancel(ROUTER_SESSION)
+      this.store.atomic(() => this.runtime.push(ROUTER_SESSION, { type: 'retry', error: `这一轮 ${minutes} 分钟没有进展，被 Watchdog 中断` }))
+      return `主 Agent 的一轮 ${minutes} 分钟没有任何进展，已中断并重试`
+    }
+    const waiting = this.runtime.oldestWaiting(ROUTER_SESSION)
+    if (waiting !== undefined && now - waiting > this.options.wakeAfterMs) {
+      this.runtime.wake(ROUTER_SESSION, true)
+      return now - waiting > this.options.stuckMs ? `主 Agent 有 ${Math.round((now - waiting) / 60_000)} 分钟前的消息还没处理，已重新唤醒` : undefined
+    }
+    return undefined
+  }
+
+  /** Probes and hands the findings to the watchdog agent. `healed`: the result of a `healRouter` the caller already ran (null: nothing). */
+  tick(healed: string | null | undefined = this.healRouter()): Finding[] {
     const findings = this.probe()
+    if (healed && this.fresh({ kind: 'system', detail: healed }, this.now())) findings.push({ kind: 'system', detail: healed })
     if (findings.length) this.store.atomic(() => { for (const f of findings) this.runtime.push(WATCHDOG_SESSION, { type: 'finding', ...f }) })
     return findings
   }
