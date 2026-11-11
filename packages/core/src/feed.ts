@@ -45,10 +45,10 @@ export class Feed {
     this.changed()
   }
 
-  /** 👍 / 👎 on an item (null clears it). A 👎 also puts it away. */
+  /** 👍 / 👎 on an item (null clears it). A 👎 also puts it away, and clearing a 👎 (撤销) brings it back. */
   react(id: string, reaction: 'up' | 'down' | null): FeedItem {
-    this.get(id)
-    this.store.db.update(schema.feed).set({ reaction, ...(reaction === 'down' ? { dismissed: true } : {}) }).where(eq(schema.feed.id, id)).run()
+    const was = this.get(id).reaction
+    this.store.db.update(schema.feed).set({ reaction, ...(reaction === 'down' ? { dismissed: true } : was === 'down' ? { dismissed: false } : {}) }).where(eq(schema.feed.id, id)).run()
     this.changed()
     return this.get(id)
   }

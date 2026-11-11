@@ -4,7 +4,7 @@
  * On phones it slides in as a drawer.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, LoaderCircle, MessageCircle, MoreHorizontal, PanelLeft, Pencil, Pin, PinOff, SquarePen, Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Check, ChevronRight, LoaderCircle, MessageCircle, MoreHorizontal, PanelLeft, Pencil, Pin, PinOff, SquarePen, Trash2, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { api, type Conversation, type Ticket } from './api'
@@ -98,6 +98,7 @@ function SidebarBody({ route }: { route: Route }) {
       <div className="flex items-baseline gap-2 px-2.5 pt-5 pb-1.5 text-xs"><span className="font-medium text-muted">侧聊</span><span className="text-faint">独立的小任务</span></div>
       {side.length === 0 && <button onClick={() => go('/new')} className="w-full rounded-xl px-2.5 py-2 text-left text-xs text-faint hover:text-muted">独立的小任务会出现在这里，比如一次旅行、一份报告。</button>}
       {side.map(c => <Item key={c.id} c={c} active={c.id === activeId} tickets={ticketsOf(c.id)} onChanged={changed} />)}
+      <Archived activeId={activeId} onChanged={changed} />
       {outside.length > 0 && <div className="px-2.5 pt-5 pb-1.5 text-xs font-medium text-muted">来自外部</div>}
       {outside.map(c => <Item key={c.id} c={c} active={c.id === activeId} tickets={ticketsOf(c.id)} onChanged={changed} />)}
     </nav>
@@ -107,6 +108,21 @@ function SidebarBody({ route }: { route: Route }) {
       <button onClick={() => go('/new')} className="press flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-muted hover:bg-sunken hover:text-fg"><SquarePen size={15} />新侧聊</button>
     </div>
   </div>
+}
+
+/** 已归档 N ›: side chats put away; they open in place and can go back with 放回侧聊. */
+function Archived({ activeId, onChanged }: { activeId: string | undefined; onChanged(): void }) {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const list = useQuery({ queryKey: ['conversations', 'archived'], queryFn: () => api.get<{ conversations: Conversation[] }>('/conversations?archived=1') }).data?.conversations ?? []
+  const changed = () => { onChanged(); qc.invalidateQueries({ queryKey: ['conversations', 'archived'] }) }
+  if (!list.length) return null
+  return <>
+    <button onClick={() => setOpen(v => !v)} aria-expanded={open} className="flex items-center gap-1 px-2.5 pt-3 pb-1 text-xs text-faint hover:text-muted">
+      已归档 {list.length}<ChevronRight size={13} className={cx('transition-transform duration-150', open && 'rotate-90')} />
+    </button>
+    {open && list.map(c => <Item key={c.id} c={c} active={c.id === activeId} tickets={[]} onChanged={changed} />)}
+  </>
 }
 
 /** The status line under 糯糯's name: a new line rolls up over the old one. */
@@ -168,7 +184,8 @@ function Item({ c, active, tickets, onChanged }: { c: Conversation; active: bool
     </button>
     {menu && <div role="menu" className="anim-menu absolute top-11 right-1 z-20 w-40 rounded-2xl border border-line bg-card p-1 text-sm shadow-xl">
       <MenuItem icon={<Pencil size={14} />} onClick={() => { const t = prompt('重命名', c.title)?.trim(); if (t) patch.mutate({ title: t }); setMenu(false) }}>重命名</MenuItem>
-      <MenuItem icon={c.pinned ? <PinOff size={14} /> : <Pin size={14} />} onClick={() => { patch.mutate({ pinned: !c.pinned }); setMenu(false) }}>{c.pinned ? '取消置顶' : '置顶'}</MenuItem>
+      {!c.archived && <MenuItem icon={c.pinned ? <PinOff size={14} /> : <Pin size={14} />} onClick={() => { patch.mutate({ pinned: !c.pinned }); setMenu(false) }}>{c.pinned ? '取消置顶' : '置顶'}</MenuItem>}
+      <MenuItem icon={c.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />} onClick={() => { patch.mutate({ archived: !c.archived }); setMenu(false); if (active && !c.archived) go('/') }}>{c.archived ? '放回侧聊' : '归档'}</MenuItem>
       <MenuItem icon={<Trash2 size={14} />} danger onClick={() => { if (confirm(`删除「${c.title}」？此操作不可撤销。`)) remove.mutate(); setMenu(false) }}>删除</MenuItem>
     </div>}
   </div>

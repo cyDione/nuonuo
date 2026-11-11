@@ -147,7 +147,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       }),
     })
     registerAgents(store, agents, engine, combineExtensions(
-      gatedSourceExtension(sources.agentExtensions(), access, reviewer),
+      gatedSourceExtension(sources.agentExtensions(id => access.settings().sources[id] === 'read'), access, reviewer),
       memoryExtension(memory, engine),
       { routerPrompt: () => personaPrompt(store) },
       instructionsExtension(instructions),

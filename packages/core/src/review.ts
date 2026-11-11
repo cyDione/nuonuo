@@ -194,6 +194,12 @@ export class Reviewer {
       this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk: 'destructive', decision: 'block', reason })
       return { action: 'block', by: 'rule', reason }
     }
+    // A source the owner set to 只能看 in 权限: nothing gets published there from the shell either.
+    if (this.access?.settings().sources.github === 'read' && reasons.some(r => /GitHub|推送到远程仓库/.test(r))) {
+      const reason = '你把 GitHub 设成了只能看：不在那里发评论、推代码。需要的话在结果里说明，由主人决定'
+      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk, decision: 'block', reason })
+      return { action: 'block', by: 'rule', reason }
+    }
     const never = this.access?.shellTouchesNever(command)
     if (never) {
       const reason = `命令碰到了「永远不碰」的文件夹 ${never}。不要绕过；需要的话在结果里说明，由主人决定`

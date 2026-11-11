@@ -1,6 +1,7 @@
 /**
  * First launch (Figma v7, 23 · F): a conversation in 主聊, not a setup wizard. 糯糯 says hello and asks for three small
- * things, one card at a time: a model (provider and key right here), a source to watch, and how proactive to be. Every
+ * things, one card at a time: a model (provider and key right here), a source to watch, how proactive to be, and
+ * (Figma section 25, F) memories carried over from another AI, which are only written once the owner confirms. Every
  * step can be skipped; what is left is one line each below the card. Shown only to someone starting without a model, and
  * never again once finished or skipped through.
  */
@@ -12,8 +13,8 @@ import { usePersona } from './persona'
 import { go } from './route'
 import { cx } from './ui'
 
-type Step = 'model' | 'source' | 'proactive' | 'done'
-const ORDER: Step[] = ['model', 'source', 'proactive']
+type Step = 'model' | 'source' | 'proactive' | 'import' | 'done'
+const ORDER: Step[] = ['model', 'source', 'proactive', 'import']
 const KEY = 'sa-onboarding'
 const read = (): Step | null => { try { return localStorage.getItem(KEY) as Step | null } catch { return null } }
 const write = (s: Step) => { try { localStorage.setItem(KEY, s) } catch { /* private mode */ } }
@@ -30,8 +31,8 @@ export function useOnboarding(): { step: Exclude<Step, 'done'> | null; next(): v
   return { step: step === 'done' || step === null ? null : step, next }
 }
 
-const TITLES: Record<Exclude<Step, 'done'>, string> = { model: '接上一个模型', source: '接一个让我留意的来源', proactive: '我该多主动' }
-const LATER: Record<Exclude<Step, 'done'>, string> = { model: '接上一个模型', source: '接一个让我留意的来源（GitHub、Gmail、RSS…）', proactive: '我该多主动：只留意 / 主动去做' }
+const TITLES: Record<Exclude<Step, 'done'>, string> = { model: '接上一个模型', source: '接一个让我留意的来源', proactive: '我该多主动', import: '从别的 AI 搬记忆过来' }
+const LATER: Record<Exclude<Step, 'done'>, string> = { model: '接上一个模型', source: '接一个让我留意的来源（GitHub、Gmail、RSS…）', proactive: '我该多主动：只留意 / 主动去做', import: '从别的 AI 搬记忆过来（可以不搬）' }
 
 export function Onboarding({ step, next }: { step: Exclude<Step, 'done'>; next(): void }) {
   const persona = usePersona()
@@ -39,16 +40,16 @@ export function Onboarding({ step, next }: { step: Exclude<Step, 'done'>; next()
   return <div className="mx-auto max-w-[680px] px-4 pt-6 pb-4 md:px-8">
     <div className="mb-3 text-center text-xs text-faint">刚刚</div>
     <div className="space-y-1.5">
-      {[`嗨，我是${persona.name}。`, '我会替你盯着事、先把能做的做了，要花钱或往外发的先问你。', '开始前要你帮我三件小事，一分钟。'].map((t, n) =>
+      {[`嗨，我是${persona.name}。`, '我会替你盯着事、先把能做的做了，要花钱或往外发的先问你。', '开始前要你帮我四件小事，一分钟。'].map((t, n) =>
         <div key={t} className="feed-in w-fit max-w-[85%] rounded-[20px] bg-bubble px-4 py-2.5 text-[15px]" style={{ animationDelay: `${n * 160}ms` }}>{t}</div>)}
     </div>
     <div key={step} className="anim-rise mt-3 max-w-[440px] overflow-hidden rounded-[18px] border border-line bg-card">
       <div className="flex items-center gap-2 border-b border-line px-4 py-3">
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{i + 1} / 3 · {TITLES[step]}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{i + 1} / {ORDER.length} · {TITLES[step]}</span>
         <button onClick={next} className="shrink-0 text-xs text-muted hover:text-fg">跳过</button>
       </div>
       <div className="px-4 pt-3 pb-3.5">
-        {step === 'model' ? <ModelStep onDone={next} /> : step === 'source' ? <SourceStep onDone={next} /> : <ProactiveStep onDone={next} />}
+        {step === 'model' ? <ModelStep onDone={next} /> : step === 'source' ? <SourceStep onDone={next} /> : step === 'proactive' ? <ProactiveStep onDone={next} /> : <ImportStep onDone={next} />}
       </div>
     </div>
     {i < ORDER.length - 1 && <div className="mt-2 max-w-[440px] space-y-0.5 rounded-[18px] bg-sunken px-4 py-2.5">
@@ -139,5 +140,44 @@ function ProactiveStep({ onDone }: { onDone(): void }) {
       <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{o.label}</span><span className="block text-xs text-muted">{o.sub}</span></span>
     </button>)}
     <p className="pt-1 text-[11px] text-faint">以后在 设置 · 主动 里随时改。</p>
+  </div>
+}
+
+type Found = { kind: 'profile' | 'lesson'; text: string }
+const KIND: Record<Found['kind'], string> = { profile: '关于你', lesson: '经验' }
+
+/** Paste what another assistant remembers; it is sorted into 关于你 / 经验 and written only after 都记住 or a look through. */
+function ImportStep({ onDone }: { onDone(): void }) {
+  const qc = useQueryClient()
+  const [text, setText] = useState('')
+  const [found, setFound] = useState<Found[] | null>(null)
+  const [one, setOne] = useState(false)
+  const preview = useMutation({ mutationFn: () => api.post<{ items: Found[] }>('/memories/import/preview', { text }), onSuccess: r => setFound(r.items) })
+  const save = useMutation({ mutationFn: (items: Found[]) => api.post<{ added: number; existing: number }>('/memories/import', { items }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['memories'] }); onDone() } })
+  const lines = text.split(/\r?\n/).filter(l => l.trim()).length
+  const count = (k: Found['kind']) => found?.filter(f => f.kind === k).length ?? 0
+  return <div>
+    <p className="text-xs leading-5 text-muted">在 ChatGPT 或 Claude 里说「把你记得的关于我的事都列出来」，整段贴到这里。</p>
+    <textarea value={text} onChange={e => { setText(e.target.value); setFound(null); setOne(false) }} aria-label="别的 AI 记得的事"
+      placeholder={'- 我在上海工作，做产品经理\n- 喜欢简短的回答，先给结论'} className="mt-2 min-h-28 w-full rounded-xl border border-line bg-panel px-3 py-2 text-[13px] leading-6 outline-none placeholder:text-faint focus:border-faint" />
+    {lines > 0 && !found && <div className="-mt-1 text-[11px] text-faint">已贴入 {lines} 行</div>}
+    {found && (found.length ? <div className="anim-rise mt-2 rounded-xl bg-accent-soft px-3.5 py-2.5">
+      <div className="text-[13px] font-medium text-accent">整理出 {found.length} 条：{(['profile', 'lesson'] as const).filter(count).map(k => `${KIND[k]} ${count(k)}`).join(' · ')}</div>
+      <div className="mt-0.5 text-[11px] text-muted">和已有的重复的会合并；你确认后才写进记忆。</div>
+    </div> : <div className="mt-2 text-xs text-muted">没认出能记的内容，换一段试试，或者先跳过。</div>)}
+    {found && one && found.length > 0 && <ul className="mt-2 max-h-56 space-y-0.5 overflow-y-auto">{found.map((f, n) => <li key={n} className="flex items-center gap-2 py-1 text-[13px]">
+      <span className="shrink-0 rounded-full bg-sunken px-1.5 py-px text-[10px] text-muted">{KIND[f.kind]}</span>
+      <span className="min-w-0 flex-1">{f.text}</span>
+      <button onClick={() => setFound(found.filter((_, m) => m !== n))} aria-label={`不要「${f.text}」`} className="press shrink-0 rounded-full px-2 py-0.5 text-[11px] text-faint hover:bg-sunken hover:text-fg">不要</button>
+    </li>)}</ul>}
+    <div className="mt-3 flex items-center gap-1.5">
+      {!found ? <button onClick={() => preview.mutate()} disabled={!text.trim() || preview.isPending} className="press h-8 rounded-full bg-ink px-4 text-[13px] font-medium text-ink-fg disabled:opacity-50">{preview.isPending ? '在整理…' : '整理一下'}</button>
+        : found.length > 0 && <>
+          <button onClick={() => save.mutate(found)} disabled={save.isPending} className="press h-8 rounded-full bg-ink px-4 text-[13px] font-medium text-ink-fg disabled:opacity-50">{one ? `记住这 ${found.length} 条` : '都记住'}</button>
+          {!one && <button onClick={() => setOne(true)} className="press h-8 rounded-full border border-line px-4 text-[13px] hover:border-faint">一条条看</button>}
+        </>}
+      {(preview.error || save.error) && <span className="ml-2 text-xs text-danger">{((preview.error || save.error) as Error).message}</span>}
+    </div>
   </div>
 }

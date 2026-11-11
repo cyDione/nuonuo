@@ -22,12 +22,14 @@ export const NotifySettingsSchema = z.object({
   /** Off: no banners at all, except what waits for the owner's OK. */
   banner: z.boolean(),
   sound: z.boolean(),
+  /** 糯糯's own chime (played by the app), or the system's notification sound. */
+  tone: z.enum(['nuonuo', 'system']),
   /** The number on the Dock / taskbar icon (desktop app). */
   badge: z.boolean(),
   quiet: z.object({ on: z.boolean(), from: Time, to: Time }),
 })
 export type NotifySettings = z.infer<typeof NotifySettingsSchema>
-export const DEFAULT_NOTIFY: NotifySettings = { message: true, price: true, feed: true, ideas: true, banner: true, sound: false, badge: true, quiet: { on: false, from: '23:00', to: '08:00' } }
+export const DEFAULT_NOTIFY: NotifySettings = { message: true, price: true, feed: true, ideas: true, banner: true, sound: false, tone: 'nuonuo', badge: true, quiet: { on: false, from: '23:00', to: '08:00' } }
 const KEY = 'settings:notify'
 
 export function notifySettings(store: Store): NotifySettings {
@@ -49,7 +51,7 @@ export function isQuiet(q: NotifySettings['quiet'], at: Date): boolean {
 }
 
 export type NoticeKind = 'message' | 'price' | 'feed' | 'ideas' | 'approval' | 'test'
-export interface Notice { type: 'notice'; id: string; kind: NoticeKind; title: string; body: string; hash: string; silent: boolean }
+export interface Notice { type: 'notice'; id: string; kind: NoticeKind; title: string; body: string; hash: string; silent: boolean; chime: boolean }
 
 /** Whether a notice of this kind goes out now under these settings. */
 export function allowed(s: NotifySettings, kind: NoticeKind, at: Date): boolean {
@@ -85,12 +87,12 @@ export class Notices {
   /** 试一下: a sample banner, whatever the settings. */
   test(): Notice { return this.send('test', `${persona(this.store).name}`, '通知是这个样子的。', '/settings/notifications') ?? this.sample() }
 
-  private sample(): Notice { return { type: 'notice', id: 'test', kind: 'test', title: '', body: '', hash: '/', silent: true } }
+  private sample(): Notice { return { type: 'notice', id: 'test', kind: 'test', title: '', body: '', hash: '/', silent: true, chime: false } }
 
   private send(kind: NoticeKind, title: string, body: string, hash: string, id = `${kind}:${this.now()}`): Notice | undefined {
     const s = notifySettings(this.store)
     if (!allowed(s, kind, new Date(this.now()))) return undefined
-    const notice: Notice = { type: 'notice', id, kind, title, body: body.slice(0, 200), hash, silent: !s.sound }
+    const notice: Notice = { type: 'notice', id, kind, title, body: body.slice(0, 200), hash, silent: !s.sound || s.tone === 'nuonuo', chime: s.sound && s.tone === 'nuonuo' }
     this.bus.emit(notice as unknown as { type: string })
     return notice
   }

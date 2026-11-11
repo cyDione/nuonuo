@@ -6,7 +6,7 @@
  */
 import { SlidingNumber } from '@animate-ui/react/primitives/texts/sliding-number'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bell, Calendar, ChartLine, CloudSun, Heart, House, LineChart, Mail, Newspaper, Package, Plane, Tag, TrendingDown, TrendingUp, Wifi, X, type LucideIcon } from 'lucide-react'
+import { Bell, Bookmark, Calendar, ChartLine, CloudSun, Heart, House, LineChart, Mail, Newspaper, Package, Plane, Tag, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp, Wifi, X, type LucideIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type ActivityEvent, type FeedIcon, type FeedItem } from './api'
 import { openTask } from './live'
@@ -36,12 +36,16 @@ export function Activity() {
   // Opening the page is seeing it: the dot on the 动态 tab goes away.
   useEffect(() => { if (feed?.unseen) void api.post('/feed/seen').then(() => qc.invalidateQueries({ queryKey: ['feed'] })) }, [feed?.unseen])
 
-  const items = feed?.items ?? []
-  const hero = items.find(i => i.card)
+  const [onlySaved, setOnlySaved] = useState(false)
+  const [undo, setUndo] = useState<FeedItem | null>(null)
+  useEffect(() => { if (!undo) return; const t = setTimeout(() => setUndo(null), 5_000); return () => clearTimeout(t) }, [undo])
+  const savedCount = (feed?.items ?? []).filter(i => i.saved).length
+  const items = (feed?.items ?? []).filter(i => !onlySaved || i.saved)
+  const hero = onlySaved ? undefined : items.find(i => i.card)
   const noticed = (activity?.events ?? []).filter(e => e.proactive?.act && !e.feedback && !e.ticketId).slice(0, 10)
   const entries: Entry[] = [
     ...items.filter(i => i !== hero).map(i => ({ at: i.at, key: i.id, item: i })),
-    ...noticed.map(e => ({ at: e.at, key: e.id, noticed: e })),
+    ...(onlySaved ? [] : noticed).map(e => ({ at: e.at, key: e.id, noticed: e })),
   ].sort((a, b) => b.at - a.at)
   const groups: { day: string; entries: Entry[]; hero?: FeedItem }[] = []
   const heroDay = hero ? dayLabel(hero.at) : null
@@ -59,26 +63,42 @@ export function Activity() {
 
   return <div className="h-full overflow-y-auto">
     <div className="mx-auto max-w-[37.5rem] px-4 pt-8 pb-16 md:px-0">
-      <header className="anim-rise">
-        <h1 className="font-display text-3xl font-semibold">动态</h1>
-        <p className="mt-1.5 text-sm text-muted">它替你盯着的事，有变化才出现在这里</p>
+      <header className="anim-rise flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="font-display text-3xl font-semibold">动态</h1>
+          <p className="mt-1.5 text-sm text-muted">{onlySaved ? '你收藏的，不会过期' : '它替你盯着的事，有变化才出现在这里'}</p>
+        </div>
+        {(savedCount > 0 || onlySaved) && <button onClick={() => setOnlySaved(v => !v)} aria-pressed={onlySaved}
+          className={cx('press mt-1.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px]', onlySaved ? 'border-ink bg-ink text-ink-fg' : 'border-line text-muted hover:border-faint hover:text-fg')}>
+          <Bookmark size={13} fill={onlySaved ? 'currentColor' : 'none'} />收藏 {savedCount}</button>}
       </header>
 
       {groups.map((g, gi) => <section key={g.day} className="mt-8">
         <h2 className="mb-2.5 text-xs text-muted">{g.day}</h2>
         <div className="space-y-3">
-          {g.hero && <Hero item={g.hero} />}
+          {g.hero && !onlySaved && <Hero item={g.hero} />}
           {g.entries.map((e, i) => <div key={e.key} className="feed-in" style={{ animationDelay: `${Math.min(gi * 3 + i + (g.hero ? 1 : 0), 8) * 60}ms` }}>
-            {e.item ? <Row item={e.item} /> : <Noticed e={e.noticed!} />}
+            {e.item ? <Row item={e.item} onDown={setUndo} /> : <Noticed e={e.noticed!} />}
           </div>)}
         </div>
       </section>)}
 
       {loaded && <div className="mt-8 flex items-center gap-3 text-sm text-muted">
         <Avatar persona={persona} size={28} mood="happy" />
-        {empty ? `还没有变化。想让${persona.name}帮你盯着什么，在聊天里说一声，比如「XM6 降到 2000 以下告诉我」。` : '就这些。有新的我再叫你，不会一直推。'}
+        {empty && onlySaved ? '还没收藏过。把鼠标放到一条上，点书签就能留下它。' : empty ? `还没有变化。想让${persona.name}帮你盯着什么，在聊天里说一声，比如「XM6 降到 2000 以下告诉我」。` : '就这些。有新的我再叫你，不会一直推。'}
       </div>}
 
+    </div>
+    {undo && <Toast key={undo.id} text={`好，「${undo.title.length > 12 ? undo.title.slice(0, 12) + '…' : undo.title}」这类以后少告诉你一些`}
+      onUndo={() => { void api.post(`/feed/${undo.id}/react`, { reaction: null }).then(() => qc.invalidateQueries({ queryKey: ['feed'] })); setUndo(null) }} />}
+  </div>
+}
+
+function Toast({ text, onUndo }: { text: string; onUndo(): void }) {
+  return <div role="status" className="anim-rise fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
+    <div className="flex max-w-full items-center gap-6 rounded-full bg-ink py-2.5 pr-3 pl-5 text-[13px] text-ink-fg shadow-xl">
+      <span className="min-w-0 truncate">{text}</span>
+      <button onClick={onUndo} className="press shrink-0 rounded-full px-3 py-1 font-medium text-accent hover:bg-white/10">撤销</button>
     </div>
   </div>
 }
@@ -130,16 +150,28 @@ function Spark({ values, className }: { values: number[]; className?: string }) 
   </svg>
 }
 
-function Row({ item }: { item: FeedItem }) {
+function Row({ item, onDown }: { item: FeedItem; onDown(item: FeedItem): void }) {
+  const qc = useQueryClient()
   const Icon = item.card ? LineChart : ICONS[item.icon] ?? Bell
   const open = item.ticketId ? () => openTask(item.ticketId!) : undefined
-  return <div className="flex items-center gap-3.5 rounded-2xl bg-sunken px-4 py-3.5">
+  const set = (patch: Partial<FeedItem>) => qc.setQueryData<{ items: FeedItem[]; unseen: number }>(['feed'], old => old && { ...old, items: old.items.map(i => i.id === item.id ? { ...i, ...patch } : i).filter(i => !(i.id === item.id && patch.reaction === 'down')) })
+  const done = () => qc.invalidateQueries({ queryKey: ['feed'] })
+  const react = useMutation({ mutationFn: (reaction: 'up' | 'down' | null) => api.post(`/feed/${item.id}/react`, { reaction }), onMutate: reaction => { set({ reaction }); if (reaction === 'down') onDown(item) }, onSettled: done })
+  const save = useMutation({ mutationFn: (saved: boolean) => api.post(`/feed/${item.id}/save`, { saved }), onMutate: saved => set({ saved }), onSettled: done })
+  const tool = 'press flex size-7 items-center justify-center rounded-full hover:bg-sunken'
+  return <div className="group flex items-center gap-3.5 rounded-2xl bg-sunken px-4 py-3.5">
     <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-panel"><Icon size={17} /></span>
     <button onClick={open} disabled={!open} className="min-w-0 flex-1 text-left">
       <span className="block truncate text-[15px] font-medium">{item.title}</span>
       {item.text && <span className="mt-0.5 block truncate text-[13px] text-muted">{item.text}</span>}
     </button>
-    {item.action ? <ActionButton item={item} /> : <span className="flex shrink-0 items-center gap-2 text-xs text-faint tabular-nums">
+    {item.saved && <Bookmark size={14} fill="currentColor" className="shrink-0 text-accent group-hover:hidden group-focus-within:hidden" aria-label="收藏了" />}
+    <div className="anim-fade hidden shrink-0 items-center gap-0.5 rounded-full border border-line bg-panel p-0.5 group-hover:flex group-focus-within:flex max-md:flex">
+      <button onClick={() => react.mutate(item.reaction === 'up' ? null : 'up')} aria-pressed={item.reaction === 'up'} aria-label="有用" title="有用" className={cx(tool, item.reaction === 'up' ? 'text-accent' : 'text-muted hover:text-fg')}><ThumbsUp size={14} fill={item.reaction === 'up' ? 'currentColor' : 'none'} /></button>
+      <button onClick={() => react.mutate('down')} aria-label="这类少告诉我" title="这类少告诉我" className={cx(tool, 'text-muted hover:text-fg')}><ThumbsDown size={14} /></button>
+      <button onClick={() => save.mutate(!item.saved)} aria-pressed={item.saved} aria-label={item.saved ? '取消收藏' : '收藏'} title={item.saved ? '取消收藏' : '收藏'} className={cx(tool, item.saved ? 'text-accent' : 'text-muted hover:text-fg')}><Bookmark size={14} fill={item.saved ? 'currentColor' : 'none'} /></button>
+    </div>
+    {item.action ? <ActionButton item={item} /> : <span className="flex shrink-0 items-center gap-2 text-xs text-faint tabular-nums group-hover:hidden group-focus-within:hidden max-md:hidden">
       {!item.seen && <span className="size-1.5 rounded-full bg-accent" aria-label="新的" />}{hm(item.at)}
     </span>}
   </div>

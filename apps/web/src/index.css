@@ -406,3 +406,7 @@ html[data-motion="reduce"] *, html[data-motion="reduce"] *::before, html[data-mo
 /* 字号: the whole interface is sized from the root. */
 html[data-text="small"] { font-size: 15px; }
 html[data-text="large"] { font-size: 17.5px; }
+
+/* ⌘F in a conversation: every match, and the current one stronger. */
+::highlight(find) { background-color: color-mix(in oklab, var(--sun) 45%, transparent); color: inherit; }
+::highlight(find-current) { background-color: var(--sun); color: #141414; }
