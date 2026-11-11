@@ -1,6 +1,6 @@
 {
   "name": "@nuonuo/plugin-sdk",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "license": "MIT",
   "description": "Types and helpers for writing Nuonuo plugins",
   "type": "module",
