@@ -317,6 +317,10 @@ export const goals = sqliteTable('goals', {
   note: text('note'),
   headline: json<{ value: string; unit?: string; note?: string } | null>('headline'),
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+  /** A step of a bigger goal (子目标). */
+  parentId: text('parent_id'),
+  /** The owner's order (drag); unset ones follow by creation. */
+  position: real('position'),
   status: text('status').$type<'active' | 'done' | 'dropped'>().notNull().default('active'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
@@ -345,5 +349,9 @@ export const feed = sqliteTable('feed', {
   conversationId: text('conversation_id'),
   ticketId: text('ticket_id'),
   seen: integer('seen', { mode: 'boolean' }).notNull().default(false),
+  /** The owner's 👍 (up) or 👎 (down); it tunes what gets posted. */
+  reaction: text('reaction').$type<'up' | 'down'>(),
+  /** 收藏: kept past the two weeks. */
+  saved: integer('saved', { mode: 'boolean' }).notNull().default(false),
   dismissed: integer('dismissed', { mode: 'boolean' }).notNull().default(false),
 })

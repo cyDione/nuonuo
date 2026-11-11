@@ -13,8 +13,8 @@ import { connectHost, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, 
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
-import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@super-assistant/core'
-import { kvGet, kvSet } from '@super-assistant/db'
+import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@super-assistant/core'
+import { kvGet, kvSet, newId, schema } from '@super-assistant/db'
 import { fireRoutine } from '@super-assistant/sources'
 import { runDoctor } from './doctor'
 import { MAX_UPLOAD, Uploads } from './uploads'
@@ -249,7 +249,36 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
       'content-security-policy': "default-src 'none'", 'cache-control': 'private, max-age=3600' } })
   })
   api.delete('/uploads/:id', c => { if (!uploads.discard(c.req.param('id'))) throw new HttpError(409, 'conflict', '已发送的附件不能删除'); return c.body(null, 204) })
+  /** 「整理一下前面的」: the assistant's working memory of the chat is summarised now, and the chat shows where. */
+  api.post('/conversations/:id/compact', async c => {
+    const id = c.req.param('id')
+    if (!conversations.get(id)) throw new HttpError(404, 'missing', 'no such conversation')
+    if (!rt.hub.resolve('summarizer') && !rt.hub.resolve('router')) throw new ModelError('no_model', '还没有配置模型')
+    if (rt.agents.isRunning(ROUTER_SESSION)) throw new HttpError(409, 'conflict', '它正在回你，等它说完再整理')
+    const session = rt.agents.session(ROUTER_SESSION)
+    let compacted = false
+    try { compacted = session ? await rt.agents.compact(session) : false } catch (error) { throw new HttpError(400, 'model', `整理失败：${(error as Error).message}`) }
+    if (!compacted) return c.json({ compacted: false, note: '前面的还不多，不用整理' })
+    const messageId = newId('msg')
+    rt.store.db.insert(schema.messages).values({ id: messageId, conversationId: id, role: 'system', content: '前面的聊天已整理', meta: { kind: 'compacted' }, createdAt: Date.now() }).run()
+    rt.bus.emit({ type: 'message.created', conversationId: id, messageId })
+    return c.json({ compacted: true, messageId })
+  })
   api.post('/conversations/:id/read', c => { conversations.markRead(c.req.param('id')); return c.json({ ok: true }) })
+  // Message actions: 撤回, 编辑 (take back and send the corrected text), 重新回答.
+  api.post('/messages/:id/recall', c => { rt.engine.recallMessage(c.req.param('id')); return c.json({ ok: true }) })
+  api.post('/messages/:id/edit', async c => {
+    const { content } = await body(c, z.object({ content: z.string().trim().min(1).max(100_000) }))
+    const old = conversations.message(c.req.param('id'))
+    if (!old) throw new HttpError(404, 'missing', 'no such message')
+    rt.engine.recallMessage(old.id, { edited: true })
+    const result = rt.engine.receiveMessage(old.conversationId, content)
+    return c.json({ message: conversations.message(result.messageId) }, 201)
+  })
+  api.post('/messages/:id/regenerate', c => {
+    if (!rt.hub.resolve('router')) throw new ModelError('no_model', '主 Agent 还没有配置模型')
+    rt.engine.regenerate(c.req.param('id')); return c.json({ ok: true })
+  })
   api.get('/messages/:id', c => {
     const message = conversations.message(c.req.param('id'))
     if (!message) throw new HttpError(404, 'missing', 'no such message')
@@ -365,6 +394,21 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.post('/routines', async c => { const input = await body(c, RoutineBody); return c.json({ routine: guard(() => rt.routines.create(input)) }, 201) })
   api.patch('/routines/:id', async c => { const input = await body(c, RoutineBody.partial()); return c.json({ routine: guard(() => rt.routines.update(c.req.param('id'), input)) }) })
   api.delete('/routines/:id', c => { rt.routines.delete(c.req.param('id')); return c.body(null, 204) })
+  /** 运行记录: each time a routine fired, what came of it (the reply, or the work it started and how that ended). */
+  api.get('/routines/:id/runs', c => {
+    const id = c.req.param('id')
+    const rows = rt.store.sqlite.prepare("SELECT id, at, disposition FROM triggers WHERE source = 'cron' AND json_extract(meta, '$.routineId') = ? ORDER BY at DESC LIMIT 50").all(id) as { id: string; at: number; disposition: string }[]
+    const runs = rows.map(r => {
+      const d = JSON.parse(r.disposition || '{}') as Record<string, any>
+      let ticket: { id: string; title: string; stage: string } | null = null
+      const ticketId = d.startedTicket ?? d.attachedTo ?? d.deliveredTo?.[0]
+      if (ticketId) { try { const v = ticketView(rt.engine, rt.engine.ticket(ticketId)); ticket = { id: v.id, title: v.title, stage: v.stage } } catch { /* deleted */ } }
+      const reply = d.answered ? conversations.message(d.answered) : undefined
+      const failed = ticket?.stage === 'person/failed'
+      return { id: r.id, at: r.at, outcome: dispositionText(d), ok: !failed, reply: reply ? { id: reply.id, text: reply.content.slice(0, 300), conversationId: reply.conversationId } : null, ticket }
+    })
+    return c.json({ runs })
+  })
   api.post('/routines/:id/run', c => {
     guard(() => rt.routines.runNow(c.req.param('id'), (r, at) => fireRoutine({ engine: rt.engine, store: rt.store }, r, at)))
     return c.json({ ok: true, routine: rt.routines.get(c.req.param('id')) })
@@ -408,10 +452,32 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json({ goal: guard(() => rt.goals.update(c.req.param('id'), patch)) })
   })
   api.delete('/goals/:id', c => { rt.goals.remove(c.req.param('id')); return c.body(null, 204) })
+  /** A step the owner adds under a goal (from 拆成几步 or by hand). */
+  api.post('/goals', async c => {
+    const input = await body(c, z.object({ title: z.string().trim().min(1).max(40), target: z.number().positive(), unit: z.string().max(8).optional(),
+      style: z.enum(['amount', 'days']).optional(), parentId: z.string() }).strict())
+    return c.json({ goal: guard(() => rt.goals.create(input)) }, 201)
+  })
+  api.put('/goals/order', async c => { const { ids } = await body(c, z.object({ ids: z.array(z.string()).max(200) })); return c.json({ goals: guard(() => rt.goals.reorder(ids)) }) })
+  api.post('/goals/:id/suggest', async c => {
+    const goal = guard(() => rt.goals.get(c.req.param('id')))
+    if (!rt.hub.resolve('router')) throw new ModelError('no_model', '还没有配置模型')
+    const children = rt.goals.list(['active', 'done']).filter(g => g.parentId === goal.id)
+    try { return c.json({ steps: await suggestSteps(rt.hub, goal, children) }) } catch (error) { throw new HttpError(400, 'model', (error as Error).message) }
+  })
+
+  // 会做的事 (它是谁): procedures the owner taught it.
+  const SkillBody = z.object({ name: z.string().trim().min(1).max(20), when: z.string().trim().min(1).max(120), steps: z.string().trim().min(1).max(4_000), enabled: z.boolean().optional() }).strict()
+  api.get('/skills', c => c.json({ skills: rt.skills.list() }))
+  api.post('/skills', async c => { const input = await body(c, SkillBody); return c.json({ skill: guard(() => rt.skills.create(input)) }, 201) })
+  api.patch('/skills/:id', async c => { const input = await body(c, SkillBody.partial()); return c.json({ skill: guard(() => rt.skills.update(c.req.param('id'), input)) }) })
+  api.delete('/skills/:id', c => { rt.skills.remove(c.req.param('id')); return c.body(null, 204) })
 
   // 动态: changes in what it watches for the owner.
   api.get('/feed', c => c.json({ items: rt.feed.list(), unseen: rt.feed.unseen() }))
   api.post('/feed/seen', c => { rt.feed.seeAll(); return c.json({ ok: true }) })
+  api.post('/feed/:id/react', async c => { const { reaction } = await body(c, z.object({ reaction: z.enum(['up', 'down']).nullable() })); return c.json({ item: guard(() => rt.feed.react(c.req.param('id'), reaction)) }) })
+  api.post('/feed/:id/save', async c => { const { saved } = await body(c, z.object({ saved: z.boolean() })); return c.json({ item: guard(() => rt.feed.save(c.req.param('id'), saved)) }) })
   api.post('/feed/:id/dismiss', c => { guard(() => rt.feed.dismiss(c.req.param('id'))); return c.json({ ok: true }) })
 
   // 点子: a few things it could do, a new batch each morning.
@@ -462,6 +528,22 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const { markdown } = await body(c, z.object({ markdown: z.string().max(200_000) }))
     return c.json(guard(() => rt.memory.applyMarkdown(markdown, 'owner')))
   })
+  // 从别的 AI 带过来: paste what another assistant remembers, tick the lines to keep, import them as the owner's.
+  api.post('/memories/import/preview', async c => {
+    const { text } = await body(c, z.object({ text: z.string().min(1).max(200_000) }))
+    return c.json({ items: parseMemoryExport(text) })
+  })
+  api.post('/memories/import', async c => {
+    const { items } = await body(c, z.object({ items: z.array(z.object({ kind: z.enum(['profile', 'lesson']), text: z.string().trim().min(2).max(300) })).min(1).max(200) }))
+    let added = 0, existing = 0, skipped = 0
+    for (const item of items) {
+      try {
+        const r = rt.memory.add({ kind: item.kind, text: item.text, trust: 'user', createdBy: 'import' })
+        if (r.status === 'exists') existing++; else if (r.status === 'active') added++; else skipped++
+      } catch { skipped++ }
+    }
+    return c.json({ added, existing, skipped })
+  })
   api.post('/memories/consolidate', c => c.json(rt.memory.consolidate()))
 
   // 通知: which changes notify, how, and the quiet hours. 试一下 sends a sample whatever the settings.
@@ -511,9 +593,21 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const png = await rt.browser.screenshot(ticket.id)
     return c.body(new Uint8Array(png), 200, { 'content-type': 'image/png', 'cache-control': 'no-store' })
   })
+  // 看它的浏览器 (read-only, from 活动): where its tab is, and each step it took with a picture.
+  api.get('/browser/:ticket/state', async c => {
+    const ticket = rt.engine.ticket(c.req.param('ticket'))
+    return c.json({ state: await rt.browser.state(ticket.id), steps: rt.browser.steps(ticket.id) })
+  })
+  api.get('/browser/:ticket/steps/:n', c => {
+    const ticket = rt.engine.ticket(c.req.param('ticket'))
+    const shot = rt.browser.stepShot(ticket.id, Number(c.req.param('n')))
+    if (!shot) throw new HttpError(404, 'missing', '没有这一步的截图')
+    return c.body(new Uint8Array(shot), 200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=86400' })
+  })
   const BrowserInput = z.discriminatedUnion('type', [
     z.object({ type: z.literal('click'), x: z.number().min(0).max(4000), y: z.number().min(0).max(4000) }),
     z.object({ type: z.literal('type'), text: z.string().max(2000) }),
+    z.object({ type: z.literal('paste'), text: z.string().max(20_000) }),
     z.object({ type: z.literal('key'), key: z.string().regex(/^[\w+]{1,30}$/) }),
     z.object({ type: z.literal('goto'), url: z.string().url() }),
     z.object({ type: z.literal('scroll'), dy: z.number().min(-5000).max(5000) }),

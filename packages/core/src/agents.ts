@@ -32,6 +32,20 @@ export function chatLength(text: string): number {
 
 const isProactive = (t: Ticket) => (t.mandate as Mandate).strength === 'proactive'
 
+/** Places in the app a 带你去 chip can open (hash routes of the web app). */
+export const OpenLink = z.object({
+  route: z.string().regex(/^(library|goals|ideas|activity|me|waiting|pane\/(activity|who|permissions)|settings\/[a-z]+(\/[\w-]+)?|c\/cnv_\w+)$/)
+    .describe('library (成果), goals, ideas, activity (动态), pane/activity, pane/who (性格·灵魂·记忆), pane/permissions (folders, apps, rules), settings/<persona|routines|sources|plugins|mcp|execution|providers|roles|usage|general|notifications|voice|shortcuts|data|system>, c/<conversation id>'),
+  label: z.string().min(1).max(16).describe('e.g. 打开权限, 去看日程'),
+})
+
+/** Cards under a chat message (Muse's data cards, drawn our way): a day's schedule, a reminder, a place. */
+export const ChatCard = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('schedule'), date: z.string().describe('YYYY-MM-DD'), events: z.array(z.object({ start: z.string().describe('HH:mm'), end: z.string().optional(), title: z.string().max(40), location: z.string().max(40).optional() })).max(8) }),
+  z.object({ type: z.literal('reminder'), title: z.string().max(40), at: z.string().describe('ISO date-time'), note: z.string().max(60).optional() }),
+  z.object({ type: z.literal('place'), name: z.string().max(40), address: z.string().max(80).optional(), note: z.string().max(60).optional(), url: z.string().url().optional() }),
+])
+
 /** What source plugins and routines add to the agents. */
 export interface AgentExtensions {
   routerTools?(): ToolSet
@@ -102,6 +116,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
   })
   runtime.registerResolver('cnv', (ref, page = 1) => {
     const rows = store.db.select().from(schema.messages).where(eq(schema.messages.conversationId, ref)).orderBy(asc(schema.messages.createdAt)).all()
+      .filter(m => { const meta = m.meta as { recalled?: boolean; superseded?: boolean }; return m.role !== 'system' && !meta.recalled && !meta.superseded })
     if (!rows.length) return undefined
     const per = 30
     const pages = Math.ceil(rows.length / per)
@@ -188,8 +203,10 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         inputSchema: z.object({ conversation_id: z.string().optional().describe('Required unless ticket_id is given'), text: z.string().min(1),
           reply_to: z.string().optional().describe('trigger_id of the message you answer'),
           ticket_id: z.string().optional().describe('The work this message is about'),
-          detailed: z.boolean().optional().describe('Only when the owner explicitly asked for a long, detailed answer in chat') }),
-        execute: async ({ conversation_id, text, ticket_id, reply_to, detailed }, { toolCallId }) => {
+          detailed: z.boolean().optional().describe('Only when the owner explicitly asked for a long, detailed answer in chat'),
+          open: OpenLink.optional().describe('A 带你去 chip under the message that opens a place in the app, when the owner asked where something is or needs to change a setting'),
+          card: ChatCard.optional().describe('A small card under the message for a day\'s schedule, a reminder you set, or a place') }),
+        execute: async ({ conversation_id, text, ticket_id, reply_to, detailed, open, card }, { toolCallId }) => {
           const conversationId = conversation_id ?? (ticket_id ? engine.conversationOfTicket(ticket_id) : undefined)
           if (!conversationId) return { ok: false, error: 'conversation_id is required without ticket_id' }
           const source = reply_to || ticket_id ? engine.replySource(reply_to, ticket_id) : conversationSource(conversationId)
@@ -198,7 +215,8 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
           if (CHAT_SOURCES.has(source) && length > limit) {
             return { ok: false, error: `Not sent: about ${length} words; chat replies must stay under ${limit}. Say only the outcome and key facts${ticket_id ? ' — the full result stays in the work\'s details' : ''}, then call reply again.` }
           }
-          return { ok: true, message_id: engine.reply({ conversationId, text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}) }) }
+          return { ok: true, message_id: engine.reply({ conversationId, text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}),
+            ...(open || card ? { extra: { ...(open ? { open } : {}), ...(card ? { card } : {}) } } : {}) }) }
         },
       }),
       start_silent_task: tool({
@@ -337,6 +355,8 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       case 'ticket-ended': return `<task_ended ticket_id="${p.ticketId}" outcome="${p.outcome}" by="${p.by}" />`
       case 'recovery': return '<recovery>服务刚刚重启。检查 list_tasks，不要重复已经发出的消息或已经开始的任务。</recovery>'
       case 'unsent': return `<unsent>Your last turn ended with plain text and no message, so the owner saw NOTHING. Only the reply tool posts messages. If the text below was meant for the owner, send it now with reply (conversation_id, and ticket_id when it is about finished work); if not, end your turn without output.\n---\n${p.text}\n</unsent>`
+      case 'recalled': return `<owner_recalled trigger_id="${p.triggerId}" conversation_id="${p.conversationId}">The owner took this message back${p.edited ? ' and sent a corrected one (it follows)' : ''}. Do not act on it; if you already started something for it, stop it or say so in one line.</owner_recalled>`
+      case 'regenerate': return `<regenerate conversation_id="${p.conversationId}" message_id="${p.messageId}">The owner asked you to answer this again, differently (it is hidden from the chat now):\n${clip(String(p.text), 2_000)}\nPost the new answer with reply.</regenerate>`
       default: return `<event>${JSON.stringify(p)}</event>`
     }
   }

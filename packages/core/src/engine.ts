@@ -387,13 +387,47 @@ export class Engine {
     })
   }
 
+  /**
+   * 撤回: the owner takes back a message they sent in the last ten minutes. It disappears from the chat; the router (and
+   * any task it went to) is told not to act on it.
+   */
+  recallMessage(messageId: string, opts: { edited?: boolean } = {}): void {
+    const m = this.store.db.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get()
+    if (!m || m.role !== 'user') throw new DomainError('missing', '只能撤回你自己发的消息')
+    if ((m.meta as { recalled?: boolean }).recalled) throw new DomainError('conflict', '这条已经撤回了')
+    if (this.now() - m.createdAt > 10 * 60_000) throw new DomainError('conflict', '超过 10 分钟的消息不能撤回')
+    this.store.atomic(() => {
+      this.store.db.update(schema.messages).set({ content: '', meta: { ...(m.meta as object), recalled: true, ...(opts.edited ? { edited: true } : {}) } }).where(eq(schema.messages.id, messageId)).run()
+      if (m.triggerId) {
+        const trigger = this.store.db.select().from(schema.triggers).where(eq(schema.triggers.id, m.triggerId)).get()
+        const delivered = ((trigger?.disposition ?? {}) as { deliveredTo?: string[] }).deliveredTo ?? []
+        for (const id of delivered) {
+          try { this.runtime.push(this.ticket(id).sessionId, { type: 'note', from: 'owner', text: '主人撤回了刚才那条消息，不要按它做。' }, { wake: true }) } catch { /* gone */ }
+        }
+        this.runtime.push(ROUTER_SESSION, { type: 'recalled', triggerId: m.triggerId, conversationId: m.conversationId, ...(opts.edited ? { edited: true } : {}) }, { wake: !opts.edited })
+      }
+      this.store.afterCommit(() => this.bus.emit({ type: 'message.updated', conversationId: m.conversationId, messageId }))
+    })
+  }
+
+  /** 重新回答: the owner wants another answer to one of the assistant's messages; the old one is hidden. */
+  regenerate(messageId: string): void {
+    const m = this.store.db.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get()
+    if (!m || m.role !== 'assistant') throw new DomainError('missing', '只能让它重新回答它自己的消息')
+    this.store.atomic(() => {
+      this.store.db.update(schema.messages).set({ meta: { ...(m.meta as object), superseded: true } }).where(eq(schema.messages.id, messageId)).run()
+      this.runtime.push(ROUTER_SESSION, { type: 'regenerate', conversationId: m.conversationId, messageId, text: m.content }, { human: true })
+      this.store.afterCommit(() => this.bus.emit({ type: 'message.updated', conversationId: m.conversationId, messageId }))
+    })
+  }
+
   // ── Router commands ────────────────────────────────────────────────────────
 
   /**
    * Posts the agent's message in a conversation. It also goes out through the source's channel (a GitHub comment) when it
    * answers a message from that source (`replyTo`) or reports on a task that came from it (`ticketId`); otherwise it stays in the web.
    */
-  reply(input: { conversationId?: string; text: string; ticketId?: string; replyTo?: string; callId?: string }): string {
+  reply(input: { conversationId?: string; text: string; ticketId?: string; replyTo?: string; callId?: string; extra?: Record<string, unknown> }): string {
     const conversationId = input.conversationId ?? (input.ticketId ? this.conversationOfTicket(input.ticketId) : undefined)
     if (!conversationId) throw new DomainError('invalid', 'reply 需要 conversation_id 或 ticket_id')
     const conversation = this.store.db.select().from(schema.conversations).where(eq(schema.conversations.id, conversationId)).get()
@@ -407,7 +441,7 @@ export class Engine {
       const delivery = this.takeDelivery(conversation.threadId ?? webchatThread(conversationId), input.ticketId)
       this.store.db.insert(schema.messages).values({ id, conversationId, role: 'assistant', content: input.text,
         ticketId: input.ticketId ?? delivery?.ticketId ?? null,
-        meta: { ...(input.callId ? { callId: input.callId } : {}), ...(external ? { via, delivery: 'pending' } : {}), ...(delivery ? { result: delivery } : {}) }, createdAt: at }).run()
+        meta: { ...(input.extra ?? {}), ...(input.callId ? { callId: input.callId } : {}), ...(external ? { via, delivery: 'pending' } : {}), ...(delivery ? { result: delivery } : {}) }, createdAt: at }).run()
       this.store.db.update(schema.conversations).set({ updatedAt: at }).where(eq(schema.conversations.id, conversationId)).run()
       if (input.replyTo) this.setDisposition(input.replyTo, { answered: id })
       if (external) this.opts.sources!.send({ messageId: id, source: via, threadId: threadId!, text: input.text, ...(input.ticketId ? { ticketId: input.ticketId } : {}) })

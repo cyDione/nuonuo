@@ -402,3 +402,31 @@ function cosine(a: number[], b: number[]): number {
   for (let i = 0; i < Math.min(a.length, b.length); i++) { dot += a[i]! * b[i]!; na += a[i]! ** 2; nb += b[i]! ** 2 }
   return na && nb ? dot / Math.sqrt(na * nb) : 0
 }
+
+/**
+ * Reads what another assistant exported about the owner (ChatGPT's "what you remember about me", a Markdown memory file,
+ * a JSON list): one entry per line or item, headings and chatter skipped. The owner ticks which to keep before import.
+ */
+export function parseMemoryExport(text: string): { kind: 'profile' | 'lesson'; text: string }[] {
+  let items: string[] = []
+  const trimmed = text.trim()
+  if (/^[[{]/.test(trimmed)) {
+    try {
+      const data = JSON.parse(trimmed) as unknown
+      const list = Array.isArray(data) ? data : Object.values(data as Record<string, unknown>).find(Array.isArray) ?? []
+      items = (list as unknown[]).map(x => typeof x === 'string' ? x : String((x as Record<string, unknown>)?.content ?? (x as Record<string, unknown>)?.text ?? (x as Record<string, unknown>)?.memory ?? '')).filter(Boolean)
+    } catch { /* not JSON: read as text */ }
+  }
+  const out: { kind: 'profile' | 'lesson'; text: string }[] = []
+  let kind: 'profile' | 'lesson' = 'profile'
+  for (const raw of items.length ? items : trimmed.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line) continue
+    if (/^#{1,6}\s/.test(line) || /^[^\s].{0,20}[:：]$/.test(line)) { kind = /经验|教训|lesson|preference for how|工作方式/i.test(line) ? 'lesson' : 'profile'; continue }
+    const body = line.replace(/^([-*•·]|\d+[.)、])\s*/, '').replace(/^\[[ x]\]\s*/i, '').trim()
+    if (body.length < 2 || body.length > 300) continue
+    if (/^(here('| i)s|以下是|这是我|i remember|我记得的)/i.test(body)) continue
+    if (!out.some(o => o.text === body)) out.push({ kind, text: body })
+  }
+  return out.slice(0, 200)
+}

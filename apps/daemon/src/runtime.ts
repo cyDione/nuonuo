@@ -2,7 +2,7 @@
 import { pruneChats } from './data'
 import { Notices } from './notices'
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-assistant/agent-runtime'
-import { accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
+import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxExtension, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@super-assistant/db'
 import { gmailPlugin, telegramPlugin } from '@super-assistant/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@super-assistant/sources'
@@ -19,6 +19,8 @@ export interface Runtime {
   access: LocalAccess
   /** Where the owner's attachments are kept. */
   uploadsDir: string
+  /** 会做的事. */
+  skills: Skills
   secrets: SecretStore
   secretsNote?: string
   hub: ModelHub
@@ -108,6 +110,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const reviewer = new Reviewer(store, hub, engine, agents, bus)
     reviewer.envFor = ticket => workerEnv({ SUPER_ASSISTANT_TICKET: ticket.id, SUPER_ASSISTANT_DIR: ticket.directory })
     const access = new LocalAccess(store)
+    const skills = new Skills(store, Date.now, () => bus.emit({ type: 'skills.updated' }))
     reviewer.access = access
     const uploadsDir = join(config.home, 'uploads')
     const conversationTitle = (id: string) => store.sqlite.prepare('SELECT title FROM conversations WHERE id = ?').get(id) as { title: string } | undefined
@@ -154,6 +157,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       browserExtension(browser, engine, agents),
       sandboxExtension(engine),
       accessExtension(access, uploadsDir),
+      skillsExtension(skills),
       localAppsExtension(new LocalApps(access, reviewer)),
       mcpExtension(mcp, engine, reviewer),
       { gateShell: (ticket, sessionId, command, cwd) => reviewer.gateShell(ticket, sessionId, command, cwd) },
@@ -172,7 +176,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, access, uploadsDir, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
+      config, store, secrets, access, uploadsDir, skills, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
       startAgents() {
         engine.mainConversation()
         agents.recover(session => engine.recoveryNote(session.id, session.role))
