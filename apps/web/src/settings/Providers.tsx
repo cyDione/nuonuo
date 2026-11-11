@@ -8,12 +8,21 @@ import { useEffect, useState } from 'react'
 import { api, type Preset, type Price, type Provider } from '../api'
 import { go } from '../route'
 import { Block, Btn, NumberInput, Page, Pill, Row, Section, TextInput } from './kit'
-import { useCatalog, useModelOptions, useProviders } from './hooks'
+import { modelTag, useCatalog, useModelOptions, useProviders, type ModelType } from './hooks'
 import { tx } from '../i18n'
 
 const KIND_LABEL: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Gemini', deepseek: 'DeepSeek', 'openai-compatible': tx('OpenAI 兼容'), typesafe: tx('决策接口') }
 const host = (url: string | null) => (url ?? '').replace(/^https?:\/\//, '').replace(/\/$/, '')
 const keyWhere = (p: Provider) => p.keyEnv ? tx('环境变量 {0}', p.keyEnv) : p.hasKey ? tx('密钥在钥匙串里') : tx('没有密钥')
+
+/** How many of a provider's models are of each type, chat first: " · 对话 12 · 向量 2 · 决策模型 1". Nothing when all are chat. */
+function breakdown(types: Record<string, ModelType>): string {
+  const counts = new Map<ModelType, number>()
+  for (const t of Object.values(types)) counts.set(t, (counts.get(t) ?? 0) + 1)
+  if (![...counts.keys()].some(t => t !== 'chat')) return ''
+  const order: ModelType[] = ['chat', 'embedding', 'rerank', 'decision', 'image', 'audio', 'video']
+  return order.filter(t => counts.has(t)).map(t => ` · ${t === 'chat' ? tx('对话') : modelTag(t)} ${counts.get(t)}`).join('')
+}
 
 export function Providers({ item }: { item?: string }) {
   const providers = useProviders()
@@ -73,8 +82,8 @@ function ProviderDetail({ p }: { p: Provider }) {
         <Btn tone="ink" disabled={!key || patch.isPending} onClick={() => patch.mutate({ apiKey: key })}>{tx('保存')}</Btn>
       </Row>}
       {p.kind !== 'typesafe' && <Row label={tx('连通测试')} sub={test.isPending || live.loading ? tx('在试…')
-        : tested ? (tested.ok ? tx('刚刚 · {0}ms · 读到 {1} 个模型', tested.latencyMs, live.models.length) : <span className="text-danger">{tested.error?.slice(0, 160)}</span>)
-        : live.error ? <span className="text-danger">{tx('读不到模型列表：{0}', live.error.slice(0, 160))}</span> : live.models.length ? tx('读到 {0} 个模型', live.models.length) : tx('还没试过')}>
+        : tested ? (tested.ok ? `${tx('刚刚 · {0}ms · 读到 {1} 个模型', tested.latencyMs, live.models.length)}${breakdown(live.types)}` : <span className="text-danger">{tested.error?.slice(0, 160)}</span>)
+        : live.error ? <span className="text-danger">{tx('读不到模型列表：{0}', live.error.slice(0, 160))}</span> : live.models.length ? `${tx('读到 {0} 个模型', live.models.length)}${breakdown(live.types)}` : tx('还没试过')}>
         <Btn disabled={test.isPending || !live.models.length} onClick={() => test.mutate()}>{tested ? tx('再测一次') : tx('测一次')}</Btn>
       </Row>}
       {p.kind === 'openai-compatible' && <Row label={tx('决策接口')} sub={tx('网关上的 Jev 决策接口；留空会自动找 /systemone、/decisions 等常见路径')}>

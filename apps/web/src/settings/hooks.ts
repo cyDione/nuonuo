@@ -1,23 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Catalog, type NotifySettings, type Provider } from '../api'
 import { desktop, type DesktopPrefs } from '../shell'
+import { tx } from '../i18n'
 
 export const useCatalog = () => useQuery({ queryKey: ['catalog'], queryFn: () => api.get<Catalog>('/catalog'), staleTime: Infinity })
 export const useProviders = () => useQuery({ queryKey: ['providers'], queryFn: () => api.get<{ providers: Provider[] }>('/providers') })
 
+export type ModelType = 'chat' | 'embedding' | 'rerank' | 'decision' | 'image' | 'audio' | 'video'
+
+/** The tag a model list shows beside a model that is not a chat model. */
+export const modelTag = (type: ModelType | undefined): string | undefined => type === undefined || type === 'chat' ? undefined
+  : ({ embedding: tx('向量'), rerank: tx('重排'), decision: tx('决策模型'), image: tx('图像'), audio: tx('语音'), video: tx('视频') } as const)[type]
+
 /**
- * The model ids to offer for a provider (live list plus suggestions, merged by the service). With `role`, they are the ones
- * that layer can use, decision models (Jev) first on the reviewer. A failed list is not kept: the next mount or `refresh()`
+ * The models to offer for a provider (every model it serves, chat, embedding, rerank and Jev alike, plus suggestions, merged
+ * by the service), with each one's type. With `role`, the ones that layer runs come first: embedding models on the embedding
+ * layer, decision models (Jev) on the reviewer, and decision models are left out where they cannot be used. A failed list is not kept: the next mount or `refresh()`
  * asks the provider again.
  */
 export function useModelOptions(provider: Provider | undefined, role?: string) {
   const live = useQuery({
     queryKey: ['models', provider?.id, role ?? null], enabled: Boolean(provider), retry: false,
     staleTime: q => (q.state.data?.error ? 0 : 10 * 60_000),
-    queryFn: () => api.get<{ models: string[]; error?: string }>(`/providers/${provider!.id}/models${role ? `?role=${encodeURIComponent(role)}` : ''}`),
+    queryFn: () => api.get<{ models: string[]; types?: Record<string, ModelType>; error?: string }>(`/providers/${provider!.id}/models${role ? `?role=${encodeURIComponent(role)}` : ''}`),
   })
   return {
     models: live.data?.models ?? [],
+    types: live.data?.types ?? {},
     error: live.data?.error ?? (live.error ? (live.error as Error).message : undefined),
     loading: live.isFetching,
     refresh: () => { void live.refetch() },

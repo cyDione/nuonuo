@@ -5,7 +5,8 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { EmbeddingModelV4, LanguageModelV4 } from '@ai-sdk/provider'
-import type { ProviderKind } from './catalog'
+import { DECISION_MODEL_SUGGESTIONS, type ProviderKind } from './catalog'
+import { mergeCatalogs, jevIdsIn, parseModelCatalog, type ModelInfo, type ModelType } from './discovery'
 import { decisionEndpoints, SYSTEM_ONE_BASE, systemOneClient, type SystemOneClient } from './systemone'
 
 export interface ProviderRecord {
@@ -31,8 +32,8 @@ export type ModelFactory = {
   embedding(provider: ProviderRecord, apiKey: string | undefined, model: string): EmbeddingModelV4
   /** Decision models (TypeSafe Jev). Defaults to the HTTP client. */
   systemOne?(provider: ProviderRecord, apiKey: string | undefined): SystemOneClient
-  /** Live model ids. Defaults to the provider's list endpoint. */
-  listModels?(provider: ProviderRecord, apiKey: string | undefined): Promise<string[]>
+  /** Live models, as ids or tagged by type (an id alone is typed from its name). Defaults to the provider's list endpoints. */
+  listModels?(provider: ProviderRecord, apiKey: string | undefined): Promise<(string | ModelInfo)[]>
 }
 
 function sdkProvider(p: ProviderRecord, apiKey: string | undefined) {
@@ -69,39 +70,70 @@ const DEFAULT_BASE: Partial<Record<ProviderKind, string>> = {
   typesafe: SYSTEM_ONE_BASE,
 }
 
-/** Live model ids from the provider's list endpoint. */
-export async function listProviderModels(p: ProviderRecord, apiKey: string | undefined, fetchImpl: typeof fetch = fetch): Promise<string[]> {
-  const base = (p.baseUrl ?? DEFAULT_BASE[p.kind] ?? '').replace(/\/+$/, '')
-  if (!base) throw new Error('no base URL')
+/** The headers a provider's list endpoints take. */
+function listHeaders(p: ProviderRecord, apiKey: string | undefined): Record<string, string> {
   const headers: Record<string, string> = { ...p.options.headers }
-  let url = `${base}/models`
-  if (p.kind === 'anthropic') { if (apiKey) headers['x-api-key'] = apiKey; headers['anthropic-version'] = '2023-06-01'; url += '?limit=1000' }
-  else if (p.kind === 'google') { if (apiKey) headers['x-goog-api-key'] = apiKey; url += '?pageSize=1000' }
+  if (p.kind === 'anthropic') { if (apiKey) headers['x-api-key'] = apiKey; headers['anthropic-version'] = '2023-06-01' }
+  else if (p.kind === 'google') { if (apiKey) headers['x-goog-api-key'] = apiKey }
   else if (apiKey) headers.authorization = `Bearer ${apiKey}`
-  const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(15_000) })
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-  return parseModelList(await response.json())
+  return headers
 }
 
 /**
- * Model ids from a list response: OpenAI `{ data: [{ id }] }`, Gemini `{ models: [{ name: 'models/…' }] }`, and the shapes
- * gateways use instead (a bare array, `{ data: { models: [...] } }`, plain strings, `name` / `model` in place of `id`).
+ * Every model a provider serves, tagged by type: its `/models`, plus what `/models` leaves out on OpenAI-style APIs — the
+ * embeddings list OpenRouter keeps on `/embeddings/models`, and the Jev a gateway serves on its decision endpoint. The
+ * extra sources are best effort; only a failed `/models` fails the call, since that is the sign the provider is unreachable.
  */
-export function parseModelList(body: unknown): string[] {
-  const nested = (v: unknown): unknown[] | undefined => {
-    if (Array.isArray(v)) return v
-    if (v && typeof v === 'object') {
-      const o = v as Record<string, unknown>
-      for (const key of ['data', 'models', 'items', 'list']) { const found = nested(o[key]); if (found) return found }
-    }
-    return undefined
+export async function listProviderModels(p: ProviderRecord, apiKey: string | undefined, fetchImpl: typeof fetch = fetch): Promise<ModelInfo[]> {
+  const base = (p.baseUrl ?? DEFAULT_BASE[p.kind] ?? '').replace(/\/+$/, '')
+  if (!base) throw new Error('no base URL')
+  const headers = listHeaders(p, apiKey)
+  const get = async (url: string, fallback?: ModelType, timeout = 15_000) => {
+    const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(timeout) })
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+    return parseModelCatalog(await response.json(), p.kind, fallback)
   }
-  const ids = (nested(body) ?? []).map(m => {
-    if (typeof m === 'string') return m
-    if (!m || typeof m !== 'object') return undefined
-    const o = m as Record<string, unknown>
-    const id = [o.id, o.model, o.name].find((v): v is string => typeof v === 'string' && v.trim() !== '')
-    return id?.trim().replace(/^models\//, '')
-  }).filter((id): id is string => Boolean(id))
-  return [...new Set(ids)].sort()
+  const mainUrl = `${base}/models${p.kind === 'anthropic' ? '?limit=1000' : p.kind === 'google' ? '?pageSize=1000' : ''}`
+  const openaiStyle = p.kind !== 'anthropic' && p.kind !== 'google' && p.kind !== 'typesafe'
+  const [main, embeddings, decisions] = await Promise.allSettled([
+    get(mainUrl),
+    openaiStyle ? get(`${base}/embeddings/models`, 'embedding', 8_000) : Promise.resolve([]),
+    p.kind === 'openai-compatible' ? probeDecisionModels(p, apiKey, fetchImpl) : Promise.resolve([]),
+  ])
+  if (main.status === 'rejected') throw main.reason
+  const extra = embeddings.status === 'fulfilled' ? embeddings.value : []
+  // A gateway that answers any path with its whole list is not an embeddings list.
+  const same = extra.length === main.value.length && extra.every(m => main.value.some(n => n.id === m.id))
+  return mergeCatalogs(main.value, same ? [] : extra, decisions.status === 'fulfilled' ? decisions.value : [])
+}
+
+/**
+ * The Jev models a gateway serves, which it does not list on `/models`. Asks each decision endpoint about a model that does
+ * not exist, which costs nothing: a gateway that names its Jev in the error (magpie: "like typesafe/jev-latest") gives the
+ * ids, and one that answers with an API error rather than "no such path" has the endpoint, so the usual Jev id is offered.
+ */
+export async function probeDecisionModels(p: ProviderRecord, apiKey: string | undefined, fetchImpl: typeof fetch = fetch): Promise<ModelInfo[]> {
+  const headers = { 'content-type': 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}), ...p.options.headers }
+  for (const url of decisionEndpoints(p.baseUrl, p.kind, p.options.decisionsUrl)) {
+    let status: number
+    let text: string
+    try {
+      const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify({ model: '?', state: '', questions: {} }), signal: AbortSignal.timeout(8_000) })
+      status = response.status
+      text = await response.text()
+    } catch { continue }
+    const ids = jevIdsIn(text)
+    if (ids.length) return ids.map(id => ({ id, type: 'decision' as const }))
+    let json = false
+    try { json = typeof JSON.parse(text) === 'object' } catch { /* a web page */ }
+    if (json && status >= 400 && ![401, 403, 404, 405].includes(status) && !/not.?found|no route|invalid url|unknown (path|route|endpoint)/i.test(text)) {
+      return DECISION_MODEL_SUGGESTIONS.map(id => ({ id, type: 'decision' as const }))
+    }
+  }
+  return []
+}
+
+/** Model ids from a list response, in any of the shapes {@link parseModelCatalog} reads. */
+export function parseModelList(body: unknown): string[] {
+  return parseModelCatalog(body).map(m => m.id)
 }
