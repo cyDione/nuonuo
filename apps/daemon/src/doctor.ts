@@ -25,9 +25,11 @@ export async function runDoctor(rt: Runtime): Promise<Check[]> {
     fix: root ? '任务的命令以服务的身份执行。建议用一个单独的普通用户运行 super-assistant，只给它需要的权限；或在 设置 → 执行 里把沙箱设为「全部」' : undefined })
   const sqlite = rt.store.sqlite.prepare('select sqlite_version() as v').get() as { v: string }
   checks.push({ id: 'sqlite', label: 'SQLite', status: 'ok', detail: sqlite.v })
-  checks.push({ id: 'secrets', label: '密钥存储', status: rt.secrets.backend === 'keychain' ? 'ok' : 'warn',
+  // macOS uses the encrypted file on purpose (packages/models/src/secrets.ts), so it is not a warning there.
+  const secretsOk = rt.secrets.backend === 'keychain' || process.platform === 'darwin'
+  checks.push({ id: 'secrets', label: '密钥存储', status: secretsOk ? 'ok' : 'warn',
     detail: rt.secrets.backend === 'keychain' ? '系统钥匙串' : `加密文件（${rt.secretsNote ?? ''}）`,
-    fix: rt.secrets.backend === 'keychain' ? undefined : 'Linux 上可安装并解锁 gnome-keyring / KWallet 以使用系统钥匙串；加密文件模式下请勿把数据目录同步到云端' })
+    fix: secretsOk ? undefined : 'Linux 上可安装并解锁 gnome-keyring / KWallet 以使用系统钥匙串；加密文件模式下请勿把数据目录同步到云端' })
   const providers = rt.hub.listProviders()
   checks.push({ id: 'providers', label: '模型供应商', status: providers.length ? 'ok' : 'warn',
     detail: providers.length ? `${providers.length} 个` : '尚未添加', fix: '设置 → 模型供应商 中添加 API key' })

@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ModelFactory } from './factory'
 import { guessModelKind, ModelHub } from './hub'
 import { resolveRole, ROLE_IDS, RoleConfigSchema } from './roles'
-import { FileSecrets, MemorySecrets } from './secrets'
+import { FileSecrets, KeychainMigratingSecrets, KeychainSecrets, MemorySecrets, openSecretStore } from './secrets'
 
 const usage = (input: number, output: number): LanguageModelV4Usage => ({
   inputTokens: { total: input, noCache: input, cacheRead: 0, cacheWrite: 0 },
@@ -127,6 +127,37 @@ describe('FileSecrets', () => {
     expect(reopened.get('provider:x')).toBe('sk-plaintext-value')
     reopened.delete('provider:x')
     expect(new FileSecrets(dir).get('provider:x')).toBeUndefined()
+  })
+})
+
+describe('macOS secrets', () => {
+  it('uses the encrypted file and moves a Keychain key into it on first read, touching the Keychain once', () => {
+    const items = new Map([['provider:old', 'sk-old']])
+    let reads = 0
+    class Entry {
+      constructor(private service: string, private account: string) {}
+      getPassword() { reads++; return items.get(this.account) }
+      setPassword(v: string) { items.set(this.account, v) }
+      deletePassword() { items.delete(this.account) }
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'sa-secrets-'))
+    const store = new KeychainMigratingSecrets(new FileSecrets(dir), new KeychainSecrets(Entry))
+    expect(store.get('provider:old')).toBe('sk-old')
+    expect(store.get('provider:old')).toBe('sk-old')
+    expect(store.get('provider:none')).toBeUndefined()
+    expect(store.get('provider:none')).toBeUndefined()
+    expect(reads).toBe(2)
+    store.set('provider:new', 'sk-new')
+    expect(items.has('provider:new')).toBe(false)
+    expect(new FileSecrets(dir).get('provider:old')).toBe('sk-old')
+    expect(new KeychainMigratingSecrets(new FileSecrets(dir), new KeychainSecrets(Entry)).get('provider:old')).toBe('sk-old')
+    expect(reads).toBe(2)
+  })
+
+  it('defaults to the file store on macOS unless the keychain is asked for', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sa-secrets-'))
+    const { store } = await openSecretStore(dir, undefined, 'darwin')
+    expect(store.backend).toBe('file')
   })
 })
 
