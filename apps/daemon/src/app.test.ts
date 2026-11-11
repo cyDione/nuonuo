@@ -217,6 +217,9 @@ describe('Muse features (backend)', () => {
     const other = rt.feed.post({ title: '天气' })
     await call(`/api/feed/${other.id}/react`, json('POST', { reaction: 'down' }))
     expect(rt.feed.list().map(i => i.id)).toEqual([item.id])
+    // 撤销 a 👎 brings the item back.
+    await call(`/api/feed/${other.id}/react`, json('POST', { reaction: null }))
+    expect(rt.feed.list().map(i => i.id).sort()).toEqual([item.id, other.id].sort())
   })
 
   it('adds steps under a goal and keeps the dragged order', async () => {

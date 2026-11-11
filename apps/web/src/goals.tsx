@@ -2,12 +2,14 @@
  * 目标 (Figma v6, 19b and the right pane's 目标): long-running aims the owner sets by telling 糯糯 「我想……」. One colour
  * card for the goal pinned to the top (its big number counts up, its days light up one by one), the rest on grey; what
  * 糯糯 did toward them this week. Nothing here is typed into a form: new goals start in the conversation.
+ * Figma section 25, G2: a goal can hold a few small goals (check or circle), 糯糯 can suggest one more (加上 / 不用了),
+ * and the cards are dragged by their handle into the order the owner wants.
  */
 import { CountingNumber } from '@animate-ui/react/primitives/texts/counting-number'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Check, ChevronRight, Code, Dumbbell, Footprints, Globe, Heart, Leaf, Moon, MoreHorizontal, Music, PenLine, Pin, Plus, Target, Wallet, X, type LucideIcon } from 'lucide-react'
+import { BookOpen, Check, Circle, Code, Dumbbell, Footprints, Globe, GripVertical, Heart, Leaf, LoaderCircle, Moon, MoreHorizontal, Music, PenLine, Pin, Plus, Sparkles, Target, Wallet, X, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { api, type Goal, type GoalIcon, type GoalLogEntry } from './api'
+import { api, type Goal, type GoalIcon, type GoalLogEntry, type GoalStep } from './api'
 import { prefillComposer } from './Chat'
 import { Avatar, usePersona } from './persona'
 import { go } from './route'
@@ -38,19 +40,37 @@ export function Bar({ value, className, tone = 'ink' }: { value: number; classNa
 }
 
 export function GoalsPage() {
+  const qc = useQueryClient()
   const data = useGoals().data
   const persona = usePersona()
-  const active = data?.goals.filter(g => g.status === 'active') ?? []
-  const done = data?.goals.filter(g => g.status === 'done') ?? []
+  const top = data?.goals.filter(g => !g.parentId) ?? []
+  const steps = (g: Goal) => data?.goals.filter(c => c.parentId === g.id) ?? []
+  const active = top.filter(g => g.status === 'active')
+  const done = top.filter(g => g.status === 'done')
   const featured = active.find(g => g.pinned) ?? active[0]
-  const rest = active.filter(g => g !== featured)
+  const [order, setOrder] = useState<string[] | null>(null)
+  const [dragging, setDragging] = useState<string | null>(null)
+  const ids = order ?? active.map(g => g.id)
+  const listed = ids.map(id => active.find(g => g.id === id)).filter((g): g is Goal => !!g)
+  const reorder = useMutation({ mutationFn: (ids: string[]) => api.put('/goals/order', { ids }), onSettled: async () => { await qc.invalidateQueries({ queryKey: ['goals'] }); setOrder(null) } })
+  const over = (id: string) => {
+    if (!dragging || dragging === id) return
+    const next = ids.filter(x => x !== dragging)
+    next.splice(next.indexOf(id) + (ids.indexOf(dragging) < ids.indexOf(id) ? 1 : 0), 0, dragging)
+    setOrder(next)
+  }
+  const drop = () => { if (order) reorder.mutate(order); setDragging(null) }
   return <div className="h-full overflow-y-auto">
     <div className="mx-auto max-w-[640px] px-4 pt-6 pb-12 md:px-8">
       <h1 className="text-[28px] font-semibold">目标</h1>
       <p className="mt-1 text-sm text-muted">长期的事，{persona.name}帮你记着进度</p>
       <div className="mt-6 space-y-3">
-        {featured && <Featured g={featured} />}
-        {rest.map(g => <GoalCard key={g.id} g={g} />)}
+        {listed.map(g => <div key={g.id} onDragOver={e => { if (dragging) { e.preventDefault(); over(g.id) } }} onDrop={e => { e.preventDefault(); drop() }}
+          className={cx('relative transition-opacity duration-150', dragging === g.id && 'opacity-50')}>
+          {listed.length > 1 && <span draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setDragImage(e.currentTarget.parentElement!, 24, 24); setDragging(g.id) }} onDragEnd={drop}
+            aria-label={`拖动「${g.title}」排序`} title="拖动排序" className="absolute top-5 -left-7 hidden cursor-grab text-faint hover:text-fg active:cursor-grabbing md:block"><GripVertical size={16} /></span>}
+          {g === featured ? <Featured g={g} steps={steps(g)} /> : <GoalCard g={g} steps={steps(g)} />}
+        </div>)}
         <button onClick={newGoal} className="press flex w-full items-center gap-3 rounded-2xl border border-dashed border-line px-5 py-4 text-left text-sm text-muted hover:border-faint hover:text-fg">
           <Plus size={17} />新目标：跟{persona.name}说一句就行，比如「我想每周跑三次」
         </button>
@@ -75,7 +95,7 @@ export function GoalsPage() {
 }
 
 /** The pinned goal: the page's one colour card. */
-function Featured({ g }: { g: Goal }) {
+function Featured({ g, steps }: { g: Goal; steps: Goal[] }) {
   const Icon = ICONS[g.icon] ?? Target
   const head = g.headline
   const big = head ? Number(head.value) : g.style === 'days' ? g.current : g.current
@@ -101,11 +121,12 @@ function Featured({ g }: { g: Goal }) {
         {Array.from({ length: dots }, (_, i) => <span key={i} className={cx('dot-in size-2.5 rounded-full', i < g.current ? 'bg-white' : 'bg-white/30')} style={{ animationDelay: `${i * 30}ms` }} />)}
       </div> : <Bar value={share(g)} tone="white" />}
     </div>
+    {steps.length > 0 && <Steps steps={steps} light />}
     <button onClick={() => { go('/'); prefillComposer(`聊聊「${g.title}」的进度`) }} className="press relative mt-4 h-8 rounded-full bg-white px-3.5 text-[13px] font-medium text-[#0b3d3a]">跟它聊聊</button>
   </div>
 }
 
-function GoalCard({ g }: { g: Goal }) {
+function GoalCard({ g, steps }: { g: Goal; steps: Goal[] }) {
   const Icon = ICONS[g.icon] ?? Target
   return <div className="anim-rise group rounded-2xl bg-sunken px-5 pt-4 pb-5">
     <div className="flex items-start gap-3">
@@ -118,6 +139,60 @@ function GoalCard({ g }: { g: Goal }) {
       <Menu g={g} />
     </div>
     <Bar value={share(g)} className="mt-4" />
+    {steps.length > 0 && <Steps steps={steps} />}
+    <Suggest g={g} />
+  </div>
+}
+
+/** What is left of a small goal, said plainly: 「还差 ¥1,600」, 「还差 3 天」. */
+function left(g: Goal) {
+  if (g.status === 'done') return '做到了'
+  const rest = Math.max(0, g.target - g.current)
+  if (g.style === 'days') return `还差 ${num(rest)} 天`
+  return money(g.unit) ? `还差 ¥${num(rest)}` : `还差 ${num(rest)}${g.unit ? ` ${g.unit}` : ''}`
+}
+
+/** The small goals under a goal: a check when done, a circle you can tick when it is. */
+function Steps({ steps, light }: { steps: Goal[]; light?: boolean }) {
+  const qc = useQueryClient()
+  const patch = useMutation({ mutationFn: (v: { id: string; status: Goal['status'] }) => api.patch(`/goals/${v.id}`, { status: v.status }), onSettled: () => qc.invalidateQueries({ queryKey: ['goals'] }) })
+  return <ul className={cx('mt-4 space-y-0.5 border-t pt-3', light ? 'border-white/20' : 'border-line')}>{steps.map(s => {
+    const done = s.status === 'done'
+    return <li key={s.id} className="flex min-h-8 items-center gap-2.5 text-sm">
+      <button onClick={() => patch.mutate({ id: s.id, status: done ? 'active' : 'done' })} role="checkbox" aria-checked={done} aria-label={s.title}
+        className={cx('press flex size-5 shrink-0 items-center justify-center rounded-full', light ? 'hover:bg-white/15' : 'hover:bg-panel')}>
+        {done ? <Check size={15} className={light ? '' : 'text-ok'} /> : <Circle size={14} className={light ? 'opacity-80' : 'text-muted'} />}
+      </button>
+      <span className={cx('min-w-0 flex-1 truncate', done && (light ? 'opacity-70' : 'text-muted'))}>{s.title}</span>
+      <span className={cx('shrink-0 text-xs tabular-nums', light ? 'opacity-75' : 'text-faint')}>{left(s)}</span>
+    </li>
+  })}</ul>
+}
+
+/** 糯糯建议加一个小目标: asked for when the owner wants it, shown one at a time, 加上 or 不用了. */
+function Suggest({ g }: { g: Goal }) {
+  const qc = useQueryClient()
+  const persona = usePersona()
+  const [ideas, setIdeas] = useState<GoalStep[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const ask = useMutation({ mutationFn: () => api.post<{ steps: GoalStep[] }>(`/goals/${g.id}/suggest`), onSuccess: r => { setError(null); setIdeas(r.steps) }, onError: e => setError((e as Error).message) })
+  const add = useMutation({ mutationFn: (s: GoalStep) => api.post('/goals', { ...s, parentId: g.id }), onSuccess: () => { setIdeas(v => v?.slice(1) ?? null); qc.invalidateQueries({ queryKey: ['goals'] }) } })
+  const idea = ideas?.[0]
+  if (!idea) return <div className="mt-3 flex items-center gap-2">
+    <button onClick={() => ask.mutate()} disabled={ask.isPending} className="press flex h-7 items-center gap-1.5 rounded-full px-2 -ml-2 text-xs text-muted hover:bg-panel hover:text-fg disabled:opacity-60">
+      {ask.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <Sparkles size={13} />}{ideas ? '再想几个小目标' : '拆成几个小目标'}</button>
+    {error && <span className="text-xs text-danger">{error}</span>}
+  </div>
+  return <div className="anim-rise mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-panel px-3.5 py-3">
+    <Sparkles size={15} className="shrink-0 self-start text-accent mt-0.5" />
+    <span className="min-w-0 flex-1">
+      <span className="block text-xs text-accent">{persona.name}建议加一个小目标</span>
+      <span className="mt-0.5 block text-sm">{idea.title}</span>
+    </span>
+    <span className="flex shrink-0 gap-1.5">
+      <button onClick={() => add.mutate(idea)} disabled={add.isPending} className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-60">加上</button>
+      <button onClick={() => setIdeas(v => v?.slice(1) ?? null)} className="press h-8 rounded-full border border-line px-3.5 text-[13px] hover:border-faint">不用了</button>
+    </span>
   </div>
 }
 

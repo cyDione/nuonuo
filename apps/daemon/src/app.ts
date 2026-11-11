@@ -183,7 +183,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   })
 
   // Conversations (M0 direct-chat preview)
-  api.get('/conversations', c => c.json({ conversations: conversations.list() }))
+  api.get('/conversations', c => c.json({ conversations: conversations.list(c.req.query('archived') === '1') }))
   api.post('/conversations', async c => {
     const input = await body(c, z.object({ title: z.string().trim().min(1).max(80).optional() }).optional().default({}))
     return c.json({ conversation: conversations.create(input.title) }, 201)
@@ -260,7 +260,9 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     try { compacted = session ? await rt.agents.compact(session) : false } catch (error) { throw new HttpError(400, 'model', `整理失败：${(error as Error).message}`) }
     if (!compacted) return c.json({ compacted: false, note: '前面的还不多，不用整理' })
     const messageId = newId('msg')
-    rt.store.db.insert(schema.messages).values({ id: messageId, conversationId: id, role: 'system', content: '前面的聊天已整理', meta: { kind: 'compacted' }, createdAt: Date.now() }).run()
+    const summary = (rt.store.sqlite.prepare("SELECT json_extract(payload, '$.summary') AS s FROM session_events WHERE session_id = ? AND kind = 'compaction' ORDER BY id DESC LIMIT 1").get(ROUTER_SESSION) as { s: string } | undefined)?.s ?? ''
+    const count = (rt.store.sqlite.prepare("SELECT count(*) AS n FROM messages WHERE conversation_id = ? AND role IN ('user', 'assistant')").get(id) as { n: number }).n
+    rt.store.db.insert(schema.messages).values({ id: messageId, conversationId: id, role: 'system', content: '前面的聊天已整理', meta: { kind: 'compacted', count, summary }, createdAt: Date.now() }).run()
     rt.bus.emit({ type: 'message.created', conversationId: id, messageId })
     return c.json({ compacted: true, messageId })
   })

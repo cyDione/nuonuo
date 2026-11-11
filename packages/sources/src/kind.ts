@@ -77,6 +77,8 @@ export interface SourceKind<C = any> {
   routerTools?(ctx: SourceContext<C>): ToolSet
   workerPrompt?(ctx: SourceContext<C>, ticket: Ticket): string | undefined
   workerTools?(ctx: SourceContext<C>, ticket: Ticket, turn: TurnContext): ToolSet
+  /** Worker tools that act in the account (write a draft, add an event): left out while the owner set it to 只能看 in 权限. */
+  writes?: string[]
   workerEnv?(ctx: SourceContext<C>, ticket: Ticket): Record<string, string>
   /**
    * HTTP endpoints of the source, under /api/sources/<id>/http/<path> (owner only) and, when `public` is true, also under

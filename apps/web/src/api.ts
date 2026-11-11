@@ -23,6 +23,18 @@ export const api = {
   del: <T = void>(path: string) => request<T>('DELETE', path),
 }
 
+/** A file the owner attached (+ 添加文件, dropped or pasted into the chat). */
+export interface Upload { id: string; name: string; mime: string; size: number }
+export async function upload(file: File, conversationId?: string): Promise<Upload> {
+  const form = new FormData()
+  form.set('file', file)
+  if (conversationId) form.set('conversation', conversationId)
+  const res = await fetch('/api/uploads', { method: 'POST', credentials: 'same-origin', body: form })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new ApiError(res.status, data?.error?.code ?? 'http', data?.error?.message ?? res.statusText)
+  return data.upload as Upload
+}
+
 // ── Shapes returned by the daemon ────────────────────────────────────────────
 export type ProviderKind = 'anthropic' | 'openai' | 'google' | 'deepseek' | 'openai-compatible' | 'typesafe'
 export interface Preset { id: string; kind: ProviderKind; label: string; baseUrl?: string; keyRequired: boolean; suggestedModels: string[]; docsUrl?: string }
@@ -83,10 +95,10 @@ export type Level = 'allow' | 'review' | 'ask' | 'deny'
 export interface ReviewSettings { external: Level; destructive: Exclude<Level, 'allow'>; mode: 'model' | 'ask'; rules: string[]; allow: string[]; deny: string[] }
 export interface AuditEntry { id: number; at: number; ticketId: string | null; actor: string; action: string; tool: string | null; input: string | null; risk: string | null; decision: string; reason: string | null }
 export interface Persona { name: string; avatar: string; color: string; personality: string; role: 'all' | 'life' | 'work' | 'study'; language: 'zh' | 'en' | 'auto' }
-export interface NotifySettings { message: boolean; price: boolean; feed: boolean; ideas: boolean; banner: boolean; sound: boolean; badge: boolean; quiet: { on: boolean; from: string; to: string } }
+export interface NotifySettings { message: boolean; price: boolean; feed: boolean; ideas: boolean; banner: boolean; sound: boolean; tone: 'nuonuo' | 'system'; badge: boolean; quiet: { on: boolean; from: string; to: string } }
 export interface PrivacySettings { keep: 'forever' | '365' | '90' | '30' }
 export interface UpdatePrefs { auto: boolean; channel: 'stable' | 'beta'; install: boolean }
-export interface Notice { type: 'notice'; id: string; kind: 'message' | 'price' | 'feed' | 'ideas' | 'approval' | 'test'; title: string; body: string; hash: string; silent: boolean }
+export interface Notice { type: 'notice'; id: string; kind: 'message' | 'price' | 'feed' | 'ideas' | 'approval' | 'test'; title: string; body: string; hash: string; silent: boolean; chime: boolean }
 
 export type ServerEvent =
   | { type: 'message.created'; conversationId: string; messageId: string }
@@ -120,13 +132,20 @@ export interface McpServer { name: string; enabled: boolean; transport: 'stdio' 
 export interface McpStatus { name: string; state: 'off' | 'connecting' | 'connected' | 'error'; tools: { name: string; description: string }[]; error?: string }
 export type GoalIcon = 'target' | 'moon' | 'wallet' | 'book' | 'run' | 'dumbbell' | 'heart' | 'music' | 'code' | 'leaf' | 'globe' | 'pen'
 export interface Goal { id: string; title: string; icon: GoalIcon; style: 'amount' | 'days'; unit: string; current: number; target: number; note: string | null
-  headline: { value: string; unit?: string; note?: string } | null; pinned: boolean; status: 'active' | 'done' | 'dropped'; createdAt: number; updatedAt: number }
+  headline: { value: string; unit?: string; note?: string } | null; pinned: boolean; status: 'active' | 'done' | 'dropped'; parentId: string | null; position: number | null; createdAt: number; updatedAt: number }
+export interface GoalStep { title: string; target: number; unit?: string; style?: 'amount' | 'days' }
 export type FeedIcon = 'bell' | 'tag' | 'weather' | 'mail' | 'wifi' | 'plane' | 'calendar' | 'package' | 'chart' | 'news' | 'home' | 'heart'
 export interface FeedItem { id: string; at: number; title: string; text: string; icon: FeedIcon; card: { label?: string; value: number; was?: number; unit?: string; note?: string; series?: number[] } | null
-  action: { label: string; say: string } | null; conversationId: string | null; ticketId: string | null; seen: boolean; dismissed: boolean }
+  action: { label: string; say: string } | null; conversationId: string | null; ticketId: string | null; seen: boolean; dismissed: boolean; reaction: 'up' | 'down' | null; saved: boolean }
 export interface ApprovalCard { title: string; note?: string; rows: { label: string; value: string }[]; confirm: string }
 export type IdeaTone = 'coral' | 'teal' | 'lilac' | 'sky' | 'amber'
 export interface Idea { id: string; kind: string; label: string; text: string; action: string; say: string; tone: IdeaTone; dismissed?: boolean; done?: boolean }
 export interface IdeaBatch { at: number; cards: Idea[]; more: { id: string; text: string; say: string; done?: boolean }[]; seen?: boolean }
 export interface IdeaSettings { cadence: 'daily' | 'weekly' | 'off'; hour: number }
 export interface GoalLogEntry { id: string; goalId: string; at: number; text: string; delta: number | null; goal: string }
+export type AppLevel = 'auto' | 'ask' | 'read' | 'off'
+export type LocalApp = 'calendar' | 'reminders' | 'notes' | 'contacts' | 'photos'
+export interface AccessSettings { folders: { path: string; write: boolean }[]; never: string[]; locked: string[]; apps: Record<LocalApp, AppLevel>; sources: Record<string, 'read' | 'act'> }
+export interface Skill { id: string; name: string; when: string; steps: string; enabled: boolean; by: 'owner' | 'assistant'; createdAt: number; updatedAt: number }
+export interface BrowserStep { n: number; at: number; action: string; url: string; title: string; shot: boolean }
+export interface RoutineRun { id: string; at: number; ok: boolean; outcome: { tone: string; text: string }; reply: { id: string; text: string; conversationId: string } | null; ticket: { id: string; title: string; stage: Stage } | null }

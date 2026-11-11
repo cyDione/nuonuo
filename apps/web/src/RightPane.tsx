@@ -6,9 +6,11 @@
  * On narrower windows the same pane opens as a drawer, and on phones as a sheet from the bottom.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Brain, ChevronDown, CreditCard, Folder, Globe, Lock, Plus, ScrollText, Send, Shield, ShieldCheck, Smile, Trash2, X } from 'lucide-react'
+import { Activity, Ban, Brain, CalendarDays, ChevronDown, Cloud, CreditCard, FileText, Folder, GitBranch, Globe, Image, ListChecks, Lock, Mail, Plus, ScrollText, Send, Shield, ShieldCheck, Smile, Trash2, Users, X } from 'lucide-react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { api, type AuditEntry, type ExecutionSettings, type InstructionsState, type Level, type Persona, type ReviewSettings, type Routine, type Ticket } from './api'
+import { api, type AccessSettings, type AppLevel, type AuditEntry, type ExecutionSettings, type InstructionsState, type Level, type LocalApp, type Persona, type ReviewSettings, type Routine, type SourceInfo, type Ticket } from './api'
+import { BrowserWatch } from './watch'
+import { SkillsSection } from './skills'
 import { openActivity, openTask, useActivityOpen, useLive } from './live'
 import { Avatar, isMascot, Mascot, MASCOT, statusLine, usePersona } from './persona'
 import { go } from './route'
@@ -103,11 +105,14 @@ function ActivityTab() {
     </section>}
     {going.length > 0 && <section>
       <Head title="正在做" count={going.length} />
-      <div className="space-y-3">{going.map(t => <button key={t.id} onClick={() => openTask(t.id)} className="block w-full text-left">
-        <span className="block truncate text-sm font-semibold">{t.title}</span>
-        {t.latestReport?.summary && <span className="mt-0.5 block truncate text-xs text-muted">{t.latestReport.summary}</span>}
-        {t.stage === 'working' ? <span className="progress mt-2 block h-1" /> : <span className="mt-2 block h-1 rounded-full bg-sunken" />}
-      </button>)}</div>
+      <div className="space-y-3">{going.map(t => <div key={t.id}>
+        <button onClick={() => openTask(t.id)} className="block w-full text-left">
+          <span className="block truncate text-sm font-semibold">{t.title}</span>
+          {t.latestReport?.summary && <span className="mt-0.5 block truncate text-xs text-muted">{t.latestReport.summary}</span>}
+          {t.stage === 'working' ? <span className="progress mt-2 block h-1" /> : <span className="mt-2 block h-1 rounded-full bg-sunken" />}
+        </button>
+        <BrowserWatch t={t} />
+      </div>)}</div>
     </section>}
     {next.length > 0 && <section>
       <Head title="接下来" count={next.length} />
@@ -199,6 +204,7 @@ function WhoTab() {
       </div>
       <p className="mt-2.5 text-[11px] text-faint">点开看全文，可以直接改。</p>
     </section>
+    <SkillsSection Head={Head} LinkBtn={LinkBtn} />
     {pending.length > 0 && <section className="rounded-2xl bg-sunken px-3.5 py-3">
       <Head title="新学到的，等你确认" count={pending.length} />
       <div className="space-y-2.5">{pending.slice(0, 5).map(m => <div key={m.id} className="flex items-start gap-3 text-sm">
@@ -277,7 +283,6 @@ function PermissionsTab() {
     mutationFn: (workspaceRoots: string[]) => api.put('/settings/execution', { ...execution!, workspaceRoots }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['execution'] }),
   })
-  const [adding, setAdding] = useState<string | null>(null)
   const [rules, setRules] = useState<string | null>(null)
   const [log, setLog] = useState(false)
   const week = audit.filter(e => e.at > Date.now() - 7 * 86_400_000)
@@ -311,21 +316,9 @@ function PermissionsTab() {
       </div>)}</div>}
       <p className="mt-3 text-[11px] leading-5 text-faint">「花钱」这一条锁着，永远先问你。其他的点一下就能改，审批卡上点「以后这类直接做」也会记在这里。</p>
     </section>
-    <section className="border-t border-line pt-5">
-      <Head title="它能碰的文件夹" action={adding == null && execution && <LinkBtn onClick={() => setAdding('')}><span className="flex items-center gap-0.5"><Plus size={12} />加一个</span></LinkBtn>} />
-      <div className="space-y-1">
-        <Row icon={<Folder size={16} />} label="每件事自己的工作目录"><span className="px-3 text-xs text-muted">能改</span></Row>
-        {execution?.workspaceRoots.map(r => <Row key={r} icon={<Folder size={16} />} label={<span className="font-mono text-[13px]">{r}</span>}>
-          <button onClick={() => setRoots.mutate(execution.workspaceRoots.filter(x => x !== r))} aria-label={`不再允许 ${r}`} className="press flex size-7 items-center justify-center rounded-full text-faint hover:bg-sunken hover:text-fg"><X size={14} /></button>
-        </Row>)}
-      </div>
-      {adding != null && <form className="mt-2 flex gap-1.5" onSubmit={e => { e.preventDefault(); const v = adding.trim(); if (v && execution && !execution.workspaceRoots.includes(v)) setRoots.mutate([...execution.workspaceRoots, v]); setAdding(null) }}>
-        <input autoFocus value={adding} onChange={e => setAdding(e.target.value)} placeholder="~/code" aria-label="文件夹路径"
-          className="h-8 min-w-0 flex-1 rounded-full border border-line bg-panel px-3 font-mono text-[13px] outline-none focus:border-faint" />
-        <button type="submit" className="press h-8 rounded-full bg-ink px-3 text-[13px] font-medium text-ink-fg">加上</button>
-      </form>}
-      <p className="mt-2 text-[11px] leading-5 text-faint">你在对话里点名这些文件夹时，它可以直接在里面做事。</p>
-    </section>
+    <FoldersSection execution={execution} onRoots={roots => setRoots.mutate(roots)} />
+    <AppsSection />
+    <AccountsSection />
     {forTask.length > 0 && <section className="border-t border-line pt-5">
       <Head title="这件事里你都同意过的" count={forTask.length} />
       <div className="space-y-1">{forTask.map(g => <div key={g.id} className="flex items-center gap-2.5 py-1.5 text-sm">
@@ -372,12 +365,137 @@ function PermissionsTab() {
   </div>
 }
 
-function Row({ icon, label, children }: { icon: React.ReactNode; label: React.ReactNode; children: React.ReactNode }) {
+function Row({ icon, label, sub, children, tone }: { icon: React.ReactNode; label: React.ReactNode; sub?: React.ReactNode; children: React.ReactNode; tone?: 'danger' }) {
   return <div className="flex min-h-11 items-center gap-3">
-    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sunken text-muted">{icon}</span>
-    <span className="min-w-0 flex-1 truncate text-sm">{label}</span>
+    <span className={cx('flex size-8 shrink-0 items-center justify-center rounded-lg bg-sunken', tone === 'danger' ? 'text-accent' : 'text-muted')}>{icon}</span>
+    <span className="min-w-0 flex-1">
+      <span className="block truncate text-sm">{label}</span>
+      {sub && <span className="block truncate text-[11px] text-faint">{sub}</span>}
+    </span>
     {children}
   </div>
+}
+
+/** A small select that reads like a pill: 直接做 ⌄. */
+function Pick<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: string }[]; onChange(v: T): void; label: string }) {
+  return <span className="relative shrink-0">
+    <select value={value} onChange={e => onChange(e.target.value as T)} aria-label={label}
+      className="h-7 cursor-pointer appearance-none rounded-full bg-sunken pr-7 pl-3 text-xs font-medium outline-none hover:bg-hero-2 focus-visible:ring-2 focus-visible:ring-accent">
+      {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+    </select>
+    <ChevronDown size={12} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-muted" />
+  </span>
+}
+
+function useAccess() {
+  const qc = useQueryClient()
+  const query = useQuery({ queryKey: ['access'], queryFn: () => api.get<{ settings: AccessSettings; platform: string }>('/settings/access') })
+  const save = useMutation({
+    mutationFn: (patch: Partial<AccessSettings>) => api.put<{ settings: AccessSettings }>('/settings/access', patch),
+    onMutate: patch => { qc.setQueryData<{ settings: AccessSettings; platform: string }>(['access'], old => old && { ...old, settings: { ...old.settings, ...patch } }) },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['access'] }),
+  })
+  return { settings: query.data?.settings, platform: query.data?.platform, save }
+}
+
+const short = (p: string) => p.replace(/\/+$/, '').split('/').filter(Boolean).slice(-2).join(' / ') || p
+
+/**
+ * 文件夹 (Figma section 25, D): 能看的 (only look, or also change) and 永远不碰. Keys and credentials are never-touch by
+ * default and locked. A folder it may change is also where it may start work.
+ */
+function FoldersSection({ execution, onRoots }: { execution: ExecutionSettings | undefined; onRoots(roots: string[]): void }) {
+  const { settings, save } = useAccess()
+  const [adding, setAdding] = useState<{ path: string; kind: 'read' | 'write' | 'never' } | null>(null)
+  // Folders that were allowed before 权限 had its own list (执行环境's work folders) show here as 能改.
+  useEffect(() => {
+    if (!settings || !execution) return
+    const missing = execution.workspaceRoots.filter(r => !settings.folders.some(f => f.path === r))
+    if (missing.length) save.mutate({ folders: [...settings.folders, ...missing.map(path => ({ path, write: true }))] })
+  }, [Boolean(settings), Boolean(execution)])
+  if (!settings) return null
+  const setFolders = (folders: AccessSettings['folders']) => {
+    save.mutate({ folders })
+    onRoots(folders.filter(f => f.write).map(f => f.path))
+  }
+  const add = () => {
+    if (!adding) return
+    const path = adding.path.trim()
+    if (path) {
+      if (adding.kind === 'never') { if (!settings.never.includes(path)) save.mutate({ never: [...settings.never, path] }) }
+      else if (!settings.folders.some(f => f.path === path)) setFolders([...settings.folders, { path, write: adding.kind === 'write' }])
+    }
+    setAdding(null)
+  }
+  return <section className="border-t border-line pt-5">
+    <Head title="文件夹" action={adding == null && <LinkBtn onClick={() => setAdding({ path: '', kind: 'read' })}><span className="flex items-center gap-0.5"><Plus size={12} />添加</span></LinkBtn>} />
+    <div className="mb-1 text-[11px] text-faint">能看的</div>
+    <div className="space-y-1">
+      {!settings.folders.length && <p className="py-1 text-xs text-faint">还没有。它只在每件事自己的工作目录里做事。</p>}
+      {settings.folders.map(f => <Row key={f.path} icon={<Folder size={16} />} label={short(f.path)} sub={f.path}>
+        <Pick value={f.write ? 'write' : 'read'} label={`${f.path} 的权限`} onChange={v => v === 'remove' ? setFolders(settings.folders.filter(x => x.path !== f.path)) : setFolders(settings.folders.map(x => x.path === f.path ? { ...x, write: v === 'write' } : x))}
+          options={[{ id: 'read', label: '只能看' }, { id: 'write', label: '能改' }, { id: 'remove', label: '不让碰了' }]} />
+      </Row>)}
+    </div>
+    <div className="mt-3 mb-1 text-[11px] text-faint">永远不碰</div>
+    <div className="space-y-1">
+      {settings.never.map(p => <Row key={p} icon={<Ban size={16} />} tone="danger" label={short(p)} sub={p}>
+        <button onClick={() => save.mutate({ never: settings.never.filter(x => x !== p) })} aria-label={`不再禁止 ${p}`} className="press flex size-7 items-center justify-center rounded-full text-faint hover:bg-sunken hover:text-fg"><X size={14} /></button>
+      </Row>)}
+      <Row icon={<Ban size={16} />} tone="danger" label="钥匙串和密钥" sub={settings.locked.slice(0, 3).join(' · ')}>
+        <span className="flex h-7 items-center gap-1 px-3 text-xs" title={settings.locked.join('\n')}>默认<Lock size={12} /></span>
+      </Row>
+    </div>
+    {adding != null && <form className="anim-rise mt-2 space-y-1.5" onSubmit={e => { e.preventDefault(); add() }}>
+      <input autoFocus value={adding.path} onChange={e => setAdding({ ...adding, path: e.target.value })} placeholder="~/Documents/工作" aria-label="文件夹路径"
+        className="h-8 w-full rounded-full border border-line bg-panel px-3 font-mono text-[13px] outline-none focus:border-faint" />
+      <div className="flex items-center gap-1.5">
+        <Pick value={adding.kind} label="这个文件夹" onChange={kind => setAdding({ ...adding, kind })} options={[{ id: 'read', label: '只能看' }, { id: 'write', label: '能改' }, { id: 'never', label: '永远不碰' }]} />
+        <span className="flex-1" />
+        <button type="button" onClick={() => setAdding(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">取消</button>
+        <button type="submit" className="press h-8 rounded-full bg-ink px-3 text-[13px] font-medium text-ink-fg">加上</button>
+      </div>
+    </form>}
+  </section>
+}
+
+const APPS: { id: LocalApp; label: string; icon: React.ReactNode }[] = [
+  { id: 'calendar', label: '日历', icon: <CalendarDays size={16} /> }, { id: 'reminders', label: '提醒事项', icon: <ListChecks size={16} /> },
+  { id: 'notes', label: '备忘录', icon: <FileText size={16} /> }, { id: 'contacts', label: '通讯录', icon: <Users size={16} /> }, { id: 'photos', label: '照片', icon: <Image size={16} /> },
+]
+const APP_LEVELS: { id: AppLevel; label: string }[] = [{ id: 'auto', label: '直接做' }, { id: 'ask', label: '先问你' }, { id: 'read', label: '只能看' }, { id: 'off', label: '不允许' }]
+const APP_SUB: Partial<Record<AppLevel, string>> = { ask: '看直接看，改要问你' }
+
+/** 电脑上的 App: each of the owner's own apps at one level. Off a Mac only 日历 is here, through Google Calendar. */
+function AppsSection() {
+  const { settings, platform, save } = useAccess()
+  if (!settings) return null
+  const mac = platform === 'darwin'
+  const apps = mac ? APPS : APPS.filter(a => a.id === 'calendar')
+  return <section className="border-t border-line pt-5">
+    <Head title={mac ? '电脑上的 App' : '日历'} />
+    <div className="space-y-1">{apps.map(a => <Row key={a.id} icon={a.icon} label={mac ? a.label : 'Google 日历'} sub={mac ? APP_SUB[settings.apps[a.id]] : '在 设置 · 来源 连上 Gmail 就能用'}>
+      <Pick value={settings.apps[a.id]} label={a.label} options={APP_LEVELS} onChange={level => save.mutate({ apps: { ...settings.apps, [a.id]: level } })} />
+    </Row>)}</div>
+    {mac && <p className="mt-2 text-[11px] leading-5 text-faint">第一次用某个 App 时，macOS 会再问你一次。</p>}
+  </section>
+}
+
+const SOURCE_ICON: Record<string, React.ReactNode> = { gmail: <Mail size={16} />, github: <GitBranch size={16} />, gdrive: <Cloud size={16} /> }
+const SOURCE_SUB: Record<string, string> = { gmail: '发邮件仍然每次问你', github: '发评论、推代码按上面的「往外发」' }
+
+/** 连接的账号: what it may do in each account the owner connected (connecting happens in 设置 · 来源). */
+function AccountsSection() {
+  const { settings, save } = useAccess()
+  const sources = (useQuery({ queryKey: ['sources'], queryFn: () => api.get<{ sources: SourceInfo[] }>('/sources') }).data?.sources ?? []).filter(x => x.enabled && x.id !== 'cron')
+  if (!settings || !sources.length) return null
+  return <section className="border-t border-line pt-5">
+    <Head title="连接的账号" />
+    <div className="space-y-1">{sources.map(x => <Row key={x.id} icon={SOURCE_ICON[x.id] ?? <Globe size={16} />} label={x.title} sub={SOURCE_SUB[x.id]}>
+      <Pick value={settings.sources[x.id] ?? 'act'} label={x.title} options={[{ id: 'read', label: '只能看' }, { id: 'act', label: '能操作' }]}
+        onChange={v => save.mutate({ sources: { ...settings.sources, [x.id]: v } })} />
+    </Row>)}</div>
+  </section>
 }
 
 function LevelPick({ value, options, onChange, label }: { value: Level; options: Level[]; onChange(v: Level): void; label: string }) {

@@ -8,7 +8,8 @@ import { api, type IdeaSettings, type NotifySettings } from '../api'
 import { notificationsEnabled, setNotifications } from '../live'
 import { usePersona } from '../persona'
 import { desktop, isMacDesktop } from '../shell'
-import { Btn, Page, Row, Section, Toggle } from './kit'
+import { Btn, Page, Row, Section, SelectInput, Toggle } from './kit'
+import { playChime } from '../sounds'
 import { useNotify } from './hooks'
 
 const CADENCE: Record<IdeaSettings['cadence'], string> = { daily: '每天早上一批', weekly: '每周一批', off: '点子已经关了' }
@@ -27,7 +28,7 @@ export function Notifications() {
   })
   const s = notify.data?.settings
   if (!s) return <Page title="通知"><div /></Page>
-  const toggle = (key: keyof Omit<NotifySettings, 'quiet'>, label: string, sub?: string) =>
+  const toggle = (key: keyof Omit<NotifySettings, 'quiet' | 'tone'>, label: string, sub?: string) =>
     <Row label={label} sub={sub}><Toggle label={label} checked={s[key]} onChange={v => notify.save({ [key]: v })} /></Row>
   return <Page title="通知">
     {!desktop && <Section title="这个浏览器" foot="网页在后台时，用系统通知告诉你；在前台时不打扰。">
@@ -45,6 +46,14 @@ export function Notifications() {
     <Section title="怎么叫你" foot="安静时间在「主动」里设，那段时间只有等你确认的事会叫你。">
       {toggle('banner', '横幅', '关掉后只有等你确认的事会弹出来')}
       {toggle('sound', '声音')}
+      {s.sound && <Row label="提示音" sub={s.tone === 'nuonuo' ? `${persona.name}自己的声音：说话升两个音，等你确认的升三个` : '用系统的通知声音'}>
+        <span className="flex items-center gap-2">
+          {s.tone === 'nuonuo' && <Btn onClick={() => playChime('message')}>试听</Btn>}
+          <SelectInput value={s.tone} onChange={e => notify.save({ tone: e.target.value as NotifySettings['tone'] })}>
+            <option value="nuonuo">{persona.name}的</option><option value="system">系统的</option>
+          </SelectInput>
+        </span>
+      </Row>}
       {desktop && toggle('badge', isMacDesktop ? 'Dock 图标上的数字' : '任务栏图标上的数字', '有几件事在等你')}
       <Row label="试一下" sub={test.error ? <span className="text-danger">{(test.error as Error).message}</span> : test.isSuccess ? `发出去了${!desktop ? '；看不到的话，检查一下系统的通知设置' : ''}` : undefined}>
         <Btn disabled={test.isPending || (!desktop && !supported)} onClick={() => test.mutate()}>发一条测试通知</Btn>

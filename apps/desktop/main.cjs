@@ -154,6 +154,7 @@ function refreshTray() {
     { label: attention ? `等你点头：${attention} 件` : '没有等你点头的事', enabled: attention > 0, click: () => show('/waiting') },
     { type: 'separator' },
     { label: '设置…', click: () => show('/settings/persona') },
+    updateItem(),
     { type: 'separator' },
     { label: '退出（后台服务继续运行）', click: () => { quitting = true; app.quit() } },
     { label: '退出并停止后台服务', click: () => { stopDaemon(); quitting = true; app.quit() } },
@@ -224,6 +225,26 @@ function showNotice(notice) {
   const n = new Notification({ title: notice.title || 'Super-assistant', body: notice.body, silent: Boolean(notice.silent) })
   n.on('click', () => show(notice.hash))
   n.show()
+  // 糯糯's own sound (设置 → 通知 → 提示音) is played by the page, which keeps running while the window is hidden.
+  if (notice.chime && win && !win.isDestroyed()) win.webContents.executeJavaScript(`window.__saChime?.(${JSON.stringify(notice.kind)})`).catch(() => {})
+}
+
+/** 检查更新 in the tray: asks the service; a newer version turns the item into 「更新到 vX」, which opens 系统和更新. */
+let update = { checking: false, latest: null, error: false }
+async function checkUpdate() {
+  update = { ...update, checking: true, error: false }; refreshTray()
+  try {
+    const status = await api('/api/update/check', { method: 'POST' })
+    update = { checking: false, latest: status.available && status.latest ? status.latest.version : null, error: Boolean(status.checkError) }
+    if (!update.latest && !update.error && Notification.isSupported()) new Notification({ title: 'Super-assistant', body: `已经是最新版本（${status.current}）`, silent: true }).show()
+  } catch { update = { ...update, checking: false, error: true } }
+  refreshTray()
+  if (update.latest) show('/settings/system')
+}
+function updateItem() {
+  if (update.checking) return { label: '正在检查更新…', enabled: false }
+  if (update.latest) return { label: `更新到 v${update.latest}…`, click: () => show('/settings/system') }
+  return { label: update.error ? '检查更新（上次没连上）' : '检查更新…', click: () => void checkUpdate() }
 }
 
 ipcMain.on('badge', (_e, count) => { attention = Number(count) || 0; refreshTray() })

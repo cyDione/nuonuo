@@ -1,5 +1,6 @@
 /** One EventSource per tab: keeps react-query caches fresh and holds the transient state (streaming replies, live worker text). */
 import { useQueryClient } from '@tanstack/react-query'
+import { playChime } from './sounds'
 import { useEffect, useSyncExternalStore } from 'react'
 import type { Notice, ServerEvent } from './api'
 import { getPrefs } from './prefs'
@@ -159,6 +160,7 @@ function showNotice(n: Notice) {
   if (n.kind !== 'test' && document.visibilityState === 'visible') return
   try {
     const note = new Notification(n.title || 'Super-assistant', { body: n.body, tag: n.id, silent: n.silent })
+    if (n.chime) playChime(n.kind)
     note.onclick = () => { window.focus(); location.hash = n.hash; note.close() }
   } catch { /* best effort */ }
 }

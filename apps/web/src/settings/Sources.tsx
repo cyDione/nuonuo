@@ -1,6 +1,8 @@
 /**
  * 来源 (Figma 21 · 03): where it hears from and answers in. The list with each one's state; the open one's own settings
  * below it: on/off, 主动留意这里 (its events go through the proactive strategy), the account, its fields, and syncing.
+ * Figma section 25, H2: 已经连上的 say only how syncing goes; 还能连 offer 连接. What each account may do (只能看 / 能操作)
+ * lives only in the right pane's 权限.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, ExternalLink, RefreshCw } from 'lucide-react'
@@ -8,6 +10,15 @@ import { useEffect, useState } from 'react'
 import { api, type FieldSpec, type ProactiveSettings, type SourceAction, type SourceInfo } from '../api'
 import { SourceIcon } from '../icons'
 import { Area, Block, Btn, Foot, NumberInput, Page, Pill, Row, SaveBar, Section, SelectInput, TextInput, Toggle } from './kit'
+
+/** 「刚刚同步」, 「2 分钟前同步」, 「出错」…: how syncing goes, said in a few words. */
+function syncing(s: SourceInfo) {
+  if (s.health.status === 'error') return <span className="text-danger">出错了</span>
+  if (s.health.status === 'starting') return '在连…'
+  if (s.id === 'cron' || !s.health.at) return s.health.status === 'ok' ? '在线' : HEALTH[s.health.status].label
+  const min = Math.floor((Date.now() - s.health.at) / 60_000)
+  return min < 1 ? '刚刚同步' : min < 60 ? `${min} 分钟前同步` : min < 1440 ? `${Math.floor(min / 60)} 小时前同步` : `${Math.floor(min / 1440)} 天前同步`
+}
 
 const HEALTH: Record<SourceInfo['health']['status'], { tone: 'neutral' | 'ok' | 'warn' | 'danger'; label: string }> = {
   off: { tone: 'neutral', label: '没打开' }, starting: { tone: 'warn', label: '启动中' }, ok: { tone: 'ok', label: '运行中' }, error: { tone: 'danger', label: '出错' },
@@ -17,14 +28,20 @@ export function Sources({ item }: { item?: string }) {
   const sources = useQuery({ queryKey: ['sources'], queryFn: () => api.get<{ sources: SourceInfo[] }>('/sources'), refetchInterval: 10_000 })
   const list = sources.data?.sources ?? []
   const open = item ? list.find(x => x.id === item) : undefined
+  const on = list.filter(s => s.enabled), off = list.filter(s => !s.enabled)
+  const href = (s: SourceInfo) => `#/settings/sources/${encodeURIComponent(s.id)}`
   return <Page title="来源">
-    <Section foot="它从这些地方接收事件，也在原处回复。在 GitHub 上用唤起词叫它，它用你的账号回复并带上机器人标记。">
-      {list.map(s => { const h = HEALTH[s.health.status]
-        return <Row key={s.id} href={`#/settings/sources/${encodeURIComponent(s.id)}`} icon={<SourceIcon source={s.id} size={18} />} label={s.title}
-          sub={<span className="line-clamp-1">{s.health.status === 'error' && s.health.detail ? <span className="text-danger">{s.health.detail}</span> : s.description}</span>}>
-          <Pill tone={h.tone}>{h.label}</Pill>
-        </Row> })}
-    </Section>
+    {on.length > 0 && <Section title="已经连上的" foot={off.length ? undefined : '连上以后，每个账号能做到哪一步（只能看 / 能操作）在右侧栏「权限」里改。'}>
+      {on.map(s => <Row key={s.id} href={href(s)} icon={<SourceIcon source={s.id} size={18} />} label={s.title}
+        sub={<span className="line-clamp-1">{s.health.status === 'error' && s.health.detail ? <span className="text-danger">{s.health.detail}</span> : s.description}</span>}>
+        <span className="text-[13px] text-muted tabular-nums">{syncing(s)}</span>
+      </Row>)}
+    </Section>}
+    {off.length > 0 && <Section title={on.length ? '还能连' : undefined} foot="连上以后，每个账号能做到哪一步（只能看 / 能操作）在右侧栏「权限」里改。">
+      {off.map(s => <Row key={s.id} icon={<SourceIcon source={s.id} size={18} />} label={s.title} sub={<span className="line-clamp-1">{s.description}</span>}>
+        <a href={href(s)} className="inline-flex h-[28px] shrink-0 items-center rounded-full border border-line bg-card px-4 text-[13px] font-medium hover:border-faint">连接</a>
+      </Row>)}
+    </Section>}
     {item && sources.isSuccess && !open && <Foot>找不到来源「{item}」。</Foot>}
     {open && <SourceDetail key={open.id} s={open} />}
   </Page>

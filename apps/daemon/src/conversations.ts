@@ -12,7 +12,7 @@ export const DEFAULT_TITLE = '新对话'
 export class Conversations {
   constructor(private store: Store, private hub: ModelHub) {}
 
-  list(): (Conversation & { lastMessage: string | null })[] {
+  list(archived = false): (Conversation & { lastMessage: string | null })[] {
     // Unread: something the owner did not write arrived after they last looked.
     return this.store.sqlite.prepare(`SELECT c.id, c.title, c.pinned, c.archived, c.source, c.origin, c.meta, c.thread_id AS threadId,
         c.created_at AS createdAt, c.updated_at AS updatedAt, c.last_read_at AS lastReadAt,
@@ -20,7 +20,7 @@ export class Conversations {
           ORDER BY created_at DESC LIMIT 1) AS lastMessage,
         (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id AND m.created_at > c.last_read_at
           AND NOT (m.role = 'user' AND coalesce(json_extract(m.meta, '$.source'), 'webchat') = 'webchat')) AS unread
-      FROM conversations c WHERE c.archived = 0 ORDER BY json_extract(c.meta, '$.main') IS 1 DESC, c.pinned DESC, c.updated_at DESC`).all()
+      FROM conversations c WHERE c.archived = ? ORDER BY json_extract(c.meta, '$.main') IS 1 DESC, c.pinned DESC, c.updated_at DESC`).all(archived ? 1 : 0)
       .map((row: any) => ({ ...row, pinned: Boolean(row.pinned), archived: Boolean(row.archived), meta: JSON.parse(row.meta ?? '{}') }))
   }
 
