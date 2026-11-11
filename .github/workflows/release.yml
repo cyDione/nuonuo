@@ -10,6 +10,8 @@ name: Release
 # version. It checks every package is already at that version (pnpm set-version, merged first), builds all six
 # packages from the chosen commit, and only when every build passed creates the v<version> tag and the Release.
 # A tag or Release made with the workflow token starts no other workflow, so the build happens in this same run.
+# With rebuild on, the version must already be released: the packages are built again from its tag and uploaded to
+# its Release, replacing any that are there (for a release whose build stopped).
 # Without a version, a manual run only builds the packages (as on pull requests).
 
 on:
@@ -19,6 +21,10 @@ on:
         description: 'Version to release, e.g. 0.2.2 (empty: build only, publish nothing)'
         required: false
         default: ''
+      rebuild:
+        description: 'Rebuild an existing release from its tag and upload the packages to it'
+        type: boolean
+        default: false
       notes:
         description: 'Release notes in Markdown (empty: generated from the merged pull requests)'
         required: false
@@ -51,21 +57,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
+          REBUILD: ${{ inputs.rebuild }}
         run: |
           tag=""
+          sha="$GITHUB_SHA"
           if [ "$GITHUB_REF_TYPE" = tag ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
             tag="$GITHUB_REF_NAME"
           elif [ -n "$VERSION" ]; then
             version="${VERSION#v}"
             [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::not a version: $VERSION"; exit 1; }
             tag="v$version"
-            # Never release a version twice: an existing tag or Release stops the run before anything is built.
-            if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then echo "::error::tag $tag already exists"; exit 1; fi
-            if gh release view "$tag" >/dev/null 2>&1; then echo "::error::release $tag already exists"; exit 1; fi
+            if [ "$REBUILD" = true ]; then
+              # Build what the tag points at, not the branch the run was started from.
+              sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)" || { echo "::error::no tag $tag to rebuild"; exit 1; }
+              gh release view "$tag" >/dev/null 2>&1 || { echo "::error::no release $tag to rebuild"; exit 1; }
+            else
+              # Never release a version twice: an existing tag or Release stops the run before anything is built.
+              if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then echo "::error::tag $tag already exists"; exit 1; fi
+              if gh release view "$tag" >/dev/null 2>&1; then echo "::error::release $tag already exists"; exit 1; fi
+            fi
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
-          echo "release: ${tag:-none}, commit $GITHUB_SHA"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "release: ${tag:-none}, commit $sha"
 
   linux:
     name: linux-${{ matrix.arch }}
@@ -129,7 +143,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-14, os: mac, arch: arm64 }
+          - { runner: macos-15, os: mac, arch: arm64 }  # macos-14 jobs are cancelled before they start (image retired)
           - { runner: macos-15-intel, os: mac, arch: x64 }
           - { runner: windows-2025, os: win, arch: x64 }
           - { runner: windows-11-arm, os: win, arch: arm64 }
