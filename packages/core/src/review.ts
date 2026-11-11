@@ -180,7 +180,11 @@ export class Reviewer {
 
   /** Decides on a shell command a worker wants to run. */
   async gateShell(ticket: Ticket, sessionId: string, command: string, cwd: string): Promise<GateDecision> {
-    const { risk, reasons } = classifyShell(command)
+    let { risk, reasons } = classifyShell(command)
+    // Without the Docker sandbox the shell can reach any file, so a command that writes outside the task's directory
+    // and the folders allowed for changing is not "normal": it goes through the review like sending something out.
+    const outside = risk === 'normal' && !this.sandboxed?.(ticket) ? this.access?.shellWritesOutside(command, cwd) : undefined
+    if (outside) { risk = 'external'; reasons = [`改动工作目录和允许的文件夹以外的文件（${outside}）`] }
     const settings = this.settings()
     const matches = (patterns: string[]) => patterns.find(p => { try { return new RegExp(p).test(command) } catch { return false } })
     const denied = matches(settings.deny)
@@ -346,6 +350,8 @@ export class Reviewer {
   envFor?: (ticket: Ticket) => Record<string, string>
   /** The owner's never-touch folders (权限 → 文件夹), enforced on shell commands too. */
   access?: LocalAccess
+  /** Whether a task's shell runs in the Docker sandbox (which sees only its directory and the allowed folders). */
+  sandboxed?: (ticket: Ticket) => boolean
 
   private escalate(ticket: Ticket, sessionId: string, command: string, cwd: string, risk: Risk, reason: string): GateDecision {
     return this.escalateAction(ticket, sessionId, 'shell', command, { command, cwd, env: this.envFor?.(ticket) ?? {} }, risk, reason)

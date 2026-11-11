@@ -6,8 +6,8 @@
 import type { AgentRuntime, Bus } from '@super-assistant/agent-runtime'
 import { kvGet, kvSet, newId, schema, type Store } from '@super-assistant/db'
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
-import { mkdirSync, statSync } from 'node:fs'
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fastPath, proactiveSettings, saveProactiveSettings, type FilterVerdict, type ProactiveMode } from './proactive'
 import { DEFAULT_SANDBOX, type SandboxSettings } from './sandbox'
 import { sourceOfThread, webchatThread, type Attention, type Ended, type HumanAction, type IncomingTrigger, type Mandate, type Report, type ReportStatus, type SourcePort, type Ticket, type TicketStage } from './model'
@@ -844,8 +844,9 @@ export class Engine {
 
   private chooseDirectory(requested: string | undefined, name: string): string {
     if (!requested) return join(this.workRoot, name)
-    const target = resolve(requested.replace(/^~(?=$|\/)/, process.env.HOME ?? '~'))
-    const roots = this.execution().workspaceRoots.map(r => resolve(r.replace(/^~(?=$|\/)/, process.env.HOME ?? '~')))
+    // Compared after resolving symlinks: a link inside an allowed root must not lead the task outside it.
+    const target = realish(resolve(requested.replace(/^~(?=$|\/)/, process.env.HOME ?? '~')))
+    const roots = this.execution().workspaceRoots.map(r => realish(resolve(r.replace(/^~(?=$|\/)/, process.env.HOME ?? '~'))))
     if (!roots.some(root => target === root || target.startsWith(root + sep))) {
       throw new DomainError('invalid', `目录 ${requested} 不在允许的工作目录内（设置 → 执行 → 允许的工作目录：${roots.join(', ') || '未设置'}）`)
     }
@@ -865,6 +866,13 @@ export class Engine {
   changed(ticketId: string): void {
     this.bus.emit({ type: 'ticket.updated', ticketId })
   }
+}
+
+/** The real path of `path`, or of its deepest existing ancestor joined with the rest (the directory may not exist yet). */
+function realish(path: string): string {
+  let existing = path
+  while (!existsSync(existing) && dirname(existing) !== existing) existing = dirname(existing)
+  try { return join(realpathSync(existing), relative(existing, path)) } catch { return path }
 }
 
 export const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n)}…` : text)

@@ -55,13 +55,29 @@ export interface RuntimeOptions {
   compactAtTokens?: number
   /** Messages kept verbatim at the end of a compacted history. */
   keepRecent?: number
+  /**
+   * A model step that streams nothing for this long (while no tool is running) is aborted as hung: a gateway that holds
+   * the connection open would otherwise keep the session `running` forever, with every new input waiting behind it.
+   */
+  stepIdleMs?: number
 }
+
+/** A model step that went quiet for too long; retried like a dropped connection. */
+export class StepTimeoutError extends Error {
+  /** `toolsRan`: a tool already ran in this step, so running the step again could repeat it (not retried). */
+  constructor(ms: number, readonly toolsRan = false) { super(`模型 ${Math.round(ms / 1000)} 秒没有响应`) }
+}
+
+/** A tool call that started but whose result was never recorded (the service stopped mid-step). */
+export interface InterruptedCall { tool: string; input: string }
 
 export class AgentRuntime {
   readonly blobs: Blobs
   readonly jobs: Jobs
   private defs = new Map<string, AgentDefinition>()
   private running = new Map<string, AbortController>()
+  /** Consecutive failed turns per session, for the back-off before waking it again. */
+  private failures = new Map<string, number>()
   private queue: { sessionId: string; human: boolean }[] = []
   private workerTurns = 0
   private stopped = false
@@ -70,7 +86,7 @@ export class AgentRuntime {
   readonly options: Required<RuntimeOptions>
 
   constructor(private store: Store, private hub: ModelHub, readonly bus: Bus, options: RuntimeOptions = {}) {
-    this.options = { maxWorkers: 3, compactAtTokens: 120_000, keepRecent: 12, ...options }
+    this.options = { maxWorkers: 3, compactAtTokens: 120_000, keepRecent: 12, stepIdleMs: 180_000, ...options }
     this.blobs = new Blobs(store)
     this.jobs = new Jobs(store, (sessionId, result, command) => this.jobFinished(sessionId, result, command))
     this.registerResolver('blob', (ref, page) => {
@@ -230,15 +246,24 @@ export class AgentRuntime {
     let steps = 0
     let lastText = ''
     let stepLimit = false
+    let failed = false
     try {
       const maxSteps = def.maxSteps ?? 100
       for (;;) {
         if (controller.signal.aborted) break
-        const items = this.take(session.id)
+        const items = this.pending(session.id)
         if (items.length) {
+          // Rendered first, then taken and written to the history in one transaction: an input is either still in the
+          // inbox or in the history, never lost between them (a crash, or a render that throws, leaves it queued).
+          const interrupted = steps === 0 ? this.interruptedCalls(session.id) : []
+          const body = await def.formatInbox(items, session)
           // The current time rides on the new input, not the system prompt: a clock in the system prompt changes the
           // prompt prefix on every step and defeats the provider's prompt cache.
-          this.appendEvent(session.id, 'message', { role: 'user', content: `${await def.formatInbox(items, session)}\n<now>${new Date().toString()}</now>` })
+          const content = `${body}${interrupted.length ? `\n\n${renderInterrupted(interrupted)}` : ''}\n<now>${new Date().toString()}</now>`
+          this.store.atomic(() => {
+            this.markTaken(session.id, items.at(-1)!.id)
+            this.appendEvent(session.id, 'message', { role: 'user', content })
+          })
           this.emit(session, { type: 'session.message' })
         } else if (steps === 0) break
         if (steps >= maxSteps) { stepLimit = true; break }
@@ -259,6 +284,7 @@ export class AgentRuntime {
         this.setState(session, 'idle')
         def.onTurnEnd?.(this.session(session.id) ?? session, { steps, lastText, stepLimit, cancelled: true, runningJobs: 0 })
       } else {
+        failed = true
         this.appendEvent(session.id, 'marker', { type: 'error', message: describeError(error) })
         this.setState(session, 'error')
         this.emit(session, { type: 'session.part', part: { kind: 'error', message: describeError(error) } })
@@ -268,8 +294,12 @@ export class AgentRuntime {
       this.running.delete(session.id)
       if (def.pool === 'worker') this.workerTurns--
       this.next()
-      // Input that arrived after the last check (e.g. while onTurnEnd ran) starts a new turn.
-      if (!this.stopped) this.wake(session.id)
+      // Input that arrived after the last check (e.g. while onTurnEnd ran) starts a new turn. After a failed turn it
+      // waits, longer each time, so an input that keeps failing (a render that throws) cannot spin.
+      const failures = failed ? (this.failures.get(session.id) ?? 0) + 1 : 0
+      if (failures) this.failures.set(session.id, failures); else this.failures.delete(session.id)
+      if (!this.stopped && !failed) this.wake(session.id)
+      else if (!this.stopped) setTimeout(() => this.wake(session.id), Math.min(5_000 * 2 ** (failures - 1), 300_000)).unref?.()
       if (this.running.size === 0 && this.queue.length === 0) for (const resolve of this.idleWaiters.splice(0)) resolve()
     }
   }
@@ -289,12 +319,75 @@ export class AgentRuntime {
   }
 
   private async step(session: SessionRecord, def: AgentDefinition, signal: AbortSignal) {
+    // The step's own abort: the turn's (cancel, shutdown) or the idle timer's (a hung model call).
+    const stepAbort = new AbortController()
+    const onTurnAbort = () => stepAbort.abort(signal.reason)
+    signal.addEventListener('abort', onTurnAbort, { once: true })
+    let toolsRunning = 0
+    let toolsStarted = 0
+    let idle: NodeJS.Timeout | undefined
+    let timedOut = false
+    const arm = () => {
+      clearTimeout(idle)
+      if (toolsRunning > 0) return
+      idle = setTimeout(() => { timedOut = true; stepAbort.abort(new StepTimeoutError(this.options.stepIdleMs)) }, this.options.stepIdleMs)
+    }
     const ctx: TurnContext = { session, signal, runtime: this }
+    const tools = this.trackTools(session.id, def.tools(ctx), {
+      start: () => { toolsRunning++; toolsStarted++; clearTimeout(idle) },
+      end: () => { toolsRunning--; arm() },
+    })
+    arm()
+    try {
+      return await this.streamStep(session, def, tools, stepAbort.signal, arm)
+    } catch (error) {
+      if (timedOut && !signal.aborted) throw new StepTimeoutError(this.options.stepIdleMs, toolsStarted > 0)
+      throw error
+    } finally {
+      clearTimeout(idle)
+      signal.removeEventListener('abort', onTurnAbort)
+    }
+  }
+
+  /**
+   * Each tool call leaves a `tool-start` marker before it runs and a `tool-end` after. The step's messages are written
+   * only when the step finishes, so after a crash these markers are the only record that a call (a command, a post)
+   * already happened; the next input says so, and the agent checks instead of doing it twice.
+   */
+  private trackTools(sessionId: string, tools: ToolSet, hooks: { start: () => void; end: () => void }): ToolSet {
+    const out: ToolSet = {}
+    for (const [name, t] of Object.entries(tools)) {
+      const run = t.execute
+      out[name] = !run ? t : {
+        ...t,
+        execute: async (input: any, options: any) => {
+          const marker = this.appendEvent(sessionId, 'marker', { type: 'tool-start', tool: name, callId: options?.toolCallId, input: clipJson(input, 300) })
+          hooks.start()
+          try { return await run(input, options) } finally {
+            hooks.end()
+            this.appendEvent(sessionId, 'marker', { type: 'tool-end', start: marker })
+          }
+        },
+      } as typeof t
+    }
+    return out
+  }
+
+  /** Calls that started after the session's last recorded message and never ended: interrupted by a stop of the service. */
+  interruptedCalls(sessionId: string): InterruptedCall[] {
+    const lastMessage = (this.store.sqlite.prepare(`SELECT max(id) AS id FROM session_events WHERE session_id = ? AND kind = 'message'`).get(sessionId) as { id: number | null }).id ?? 0
+    const markers = this.store.db.select().from(schema.sessionEvents)
+      .where(and(eq(schema.sessionEvents.sessionId, sessionId), eq(schema.sessionEvents.kind, 'marker'), gt(schema.sessionEvents.id, lastMessage))).orderBy(asc(schema.sessionEvents.id)).all()
+    const ended = new Set(markers.filter(m => m.payload?.type === 'tool-end').map(m => m.payload.start as number))
+    return markers.filter(m => m.payload?.type === 'tool-start' && !ended.has(m.id)).map(m => ({ tool: String(m.payload.tool), input: String(m.payload.input ?? '') }))
+  }
+
+  private async streamStep(session: SessionRecord, def: AgentDefinition, tools: ToolSet, signal: AbortSignal, onActivity: () => void) {
     const result = streamText({
       model: this.hub.model(session.modelRole, { ref: session.ticketId ?? session.id }),
       system: def.system(session),
       messages: this.history(session.id),
-      tools: def.tools(ctx),
+      tools,
       stopWhen: stepCountIs(1),
       abortSignal: signal,
       maxRetries: 2,
@@ -306,6 +399,7 @@ export class AgentRuntime {
     let text = ''
     let streamError: unknown
     for await (const part of result.fullStream) {
+      onActivity()
       const mapped = toPart(part)
       if (mapped) this.emit(session, { type: 'session.part', part: mapped })
       if (part.type === 'text-delta') text += part.text
@@ -341,13 +435,20 @@ export class AgentRuntime {
     return true
   }
 
-  private take(sessionId: string): InboxItem[] {
-    const items = this.pending(sessionId)
-    if (items.length) {
-      this.store.db.update(schema.sessionInbox).set({ takenAt: Date.now() })
-        .where(and(eq(schema.sessionInbox.sessionId, sessionId), isNull(schema.sessionInbox.takenAt), sql`${schema.sessionInbox.id} <= ${items.at(-1)!.id}`)).run()
-    }
-    return items
+  /** Marks the session's inbox items up to `lastId` as taken (items discarded meanwhile stay discarded). */
+  private markTaken(sessionId: string, lastId: number): void {
+    this.store.db.update(schema.sessionInbox).set({ takenAt: Date.now() })
+      .where(and(eq(schema.sessionInbox.sessionId, sessionId), isNull(schema.sessionInbox.takenAt), sql`${schema.sessionInbox.id} <= ${lastId}`)).run()
+  }
+
+  /** When the session last recorded anything (a message or a marker); undefined for a new session. */
+  lastActivity(sessionId: string): number | undefined {
+    return (this.store.sqlite.prepare('SELECT max(at) AS at FROM session_events WHERE session_id = ?').get(sessionId) as { at: number | null }).at ?? undefined
+  }
+
+  /** The oldest input still waiting in the session's inbox that would wake it. */
+  oldestWaiting(sessionId: string): number | undefined {
+    return (this.store.sqlite.prepare('SELECT min(created_at) AS at FROM session_inbox WHERE session_id = ? AND taken_at IS NULL AND wake = 1').get(sessionId) as { at: number | null }).at ?? undefined
   }
 
   private next(): void {
@@ -402,8 +503,19 @@ function renderForSummary(m: ModelMessage): string {
   return `${m.role}: ${content}`
 }
 
-/** Errors worth one more try: the response broke off, or the connection dropped. */
+function clipJson(value: unknown, n: number): string {
+  let text = ''
+  try { text = JSON.stringify(value) ?? '' } catch { text = String(value) }
+  return text.length > n ? `${text.slice(0, n)}…` : text
+}
+
+function renderInterrupted(calls: InterruptedCall[]): string {
+  return `<interrupted_calls>服务在下面这些工具调用执行期间停止了，它们可能已经生效（命令跑完、内容已发出），但结果没有记下来。先检查实际情况，不要直接再做一遍：\n${calls.map(c => `- ${c.tool} ${c.input}`).join('\n')}\n</interrupted_calls>`
+}
+
+/** Errors worth one more try: the response broke off, the connection dropped, or the model went quiet. */
 export function transient(error: unknown): boolean {
+  if (error instanceof StepTimeoutError) return !error.toolsRan
   const text = `${describeError(error)} ${(error as { cause?: unknown })?.cause ?? ''}`
   return /Failed to process successful response|ECONNRESET|socket hang up|terminated|other side closed|fetch failed|ETIMEDOUT|EPIPE|premature close/i.test(text)
 }
