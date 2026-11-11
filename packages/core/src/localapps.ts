@@ -224,11 +224,30 @@ export const SOURCE_APP_TOOLS: Record<string, { app: LocalApp; write: boolean }>
   gcal_add: { app: 'calendar', write: true },
 }
 
+/** A third-party plugin's acting tool: the owner approves each call (blocked when there is no reviewer to ask). */
+function askOwnerFirst(name: string, t: ToolSet[string], ticket: Ticket, sessionId: string, reviewer: Reviewer | undefined): ToolSet[string] {
+  const run = t.execute!.bind(t)
+  const toolId = `plugin:${name}`
+  reviewer?.registerExecutor(toolId, async input => String(await run(input.args as never, { toolCallId: 'approved', messages: [] } as never)))
+  return {
+    ...t,
+    execute: async (args: unknown, options: unknown) => {
+      if (!reviewer) throw new Error(`${name} 是插件的写操作，需要主人批准，但审批没有启用`)
+      const decision = reviewer.askOwner(ticket, sessionId, toolId, `插件：${name} ${JSON.stringify(args)}`, { args, label: `插件 ${name}` }, '第三方插件要做改动，先问你')
+      if (decision.action === 'block') throw new Error(decision.reason)
+      if (decision.action === 'escalate') return `[需要主人批准（${decision.approvalId}）：${decision.reason}。批准后会自动执行，结果作为新消息送达。]`
+      return run(args as never, options as never)
+    },
+  } as typeof t
+}
+
 /** Applies the app levels to a source's tools: hidden when off, writes removed at 只能看 and asked at 先问你. */
-export function gateSourceTools(tools: ToolSet, ticket: Ticket, sessionId: string, access: LocalAccess, reviewer: Reviewer | undefined): ToolSet {
+export function gateSourceTools(tools: ToolSet, ticket: Ticket, sessionId: string, access: LocalAccess, reviewer: Reviewer | undefined,
+  askFirst: ReadonlySet<string> = new Set()): ToolSet {
   const out: ToolSet = {}
   for (const [name, t] of Object.entries(tools)) {
     const rule = SOURCE_APP_TOOLS[name]
+    if (!rule && askFirst.has(name) && t.execute) { out[name] = askOwnerFirst(name, t, ticket, sessionId, reviewer); continue }
     if (!rule) { out[name] = t; continue }
     const level = access.app(rule.app)
     if (level === 'off' || (rule.write && level === 'read')) continue

@@ -18,6 +18,8 @@ interface Instance { kind: SourceKind; ctx: SourceContext<any>; stop?: () => voi
 
 export class SourceRegistry implements SourcePort {
   private kinds = new Map<string, SourceKind>()
+  /** Kinds from installed third-party plugins: they get the narrowed context (see `outsiderContext`). */
+  private outsiders = new Set<string>()
   private instances = new Map<string, Instance>()
   private healths = new Map<string, Health>()
   private factsBy = new Map<string, Record<string, string>>()
@@ -27,9 +29,11 @@ export class SourceRegistry implements SourcePort {
     effects.handle<OutgoingMessage & { source: string }>('reply', async payload => this.deliver(payload), { concurrency: 2, baseDelayMs: 5_000, maxDelayMs: 300_000 })
   }
 
-  register(kind: SourceKind): void {
+  register(kind: SourceKind, opts: { thirdParty?: boolean } = {}): void {
     if (this.kinds.has(kind.id)) throw new Error(`source ${kind.id} already registered`)
     this.kinds.set(kind.id, kind)
+    if (opts.thirdParty) this.outsiders.add(kind.id)
+    else this.outsiders.delete(kind.id)
   }
 
   has(id: string): boolean { return this.kinds.has(id) }
@@ -38,6 +42,7 @@ export class SourceRegistry implements SourcePort {
   async unregister(id: string): Promise<void> {
     await this.stop(id)
     this.kinds.delete(id)
+    this.outsiders.delete(id)
   }
 
   private secretKeys(kind: SourceKind | undefined): string[] {
@@ -139,10 +144,10 @@ export class SourceRegistry implements SourcePort {
     const touches = (ticket: Ticket, kind: SourceKind) => this.engine.subscribersOfTicket(ticket.id).some(threadId => threadId.startsWith(`${kind.id}:`))
     return {
       routerPrompt: () => running().map(i => i.kind.routerPrompt?.(i.ctx)).filter(Boolean).join('\n\n'),
-      routerTools: () => Object.assign({}, ...running().map(i => i.kind.routerTools?.(i.ctx) ?? {})) as ToolSet,
+      routerTools: () => Object.assign({}, ...running().map(i => this.ownTools(i.kind, i.kind.routerTools?.(i.ctx) ?? {}))) as ToolSet,
       workerPrompt: ticket => running().filter(i => touches(ticket, i.kind)).map(i => i.kind.workerPrompt?.(i.ctx, ticket)).filter(Boolean).join('\n\n'),
       workerTools: (ticket, turn) => Object.assign({}, ...running().map(i => {
-        const tools = i.kind.workerTools?.(i.ctx, ticket, turn) ?? {}
+        const tools = this.ownTools(i.kind, i.kind.workerTools?.(i.ctx, ticket, turn) ?? {})
         if (!readOnly(i.kind.id) || !i.kind.writes?.length) return tools
         return Object.fromEntries(Object.entries(tools).filter(([name]) => !i.kind.writes!.includes(name)))
       })) as ToolSet,
@@ -152,6 +157,22 @@ export class SourceRegistry implements SourcePort {
         return instance?.kind.threadInfo?.(instance.ctx, threadId)
       },
     }
+  }
+
+  /**
+   * Acting tools of third-party sources (their `writes`): the owner is asked before each call, whatever 权限 says,
+   * since the app cannot know what they change.
+   */
+  askFirstTools(): Set<string> {
+    return new Set([...this.instances.values()].filter(i => this.outsiders.has(i.kind.id)).flatMap(i => i.kind.writes ?? []))
+  }
+
+  /** A third-party source's tools must be named `<id>_…`; others are dropped so they cannot pass for the app's own. */
+  private ownTools(kind: SourceKind, tools: ToolSet): ToolSet {
+    if (!this.outsiders.has(kind.id)) return tools
+    const ok = Object.entries(tools).filter(([name]) => name.startsWith(`${kind.id}_`))
+    if (ok.length < Object.keys(tools).length) console.warn(`[${kind.id}] 插件工具名必须以 ${kind.id}_ 开头，已忽略：${Object.keys(tools).filter(n => !n.startsWith(`${kind.id}_`)).join(', ')}`)
+    return Object.fromEntries(ok)
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────
@@ -189,7 +210,8 @@ export class SourceRegistry implements SourcePort {
     const settings = this.settings(kind.id)
     const registry = this
     const ctx: SourceContext<any> = {
-      id: kind.id, config: settings.config, engine: this.engine, store: this.store, signal: abort.signal,
+      id: kind.id, config: settings.config, signal: abort.signal,
+      ...(this.outsiders.has(kind.id) ? outsiderContext(kind.id, this.engine) : { engine: this.engine, store: this.store }),
       state: {
         get: <T>(key: string) => kvGet<T>(registry.store, `source:${kind.id}:${key}`),
         set: (key: string, value: unknown) => kvSet(registry.store, `source:${kind.id}:${key}`, value),
@@ -225,4 +247,36 @@ export class SourceRegistry implements SourcePort {
       throw error
     }
   }
+}
+
+const ENGINE_FOR_PLUGINS = ['receive', 'followed', 'follow', 'threadClosed', 'mainConversation', 'conversationOfThread'] as const
+
+/**
+ * What a third-party plugin's source sees instead of the whole engine and database: it can report events and follow
+ * threads only under its own `<id>:` prefix, see the threads it follows, and look up conversations. Anything else (the
+ * database, ending tasks, writing memory, other sources' threads) throws, so a plugin cannot reach past its own channel.
+ * Built-in sources keep the full context.
+ */
+export function outsiderContext(id: string, engine: Engine): { engine: Engine; store: Store } {
+  const own = (threadId: string) => {
+    if (typeof threadId !== 'string' || !threadId.startsWith(`${id}:`)) throw new Error(`插件来源 ${id} 只能使用以 "${id}:" 开头的线程，收到 ${String(threadId)}`)
+  }
+  const facade: Pick<Engine, typeof ENGINE_FOR_PLUGINS[number]> = {
+    receive: t => {
+      if (t.source !== id) throw new Error(`插件来源 ${id} 不能以 ${t.source} 的名义送来消息`)
+      own(t.threadId)
+      return engine.receive(t)
+    },
+    followed: () => engine.followed().filter(f => f.threadId.startsWith(`${id}:`)),
+    follow: (ticketId, threadId, kind, info) => { own(threadId); engine.follow(ticketId, threadId, kind, info) },
+    threadClosed: (threadId, outcome) => { own(threadId); engine.threadClosed(threadId, outcome) },
+    mainConversation: () => engine.mainConversation(),
+    conversationOfThread: threadId => engine.conversationOfThread(threadId),
+  }
+  const refuse = (what: string) => { throw new Error(`第三方插件不能使用 ${what}（见 docs/04-plugin-sdk.md 的「插件能用的接口」）`) }
+  const narrowed = new Proxy(facade, {
+    get: (target, prop) => (typeof prop === 'string' && prop in target ? (target as any)[prop] : typeof prop === 'string' ? refuse(`engine.${prop}`) : undefined),
+  }) as unknown as Engine
+  const store = new Proxy({}, { get: (_t, prop) => (typeof prop === 'string' && prop !== 'then' ? refuse('store') : undefined) }) as Store
+  return { engine: narrowed, store }
 }

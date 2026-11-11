@@ -2,7 +2,7 @@ import { Bus } from '@super-assistant/agent-runtime'
 import { Feed, type Ideas, type Reviewer } from '@super-assistant/core'
 import { newId, openStore, schema, type Store } from '@super-assistant/db'
 import { afterEach, describe, expect, it } from 'vitest'
-import { clearChats, exportAll, privacySettings, pruneChats, savePrivacySettings } from './data'
+import { clearChats, exportAll, privacySettings, pruneChats, pruneRuntime, savePrivacySettings } from './data'
 import { allowed, DEFAULT_NOTIFY, isQuiet, type Notice, Notices, saveNotifySettings } from './notices'
 
 let store: Store
@@ -64,6 +64,23 @@ describe('data and privacy', () => {
     expect(pruneChats(store, 'main', id => id === 'side-busy', now)).toBe(3)
     const left = (store.sqlite.prepare('SELECT id FROM conversations ORDER BY id').all() as { id: string }[]).map(r => r.id)
     expect(left).toEqual(['main', 'side-busy', 'side-new'])
+  })
+
+  it('trims the runtime\'s own leftovers and keeps what is recent or still in use', () => {
+    store = openStore(':memory:')
+    const now = Date.now(), old = now - 100 * 86_400_000
+    const q = (sql: string, ...args: unknown[]) => store.sqlite.prepare(sql).run(...args)
+    q("INSERT INTO sessions (id, role, model_role, state, meta, created_at, updated_at) VALUES ('s1','worker','worker','idle','{}',?,?), ('s2','worker','worker','running','{}',?,?)", old, old, old, old)
+    q("INSERT INTO session_inbox (session_id, payload, created_at, taken_at) VALUES ('s1','{}',?,?), ('s1','{}',?,NULL), ('s1','{}',?,?)", old, old, old, now, now)
+    q("INSERT INTO jobs (id, session_id, command, cwd, status, output, started_at, ended_at) VALUES ('j1','s1','ls','/','exited','x',?,?), ('j2','s1','ls','/','running','',?,NULL), ('j3','s1','ls','/','exited','',?,?)", old, old, old, now, now)
+    const marker = (sid: string, type: string, at: number) => q("INSERT INTO session_events (session_id, kind, payload, at) VALUES (?, 'marker', ?, ?)", sid, JSON.stringify({ type }), at)
+    marker('s1', 'tool-start', old); marker('s1', 'tool-end', old); marker('s1', 'compacted', old); marker('s2', 'tool-start', old); marker('s1', 'tool-start', now)
+    q("INSERT INTO session_events (session_id, kind, payload, at) VALUES ('s1','message','{}',?)", old)
+    q("INSERT INTO blobs (id, kind, content, meta, created_at) VALUES ('blob_old','x','a','{}',?), ('blob_new','x','b','{}',?)", old, now)
+    expect(pruneRuntime(store, now)).toEqual({ inbox: 1, jobs: 1, markers: 2, blobs: 1 })
+    expect((store.sqlite.prepare('SELECT id FROM blobs').all() as { id: string }[]).map(r => r.id)).toEqual(['blob_new'])
+    expect((store.sqlite.prepare('SELECT id FROM jobs ORDER BY id').all() as { id: string }[]).map(r => r.id)).toEqual(['j2', 'j3'])
+    expect(store.sqlite.prepare('SELECT COUNT(*) AS n FROM session_events').get()).toEqual({ n: 4 })
   })
 
   it('exports rows without embeddings, and clearing chats empties the main chat and drops side chats only', () => {

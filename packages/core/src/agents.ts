@@ -186,6 +186,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     maxSteps: 30,
     system: () => `${ROUTER_PROMPT}${ext.routerPrompt ? `\n\n${ext.routerPrompt()}` : ''}${ext.sharedPrompt ? `\n\n${ext.sharedPrompt('router')}` : ''}\n\nToday: ${today()}`,
     formatInbox: async items => {
+      const routerContext = routerContextOf(engine)
       if (items.some(i => ANSWERABLE.has(i.payload.type) && (i.payload.type !== 'report' || ['ready', 'blocked', 'failed'].includes(i.payload.status) || i.payload.humanAction))) answerable = true
       // What the router may remember directly depends on whose words this batch carries, decided here in code.
       const requests = items.filter(i => i.payload.type === 'trigger' || i.payload.type === 'handback' || i.payload.type === 'proactive').map(i => String(i.payload.triggerId))
@@ -213,7 +214,9 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       reminded = remind
       if (remind) store.atomic(() => runtime.push(ROUTER_SESSION, { type: 'unsent', text: clip(info.lastText.trim(), 3_000) }))
     },
+    // Extension tools first, so none of them can replace a built-in one (a plugin's `reply` or `shell`).
     tools: () => wrapSpeaking({
+      ...(ext.routerTools?.() ?? {}),
       reply: tool({
         description: 'Post a message to the owner — the only way to speak. It also goes out to the source (e.g. a GitHub comment) when reply_to is a message from that source, or ticket_id is work that came from it; otherwise it stays in the web. The owner sees only your text: the full result and files stay in the work\'s details.',
         inputSchema: z.object({ conversation_id: z.string().optional().describe('Required unless ticket_id is given'), text: z.string().min(1),
@@ -312,7 +315,6 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         },
       }),
       ...recallTool(runtime),
-      ...(ext.routerTools?.() ?? {}),
     }),
     onTurnError: (_s, error) => {
       const message = error instanceof Error ? error.message : String(error)
@@ -423,6 +425,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       const ticket = engine.ticket(ctx.session.ticketId!)
       const exec = engine.execution()
       return {
+        ...(ext.workerTools?.(ticket, ctx) ?? {}),
         ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket)),
         ...shellTools(runtime.jobs, runtime.blobs, {
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
@@ -433,7 +436,6 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         }),
         ...webTools(runtime.blobs),
         ...recallTool(runtime),
-        ...(ext.workerTools?.(ticket, ctx) ?? {}),
         report: tool({
           description: 'Report this work\'s state to the assistant. Required once at the end of every turn.',
           inputSchema: z.object({
@@ -642,9 +644,9 @@ export function combineExtensions(...exts: AgentExtensions[]): AgentExtensions {
   }
 }
 
-/** Puts source tools that reach the owner's apps (Google Calendar) under the same 权限 levels as the local ones. */
-export function gatedSourceExtension(ext: AgentExtensions, access: LocalAccess, reviewer: Reviewer | undefined): AgentExtensions {
-  return { ...ext, workerTools: (ticket, ctx) => gateSourceTools(ext.workerTools?.(ticket, ctx) ?? {}, ticket, ctx.session.id, access, reviewer) }
+/** Puts source tools that reach the owner's apps (Google Calendar) under the same 权限 levels as the local ones; `askFirst` names are always asked. */
+export function gatedSourceExtension(ext: AgentExtensions, access: LocalAccess, reviewer: Reviewer | undefined, askFirst: () => ReadonlySet<string> = () => new Set()): AgentExtensions {
+  return { ...ext, workerTools: (ticket, ctx) => gateSourceTools(ext.workerTools?.(ticket, ctx) ?? {}, ticket, ctx.session.id, access, reviewer, askFirst()) }
 }
 
 /** The owner's apps on this Mac (日历, 提醒事项, 备忘录, 通讯录, 照片), at their levels in 权限. */
@@ -664,7 +666,14 @@ export function accessExtension(access: LocalAccess, uploadsDir: string): AgentE
 }
 
 /** What the router is answering right now; set per batch in code, read by the memory tools. */
-const routerContext: { trust: MemoryTrust; source: string; scope: string | undefined } = { trust: 'external', source: '', scope: undefined }
+type RouterContext = { trust: MemoryTrust; source: string; scope: string | undefined }
+const routerContexts = new WeakMap<Engine, RouterContext>()
+/** Kept per engine, so two assistants in one process (tests, a future multi-profile daemon) never share trust. */
+function routerContextOf(engine: Engine): RouterContext {
+  let ctx = routerContexts.get(engine)
+  if (!ctx) routerContexts.set(engine, ctx = { trust: 'external', source: '', scope: undefined })
+  return ctx
+}
 
 /**
  * Memory for both agents: the prompt section, recall into each input, and remember / forget / search_memory.
@@ -675,7 +684,7 @@ export function memoryExtension(memory: Memory, engine: Engine): AgentExtensions
   return {
     sharedPrompt: (role, ticket) => memory.prompt(role, ticket ? engine.projectOf(ticket) : undefined),
     inlineContext: (text, scope) => memory.inline(text, scope),
-    routerTools: () => memory.tools({ by: 'router', trust: () => routerContext.trust, scope: () => routerContext.scope, source: () => routerContext.source }),
+    routerTools: () => memory.tools({ by: 'router', trust: () => routerContextOf(engine).trust, scope: () => routerContextOf(engine).scope, source: () => routerContextOf(engine).source }),
     workerTools: (ticket, ctx) => memory.tools({
       by: ticket.id,
       trust: () => {

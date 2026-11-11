@@ -1,5 +1,5 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
-import { pruneChats } from './data'
+import { pruneChats, pruneRuntime } from './data'
 import { Notices } from './notices'
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@super-assistant/agent-runtime'
 import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@super-assistant/core'
@@ -155,7 +155,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       }),
     })
     registerAgents(store, agents, engine, combineExtensions(
-      gatedSourceExtension(sources.agentExtensions(id => access.settings().sources[id] === 'read'), access, reviewer),
+      gatedSourceExtension(sources.agentExtensions(id => access.settings().sources[id] === 'read'), access, reviewer, () => sources.askFirstTools()),
       memoryExtension(memory, engine),
       { routerPrompt: () => personaPrompt(store) },
       instructionsExtension(instructions),
@@ -197,6 +197,8 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
           try { if (Date.now() - (kvGet<number>(store, 'memory:consolidated') ?? 0) > 20 * 3_600_000) { memory.consolidate(); kvSet(store, 'memory:consolidated', Date.now()) } } catch (e) { console.error('[memory]', e) }
           // 聊天记录保留 (设置 → 数据和隐私): older messages go, hourly.
           try { pruneChats(store, engine.mainConversation(), id => engine.tickets({ threadId: engine.threadOf(id), open: true }).length > 0) } catch (e) { console.error('[privacy]', e) }
+          // The runtime's own leftovers (delivered inbox rows, old command output, spilled tool output).
+          try { pruneRuntime(store) } catch (e) { console.error('[retention]', e) }
         }
         upkeep()
         memoryTimer = setInterval(upkeep, 3_600_000)
