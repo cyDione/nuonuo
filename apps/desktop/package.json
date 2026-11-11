@@ -46,6 +46,8 @@
       ],
       "identity": "-",
       "hardenedRuntime": false,
+      "entitlements": "signing/entitlements.mac.plist",
+      "entitlementsInherit": "signing/entitlements.mac.plist",
       "artifactName": "super-assistant-${version}-mac-${arch}.${ext}"
     },
     "linux": {

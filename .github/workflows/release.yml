@@ -151,7 +151,8 @@ jobs:
       run:
         shell: bash
     env:
-      # No Developer ID: the macOS app is ad-hoc signed (mac.identity "-"), also on pull requests.
+      # Without a Developer ID the macOS app is ad-hoc signed (mac.identity "-"): pull requests, build-only runs, and
+      # releases while the signing secrets below are not set. See "macOS signing" for the release case.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       CSC_FOR_PULL_REQUEST: 'true'
     steps:
@@ -175,6 +176,60 @@ jobs:
       - name: Stage the service and Node.js
         run: node scripts/stage-desktop.mjs
 
+      # A release is signed with the Developer ID certificate and notarized by Apple when these repository secrets are set
+      # (Settings → Secrets and variables → Actions), so Gatekeeper opens the app without a trip to Privacy & Security:
+      #   MAC_CERT_P12_BASE64       the "Developer ID Application" certificate with its private key, as a base64 .p12
+      #   MAC_CERT_PASSWORD         the .p12's password
+      # and one way to notarize, preferably an App Store Connect API key:
+      #   APPLE_API_KEY_P8          the AuthKey_XXXX.p8 file's contents
+      #   APPLE_API_KEY_ID          its key ID
+      #   APPLE_API_ISSUER          the issuer ID shown above the keys
+      # or an Apple ID:
+      #   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
+      # With no certificate the release stays ad-hoc signed (a warning says so). A certificate without a way to notarize
+      # stops the run, because a signed but unnotarized app is still blocked by Gatekeeper.
+      - name: macOS signing
+        if: matrix.os == 'mac' && needs.prepare.outputs.tag != ''
+        env:
+          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$MAC_CERT_P12_BASE64" ]; then
+            echo "::warning::no MAC_CERT_P12_BASE64 secret: this release's macOS app is ad-hoc signed and not notarized, so Gatekeeper blocks it on first open"
+            exit 0
+          fi
+          {
+            # base64 tools wrap lines; electron-builder wants one line.
+            echo "CSC_LINK=$(printf '%s' "$MAC_CERT_P12_BASE64" | tr -d ' \r\n')"
+            echo "CSC_KEY_PASSWORD=$MAC_CERT_PASSWORD"
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=true"
+            echo "MAC_SIGNED=1"
+          } >> "$GITHUB_ENV"
+          # Sign with the certificate from CSC_LINK (identity is matched by name) under the hardened runtime that
+          # notarization requires; only this checkout's build config changes.
+          node -e '
+            const fs = require("node:fs"); const p = "apps/desktop/package.json"; const pkg = JSON.parse(fs.readFileSync(p, "utf8"))
+            Object.assign(pkg.build.mac, { identity: "Developer ID Application", hardenedRuntime: true })
+            fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n")'
+          if [ -n "$APPLE_API_KEY_P8" ] && [ -n "$APPLE_API_KEY_ID" ] && [ -n "$APPLE_API_ISSUER" ]; then
+            key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+            printf '%s\n' "$APPLE_API_KEY_P8" > "$key"
+            { echo "APPLE_API_KEY=$key"; echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID"; echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"; } >> "$GITHUB_ENV"
+            echo "signing with the Developer ID certificate, notarizing with the App Store Connect API key"
+          elif [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            { echo "APPLE_ID=$APPLE_ID"; echo "APPLE_APP_SPECIFIC_PASSWORD=$APPLE_APP_SPECIFIC_PASSWORD"; echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"; } >> "$GITHUB_ENV"
+            echo "signing with the Developer ID certificate, notarizing with the Apple ID"
+          else
+            echo "::error::MAC_CERT_P12_BASE64 is set but there is no way to notarize: add APPLE_API_KEY_P8 + APPLE_API_KEY_ID + APPLE_API_ISSUER (or APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID)"
+            exit 1
+          fi
+
       - name: Package the desktop app
         working-directory: apps/desktop
         # electron-builder downloads Electron and its helper tools from GitHub, which sometimes answers 504; the
@@ -186,6 +241,15 @@ jobs:
             sleep $((attempt * 20))
           done
           exit 1
+
+      - name: Check the macOS signature and notarization
+        if: env.MAC_SIGNED == '1'
+        run: |
+          app="$(find apps/desktop/dist -maxdepth 2 -name '*.app' -type d | head -n1)"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv --verbose=2 "$app" 2>&1 | grep -E 'Authority=Developer ID Application|TeamIdentifier|flags=.*runtime'
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=4 "$app"
 
       - name: Smoke test the bundled service
         run: |
