@@ -1,6 +1,6 @@
 import type { LanguageModelV4, LanguageModelV4Usage } from '@ai-sdk/provider'
 import { APICallError } from '@ai-sdk/provider'
-import { openStore, type Store } from '@super-assistant/db'
+import { openStore, type Store } from '@nuonuo/db'
 import { generateText, streamText } from 'ai'
 import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 import { mkdtempSync, readFileSync } from 'node:fs'
@@ -130,6 +130,23 @@ describe('FileSecrets', () => {
   })
 })
 
+describe('keychain names', () => {
+  it('moves a key saved under the old service name (super-assistant) to nuonuo on first read', () => {
+    const items = new Map([['super-assistant/provider:a', 'sk-a']])
+    class Entry {
+      constructor(private service: string, private account: string) {}
+      private get key() { return `${this.service}/${this.account}` }
+      getPassword() { return items.get(this.key) }
+      setPassword(v: string) { items.set(this.key, v) }
+      deletePassword() { items.delete(this.key) }
+    }
+    const store = new KeychainSecrets(Entry)
+    expect(store.get('provider:a')).toBe('sk-a')
+    expect([...items]).toEqual([['nuonuo/provider:a', 'sk-a']])
+    expect(store.get('provider:b')).toBeUndefined()
+  })
+})
+
 describe('macOS secrets', () => {
   it('uses the encrypted file and moves a Keychain key into it on first read, touching the Keychain once', () => {
     const items = new Map([['provider:old', 'sk-old']])
@@ -146,12 +163,13 @@ describe('macOS secrets', () => {
     expect(store.get('provider:old')).toBe('sk-old')
     expect(store.get('provider:none')).toBeUndefined()
     expect(store.get('provider:none')).toBeUndefined()
-    expect(reads).toBe(2)
+    // provider:none is looked up under the new and the old (super-assistant) Keychain name, once.
+    expect(reads).toBe(3)
     store.set('provider:new', 'sk-new')
     expect(items.has('provider:new')).toBe(false)
     expect(new FileSecrets(dir).get('provider:old')).toBe('sk-old')
     expect(new KeychainMigratingSecrets(new FileSecrets(dir), new KeychainSecrets(Entry)).get('provider:old')).toBe('sk-old')
-    expect(reads).toBe(2)
+    expect(reads).toBe(3)
   })
 
   it('defaults to the file store on macOS unless the keychain is asked for', async () => {

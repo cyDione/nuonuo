@@ -3,7 +3,7 @@
  * and the call returns at once (asynchronous ReAct: the session keeps taking messages), and its completion is pushed to the
  * session's inbox as a new event.
  */
-import { newId, schema, type Store } from '@super-assistant/db'
+import { newId, schema, type Store } from '@nuonuo/db'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { uptime } from 'node:os'
@@ -40,7 +40,7 @@ export class Jobs {
     const started = Date.now()
     this.store.db.insert(schema.jobs).values({ id, sessionId: opts.sessionId, command: opts.command, cwd: opts.cwd, status: 'running', startedAt: started }).run()
     const [bin, args] = shellFor(opts.command)
-    const child = spawn(bin, args, { cwd: opts.cwd, env: { ...opts.env, SUPER_ASSISTANT_JOB: id }, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(bin, args, { cwd: opts.cwd, env: { ...opts.env, NUONUO_JOB: id }, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     if (child.pid) this.store.db.update(schema.jobs).set({ pid: child.pid }).where(eq(schema.jobs.id, id)).run()
     const live: Live = { child, output: '', started, background: false, sessionId: opts.sessionId, done: undefined as never }
     const append = (chunk: Buffer) => {
@@ -157,7 +157,7 @@ function stillOurs(jobId: string, pid: number, startedAt: number): boolean {
   try { process.kill(-pid, 0) } catch { return false }
   if (process.platform !== 'linux') return true
   // The group leader may be gone while its children run on; any of them carries the marker.
-  const marker = `SUPER_ASSISTANT_JOB=${jobId}`
+  const marker = `NUONUO_JOB=${jobId}`
   try {
     return readdirSync('/proc').some(n => /^\d+$/.test(n) && (() => { try { return readFileSync(`/proc/${n}/environ`, 'utf8').split('\0').includes(marker) } catch { return false } })())
   } catch { return false }

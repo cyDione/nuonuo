@@ -6,7 +6,7 @@
  * Versions saved before 0.2.3 kept three fields (沟通方式 / 做事边界 / 交付要求); they are read back as one document
  * with a `##` heading per non-empty field.
  */
-import { kvGet, kvSet, type Store } from '@super-assistant/db'
+import { kvGet, kvSet, type Store } from '@nuonuo/db'
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 

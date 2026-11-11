@@ -2,7 +2,7 @@
  * Inline & Spill for tool output: long text goes to a blob and the model sees its head, tail and a `blob_…` ref it can page
  * through with `recall`, so the context window keeps room for what matters.
  */
-import { newId, schema, type Store } from '@super-assistant/db'
+import { newId, schema, type Store } from '@nuonuo/db'
 import { eq } from 'drizzle-orm'
 
 export const SPILL_CHARS = 12_000

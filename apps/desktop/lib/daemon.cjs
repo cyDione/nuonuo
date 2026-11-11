@@ -1,4 +1,4 @@
-// Finds the running Super-assistant daemon, or starts one with the Node.js bundled in the app (the system's in development).
+// Finds the running Nuonuo daemon, or starts one with the Node.js bundled in the app (the system's in development).
 // The desktop app and the CLI share one daemon and one data directory; the daemon keeps running after the window closes,
 // so routines and sources keep working.
 const { spawn, execFileSync } = require('node:child_process')
@@ -6,7 +6,15 @@ const { existsSync, mkdirSync, openSync, readFileSync } = require('node:fs')
 const { homedir } = require('node:os')
 const { join, resolve } = require('node:path')
 
-const home = () => resolve(process.env.SUPER_ASSISTANT_HOME || join(homedir(), '.super-assistant'))
+// The data directory, as the daemon resolves it (apps/daemon/src/legacy.ts): NUONUO_HOME, else ~/.nuonuo, except that an
+// install from before the rename keeps ~/.super-assistant until the daemon's next start moves it.
+const legacyHome = () => join(homedir(), '.super-assistant')
+function home() {
+  const set = (process.env.NUONUO_HOME || process.env.SUPER_ASSISTANT_HOME || '').trim()
+  if (set && resolve(set) !== resolve(legacyHome())) return resolve(set)
+  const fresh = join(homedir(), '.nuonuo')
+  return existsSync(fresh) || !existsSync(legacyHome()) ? fresh : legacyHome()
+}
 
 function readLock() {
   try {
@@ -36,7 +44,7 @@ async function health(lock) {
 
 /** The packaged app carries its own Node.js; in development, GUI apps on macOS start with a minimal PATH, so look where Node usually lives too. */
 function findNode() {
-  if (process.env.SUPER_ASSISTANT_NODE) return process.env.SUPER_ASSISTANT_NODE
+  if (process.env.NUONUO_NODE) return process.env.NUONUO_NODE
   const bundled = process.resourcesPath && join(process.resourcesPath, 'node', process.platform === 'win32' ? 'node.exe' : 'node')
   if (bundled && existsSync(bundled)) return bundled
   if (process.platform === 'win32') {
@@ -53,7 +61,7 @@ function findNode() {
 
 /** The daemon's CLI: next to the app when packaged, else in the repository. */
 function findCli() {
-  const options = [process.env.SUPER_ASSISTANT_CLI, process.resourcesPath && join(process.resourcesPath, 'daemon', 'cli.mjs'), join(__dirname, '..', '..', 'daemon', 'dist', 'cli.mjs')]
+  const options = [process.env.NUONUO_CLI, process.resourcesPath && join(process.resourcesPath, 'daemon', 'cli.mjs'), join(__dirname, '..', '..', 'daemon', 'dist', 'cli.mjs')]
   return options.find(p => p && existsSync(p))
 }
 
@@ -74,14 +82,14 @@ async function ensureDaemon(log = console.log, version) {
   }
   const node = findNode()
   const cli = findCli()
-  if (!node) throw new Error('找不到 Node.js（安装包里应自带；开发时需要 22.12 或更高版本）。安装 Node，或设置环境变量 SUPER_ASSISTANT_NODE 指向 node 可执行文件。')
-  if (!cli) throw new Error('找不到 Super-assistant 服务（apps/daemon/dist/cli.mjs）。先在仓库里运行 pnpm build，或设置 SUPER_ASSISTANT_CLI。')
+  if (!node) throw new Error('找不到 Node.js（安装包里应自带；开发时需要 22.12 或更高版本）。安装 Node，或设置环境变量 NUONUO_NODE 指向 node 可执行文件。')
+  if (!cli) throw new Error('找不到 Nuonuo 服务（apps/daemon/dist/cli.mjs）。先在仓库里运行 pnpm build，或设置 NUONUO_CLI。')
   mkdirSync(join(home(), 'logs'), { recursive: true })
   const out = openSync(join(home(), 'logs', 'daemon.log'), 'a')
   log(`starting daemon: ${node} ${cli}`)
   // --desktop: browser access follows the app's setting (off until turned on in Settings → System).
   const child = spawn(node, [cli, 'start', '--no-open', '--desktop'], {
-    detached: true, windowsHide: true, stdio: ['ignore', out, out], env: { ...process.env, SUPER_ASSISTANT_HOME: home() }, cwd: join(cli, '..'),
+    detached: true, windowsHide: true, stdio: ['ignore', out, out], env: { ...process.env, NUONUO_HOME: home() }, cwd: join(cli, '..'),
   })
   child.unref()
   for (let i = 0; i < 60; i++) {

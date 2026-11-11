@@ -3,7 +3,7 @@
  * The owner writes or switches them on; the assistant may only propose one (it waits switched off until the owner
  * turns it on), so a skill never comes from someone else's words. Workers get the steps of the skills that are on.
  */
-import { kvGet, kvSet, newId, type Store } from '@super-assistant/db'
+import { kvGet, kvSet, newId, type Store } from '@nuonuo/db'
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 import type { AgentExtensions } from './agents'

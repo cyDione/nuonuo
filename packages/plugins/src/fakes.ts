@@ -51,7 +51,7 @@ export class FakeGmail {
   readonly email = 'me@example.com'
   mails: FakeMail[] = []
   drafts: { id: string; threadId?: string; raw: string }[] = []
-  labels = [{ id: 'INBOX', name: 'INBOX' }, { id: 'Label_7', name: 'super-assistant' }]
+  labels = [{ id: 'INBOX', name: 'INBOX' }, { id: 'Label_7', name: 'nuonuo' }]
   private history: { id: number; added?: string; labelAdded?: { id: string; labels: string[] } }[] = []
   private historyId = 100
   issuedCode = 'auth-code-1'

@@ -1,14 +1,14 @@
 {
-  "name": "@super-assistant/daemon",
+  "name": "@nuonuo/daemon",
   "version": "0.2.4",
   "license": "MIT",
   "private": true,
   "type": "module",
   "bin": {
-    "super-assistant": "./dist/cli.mjs"
+    "nuonuo": "./dist/cli.mjs"
   },
   "scripts": {
-    "dev": "SUPER_ASSISTANT_HOME=${SUPER_ASSISTANT_HOME:-../../.super-assistant-dev} tsx watch src/cli.ts start --no-open --dev",
+    "dev": "NUONUO_HOME=${NUONUO_HOME:-../../.nuonuo-dev} tsx watch src/cli.ts start --no-open --dev",
     "start": "tsx src/cli.ts start",
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json"
@@ -23,13 +23,13 @@
     "@hono/node-server": "^2.1.6",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@napi-rs/keyring": "^2.1.2",
-    "@super-assistant/agent-runtime": "workspace:*",
-    "@super-assistant/core": "workspace:*",
-    "@super-assistant/db": "workspace:*",
-    "@super-assistant/models": "workspace:*",
-    "@super-assistant/plugin-sdk": "workspace:*",
-    "@super-assistant/plugins": "workspace:*",
-    "@super-assistant/sources": "workspace:*",
+    "@nuonuo/agent-runtime": "workspace:*",
+    "@nuonuo/core": "workspace:*",
+    "@nuonuo/db": "workspace:*",
+    "@nuonuo/models": "workspace:*",
+    "@nuonuo/plugin-sdk": "workspace:*",
+    "@nuonuo/plugins": "workspace:*",
+    "@nuonuo/sources": "workspace:*",
     "ai": "^7.0.162",
     "better-sqlite3": "^13.0.3",
     "commander": "^15.0.0",

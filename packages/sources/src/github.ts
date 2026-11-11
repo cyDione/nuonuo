@@ -17,7 +17,7 @@ import { promisify } from 'node:util'
 import { z } from 'zod'
 import type { DeviceCode, SourceContext, SourceKind } from './kind'
 
-export const MARKER = '<!-- super-assistant -->'
+export const MARKER = '<!-- nuonuo -->'
 
 /**
  * The built-in OAuth App (device flow enabled). A client ID is public by design: the device flow needs no secret.
@@ -54,7 +54,7 @@ export class GithubApi {
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await this.fetchImpl(`${this.base.replace(/\/$/, '')}${path}`, {
       method, signal: AbortSignal.timeout(30_000),
-      headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'super-assistant',
+      headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'nuonuo',
         ...(this.token ? { authorization: `Bearer ${this.token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     })
@@ -107,7 +107,7 @@ export function githubKind(deps: { fetch?: typeof fetch; token?: () => Promise<s
   async function oauthPost(ctx: SourceContext<GithubConfig>, path: string, params: Record<string, string>): Promise<Record<string, any>> {
     const res = await f(`${ctx.config.oauthUrl.replace(/\/$/, '')}${path}`, {
       method: 'POST', signal: AbortSignal.timeout(30_000),
-      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'super-assistant' },
+      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'nuonuo' },
       body: new URLSearchParams(params),
     })
     const data = await res.json().catch(() => ({})) as Record<string, any>
@@ -299,7 +299,7 @@ export function githubKind(deps: { fetch?: typeof fetch; token?: () => Promise<s
       const { api } = await session(ctx)
       try {
         const posted = await api.request<{ html_url: string }>('POST', `/repos/${ref.repo}/issues/${ref.number}/comments`,
-          { body: `🤖 **Super-assistant**\n\n${message.text}\n\n${MARKER}` })
+          { body: `🤖 **Nuonuo**\n\n${message.text}\n\n${MARKER}` })
         return { url: posted.html_url }
       } catch (error) {
         const status = (error as { status?: number }).status
@@ -318,7 +318,7 @@ export function githubKind(deps: { fetch?: typeof fetch; token?: () => Promise<s
       return `## GitHub
 ${ref ? `This task came from GitHub ${ref.repo} #${ref.number}. Read it first: \`gh issue view ${ref.number} -R ${ref.repo} --comments\` (or \`gh pr view\` / \`gh pr diff\` for a pull request).` : `Watched repositories: ${repos}.`}
 - Use the \`gh\` CLI and git; they are logged in as the owner. Work in a clone inside your working directory (\`gh repo clone <repo> .\` when it is empty).
-- Code changes: branch \`super-assistant/${ticket.name}\`, clear commits, push, then \`gh pr create\` with a body covering background, the change and how you verified it. Then call github_follow with the PR number so reviews and CI reach you.
+- Code changes: branch \`nuonuo/${ticket.name}\`, clear commits, push, then \`gh pr create\` with a body covering background, the change and how you verified it. Then call github_follow with the PR number so reviews and CI reach you.
 - Your report is posted back to the GitHub thread by the main agent; don't post comments yourself unless the owner asked.
 - Never push to the default branch, force-push shared branches, or merge unless the owner asked.`
     },
@@ -340,7 +340,7 @@ ${ref ? `This task came from GitHub ${ref.repo} #${ref.number}. Read it first: \
     },
     workerEnv(ctx, ticket): Record<string, string> {
       const ref = parseThread(ticket.threadId)
-      const env: Record<string, string> = ref ? { SUPER_ASSISTANT_GITHUB_REPO: ref.repo, SUPER_ASSISTANT_GITHUB_NUMBER: String(ref.number) } : {}
+      const env: Record<string, string> = ref ? { NUONUO_GITHUB_REPO: ref.repo, NUONUO_GITHUB_NUMBER: String(ref.number) } : {}
       // With an OAuth authorization there may be no `gh` login on this machine: lend the token to `gh` and to git over HTTPS.
       const token = oauthToken(ctx)
       if (token) {

@@ -1,7 +1,7 @@
-import { AgentRuntime, Bus } from '@super-assistant/agent-runtime'
-import { generateOf, lastUserText, streamOf, systemText, type Scripted } from '@super-assistant/agent-runtime/src/testing'
-import { kvSet, newId, openStore, schema, type Store } from '@super-assistant/db'
-import { MemorySecrets, ModelHub } from '@super-assistant/models'
+import { AgentRuntime, Bus } from '@nuonuo/agent-runtime'
+import { generateOf, lastUserText, streamOf, systemText, type Scripted } from '@nuonuo/agent-runtime/src/testing'
+import { kvSet, newId, openStore, schema, type Store } from '@nuonuo/db'
+import { MemorySecrets, ModelHub } from '@nuonuo/models'
 import { MockLanguageModelV4 } from 'ai/test'
 import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -16,7 +16,7 @@ import { Watchdog } from './watchdog'
 
 let store: Store
 let runtime: AgentRuntime
-beforeAll(() => { process.env.SUPER_ASSISTANT_ROUTER_RETRY_MS = '20' })
+beforeAll(() => { process.env.NUONUO_ROUTER_RETRY_MS = '20' })
 afterEach(async () => { await runtime?.shutdown(); store?.close() })
 
 const settle = async (rounds = 6) => { for (let i = 0; i < rounds; i++) { await new Promise(r => setTimeout(r, 40)); await runtime.idle() } }
@@ -124,7 +124,7 @@ describe('folder boundary without a sandbox', () => {
     const home = mkdtempSync(join(tmpdir(), 'sa-home-'))
     const access = new LocalAccess(store, () => home, ['/tmp/scratch'])
     access.save({ folders: [{ path: '~/Docs', write: false }, { path: '~/Work', write: true }] })
-    const cwd = join(home, '.super-assistant/work/t1')
+    const cwd = join(home, '.nuonuo/work/t1')
     expect(access.shellWritesOutside('echo x > out.txt', cwd)).toBeUndefined()
     expect(access.shellWritesOutside('echo x > ~/Work/a.txt', cwd)).toBeUndefined()
     expect(access.shellWritesOutside('rm -rf /tmp/scratch', cwd)).toBeUndefined()

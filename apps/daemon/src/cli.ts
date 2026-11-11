@@ -9,16 +9,20 @@ import { connectHost, homeDir, isLoopback, loadEnvFile, networkUrls, readSavedCo
 import { runDoctor } from './doctor'
 import { createRuntime, readLock, type LockInfo } from './runtime'
 import { startDaemon } from './server'
+import { adoptLegacyEnv, migrateLegacyHome } from './legacy'
 import { installService, uninstallService } from './service'
 import { runsAsService, Updater } from './update'
 import { findDockerHost, widenPath } from './shell-env'
 
+// Variables from before the rename (SUPER_ASSISTANT_*) still apply, from the environment and from <home>/env.
+adoptLegacyEnv()
 // Keys in <home>/env reach every command, including a service started at login.
 loadEnvFile(homeDir())
+adoptLegacyEnv()
 // A GUI- or launchd-started service on macOS sees only /usr/bin:/bin: find Homebrew, Docker and the login shell's tools.
 widenPath()
 
-const program = new Command('super-assistant').version(VERSION).description('你的个人 Super-assistant（本机运行）')
+const program = new Command('nuonuo').version(VERSION).description('你的个人 Nuonuo（本机运行）')
 const entry = fileURLToPath(import.meta.url)
 
 function openBrowser(url: string) {
@@ -58,6 +62,7 @@ function warnIfOpen(host: string) {
 
 /** `start -d`: runs the service detached (output in <home>/logs/daemon.log) and returns once it answers. */
 async function startInBackground(opts: StartOpts) {
+  migrateLegacyHome()
   const config = resolveConfig(opts)
   const running = readLock(config.home)
   if (running) {
@@ -80,11 +85,11 @@ async function startInBackground(opts: StartOpts) {
     const lock = readLock(config.home)
     if (!lock || lock.pid !== child.pid) continue
     try { await health(config.home, lock) } catch { continue }
-    console.log(`Super-assistant ${VERSION} 已在后台启动（pid ${lock.pid}）`)
+    console.log(`Nuonuo ${VERSION} 已在后台启动（pid ${lock.pid}）`)
     printLinks(config.home, lock)
     warnIfOpen(lock.host ?? '127.0.0.1')
     console.log(`  日志      ${logFile}`)
-    console.log('  停止      super-assistant stop')
+    console.log('  停止      nuonuo stop')
     process.exit(0)
   }
   console.error(`后台服务没有启动起来，请查看 ${logFile}`)
@@ -94,11 +99,15 @@ async function startInBackground(opts: StartOpts) {
 program.command('start').description('启动服务（默认只监听 127.0.0.1:7420；-d 在后台运行）')
   .option('-H, --host <ip>', '监听地址：127.0.0.1 仅本机，0.0.0.0 所有网卡（局域网可访问），或某个网卡的 IP')
   .option('-p, --port <port>', '端口（默认 7420）', parsePort)
-  .option('-d, --daemon', '在后台运行（输出写到数据目录的 logs/daemon.log），用 super-assistant stop 停止')
+  .option('-d, --daemon', '在后台运行（输出写到数据目录的 logs/daemon.log），用 nuonuo stop 停止')
   .option('--no-open', '不自动打开浏览器')
   .option('--dev', '开发模式：允许 Vite 开发服务器（localhost:5173）访问 API')
   .addOption(new Option('--desktop', '由桌面应用启动').hideHelp())
   .action(async (opts: StartOpts) => {
+    // An install from before the rename: move ~/.super-assistant to ~/.nuonuo now that the old service has stopped.
+    const move = migrateLegacyHome()
+    if (move.moved) console.log(`数据目录已从 ${move.from} 移到 ${move.to}`)
+    else if (move.reason) console.warn(move.reason)
     if (opts.daemon) return startInBackground(opts)
     const config = resolveConfig(opts)
     let stopping = false
@@ -130,7 +139,7 @@ program.command('start').description('启动服务（默认只监听 127.0.0.1:7
     }
     const started = await startDaemon(config, { restart: () => { void restart() } })
     void findDockerHost().then(host => { if (host) console.log(`Docker：使用 ${host}`) })
-    console.log(`Super-assistant ${VERSION} 已启动`)
+    console.log(`Nuonuo ${VERSION} 已启动`)
     console.log(`  数据目录  ${config.home}`)
     console.log(`  密钥存储  ${started.runtime.secrets.backend}${started.runtime.secretsNote ? `（${started.runtime.secretsNote}）` : ''}`)
     console.log(`  登录链接  ${config.dev ? started.loginUrl.replace(started.url, 'http://localhost:5173') : started.loginUrl}`)
@@ -169,7 +178,7 @@ program.command('stop').description('停止运行中的服务').action(async () 
   const config = resolveConfig()
   const lock = readLock(config.home)
   if (lock && runsAsService({}, `/proc/${lock.pid}/cgroup`)) {
-    console.log('服务由 systemd 管理：用 systemctl --user stop super-assistant 停止（否则开机自启的设置会让它再起来）')
+    console.log('服务由 systemd 管理：用 systemctl --user stop nuonuo 停止（否则开机自启的设置会让它再起来）')
   }
   console.log(await stopRunning(config.home) ? '已停止' : '未运行')
 })
@@ -194,7 +203,7 @@ program.command('config').description('查看或保存监听地址和端口（�
     if (opts.web !== undefined) patch.web = /^(on|true|1|yes)$/i.test(opts.web)
     if (Object.keys(patch).length) {
       writeSavedConfig(config.home, patch)
-      console.log(`已保存到 ${join(config.home, 'config.json')}；重启服务后生效（super-assistant restart）`)
+      console.log(`已保存到 ${join(config.home, 'config.json')}；重启服务后生效（nuonuo restart）`)
     }
     const next = resolveConfig()
     const from = { flag: '命令行', env: '环境变量', file: 'config.json', default: '默认' } as const

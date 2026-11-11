@@ -1,6 +1,6 @@
 /** Conversations: the web chat's list of topics. Each is a WebChat thread; its messages are triggers and the agent's replies. */
-import { newId, schema, type Store } from '@super-assistant/db'
-import type { ModelHub } from '@super-assistant/models'
+import { newId, schema, type Store } from '@nuonuo/db'
+import type { ModelHub } from '@nuonuo/models'
 import { generateText } from 'ai'
 import { asc, eq } from 'drizzle-orm'
 

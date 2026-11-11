@@ -1,7 +1,7 @@
-import { AgentRuntime, Bus, workerEnv } from '@super-assistant/agent-runtime'
-import { generateOf, lastUserText, streamOf, systemText, type Scripted } from '@super-assistant/agent-runtime/src/testing'
-import { kvSet, newId, openStore, schema, type Store } from '@super-assistant/db'
-import { MemorySecrets, ModelHub } from '@super-assistant/models'
+import { AgentRuntime, Bus, workerEnv } from '@nuonuo/agent-runtime'
+import { generateOf, lastUserText, streamOf, systemText, type Scripted } from '@nuonuo/agent-runtime/src/testing'
+import { kvSet, newId, openStore, schema, type Store } from '@nuonuo/db'
+import { MemorySecrets, ModelHub } from '@nuonuo/models'
 import { MockLanguageModelV4 } from 'ai/test'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -14,7 +14,7 @@ import { classifyShell, Reviewer } from './review'
 describe('classifyShell', () => {
   it.each([
     ['ls -la && cat README.md', 'normal'],
-    ['git commit -am wip && git push origin super-assistant/x', 'external'],
+    ['git commit -am wip && git push origin nuonuo/x', 'external'],
     ['gh pr create --fill', 'external'],
     ['curl -X POST https://example.com -d @data.json', 'external'],
     ['curl https://example.com', 'normal'],

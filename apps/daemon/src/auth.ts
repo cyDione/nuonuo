@@ -51,7 +51,7 @@ export function hostGuard(config: DaemonConfig): MiddlewareHandler {
 }
 
 /** The header the desktop app adds to its window's requests. */
-export const DESKTOP_HEADER = 'x-super-assistant-client'
+export const DESKTOP_HEADER = 'x-nuonuo-client'
 
 /**
  * The desktop app with browser access turned off: pages are only served to its window. Calls with the token in an
@@ -60,7 +60,7 @@ export const DESKTOP_HEADER = 'x-super-assistant-client'
 export function webGate(config: DaemonConfig): MiddlewareHandler {
   return async (c, next) => {
     if (config.web || c.req.header(DESKTOP_HEADER) === 'desktop' || c.req.header('authorization') || c.req.path.startsWith('/plugin/')) return next()
-    return c.html('<!doctype html><meta charset="utf-8"><title>Super-assistant</title><body style="font:15px system-ui;margin:3rem auto;max-width:32rem;line-height:1.6"><h2>网页访问未开启</h2><p>Super-assistant 桌面版默认只在应用窗口里使用。要在浏览器（或局域网里的其他设备）打开，请在桌面应用的「设置 → 系统 → 网页访问」中开启。</p></body>', 403)
+    return c.html('<!doctype html><meta charset="utf-8"><title>Nuonuo</title><body style="font:15px system-ui;margin:3rem auto;max-width:32rem;line-height:1.6"><h2>网页访问未开启</h2><p>Nuonuo 桌面版默认只在应用窗口里使用。要在浏览器（或局域网里的其他设备）打开，请在桌面应用的「设置 → 系统 → 网页访问」中开启。</p></body>', 403)
   }
 }
 
@@ -68,7 +68,7 @@ export function requireToken(token: string): MiddlewareHandler {
   return async (c, next) => {
     const bearer = c.req.header('authorization')?.replace(/^Bearer\s+/i, '')
     const presented = bearer || getCookie(c, COOKIE) || ''
-    if (!presented || !same(presented, token)) return c.json({ error: { code: 'unauthorized', message: '需要访问令牌：运行 super-assistant token 获取登录链接' } }, 401)
+    if (!presented || !same(presented, token)) return c.json({ error: { code: 'unauthorized', message: '需要访问令牌：运行 nuonuo token 获取登录链接' } }, 401)
     await next()
   }
 }

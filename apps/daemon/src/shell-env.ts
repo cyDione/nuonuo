@@ -9,7 +9,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
-const MARK = '__SUPER_ASSISTANT_PATH__'
+const MARK = '__NUONUO_PATH__'
 
 /** The usual places macOS tools live that a GUI-launched process does not see. */
 export function extraPathDirs(home = homedir()): string[] {

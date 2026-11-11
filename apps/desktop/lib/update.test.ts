@@ -13,19 +13,19 @@ const { blocker, macScript, winScript } = createRequire(import.meta.url)('./upda
 
 describe('blocker', () => {
   it('refuses a dev build, an app run from the dmg or translocated, and systems without an installer', () => {
-    expect(blocker({ platform: 'darwin', exe: '/x/Super-assistant.app/Contents/MacOS/Super-assistant', packaged: false })).toMatch(/开发版/)
-    expect(blocker({ platform: 'darwin', exe: '/Volumes/Super-assistant/Super-assistant.app/Contents/MacOS/Super-assistant', packaged: true })).toMatch(/应用程序/)
-    expect(blocker({ platform: 'darwin', exe: '/private/var/folders/x/AppTranslocation/y/d/Super-assistant.app/Contents/MacOS/Super-assistant', packaged: true })).toMatch(/应用程序/)
-    expect(blocker({ platform: 'win32', exe: 'C:\\x\\Super-assistant.exe', packaged: true })).toBeNull()
+    expect(blocker({ platform: 'darwin', exe: '/x/Nuonuo.app/Contents/MacOS/Nuonuo', packaged: false })).toMatch(/开发版/)
+    expect(blocker({ platform: 'darwin', exe: '/Volumes/Nuonuo/Nuonuo.app/Contents/MacOS/Nuonuo', packaged: true })).toMatch(/应用程序/)
+    expect(blocker({ platform: 'darwin', exe: '/private/var/folders/x/AppTranslocation/y/d/Nuonuo.app/Contents/MacOS/Nuonuo', packaged: true })).toMatch(/应用程序/)
+    expect(blocker({ platform: 'win32', exe: 'C:\\x\\Nuonuo.exe', packaged: true })).toBeNull()
     expect(blocker({ platform: 'linux', exe: '/opt/x', packaged: true })).toMatch(/不支持/)
     const apps = mkdtempSync(join(tmpdir(), 'sa-apps-'))
-    expect(blocker({ platform: 'darwin', exe: join(apps, 'Super-assistant.app/Contents/MacOS/Super-assistant'), packaged: true })).toBeNull()
+    expect(blocker({ platform: 'darwin', exe: join(apps, 'Nuonuo.app/Contents/MacOS/Nuonuo'), packaged: true })).toBeNull()
   })
 })
 
 describe('Windows helper', () => {
   it('runs the installer silently and quotes paths for PowerShell', () => {
-    const script = winScript({ appPid: 1, daemonPid: 2, staged: "C:\\Users\\o'k\\setup.exe", exe: 'C:\\a\\Super-assistant.exe', resources: 'C:\\a\\resources', home: 'C:\\h', relaunch: true, restartDaemon: true })
+    const script = winScript({ appPid: 1, daemonPid: 2, staged: "C:\\Users\\o'k\\setup.exe", exe: 'C:\\a\\Nuonuo.exe', resources: 'C:\\a\\resources', home: 'C:\\h', relaunch: true, restartDaemon: true })
     expect(script).toContain("$setup = 'C:\\Users\\o''k\\setup.exe'")
     expect(script).toContain("-ArgumentList '/S', '--updated' -Wait")
     expect(script).toContain('if ($true) {\n  Start-Process -FilePath $exe')
@@ -35,8 +35,8 @@ describe('Windows helper', () => {
 describe.skipIf(process.platform === 'win32')('macOS helper', () => {
   it('waits for the app, stops the service, swaps the app in, clears quarantine and starts the new service', async () => {
     const root = mkdtempSync(join(tmpdir(), 'sa-mac-'))
-    const bin = join(root, 'bin'), dest = join(root, 'Applications/Super-assistant.app'), home = join(root, 'home')
-    const staged = join(home, 'updates/v9/app/Super-assistant.app')
+    const bin = join(root, 'bin'), dest = join(root, 'Applications/Nuonuo.app'), home = join(root, 'home')
+    const staged = join(home, 'updates/v9/app/Nuonuo.app')
     for (const d of [bin, join(dest, 'Contents'), join(staged, 'Contents/Resources/node'), join(staged, 'Contents/Resources/daemon'), join(home, 'logs')]) mkdirSync(d, { recursive: true })
     writeFileSync(join(dest, 'v'), 'old'); writeFileSync(join(staged, 'v'), 'new')
     const stub = (name: string, body: string) => { writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`); chmodSync(join(bin, name), 0o755) }

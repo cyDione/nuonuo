@@ -1,5 +1,5 @@
 /** Who the assistant is to the owner (Muse): a name, an avatar and a personality the owner chose. */
-import { kvGet, kvSet, type Store } from '@super-assistant/db'
+import { kvGet, kvSet, type Store } from '@nuonuo/db'
 
 export const PERSONA_ROLES = ['all', 'life', 'work', 'study'] as const
 export const PERSONA_LANGUAGES = ['zh', 'en', 'auto'] as const
@@ -49,5 +49,5 @@ const LANGUAGE_LINE: Record<Persona['language'], string> = {
 export function personaPrompt(store: Store): string {
   const p = persona(store)
   return `## Who you are
-Your name is ${p.name}. Use it when it is natural (introductions, sign-offs in email) — never call yourself an AI system or "Super-assistant".${ROLE_LINE[p.role]}${LANGUAGE_LINE[p.language]}${p.personality ? `\nYour personality, as the owner described it — keep to it in every message:\n${p.personality}` : ''}`
+Your name is ${p.name}. Use it when it is natural (introductions, sign-offs in email) — never call yourself an AI system or "Nuonuo".${ROLE_LINE[p.role]}${LANGUAGE_LINE[p.language]}${p.personality ? `\nYour personality, as the owner described it — keep to it in every message:\n${p.personality}` : ''}`
 }

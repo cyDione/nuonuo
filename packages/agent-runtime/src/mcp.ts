@@ -100,7 +100,7 @@ export class McpManager {
     const conn: Connection = { config, key: JSON.stringify(config), status: { name: config.name, state: 'connecting', tools: [] } }
     this.connections.set(config.name, conn)
     try {
-      const client = new Client({ name: 'super-assistant', version: pkg.version })
+      const client = new Client({ name: 'nuonuo', version: pkg.version })
       if (config.transport === 'stdio') {
         if (!config.command) throw new Error('stdio 服务需要 command')
         const env = { ...getDefaultEnvironment(), ...Object.fromEntries(Object.entries(config.env ?? {}).map(([k, v]) => [k, resolveEnv(v, this.env)])) }

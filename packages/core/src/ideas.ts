@@ -4,9 +4,9 @@
  * settings). Each card can be put away with ×; kinds the owner keeps putting away are suggested less. Pressing a card's
  * button opens a side chat that starts with what the card offered.
  */
-import { kvGet, kvSet, newId, schema, type Store } from '@super-assistant/db'
+import { kvGet, kvSet, newId, schema, type Store } from '@nuonuo/db'
 import { and, desc, eq, gte, inArray } from 'drizzle-orm'
-import type { ModelHub } from '@super-assistant/models'
+import type { ModelHub } from '@nuonuo/models'
 import { z } from 'zod'
 import type { Feed } from './feed'
 import type { Goals } from './goals'

@@ -1,4 +1,4 @@
-import { openStore, type Store } from '@super-assistant/db'
+import { openStore, type Store } from '@nuonuo/db'
 import { mkdtempSync, readdirSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'

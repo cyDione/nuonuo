@@ -1,10 +1,10 @@
 {
-  "name": "@super-assistant/desktop",
-  "productName": "Super-assistant",
+  "name": "@nuonuo/desktop",
+  "productName": "Nuonuo",
   "version": "0.2.4",
   "license": "MIT",
   "private": true,
-  "description": "Super-assistant desktop app for macOS and Windows: window, tray, notifications, global shortcut, with its own Node.js and service",
+  "description": "Nuonuo desktop app for macOS and Windows: window, tray, notifications, global shortcut, with its own Node.js and service",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
@@ -18,8 +18,8 @@
     "electron-builder": "26.18.0"
   },
   "build": {
-    "appId": "dev.super-assistant.desktop",
-    "productName": "Super-assistant",
+    "appId": "dev.nuonuo.desktop",
+    "productName": "Nuonuo",
     "publish": null,
     "afterPack": "scripts/after-pack.cjs",
     "files": [
@@ -49,34 +49,35 @@
       "hardenedRuntime": false,
       "entitlements": "signing/entitlements.mac.plist",
       "entitlementsInherit": "signing/entitlements.mac.plist",
-      "artifactName": "super-assistant-${version}-mac-${arch}.${ext}"
+      "artifactName": "nuonuo-${version}-mac-${arch}.${ext}"
     },
     "linux": {
-      "executableName": "super-assistant",
+      "executableName": "nuonuo",
       "target": [
         "AppImage",
         "tar.gz"
       ],
       "category": "Utility",
-      "artifactName": "super-assistant-${version}-linux-desktop-${arch}.${ext}"
+      "artifactName": "nuonuo-${version}-linux-desktop-${arch}.${ext}"
     },
-    "artifactName": "super-assistant-${version}-${os}-${arch}.${ext}",
+    "artifactName": "nuonuo-${version}-${os}-${arch}.${ext}",
     "dmg": {
-      "artifactName": "super-assistant-${version}-mac-${arch}.${ext}"
+      "artifactName": "nuonuo-${version}-mac-${arch}.${ext}"
     },
     "win": {
       "target": [
         "nsis",
         "zip"
       ],
-      "artifactName": "super-assistant-${version}-win-${arch}.${ext}"
+      "artifactName": "nuonuo-${version}-win-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "super-assistant-${version}-win-${arch}-setup.${ext}",
-      "shortcutName": "Super-assistant"
+      "artifactName": "nuonuo-${version}-win-${arch}-setup.${ext}",
+      "shortcutName": "Nuonuo",
+      "guid": "99f09e0f-842f-5875-983d-5a79624d00e0"
     }
   }
 }

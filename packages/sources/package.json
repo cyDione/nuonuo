@@ -1,5 +1,5 @@
 {
-  "name": "@super-assistant/sources",
+  "name": "@nuonuo/sources",
   "version": "0.2.4",
   "license": "MIT",
   "private": true,
@@ -8,12 +8,12 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "tsc -p tsconfig.json" },
   "dependencies": {
-    "@super-assistant/agent-runtime": "workspace:*",
-    "@super-assistant/core": "workspace:*",
-    "@super-assistant/db": "workspace:*",
+    "@nuonuo/agent-runtime": "workspace:*",
+    "@nuonuo/core": "workspace:*",
+    "@nuonuo/db": "workspace:*",
     "ai": "^7.0.162",
     "drizzle-orm": "^0.45.4",
     "zod": "^4.6.7"
   },
-  "devDependencies": { "@ai-sdk/provider": "^4.0.35", "@super-assistant/models": "workspace:*" }
+  "devDependencies": { "@ai-sdk/provider": "^4.0.35", "@nuonuo/models": "workspace:*" }
 }

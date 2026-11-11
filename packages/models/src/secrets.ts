@@ -16,19 +16,35 @@ export interface SecretStore {
   delete(ref: string): void
 }
 
-const SERVICE = 'super-assistant'
+const SERVICE = 'nuonuo'
+/** The keychain service name before the project was renamed to nuonuo; keys saved under it move over on first read. */
+const LEGACY_SERVICE = 'super-assistant'
 
 export class KeychainSecrets implements SecretStore {
   readonly backend = 'keychain' as const
   constructor(private Entry: new (service: string, account: string) => {
     getPassword(): string | null | undefined; setPassword(v: string): void; deletePassword(): boolean | void
-  }) {}
+  }, private moveLegacy = true) {}
   get(ref: string) {
-    try { return this.entry(ref).getPassword() ?? undefined } catch { return undefined }
+    try {
+      const value = this.entry(ref).getPassword() ?? undefined
+      return value ?? this.adoptLegacy(ref)
+    } catch { return undefined }
   }
   set(ref: string, value: string) { this.entry(ref).setPassword(value) }
   delete(ref: string) { try { this.entry(ref).deletePassword() } catch { /* already absent */ } }
   private entry(ref: string) { return new this.Entry(SERVICE, ref) }
+  /** A key saved by a version from before the rename: copied to the new name, then removed from the old one. */
+  private adoptLegacy(ref: string): string | undefined {
+    try {
+      const old = new this.Entry(LEGACY_SERVICE, ref)
+      const value = old.getPassword() ?? undefined
+      if (value === undefined || !this.moveLegacy) return value
+      this.set(ref, value)
+      try { old.deletePassword() } catch { /* best effort */ }
+      return value
+    } catch { return undefined }
+  }
 }
 
 /** Encrypted file store. It protects against casual reads and synced backups of `secrets.enc`, not against code running as you. */
@@ -98,17 +114,17 @@ export class MemorySecrets implements SecretStore {
 
 /**
  * Picks the keychain when it answers a probe, otherwise the encrypted file; on macOS, the encrypted file (see the top of this file).
- * `SUPER_ASSISTANT_SECRETS=file|keychain` forces one. Returns why the file store was chosen, for `super-assistant doctor`.
+ * `NUONUO_SECRETS=file|keychain` forces one. Returns why the file store was chosen, for `nuonuo doctor`.
  */
-export async function openSecretStore(home: string, prefer = process.env.SUPER_ASSISTANT_SECRETS, platform = process.platform): Promise<{ store: SecretStore; note?: string }> {
+export async function openSecretStore(home: string, prefer = process.env.NUONUO_SECRETS, platform = process.platform): Promise<{ store: SecretStore; note?: string }> {
   const fileStore = () => new FileSecrets(join(home, 'secrets'))
-  if (prefer === 'file') return { store: fileStore(), note: 'SUPER_ASSISTANT_SECRETS=file' }
+  if (prefer === 'file') return { store: fileStore(), note: 'NUONUO_SECRETS=file' }
   if (platform === 'darwin' && prefer !== 'keychain') {
-    const note = 'macOS 上默认用加密文件，避免钥匙串每次启动都要密码（SUPER_ASSISTANT_SECRETS=keychain 可改回）'
+    const note = 'macOS 上默认用加密文件，避免钥匙串每次启动都要密码（NUONUO_SECRETS=keychain 可改回）'
     try {
       // No probe here: writing a probe item another binary created would itself ask for the password.
       const { Entry } = await import('@napi-rs/keyring')
-      return { store: new KeychainMigratingSecrets(fileStore(), new KeychainSecrets(Entry)), note }
+      return { store: new KeychainMigratingSecrets(fileStore(), new KeychainSecrets(Entry, false)), note }
     } catch { return { store: fileStore(), note } }
   }
   try {

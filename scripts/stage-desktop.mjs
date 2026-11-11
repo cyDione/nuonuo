@@ -14,7 +14,7 @@ const root = join(fileURLToPath(import.meta.url), '../..')
 const desktop = join(root, 'apps/desktop')
 const stage = join(desktop, '.stage')
 const platform = process.platform
-const arch = process.env.SUPER_ASSISTANT_ARCH || process.arch
+const arch = process.env.NUONUO_ARCH || process.arch
 const nodeVersion = process.env.NODE_VERSION || process.versions.node
 const win = platform === 'win32'
 

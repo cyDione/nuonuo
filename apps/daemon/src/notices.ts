@@ -3,10 +3,10 @@
  * event; the desktop app shows it natively, a browser tab shows it when it is in the background and notifications are on.
  * Things waiting for the owner's OK always notify. Quiet hours (设置 → 助理 → 安静时间) hold back everything else.
  */
-import type { Bus } from '@super-assistant/agent-runtime'
-import { kvGet, kvSet, type Store } from '@super-assistant/db'
-import type { Feed, Ideas, Reviewer } from '@super-assistant/core'
-import { persona } from '@super-assistant/core'
+import type { Bus } from '@nuonuo/agent-runtime'
+import { kvGet, kvSet, type Store } from '@nuonuo/db'
+import type { Feed, Ideas, Reviewer } from '@nuonuo/core'
+import { persona } from '@nuonuo/core'
 import { z } from 'zod'
 
 const Time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)

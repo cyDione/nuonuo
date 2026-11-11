@@ -1,8 +1,8 @@
-import { openStore, type Store } from '@super-assistant/db'
+import { openStore, type Store } from '@nuonuo/db'
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fsTools } from '@super-assistant/agent-runtime'
+import { fsTools } from '@nuonuo/agent-runtime'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { LocalAccess, LOCKED_NEVER } from './access'
 

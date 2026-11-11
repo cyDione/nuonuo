@@ -11,7 +11,7 @@ import { Btn, Choice, Foot, NumberInput, Page, Row, Section, TextInput, Toggle }
 import { tx } from '../i18n'
 import { desktop } from '../shell'
 
-const REPO = 'https://github.com/cyDione/super-assistant'
+const REPO = 'https://github.com/cyDione/nuonuo'
 const uptime = (ms: number) => { const m = Math.round(ms / 60_000); return m < 60 ? tx('{0} 分钟', m) : m < 1440 ? tx('{0} 小时', Math.floor(m / 60)) : tx('{0} 天', Math.floor(m / 1440)) }
 
 export function System() {
@@ -79,14 +79,14 @@ function Updates() {
   const pct = dl?.size ? Math.min(99, Math.floor(dl.received / dl.size * 100)) : 0
   const state = dl?.state === 'downloading' ? tx('正在下载 {0}… {1}%', dl.tag, pct)
     : dl?.state === 'ready' ? (s.prefs?.install ? tx('{0} 已下载好，退出时自动安装', dl.tag) : tx('{0} 已下载好', dl.tag))
-    : running ? (stuck ? (lost ? tx('服务没有回来：在终端运行 super-assistant start 看看') : tx('装好了，但服务没有重启：请手动重启')) : lost ? tx('正在重启服务…') : tx('正在安装 {0}…', updating?.target || s.run?.target))
+    : running ? (stuck ? (lost ? tx('服务没有回来：在终端运行 nuonuo start 看看') : tx('装好了，但服务没有重启：请手动重启')) : lost ? tx('正在重启服务…') : tx('正在安装 {0}…', updating?.target || s.run?.target))
     : s.checkError ? tx('检查失败') : s.available ? tx('{0} 可以更新了', s.latest?.tag) : s.latest ? tx('已是最新') : tx('还没检查过')
   const prefs = s.prefs
   return <>
     <div className="flex items-center gap-4 rounded-2xl bg-sunken px-5 py-4">
       <Mascot color={BRAND} size={48} />
       <div className="min-w-0 flex-1">
-        <div className="text-[17px] font-semibold">super-assistant</div>
+        <div className="text-[17px] font-semibold">nuonuo</div>
         <div className="mt-0.5 flex flex-wrap gap-x-1.5 text-xs text-muted">
           <span>v{s.current.replace(/^v/, '')}</span>·<span className={s.available ? 'text-accent' : s.checkError ? 'text-danger' : ''}>{state}</span>·
           <a href={REPO} target="_blank" rel="noreferrer" className="hover:text-fg">GitHub</a>·
@@ -124,7 +124,7 @@ function Service({ health }: { health: Health }) {
   const restart = useMutation({ mutationFn: () => api.post('/system/restart'), onSuccess: () => { setRestarting(true); setTimeout(() => location.reload(), 4000) } })
   return <Row label={tx('本机服务')} sub={restart.error ? <span className="text-danger">{(restart.error as Error).message}</span> : tx('{0} · pid {1} · 已运行 {2}', restarting ? tx('正在重启') : tx('运行中'), health.pid, uptime(health.uptimeMs))}>
     {access?.canRestart ? <Btn onClick={() => restart.mutate()} disabled={restart.isPending || restarting}><RefreshCw size={13} className={restarting ? 'animate-spin' : ''} />{tx('重启服务')}</Btn>
-      : <span className="text-xs text-faint">{tx('重启：super-assistant restart')}</span>}
+      : <span className="text-xs text-faint">{tx('重启：nuonuo restart')}</span>}
   </Row>
 }
 
@@ -159,7 +159,7 @@ function Access() {
       const target = s!.saved
       const host = target.host === '0.0.0.0' || target.host === '::' ? location.hostname : target.host
       const moved = String(target.port) !== location.port || (host !== location.hostname && !['127.0.0.1', 'localhost'].includes(host))
-      const isDesktop = Boolean((window as { superAssistantDesktop?: unknown }).superAssistantDesktop)
+      const isDesktop = Boolean((window as { nuonuoDesktop?: unknown }).nuonuoDesktop)
       setTimeout(() => {
         if (moved && !isDesktop) location.href = `http://${host.includes(':') ? `[${host}]` : host}:${target.port}/`
         else location.reload()
@@ -185,7 +185,7 @@ function Access() {
     </>}
     {(dirty || s.restartNeeded) && <Row label={dirty ? tx('还没保存') : restarting ? tx('正在重启…') : tx('已保存，重启服务后生效')}>
       {dirty && <Btn tone="ink" onClick={() => save.mutate()} disabled={save.isPending || !form.port || (form.mode === 'custom' && !form.host.trim())}>{tx('保存')}</Btn>}
-      {!dirty && s.restartNeeded && (s.canRestart ? <Btn onClick={() => restart.mutate()} disabled={restart.isPending || restarting}>{tx('重启服务')}</Btn> : <span className="text-xs text-faint">super-assistant restart</span>)}
+      {!dirty && s.restartNeeded && (s.canRestart ? <Btn onClick={() => restart.mutate()} disabled={restart.isPending || restarting}>{tx('重启服务')}</Btn> : <span className="text-xs text-faint">nuonuo restart</span>)}
     </Row>}
     {s.running.web && <>
       <LinkRow label={tx('本机')} url={s.localUrl} />

@@ -3,11 +3,11 @@
  * Each is an amount toward a target (¥6,400 / 12,000, 1 / 2 本) or days kept out of a number of days (第 9 / 21 天).
  * The assistant records progress and what it did toward each one; the owner sees them on the 目标 page.
  */
-import { newId, schema, type Store } from '@super-assistant/db'
+import { newId, schema, type Store } from '@nuonuo/db'
 import { tool, type ToolSet } from 'ai'
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm'
 import { z } from 'zod'
-import type { ModelHub } from '@super-assistant/models'
+import type { ModelHub } from '@nuonuo/models'
 import type { AgentExtensions } from './agents'
 import { generateStructured } from './structured'
 

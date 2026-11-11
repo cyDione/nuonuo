@@ -1,5 +1,5 @@
 {
-  "name": "@super-assistant/plugins",
+  "name": "@nuonuo/plugins",
   "version": "0.2.4",
   "license": "MIT",
   "private": true,
@@ -8,14 +8,14 @@
   "main": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "tsc -p tsconfig.json" },
-  "dependencies": { "@super-assistant/plugin-sdk": "workspace:*" },
+  "dependencies": { "@nuonuo/plugin-sdk": "workspace:*" },
   "devDependencies": {
     "@ai-sdk/provider": "^4.0.35",
-    "@super-assistant/agent-runtime": "workspace:*",
-    "@super-assistant/core": "workspace:*",
-    "@super-assistant/db": "workspace:*",
-    "@super-assistant/models": "workspace:*",
-    "@super-assistant/sources": "workspace:*",
+    "@nuonuo/agent-runtime": "workspace:*",
+    "@nuonuo/core": "workspace:*",
+    "@nuonuo/db": "workspace:*",
+    "@nuonuo/models": "workspace:*",
+    "@nuonuo/sources": "workspace:*",
     "ai": "^7.0.162"
   }
 }

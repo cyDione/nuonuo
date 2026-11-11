@@ -155,11 +155,11 @@ export async function setNotifications(on: boolean): Promise<boolean> {
 }
 /** The service decided this is worth a banner (设置 → 通知). A browser tab shows it while in the background; the desktop app shows its own. */
 function showNotice(n: Notice) {
-  if ((window as { superAssistantDesktop?: unknown }).superAssistantDesktop) return
+  if ((window as { nuonuoDesktop?: unknown }).nuonuoDesktop) return
   if (!notificationsEnabled() || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
   if (n.kind !== 'test' && document.visibilityState === 'visible') return
   try {
-    const note = new Notification(n.title || 'Super-assistant', { body: n.body, tag: n.id, silent: n.silent })
+    const note = new Notification(n.title || 'Nuonuo', { body: n.body, tag: n.id, silent: n.silent })
     if (n.chime) playChime(n.kind)
     note.onclick = () => { window.focus(); location.hash = n.hash; note.close() }
   } catch { /* best effort */ }

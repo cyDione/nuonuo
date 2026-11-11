@@ -5,19 +5,19 @@
  *   the daemon on 127.0.0.1 — also through `ssh -L`, since the browser follows the redirect. The refresh token goes into the
  *   secret store. The client is a built-in "Desktop app" client, or one of your own Google Cloud project.
  * - Reading: History API polling from a cursor, so a sleeping laptop catches up.
- * - Requests: mail from your allowed addresses, or mail you label (default `super-assistant`), goes to the agent; other mail is
+ * - Requests: mail from your allowed addresses, or mail you label (default `nuonuo`), goes to the agent; other mail is
  *   recorded but not acted on. Replies to a mail thread are saved as a draft reply in that thread.
  * - Workers get gmail_search / gmail_read / gmail_draft.
  */
 import { createHash, randomBytes } from 'node:crypto'
 import pkg from '../package.json' with { type: 'json' }
-import { definePlugin, tool, z, type SourceContext, type SourceKind } from '@super-assistant/plugin-sdk'
+import { definePlugin, tool, z, type SourceContext, type SourceKind } from '@nuonuo/plugin-sdk'
 
 export const GmailConfig = z.object({
   clientId: z.string().trim().default(''),
   clientSecret: z.string().default(''),
   allowedSenders: z.array(z.string().trim().toLowerCase()).default([]),
-  triggerLabel: z.string().trim().default('super-assistant'),
+  triggerLabel: z.string().trim().default('nuonuo'),
   pollSeconds: z.number().int().min(30).max(3600).default(120),
   apiUrl: z.string().url().default('https://gmail.googleapis.com'),
   calendarUrl: z.string().url().default('https://www.googleapis.com/calendar/v3'),
@@ -117,7 +117,9 @@ export function gmailKind(deps: { fetch?: typeof fetch } = {}): SourceKind<Confi
     const cached = ctx.state.get<string>(`label:${ctx.config.triggerLabel}`)
     if (cached) return cached
     const { labels } = await api<{ labels: { id: string; name: string }[] }>(ctx, 'GET', '/labels')
-    const id = labels.find(l => l.name.toLowerCase() === ctx.config.triggerLabel.toLowerCase())?.id
+    const named = (name: string) => labels.find(l => l.name.toLowerCase() === name.toLowerCase())?.id
+    // The default label was `super-assistant` before the rename: a mailbox that still has only that one keeps working.
+    const id = named(ctx.config.triggerLabel) ?? (ctx.config.triggerLabel === 'nuonuo' ? named('super-assistant') : undefined)
     if (id) ctx.state.set(`label:${ctx.config.triggerLabel}`, id)
     return id
   }

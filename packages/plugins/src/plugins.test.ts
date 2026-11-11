@@ -1,9 +1,9 @@
-import { AgentRuntime, Bus } from '@super-assistant/agent-runtime'
-import { generateOf, streamOf } from '@super-assistant/agent-runtime/src/testing'
-import { Engine, registerAgents, ROUTER_SESSION } from '@super-assistant/core'
-import { Effects, openStore, schema, type Store } from '@super-assistant/db'
-import { MemorySecrets, ModelHub } from '@super-assistant/models'
-import { SourceRegistry } from '@super-assistant/sources'
+import { AgentRuntime, Bus } from '@nuonuo/agent-runtime'
+import { generateOf, streamOf } from '@nuonuo/agent-runtime/src/testing'
+import { Engine, registerAgents, ROUTER_SESSION } from '@nuonuo/core'
+import { Effects, openStore, schema, type Store } from '@nuonuo/db'
+import { MemorySecrets, ModelHub } from '@nuonuo/models'
+import { SourceRegistry } from '@nuonuo/sources'
 import { MockLanguageModelV4 } from 'ai/test'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -92,7 +92,7 @@ describe('Gmail', () => {
     await registry.pollNow('gmail')
     expect(triggers().map(t => [t.actor, (t.disposition as any).ignored ?? 'routed'])).toEqual([
       ['boss@work.com', 'routed'], ['deals@shop.com', 'not_allowed'], ['me@example.com', 'routed']])
-    gm.label(spam.id, 'Label_7') // the owner labels a mail "super-assistant"
+    gm.label(spam.id, 'Label_7') // the owner labels a mail "nuonuo"
     await registry.pollNow('gmail')
     expect(await routerSaw()).toContain('主题：大促')
 

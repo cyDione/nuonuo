@@ -42,7 +42,7 @@ Worker 的每条 shell 命令在执行前都要过审核闸门：
 - **工具**：`browser_open / snapshot / click / type / screenshot`。快照会给页面上可见的可操作元素编号（`[e12] button "登录"`），Worker 用编号来点击或输入。
 - **接管**：Worker 调用 `request_handoff`，任务卡片上出现「接管浏览器」按钮。你在网页里看到实时画面，可以点击、输入、按键、跳转地址，完成后点「交还」，Worker 被唤醒继续。远程画面的方式在没有图形界面的机器上、在手机上都能用。
 - **规则**：Worker 不能自己输入密码或付款信息。
-- **找浏览器的顺序**：`SUPER_ASSISTANT_BROWSER` 环境变量 → Playwright 自带的浏览器 → 系统里的 Chrome / Chromium。
+- **找浏览器的顺序**：`NUONUO_BROWSER` 环境变量 → Playwright 自带的浏览器 → 系统里的 Chrome / Chromium。
 
 ## Docker 沙箱（`packages/core/src/sandbox.ts`）
 

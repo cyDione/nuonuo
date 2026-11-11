@@ -1,6 +1,6 @@
-import { generateOf, systemText } from '@super-assistant/agent-runtime/src/testing'
-import { kvSet, newId, openStore, schema, type Store } from '@super-assistant/db'
-import { MemorySecrets, ModelHub } from '@super-assistant/models'
+import { generateOf, systemText } from '@nuonuo/agent-runtime/src/testing'
+import { kvSet, newId, openStore, schema, type Store } from '@nuonuo/db'
+import { MemorySecrets, ModelHub } from '@nuonuo/models'
 import { MockLanguageModelV4 } from 'ai/test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -47,14 +47,14 @@ describe('Memory runtime', () => {
 
   it('recalls within the current project, and the main agent\'s prompt holds only the profile', async () => {
     const { memory } = setup()
-    memory.add({ kind: 'project', scope: 'cyDione/super-assistant', text: '提交信息用英文，PR 描述用中文', trust: 'user', createdBy: 'owner' })
+    memory.add({ kind: 'project', scope: 'cyDione/nuonuo', text: '提交信息用英文，PR 描述用中文', trust: 'user', createdBy: 'owner' })
     memory.add({ kind: 'project', scope: 'other/repo', text: 'PR 描述用英文', trust: 'user', createdBy: 'owner' })
     memory.add({ kind: 'lesson', text: '这台机器上 pnpm 构建前要先 pnpm install --frozen-lockfile', trust: 'system', createdBy: 'tkt_1' })
-    const hits = await memory.recall('PR 描述用什么语言', { scope: 'cyDione/super-assistant' })
+    const hits = await memory.recall('PR 描述用什么语言', { scope: 'cyDione/nuonuo' })
     expect(hits[0]!.text).toBe('提交信息用英文，PR 描述用中文')
     expect(await memory.inline('怎么构建 pnpm 项目')).toMatch(/<memories[\s\S]*\[mem_\w+ lesson\] 这台机器上 pnpm/)
     expect(memory.prompt('router')).not.toContain('pnpm')
-    expect(memory.prompt('worker', 'cyDione/super-assistant')).toContain('### Project cyDione/super-assistant\n- 提交信息用英文')
+    expect(memory.prompt('worker', 'cyDione/nuonuo')).toContain('### Project cyDione/nuonuo\n- 提交信息用英文')
   })
 
   it('consolidates: episodes expire, near-duplicates merge into the newest', () => {

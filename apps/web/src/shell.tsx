@@ -13,7 +13,7 @@ export interface DesktopPrefs { tray: boolean; close: 'hide' | 'quit'; summon: s
 interface DesktopBridge { isDesktop: true; platform: string; setBadge?(n: number): void; on?(event: string, fn: (value: unknown) => void): void; quick?(action: 'hide' | 'open', hash?: string): void
   prefs?: { get(): Promise<DesktopPrefs>; set(patch: Partial<Omit<DesktopPrefs, 'registered'>>): Promise<DesktopPrefs> }; reveal?(path: string): Promise<string>
   update?: { install(): Promise<string> } }
-export const desktop = (window as { superAssistantDesktop?: DesktopBridge }).superAssistantDesktop
+export const desktop = (window as { nuonuoDesktop?: DesktopBridge }).nuonuoDesktop
 export const isMacDesktop = desktop?.platform === 'darwin'
 
 // ── Pane sizes, remembered per device ───────────────────────────────────────

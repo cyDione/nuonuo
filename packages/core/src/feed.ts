@@ -2,7 +2,7 @@
  * 动态 (Figma v6, 19a): what changed in the things the assistant watches for the owner. Only changes reach it, never
  * "nothing new", and at most one of them gets the big colour card. The page ends with 「就这些」: it never scrolls forever.
  */
-import { newId, schema, type Store } from '@super-assistant/db'
+import { newId, schema, type Store } from '@nuonuo/db'
 import { tool, type ToolSet } from 'ai'
 import { and, desc, eq, gte, or } from 'drizzle-orm'
 import { z } from 'zod'
