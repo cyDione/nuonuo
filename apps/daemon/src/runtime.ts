@@ -131,7 +131,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       // how to undo it, so changes to prompts and trigger rules stay under the owner's control.
       correctionTools: () => announced({ ...instructions.tools('watchdog'), update_proactive: proactiveTool(store, 'watchdog', engine) }, (name, result) => {
         const r = result as { version?: number }
-        const what = name === 'update_instructions' ? `说明（第 ${r.version} 版）` : `主动策略（第 ${r.version} 版）`
+        const what = name === 'update_instructions' ? `灵魂（第 ${r.version} 版）` : `主动策略（第 ${r.version} 版）`
         const where = name === 'update_instructions' ? '右侧栏的「它是谁」' : '设置 → 助理 → 主动的策略'
         engine.reply({ conversationId: watchdog.conversation(), text: `我刚改了${what}。不同意的话告诉我，或者在${where}里恢复到上一版。` })
       }),

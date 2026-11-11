@@ -13,7 +13,7 @@ import { connectHost, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, 
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
-import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, SECTION_LABEL, SECTIONS, WATCHDOG_SESSION } from '@super-assistant/core'
+import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@super-assistant/core'
 import { kvGet, kvSet } from '@super-assistant/db'
 import { fireRoutine } from '@super-assistant/sources'
 import { runDoctor } from './doctor'
@@ -308,10 +308,10 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   })
 
   // Standing instructions (versioned)
-  api.get('/instructions', c => c.json({ current: rt.instructions.current(), history: rt.instructions.history(), sections: SECTIONS.map(id => ({ id, label: SECTION_LABEL[id] })) }))
+  api.get('/instructions', c => c.json({ current: rt.instructions.current(), history: rt.instructions.history() }))
   api.put('/instructions', async c => {
-    const sections = await body(c, z.object(Object.fromEntries(SECTIONS.map(s => [s, z.string().max(4_000)]))).partial())
-    return c.json({ current: rt.instructions.update(sections, 'owner') })
+    const { body: text } = await body(c, z.object({ body: z.string().max(INSTRUCTIONS_MAX) }))
+    return c.json({ current: rt.instructions.update(text, 'owner') })
   })
   api.post('/instructions/restore', async c => {
     const { version } = await body(c, z.object({ version: z.number().int().min(1) }))
@@ -418,6 +418,13 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json({ memory: rt.memory.get(c.req.param('id')) })
   })
   api.delete('/memories/:id', c => { rt.memory.remove(c.req.param('id')); return c.body(null, 204) })
+  // The active entries as one Markdown document (## 关于你 / ## 项目 · 名字 / ## 近期 / ## 经验, one line each); saving it
+  // forgets the lines that were removed and remembers the new ones.
+  api.get('/memories/markdown', c => c.json({ markdown: rt.memory.markdown() }))
+  api.put('/memories/markdown', async c => {
+    const { markdown } = await body(c, z.object({ markdown: z.string().max(200_000) }))
+    return c.json(guard(() => rt.memory.applyMarkdown(markdown, 'owner')))
+  })
   api.post('/memories/consolidate', c => c.json(rt.memory.consolidate()))
 
   // 通知: which changes notify, how, and the quiet hours. 试一下 sends a sample whatever the settings.

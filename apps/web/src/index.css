@@ -306,6 +306,34 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 html.blurred .flow::before { animation-play-state: paused; }
 @keyframes flow { 0% { transform: translate(0, 0) rotate(0deg) } 50% { transform: translate(7%, -5%) rotate(14deg) scale(1.06) } 100% { transform: translate(-6%, 5%) rotate(-10deg) scale(1.1) } }
 
+/*
+ * Liquid (Figma section 24, after animate-ui's Bubble Background): a two-colour gradient (--l1 → --l2, picked at random
+ * each time 它是谁 opens) with two soft glows drifting through it — transform only, paused while the window is in the
+ * background, still when motion is reduced. A fine grain keeps it from looking like plastic.
+ */
+.liquid { position: relative; isolation: isolate; overflow: hidden; color: #ffffff; }
+.liquid::before, .liquid::after { content: ""; position: absolute; z-index: -1; pointer-events: none; border-radius: 50%; }
+.liquid::before { width: 90%; height: 110%; left: -25%; top: -45%; background: radial-gradient(closest-side, color-mix(in oklab, var(--l1) 62%, white), transparent); opacity: 0.85; animation: liquid-a 17s ease-in-out infinite alternate; }
+.liquid::after { width: 85%; height: 110%; right: -20%; bottom: -50%; background: radial-gradient(closest-side, color-mix(in oklab, var(--l2) 85%, black), transparent); opacity: 0.8; animation: liquid-b 21s ease-in-out infinite alternate; }
+.liquid { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"), linear-gradient(135deg, var(--l1), var(--l2)); }
+@keyframes liquid-a { 0% { transform: translate(0, 0) scale(1) } 50% { transform: translate(38%, 22%) scale(1.15) } 100% { transform: translate(12%, 48%) scale(0.95) } }
+@keyframes liquid-b { 0% { transform: translate(0, 0) scale(1) } 50% { transform: translate(-36%, -30%) scale(1.1) } 100% { transform: translate(-10%, -52%) scale(1.2) } }
+html.blurred .liquid::before, html.blurred .liquid::after { animation-play-state: paused; }
+
+/* A Markdown document read in a sheet (灵魂, 记忆). */
+.prose-doc { font-size: 14px; line-height: 1.7; word-break: break-word; text-wrap: pretty; }
+.prose-doc > * + * { margin-top: 0.5em; }
+.prose-doc h1, .prose-doc h2, .prose-doc h3 { font-weight: 600; margin-top: 1.2em; text-wrap: balance; }
+.prose-doc > :first-child { margin-top: 0.25em; }
+.prose-doc h1 { font-size: 1.3em } .prose-doc h2 { font-size: 1.14em } .prose-doc h3 { font-size: 1em }
+.prose-doc ul { list-style: disc; padding-left: 1.3em } .prose-doc ol { list-style: decimal; padding-left: 1.3em }
+.prose-doc li + li { margin-top: 0.15em; }
+.prose-doc li::marker { color: var(--faint) }
+.prose-doc a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px }
+.prose-doc strong { font-weight: 600 }
+.prose-doc code { font-family: var(--font-mono); font-size: 0.88em; background: var(--sunken); padding: 0.1em 0.35em; border-radius: 4px }
+.prose-doc blockquote { border-left: 2px solid var(--line); padding-left: 0.9em; color: var(--muted) }
+
 /* Quick ask (the ⌘⇧Space window). */
 html.quick, html.quick body { background: transparent !important; }
 
@@ -324,6 +352,7 @@ html.quick, html.quick body { background: transparent !important; }
   .out-r, .out-l, .out-sheet, .out-pop { animation-name: fade-out; }
   .msg-actions { transform: none; }
   .flow::before { animation: none; }
+  .liquid::before, .liquid::after { animation: none; }
 }
 
 /* ── v6 (Figma section 18–21) ────────────────────────────────────────────── */

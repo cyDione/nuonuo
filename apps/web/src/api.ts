@@ -67,9 +67,8 @@ export interface ActivityEvent { id: string; source: string; actor: string; huma
   proactive: { act: boolean; reason: string; mode: string; title?: string; goal?: string } | null; feedback: { useful: boolean } | null; ticketId: string | null; outcome: { tone: 'ok' | 'muted' | 'warn' | 'accent'; text: string } }
 export interface ProactiveSettings { mode: 'off' | 'observe' | 'auto'; strategy: string; sources: string[]; ignoreActors: string[]; budget: { concurrent: number; daily: number }; version: number; by?: string; at?: number }
 export interface AttentionStats { days: number; approvals: number; questions: number; screened: number; picked: number; silent: number; told: number; useful: number; useless: number }
-export type SectionId = 'communication' | 'scope' | 'delivery'
-export interface InstructionsVersion { version: number; sections: Record<SectionId, string>; at: number; by: string; note?: string }
-export interface InstructionsState { current: InstructionsVersion; history: InstructionsVersion[]; sections: { id: SectionId; label: string }[] }
+export interface InstructionsVersion { version: number; body: string; at: number; by: string; note?: string }
+export interface InstructionsState { current: InstructionsVersion; history: InstructionsVersion[] }
 export type TranscriptItem =
   | { id: string; kind: 'input'; text: string; at: number }
   | { id: string; kind: 'text' | 'reasoning'; text: string; at: number }

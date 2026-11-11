@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { chatLength, instructionsExtension, proactiveExtension, registerAgents, combineExtensions } from './agents'
 import { Engine, ROUTER_SESSION } from './engine'
-import { Instructions } from './instructions'
+import { appendLine, Instructions } from './instructions'
 import type { IncomingTrigger } from './model'
 import { fastPath, proactiveSettings, saveProactiveSettings, Screener, DEFAULT_PROACTIVE } from './proactive'
 
@@ -303,19 +303,33 @@ describe('instructions and recall', () => {
   it('keeps versions, restores them, and puts them in every prompt', async () => {
     const { instructions, engine, conversation } = setup()
     expect(instructions.prompt()).toBe('')
-    instructions.update({ communication: '- 结论先说' }, 'owner')
-    instructions.update({ scope: '- 不要合并 PR' }, 'owner')
+    instructions.update('## 沟通方式\n- 结论先说', 'owner')
+    instructions.update('## 沟通方式\n- 结论先说\n\n## 做事边界\n- 不要合并 PR', 'owner')
     expect(instructions.current().version).toBe(2)
     expect(instructions.prompt()).toContain('不要合并 PR')
     instructions.restore(1, 'owner')
-    expect(instructions.current()).toMatchObject({ version: 3, sections: { scope: '', communication: '- 结论先说' } })
+    expect(instructions.current()).toMatchObject({ version: 3, body: '## 沟通方式\n- 结论先说' })
     let system = ''
     const cnv = conversation()
-    behaviour = { router: (_l, o) => { system = systemText(o); return { calls: [{ name: 'update_instructions', input: { section: 'delivery', mode: 'append', text: '附上测试结果' } }, { name: 'reply', input: { conversation_id: cnv, text: '好，记住了。' } }] } } }
+    behaviour = { router: (_l, o) => { system = systemText(o); return { calls: [{ name: 'update_instructions', input: { heading: '交付要求', mode: 'append', text: '附上测试结果' } }, { name: 'reply', input: { conversation_id: cnv, text: '好，记住了。' } }] } } }
     engine.receiveMessage(cnv, '以后交付都附上测试结果')
     await settle()
     expect(system).toContain('结论先说')
-    expect(instructions.current()).toMatchObject({ version: 4, by: 'router', sections: { delivery: '- 附上测试结果' } })
+    expect(instructions.current()).toMatchObject({ version: 4, by: 'router', body: '## 沟通方式\n- 结论先说\n\n## 交付要求\n- 附上测试结果' })
+  })
+
+  it('reads versions saved as three fields back as one document', () => {
+    const { instructions } = setup()
+    kvSet(store, 'instructions', { version: 2, sections: { communication: '- 结论先说', scope: '', delivery: '- 附测试结果' }, at: 1, by: 'owner' })
+    kvSet(store, 'instructions:history', [{ version: 2, sections: { communication: '- 结论先说', scope: '', delivery: '- 附测试结果' }, at: 1, by: 'owner' }])
+    expect(instructions.current().body).toBe('## 沟通方式\n- 结论先说\n\n## 交付要求\n- 附测试结果')
+    expect(instructions.history()[0]!.body).toContain('## 交付要求')
+    expect(instructions.update('## 沟通方式\n- 结论先说\n- 别客套', 'owner').version).toBe(3)
+  })
+
+  it('appends under an existing heading, before the next one', () => {
+    expect(appendLine('## 沟通方式\n- 结论先说\n\n## 做事边界\n- 不合并', '别客套', '沟通方式')).toBe('## 沟通方式\n- 结论先说\n- 别客套\n\n## 做事边界\n- 不合并')
+    expect(appendLine('', '别客套')).toBe('- 别客套')
   })
 
   it('follows the chain: thread → work → session', async () => {
