@@ -1,6 +1,6 @@
 {
   "name": "@super-assistant/plugins",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "license": "MIT",
   "private": true,
   "description": "First-party plugins: Telegram and Gmail",
