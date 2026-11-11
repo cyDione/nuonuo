@@ -1,10 +1,11 @@
 /**
  * 设置窗口 (Figma v6, section 21; ⌘,): the whole window, with its own sidebar. 返回聊天 at the top (or Esc) goes back to
  * where you were; 搜索设置 narrows the list. Five groups: 助理 · 连接 · 安全 · 模型 · 应用. Pages here have no motion.
- * What lives elsewhere stays there: personality, soul and memory in the right pane's 它是谁; what it may do on its own in
- * the right pane's 权限. Look, theme colour, 主动程度, 点子 and raw records are here (通用, 助理, 数据和隐私).
+ * What lives elsewhere stays there (Figma v7): name, look, personality, soul and memory in the right pane's 它是谁; what it
+ * may do on its own and the rules in the right pane's 权限. 主动程度, 点子, the sandbox and raw records are here (主动,
+ * 安全和执行, 数据和隐私).
  */
-import { Activity, AlarmClock, Bell, ChevronLeft, Cpu, Info, Keyboard, KeyRound, Lock, Mic, Play, Plug, Puzzle, Search, Server, Settings as Cog, ShieldCheck, Smile } from 'lucide-react'
+import { Activity, AlarmClock, Bell, ChevronLeft, Cpu, Info, Keyboard, KeyRound, Lock, Mic, Plug, Puzzle, Search, Server, Settings as Cog, ShieldCheck, Smile } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { leaveSettings, type SettingsTab } from '../route'
 import { isMacDesktop } from '../shell'
@@ -14,7 +15,6 @@ import { Routines } from './Routines'
 import { Sources } from './Sources'
 import { Plugins } from './Plugins'
 import { Mcp } from './Mcp'
-import { Review } from './Review'
 import { Execution } from './Execution'
 import { Providers } from './Providers'
 import { Roles } from './Roles'
@@ -30,7 +30,7 @@ import { System } from './System'
 type Tab = { id: SettingsTab; label: string; icon: ReactNode; words: string }
 const GROUPS: { title: string; tabs: Tab[] }[] = [
   { title: '助理', tabs: [
-    { id: 'persona', label: '助理', icon: <Smile size={17} />, words: '名字 角色 主动 主动程度 只留意 点子 策略 节奏 同时 每天 不理会 账号 安静时间 头像' },
+    { id: 'persona', label: '主动', icon: <Smile size={17} />, words: '主动 主动程度 多主动 只留意 点子 策略 节奏 同时 每天 不理会 账号 安静时间' },
     { id: 'routines', label: '定时任务', icon: <AlarmClock size={17} />, words: '定时 cron 每天 简报 周报 提醒' },
   ] },
   { title: '连接', tabs: [
@@ -39,8 +39,7 @@ const GROUPS: { title: string; tabs: Tab[] }[] = [
     { id: 'mcp', label: 'MCP 工具', icon: <Server size={17} />, words: 'MCP 工具 服务 notion filesystem' },
   ] },
   { title: '安全', tabs: [
-    { id: 'review', label: '规则与审核', icon: <ShieldCheck size={17} />, words: '审核 规则 放行 拦截 审计 记录' },
-    { id: 'execution', label: '执行环境', icon: <Play size={17} />, words: '并发 超时 命令 Docker 沙箱 镜像 网络 禁止' },
+    { id: 'execution', label: '安全和执行', icon: <ShieldCheck size={17} />, words: '审核 放行 拦截 正则 并发 超时 命令 Docker 沙箱 镜像 网络 禁止' },
   ] },
   { title: '模型', tabs: [
     { id: 'providers', label: '模型供应商', icon: <KeyRound size={17} />, words: 'API key 密钥 Base URL 网关 价格 连通 OpenAI Anthropic' },
@@ -52,7 +51,7 @@ const GROUPS: { title: string; tabs: Tab[] }[] = [
     { id: 'notifications', label: '通知', icon: <Bell size={17} />, words: '通知 价格 动态 点子 确认 横幅 声音 Dock 数字 试一下' },
     { id: 'voice', label: '语音', icon: <Mic size={17} />, words: '语音 输入 识别 语言 自动发送 朗读 声音 语速' },
     { id: 'shortcuts', label: '快捷键', icon: <Keyboard size={17} />, words: '快捷键 叫出 快速问 搜索 新侧聊 主聊 右侧栏' },
-    { id: 'data', label: '数据和隐私', icon: <Lock size={17} />, words: '数据目录 隐私 聊天记录 保留 原始记录 导出 清除 记忆' },
+    { id: 'data', label: '数据和隐私', icon: <Lock size={17} />, words: '数据目录 隐私 聊天记录 保留 原始记录 事件 审计 审核记录 导出 清除 记忆' },
     { id: 'system', label: '系统和更新', icon: <Info size={17} />, words: '版本 更新 渠道 服务 重启 密钥 网页版 局域网 端口 看门狗 环境检查' },
   ] },
 ]
@@ -118,7 +117,6 @@ export function Settings({ tab, item }: { tab: SettingsTab; item?: string }) {
         {tab === 'sources' && <Sources {...(item ? { item } : {})} />}
         {tab === 'plugins' && <Plugins />}
         {tab === 'mcp' && <Mcp {...(item ? { item } : {})} />}
-        {tab === 'review' && <Review />}
         {tab === 'execution' && <Execution />}
         {tab === 'providers' && <Providers {...(item ? { item } : {})} />}
         {tab === 'roles' && <Roles {...(item ? { item } : {})} />}

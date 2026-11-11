@@ -1,25 +1,24 @@
 /**
  * The right pane (Figma v6, 81:1128 / 92:1057 / section 20): opened from 糯糯 in the sidebar. Its face and status line on
- * top, then an icon-only switch: 活动 (what it is doing, what waits for you, what comes next, what it did today), 它是谁
- * (性格 · 灵魂 · 记忆) and 权限 (what it may do on its own, and where). These live only here, never in settings.
+ * top, then an icon-only switch (Figma v7, section 23): 活动 (what waits for you, what it is doing, what comes next, what
+ * it has done — the full history opens in place), 它是谁 (名字 · 角色 · 样子 · 性格 · 灵魂 · 记忆) and 权限 (what it may do
+ * on its own, where, and the rules). These live only here, never in settings. 目标 lives only on its page (更多 → 目标).
  * On narrower windows the same pane opens as a drawer, and on phones as a sheet from the bottom.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, ChevronDown, Target, ChevronRight, CreditCard, Folder, Globe, Lock, Plus, Send, Shield, ShieldCheck, Smile, Trash2, X } from 'lucide-react'
+import { Activity, ChevronDown, CreditCard, Folder, Globe, Lock, Plus, Send, Shield, ShieldCheck, Smile, Trash2, X } from 'lucide-react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { api, type AuditEntry, type ExecutionSettings, type InstructionsState, type Level, type Persona, type ReviewSettings, type Routine, type Ticket } from './api'
 import { openActivity, openTask, useActivityOpen, useLive } from './live'
-import { Avatar, statusLine, usePersona } from './persona'
+import { Avatar, isMascot, Mascot, MASCOT, statusLine, usePersona } from './persona'
 import { go } from './route'
-import { GoalsPaneTab } from './goals'
-import { Grants } from './Activity'
 import { InstructionsPage } from './settings/Instructions'
 import { MemoryPage } from './settings/MemoryPage'
 import { needsOwner, useTickets } from './tasks'
 import { cx, IconButton, Modal, Seg } from './ui'
 import { usePresence } from './shell'
 
-export type PaneTab = 'activity' | 'who' | 'permissions' | 'goals'
+export type PaneTab = 'activity' | 'who' | 'permissions'
 let tab: PaneTab = 'activity'
 const tabListeners = new Set<() => void>()
 export function setPaneTab(next: PaneTab) { tab = next; for (const l of tabListeners) l() }
@@ -29,7 +28,6 @@ const TABS: { id: PaneTab; label: React.ReactNode }[] = [
   { id: 'activity', label: <span className="flex items-center" title="活动"><Activity size={17} aria-label="活动" /></span> },
   { id: 'who', label: <span className="flex items-center" title="它是谁"><Smile size={17} aria-label="它是谁" /></span> },
   { id: 'permissions', label: <span className="flex items-center" title="权限"><Shield size={17} aria-label="权限" /></span> },
-  { id: 'goals', label: <span className="flex items-center" title="目标"><Target size={17} aria-label="目标" /></span> },
 ]
 
 const hm = (at: number) => new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
@@ -38,6 +36,11 @@ function when(at: number) {
   const d = new Date(at), now = new Date()
   const days = Math.round((new Date(d.toDateString()).getTime() - new Date(now.toDateString()).getTime()) / 86_400_000)
   return `${days === 0 ? '今天' : days === 1 ? '明天' : days < 7 ? WEEK[d.getDay()] : `${d.getMonth() + 1}/${d.getDate()}`} ${hm(at)}`
+}
+
+function ago(at: number) {
+  const days = Math.round((new Date(new Date().toDateString()).getTime() - new Date(new Date(at).toDateString()).getTime()) / 86_400_000)
+  return `${days === 0 ? '今天' : days === 1 ? '昨天' : `${new Date(at).getMonth() + 1}/${new Date(at).getDate()}`} ${hm(at)}`
 }
 
 export function RightPane({ onClose }: { onClose(): void }) {
@@ -58,7 +61,7 @@ export function RightPane({ onClose }: { onClose(): void }) {
     </div>
     <div className="px-6 pt-5 pb-1"><Seg label="右侧栏" value={current} options={TABS} onChange={setPaneTab} className="[&_button]:h-8" /></div>
     <div key={current} className="anim-fade min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-6">
-      {current === 'activity' ? <ActivityTab onLeave={onClose} /> : current === 'who' ? <WhoTab /> : current === 'goals' ? <GoalsPaneTab onLeave={onClose} /> : <PermissionsTab />}
+      {current === 'activity' ? <ActivityTab /> : current === 'who' ? <WhoTab /> : <PermissionsTab />}
     </div>
   </div>
 }
@@ -74,26 +77,20 @@ const LinkBtn = ({ onClick, children }: { onClick(): void; children: React.React
 
 // ── 活动 ────────────────────────────────────────────────────────────────────
 
-function ActivityTab({ onLeave }: { onLeave(): void }) {
+function ActivityTab() {
   const tickets = useTickets().data?.tickets ?? []
   const routines = useQuery({ queryKey: ['routines'], queryFn: () => api.get<{ routines: Routine[] }>('/routines') }).data?.routines ?? []
+  const [all, setAll] = useState(false)
   const live = tickets.filter(t => t.stage !== 'ended')
   const waiting = live.filter(needsOwner)
   const going = live.filter(t => !needsOwner(t))
+  const finished = tickets.filter(t => t.ended?.outcome === 'completed').sort((a, b) => b.ended!.at - a.ended!.at)
   const today = new Date().toDateString()
-  const done = tickets.filter(t => t.ended?.outcome === 'completed' && new Date(t.ended.at).toDateString() === today).sort((a, b) => b.ended!.at - a.ended!.at)
+  const done = all ? finished : finished.filter(t => new Date(t.ended!.at).toDateString() === today)
   const next = routines.filter(r => r.enabled && r.next).sort((a, b) => a.next! - b.next!).slice(0, 4)
   const open = (t: Ticket) => { if (t.conversationId) go(`/c/${t.conversationId}`); else openTask(t.id) }
-  if (!live.length && !next.length && !done.length) return <div className="flex flex-col items-center gap-1.5 py-12 text-sm text-faint"><ShieldCheck size={20} />现在没事，有事叫我</div>
+  if (!live.length && !next.length && !finished.length) return <div className="flex flex-col items-center gap-1.5 py-12 text-sm text-faint"><ShieldCheck size={20} />现在没事，有事叫我</div>
   return <div className="space-y-6">
-    {going.length > 0 && <section>
-      <Head title="正在做" count={going.length} />
-      <div className="space-y-3">{going.map(t => <button key={t.id} onClick={() => openTask(t.id)} className="block w-full text-left">
-        <span className="block truncate text-sm font-semibold">{t.title}</span>
-        {t.latestReport?.summary && <span className="mt-0.5 block truncate text-xs text-muted">{t.latestReport.summary}</span>}
-        {t.stage === 'working' ? <span className="progress mt-2 block h-1" /> : <span className="mt-2 block h-1 rounded-full bg-sunken" />}
-      </button>)}</div>
-    </section>}
     {waiting.length > 0 && <section>
       <Head title="等你点头" count={waiting.length} />
       <div className="space-y-1.5">{waiting.map(t => <button key={t.id} onClick={() => open(t)} className="press flex w-full items-center gap-3 rounded-2xl bg-sunken px-3.5 py-3 text-left">
@@ -105,19 +102,54 @@ function ActivityTab({ onLeave }: { onLeave(): void }) {
         <span className="shrink-0 text-xs font-medium text-accent">去确认</span>
       </button>)}</div>
     </section>}
+    {going.length > 0 && <section>
+      <Head title="正在做" count={going.length} />
+      <div className="space-y-3">{going.map(t => <button key={t.id} onClick={() => openTask(t.id)} className="block w-full text-left">
+        <span className="block truncate text-sm font-semibold">{t.title}</span>
+        {t.latestReport?.summary && <span className="mt-0.5 block truncate text-xs text-muted">{t.latestReport.summary}</span>}
+        {t.stage === 'working' ? <span className="progress mt-2 block h-1" /> : <span className="mt-2 block h-1 rounded-full bg-sunken" />}
+      </button>)}</div>
+    </section>}
     {next.length > 0 && <section>
       <Head title="接下来" count={next.length} />
       <div className="space-y-2">{next.map(r => <a key={r.id} href={r.conversationId ? `#/c/${r.conversationId}` : '#/settings/routines'} className="flex gap-4 text-sm hover:text-accent">
         <span className="w-[96px] shrink-0 font-medium whitespace-nowrap tabular-nums">{when(r.next!)}</span><span className="min-w-0 flex-1 truncate">{r.name}</span>
       </a>)}</div>
     </section>}
-    {done.length > 0 && <section className="border-t border-line pt-5">
-      <Head title="今天做过" count={done.length} action={<LinkBtn onClick={() => { go('/activity'); onLeave() }}>看全部</LinkBtn>} />
-      <div className="space-y-2">{done.slice(0, 6).map(t => <button key={t.id} onClick={() => openTask(t.id)} className="flex w-full gap-4 text-left text-sm hover:text-accent">
-        <span className="w-10 shrink-0 text-faint tabular-nums">{hm(t.ended!.at)}</span><span className="min-w-0 flex-1 truncate">{t.title}</span>
-      </button>)}</div>
+    {(done.length > 0 || finished.length > 0) && <section className="border-t border-line pt-5">
+      <Head title={all ? '做过' : '今天做过'} count={done.length}
+        action={finished.length > done.length || all ? <LinkBtn onClick={() => setAll(v => !v)}>{all ? '收起' : '展开'}</LinkBtn> : undefined} />
+      {all ? <Done tickets={done} /> : done.length > 0 ? <Rows tickets={done.slice(0, 6)} />
+        : <p className="text-sm text-faint">今天还没做完什么。</p>}
     </section>}
   </div>
+}
+
+/** Finished work as time + title rows; a row opens the task to see how it went. */
+function Rows({ tickets }: { tickets: Ticket[] }) {
+  return <div className="space-y-2">{tickets.map(t => <button key={t.id} onClick={() => openTask(t.id)} className="flex w-full gap-4 text-left text-sm hover:text-accent">
+    <span className="w-10 shrink-0 text-faint tabular-nums">{hm(t.ended!.at)}</span><span className="min-w-0 flex-1 truncate">{t.title}</span>
+  </button>)}</div>
+}
+
+/** Everything it has finished, grouped by day, right here in the pane (动态 is for changes outside, not this). */
+function Done({ tickets }: { tickets: Ticket[] }) {
+  const groups: { day: string; tickets: Ticket[] }[] = []
+  for (const t of tickets) {
+    const day = dayName(t.ended!.at)
+    const g = groups.at(-1)
+    if (g?.day === day) g.tickets.push(t); else groups.push({ day, tickets: [t] })
+  }
+  return <div className="space-y-4">{groups.map(g => <div key={g.day}>
+    <div className="mb-1.5 text-[11px] font-medium text-faint">{g.day}</div>
+    <Rows tickets={g.tickets} />
+  </div>)}</div>
+}
+
+function dayName(at: number) {
+  const d = new Date(at), now = new Date()
+  const days = Math.round((new Date(now.toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86_400_000)
+  return days === 0 ? '今天' : days === 1 ? '昨天' : `${d.getMonth() + 1} 月 ${d.getDate()} 日 · ${WEEK[d.getDay()]}`
 }
 
 // ── 它是谁 ──────────────────────────────────────────────────────────────────
@@ -142,7 +174,8 @@ function WhoTab() {
   const pending = memories?.memories.filter(m => m.status === 'pending') ?? []
   const rules = instructions ? ruleLines(instructions) : []
   return <div className="space-y-5">
-    <section>
+    {raw && <Identity persona={raw} />}
+    <section className="border-t border-line pt-5">
       <Head title="性格" action={editing == null && <LinkBtn onClick={() => setEditing(personality)}>改一改</LinkBtn>} />
       {editing != null ? <div className="space-y-2">
         <textarea autoFocus value={editing} onChange={e => setEditing(e.target.value)} placeholder="说话直接，先说结论，偶尔开个玩笑。"
@@ -181,16 +214,70 @@ function WhoTab() {
   </div>
 }
 
+const ROLES: { id: Persona['role']; label: string }[] = [{ id: 'all', label: '什么都帮' }, { id: 'life', label: '生活助理' }, { id: 'work', label: '工作助理' }, { id: 'study', label: '学习伙伴' }]
+const AVATARS = ['🦊', '🐱', '🐼', '🦉', '🐙', '🌱']
+const COLORS = ['#ff7a9a', '#5db49c', '#f2be45', '#d0583a', '#3f8f9c', '#5c5c5c']
+
+/** 名字和样子 (Figma v7 D): who it is, set where you look at it. Settings no longer has a copy. */
+function Identity({ persona }: { persona: Persona }) {
+  const qc = useQueryClient()
+  const save = useMutation({
+    mutationFn: (p: Partial<Persona>) => api.put('/persona', p),
+    onMutate: p => qc.setQueryData<{ persona: Persona }>(['persona'], old => old && { persona: { ...old.persona, ...p } }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['persona'] }),
+  })
+  const [name, setName] = useState(persona.name)
+  useEffect(() => setName(persona.name), [persona.name])
+  const field = 'h-8 w-[150px] rounded-[10px] border border-line bg-card px-3 text-[13px] outline-none focus:border-faint'
+  return <section>
+    <Head title="名字和样子" />
+    <div className="rounded-2xl bg-sunken px-3.5 py-1.5">
+      <label className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">名字</span>
+        <input value={name} maxLength={24} aria-label="名字" onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+          onBlur={() => { if (name.trim() && name.trim() !== persona.name) save.mutate({ name: name.trim() }); else setName(persona.name) }} className={field} />
+      </label>
+      <label className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">角色</span>
+        <span className="relative">
+          <select value={persona.role} aria-label="角色" onChange={e => save.mutate({ role: e.target.value as Persona['role'] })} className={cx(field, 'cursor-pointer appearance-none pr-8')}>
+            {ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+          <ChevronDown size={13} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-muted" />
+        </span>
+      </label>
+      <div className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">样子</span>
+        <span className="flex items-center gap-0.5">
+          <button type="button" aria-label="糯糯" aria-pressed={isMascot(persona)} onClick={() => save.mutate({ avatar: MASCOT })}
+            className={cx('flex size-7 items-center justify-center rounded-lg', isMascot(persona) ? 'bg-card ring-1 ring-line' : 'hover:bg-card')}><Mascot color={persona.color} size={20} /></button>
+          {AVATARS.map(a => <button key={a} type="button" aria-pressed={persona.avatar === a} onClick={() => save.mutate({ avatar: a })}
+            className={cx('size-7 rounded-lg text-sm', persona.avatar === a ? 'bg-card ring-1 ring-line' : 'hover:bg-card')}>{a}</button>)}
+        </span>
+      </div>
+      <div className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">颜色</span>
+        <span className="flex items-center gap-2">
+          {COLORS.map(c => <button key={c} type="button" aria-label={`颜色 ${c}`} aria-pressed={persona.color === c} onClick={() => save.mutate({ color: c })}
+            className={cx('size-[18px] rounded-full', persona.color === c && 'ring-2 ring-offset-2 ring-offset-sunken')} style={{ background: c, ['--tw-ring-color' as string]: c }} />)}
+        </span>
+      </div>
+    </div>
+  </section>
+}
+
 // ── 权限 ────────────────────────────────────────────────────────────────────
 
 const LEVEL_LABEL: Record<Level, string> = { allow: '直接做', review: '它判断', ask: '先问你', deny: '不行' }
+
+type Grant = { id: string; ticketId: string; label: string; title: string; createdAt: number; standing: boolean }
+const lines = (v: string) => v.split('\n').map(x => x.trim()).filter(Boolean)
+const DECISION: Record<string, { label: string; cls: string }> = { allow: { label: '自己做了', cls: 'text-ok' }, block: { label: '没做', cls: 'text-danger' }, escalate: { label: '问了你', cls: 'text-warn' } }
 
 function PermissionsTab() {
   const qc = useQueryClient()
   const review = useQuery({ queryKey: ['review'], queryFn: () => api.get<{ settings: ReviewSettings; defaults: ReviewSettings }>('/settings/review') }).data?.settings
   const execution = useQuery({ queryKey: ['execution'], queryFn: () => api.get<{ settings: ExecutionSettings }>('/settings/execution') }).data?.settings
   const audit = useQuery({ queryKey: ['audit', 1000], queryFn: () => api.get<{ entries: AuditEntry[] }>('/audit?limit=1000') }).data?.entries ?? []
-  const setLevel = useMutation({
+  const grants = useQuery({ queryKey: ['grants'], queryFn: () => api.get<{ grants: Grant[] }>('/grants') }).data?.grants ?? []
+  const revoke = useMutation({ mutationFn: (id: string) => api.del(`/grants/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['grants'] }) })
+  const saveReview = useMutation({
     mutationFn: (patch: Partial<ReviewSettings>) => api.put('/settings/review', { ...review!, ...patch }),
     onMutate: patch => { qc.setQueryData<{ settings: ReviewSettings }>(['review'], old => old && { ...old, settings: { ...old.settings, ...patch } }) },
     onSettled: () => qc.invalidateQueries({ queryKey: ['review'] }),
@@ -200,27 +287,38 @@ function PermissionsTab() {
     onSettled: () => qc.invalidateQueries({ queryKey: ['execution'] }),
   })
   const [adding, setAdding] = useState<string | null>(null)
+  const [rules, setRules] = useState<string | null>(null)
+  const [log, setLog] = useState(false)
   const week = audit.filter(e => e.at > Date.now() - 7 * 86_400_000)
   const self = week.filter(e => e.action === 'review' && e.decision === 'allow' && e.actor !== 'owner').length
   const asked = week.filter(e => e.decision === 'escalate').length
   const refused = week.filter(e => e.actor === 'owner' && e.action === 'approval' && e.decision === 'block').length
   if (!review) return null
+  const standing = grants.filter(g => g.standing)
+  const forTask = grants.filter(g => !g.standing)
   return <div className="space-y-5">
     <section>
       <Head title="它能自己做什么" />
       <div className="space-y-1">
         <Row icon={<Globe size={16} />} label="查网页、看资料"><span className="px-3 text-xs text-muted">直接做</span></Row>
         <Row icon={<Send size={16} />} label="往外发：评论、发消息">
-          <LevelPick value={review.external} options={['allow', 'review', 'ask', 'deny']} onChange={external => setLevel.mutate({ external })} label="往外发" />
+          <LevelPick value={review.external} options={['allow', 'review', 'ask', 'deny']} onChange={external => saveReview.mutate({ external })} label="往外发" />
         </Row>
         <Row icon={<Trash2 size={16} />} label="删除、强推、合并">
-          <LevelPick value={review.destructive} options={['review', 'ask', 'deny']} onChange={destructive => setLevel.mutate({ destructive: destructive as ReviewSettings['destructive'] })} label="删除、强推、合并" />
+          <LevelPick value={review.destructive} options={['review', 'ask', 'deny']} onChange={destructive => saveReview.mutate({ destructive: destructive as ReviewSettings['destructive'] })} label="删除、强推、合并" />
         </Row>
         <Row icon={<CreditCard size={16} />} label="花钱">
           <span className="flex h-7 items-center gap-1 rounded-full border border-accent/40 px-3 text-xs text-accent">每次都问<Lock size={12} /></span>
         </Row>
       </div>
-      <p className="mt-3 text-[11px] leading-5 text-faint">「花钱」这一条锁着，永远先问你。其他的点一下就能改。</p>
+      {standing.length > 0 && <div className="mt-3 space-y-1.5">{standing.map(g => <div key={g.id} className="anim-rise flex items-center gap-3 rounded-2xl bg-accent-soft px-3.5 py-2.5">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">{g.label} · 直接做</span>
+          <span className="block text-[11px] text-muted">{ago(g.createdAt)} 你在审批卡里定的</span>
+        </span>
+        <button onClick={() => revoke.mutate(g.id)} disabled={revoke.isPending} className="shrink-0 text-xs font-medium text-accent">撤销</button>
+      </div>)}</div>}
+      <p className="mt-3 text-[11px] leading-5 text-faint">「花钱」这一条锁着，永远先问你。其他的点一下就能改，审批卡上点「以后这类直接做」也会记在这里。</p>
     </section>
     <section className="border-t border-line pt-5">
       <Head title="它能碰的文件夹" action={adding == null && execution && <LinkBtn onClick={() => setAdding('')}><span className="flex items-center gap-0.5"><Plus size={12} />加一个</span></LinkBtn>} />
@@ -237,11 +335,48 @@ function PermissionsTab() {
       </form>}
       <p className="mt-2 text-[11px] leading-5 text-faint">你在对话里点名这些文件夹时，它可以直接在里面做事。</p>
     </section>
-    <Grants />
+    {forTask.length > 0 && <section className="border-t border-line pt-5">
+      <Head title="这件事里你都同意过的" count={forTask.length} />
+      <div className="space-y-1">{forTask.map(g => <div key={g.id} className="flex items-center gap-2.5 py-1.5 text-sm">
+        <span className="min-w-0 flex-1 truncate">{g.label}<span className="text-faint"> · {g.title}</span></span>
+        <button onClick={() => revoke.mutate(g.id)} disabled={revoke.isPending} className="shrink-0 text-xs text-muted hover:text-fg">撤回</button>
+      </div>)}</div>
+    </section>}
     <section className="border-t border-line pt-5">
-      <Head title="最近 7 天" />
+      <Head title="规则" count={review.rules.length || undefined} action={rules == null && <LinkBtn onClick={() => setRules(review.rules.join('\n'))}>{review.rules.length ? '展开' : '写一条'}</LinkBtn>} />
+      {rules != null ? <div className="space-y-2">
+        <textarea autoFocus value={rules} onChange={e => setRules(e.target.value)} placeholder={'发邮件、发评论之前先让我看一眼。\n不要删任何文件。'} aria-label="规则，每行一条"
+          className="min-h-24 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm leading-6 outline-none focus:border-faint" />
+        <div className="flex justify-end gap-1.5">
+          <button onClick={() => setRules(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">收起</button>
+          <button onClick={() => saveReview.mutate({ rules: lines(rules) }, { onSuccess: () => setRules(null) })} disabled={saveReview.isPending || lines(rules).join() === review.rules.join()}
+            className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-50">保存</button>
+        </div>
+      </div> : review.rules.length > 0 && <ol className="space-y-1.5 text-sm">{review.rules.slice(0, 3).map((r, i) => <li key={i} className="flex gap-3"><span className="w-3 shrink-0 text-faint tabular-nums">{i + 1}</span><span className="min-w-0">{r}</span></li>)}</ol>}
+      <div className="mt-2 flex min-h-10 items-center gap-3 text-sm">
+        <span className="min-w-0 flex-1 text-muted">拿不准的事，交给它判断还是问你</span>
+        <span className="relative shrink-0">
+          <select value={review.mode} onChange={e => saveReview.mutate({ mode: e.target.value as ReviewSettings['mode'] })} aria-label="拿不准的事"
+            className="h-7 cursor-pointer appearance-none rounded-full bg-sunken pr-7 pl-3 text-xs font-medium outline-none hover:bg-hero-2 focus-visible:ring-2 focus-visible:ring-accent">
+            <option value="model">它判断</option><option value="ask">问你</option>
+          </select>
+          <ChevronDown size={12} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-muted" />
+        </span>
+      </div>
+    </section>
+    <section className="border-t border-line pt-5">
+      <Head title="最近 7 天" action={<LinkBtn onClick={() => setLog(v => !v)}>{log ? '收起' : '看记录'}</LinkBtn>} />
       <p className="text-sm tabular-nums">自己做了 {self} 次 · 问过你 {asked} 次 · 你拒绝了 {refused} 次</p>
-      <a href="#/settings/review" className="group mt-1.5 inline-flex items-center gap-0.5 text-xs text-muted hover:text-fg">看活动记录<ChevronRight size={12} className="transition-transform duration-200 ease-out group-hover:translate-x-0.5" /></a>
+      {log && <div className="mt-3 space-y-0.5">
+        {!week.length ? <p className="py-2 text-sm text-faint">这 7 天没有要审核的事。</p> : week.slice(0, 40).map(e => <div key={e.id} className="flex gap-3 py-1.5 text-[13px]">
+          <span className="w-[70px] shrink-0 text-xs text-faint tabular-nums">{ago(e.at)}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-mono text-xs">{e.input}</span>
+            <span className={cx('text-xs', DECISION[e.decision]?.cls ?? 'text-muted')}>{DECISION[e.decision]?.label ?? e.decision}</span>{e.reason && <span className="text-xs text-faint"> · {e.reason}</span>}
+          </span>
+        </div>)}
+        {week.length > 40 && <p className="pt-1 text-[11px] text-faint">更早的在 设置 · 数据和隐私 · 原始记录。</p>}
+      </div>}
     </section>
   </div>
 }

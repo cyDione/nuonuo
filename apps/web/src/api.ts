@@ -58,7 +58,7 @@ export interface Report { status: 'progress' | 'waiting' | 'ready' | 'blocked' |
 export interface Ticket {
   id: string; title: string; name: string; note: string | null; stage: Stage; stageLabel: string; conversationId: string | null; source: string; directory: string
   latestReport: Report | null; attention: { question: string; options?: string[]; kind?: 'question' | 'handoff'; at: number } | null
-  approvals: { id: string; command: string; reason: string; risk: string; createdAt: number; card?: ApprovalCard | null }[]
+  approvals: { id: string; command: string; reason: string; risk: string; createdAt: number; card?: ApprovalCard | null; standing?: boolean }[]
   ended: { at: number; by: string; outcome: 'completed' | 'stopped' | 'dropped'; reason?: string } | null; createdAt: number; updatedAt: number
   proactive: boolean; why: string | null
 }

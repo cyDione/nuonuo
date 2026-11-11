@@ -124,7 +124,7 @@ export class Notices {
       this.approvals.add(a.id)
       const input = a.input as { card?: { title?: string }; command?: string }
       const conversation = this.parts.ticketConversation(a.ticketId)
-      this.send('approval', '等你确认', input.card?.title ?? input.command ?? a.reason, conversation ? `/c/${conversation}` : '/activity', `approval:${a.id}`)
+      this.send('approval', '等你确认', input.card?.title ?? input.command ?? a.reason, conversation ? `/c/${conversation}` : '/waiting', `approval:${a.id}`)
     }
   }
 }

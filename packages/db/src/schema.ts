@@ -283,6 +283,16 @@ export const grants = sqliteTable('grants', {
   revokedAt: integer('revoked_at'),
 })
 
+/** A kind of action the owner said to just do from now on, in any task (「以后这类直接做」 on an approval card), until revoked in 权限. */
+export const standingGrants = sqliteTable('standing_grants', {
+  id: text('id').primaryKey(),
+  tool: text('tool').notNull(),
+  key: text('key').notNull(),
+  label: text('label').notNull(),
+  createdAt: integer('created_at').notNull(),
+  revokedAt: integer('revoked_at'),
+})
+
 /** A long-running aim of the owner's (目标): an amount toward a target, or days kept out of a number of days. */
 export const goals = sqliteTable('goals', {
   id: text('id').primaryKey(),

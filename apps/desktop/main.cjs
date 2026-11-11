@@ -146,16 +146,14 @@ function refreshTray() {
   tray.setImage(trayImage())
   tray.setToolTip(attention ? `Super-assistant · ${attention} 件事等你处理` : 'Super-assistant')
   if (process.platform === 'darwin') tray.setTitle(attention && badgeOn ? String(attention) : '')
-  const login = app.getLoginItemSettings().openAtLogin
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开 Super-assistant', click: () => show() },
     { label: '快问…', ...(prefs.quick ? { accelerator: prefs.quick } : {}), click: () => toggleQuick() },
-    { label: '新对话', click: () => show('/new') },
+    { label: '新侧聊', click: () => show('/new') },
     { type: 'separator' },
-    { label: attention ? `待你处理：${attention} 件` : '没有需要你处理的事', enabled: attention > 0, click: () => show() },
+    { label: attention ? `等你点头：${attention} 件` : '没有等你点头的事', enabled: attention > 0, click: () => show('/waiting') },
     { type: 'separator' },
-    { label: '开机时启动', type: 'checkbox', checked: login, click: item => { app.setLoginItemSettings({ openAtLogin: item.checked, openAsHidden: true }); refreshTray() } },
-    { label: '设置', click: () => show('/settings/persona') },
+    { label: '设置…', click: () => show('/settings/persona') },
     { type: 'separator' },
     { label: '退出（后台服务继续运行）', click: () => { quitting = true; app.quit() } },
     { label: '退出并停止后台服务', click: () => { stopDaemon(); quitting = true; app.quit() } },

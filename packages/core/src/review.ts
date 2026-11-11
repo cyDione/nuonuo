@@ -238,18 +238,28 @@ export class Reviewer {
     return this.escalate(ticket, sessionId, command, cwd, risk, verdict.reason)
   }
 
-  /** What the owner allowed for the rest of a task, while that task is open. */
-  grants(): (typeof schema.grants.$inferSelect & { title: string })[] {
+  /**
+   * What the owner allowed: for the rest of a task while that task is open, and standing ones (「以后这类直接做」 on an
+   * approval card) until revoked.
+   */
+  grants(): (typeof schema.grants.$inferSelect & { title: string; standing: boolean })[] {
+    const standing = this.store.db.select().from(schema.standingGrants).where(isNull(schema.standingGrants.revokedAt)).orderBy(desc(schema.standingGrants.createdAt)).all()
+      .map(g => ({ ...g, ticketId: STANDING, title: '', standing: true }))
     const rows = this.store.db.select().from(schema.grants).where(isNull(schema.grants.revokedAt)).orderBy(desc(schema.grants.createdAt)).all()
-    return rows.flatMap(g => { try { const t = this.engine.ticket(g.ticketId); return t.ended ? [] : [{ ...g, title: t.title }] } catch { return [] } })
+    return [...standing, ...rows.flatMap(g => {
+      try { const t = this.engine.ticket(g.ticketId); return t.ended ? [] : [{ ...g, title: t.title, standing: false }] } catch { return [] }
+    })]
   }
 
   revokeGrant(id: string): void {
-    this.store.db.update(schema.grants).set({ revokedAt: this.now() }).where(eq(schema.grants.id, id)).run()
+    const at = this.now()
+    this.store.db.update(schema.grants).set({ revokedAt: at }).where(eq(schema.grants.id, id)).run()
+    this.store.db.update(schema.standingGrants).set({ revokedAt: at }).where(eq(schema.standingGrants.id, id)).run()
   }
 
   private granted(ticketId: string, tool: string, key: string) {
-    return this.store.db.select().from(schema.grants).where(and(eq(schema.grants.ticketId, ticketId), eq(schema.grants.tool, tool), eq(schema.grants.key, key), isNull(schema.grants.revokedAt))).get()
+    return this.store.db.select().from(schema.standingGrants).where(and(eq(schema.standingGrants.tool, tool), eq(schema.standingGrants.key, key), isNull(schema.standingGrants.revokedAt))).get()
+      ?? this.store.db.select().from(schema.grants).where(and(eq(schema.grants.ticketId, ticketId), eq(schema.grants.tool, tool), eq(schema.grants.key, key), isNull(schema.grants.revokedAt))).get()
   }
 
   pending(ticketId?: string): Approval[] {
@@ -262,24 +272,31 @@ export class Reviewer {
   }
 
   /**
-   * The owner decides. Approving runs the command in the background in the task's working directory; its result reaches the
-   * worker as a finished job. Denying tells the worker why. Either way the worker wakes.
+   * The owner's answer to an approval. Approving runs the command in the background in the task's working directory; its
+   * result reaches the worker as a finished job. Denying tells the worker why. Either way the worker wakes.
+   * `scope: 'task'` (Muse's "allow for this task") also allows the same kind of action for the rest of this task;
+   * `scope: 'always'` (「以后这类直接做」) allows it from now on, until revoked in 权限. Neither ever covers destructive
+   * actions or spending, which are asked every time.
    */
-  /**
-   * The owner's answer to an approval. `scope: 'task'` (Muse's "allow for this task") also allows the same kind of action
-   * for the rest of this task — never for destructive ones, which are asked every time.
-   */
-  decide(id: string, approve: boolean, note?: string, scope: 'once' | 'task' = 'once'): Approval {
+  decide(id: string, approve: boolean, note?: string, scope: 'once' | 'task' | 'always' = 'once'): Approval & { grantId?: string } {
     const approval = this.get(id)
     if (!approval) throw new Error(`没有审批 ${id}`)
     if (approval.status !== 'pending') throw new Error('这个审批已经处理过了')
     const ticket = this.engine.ticket(approval.ticketId)
     const at = this.now()
     const command = String(approval.input.command)
-    if (approve && scope === 'task' && approval.risk !== 'destructive') {
+    let grantId: string | undefined
+    if (approve && scope !== 'once' && canGrant(approval)) {
       const key = grantKey(approval.tool, command, approval.input)
-      this.store.db.insert(schema.grants).values({ id: newId('grt'), ticketId: ticket.id, tool: approval.tool, key, label: grantLabel(approval.tool, command, approval.input), createdAt: at })
-        .onConflictDoUpdate({ target: [schema.grants.ticketId, schema.grants.tool, schema.grants.key], set: { revokedAt: null, createdAt: at } }).run()
+      const label = grantLabel(approval.tool, command, approval.input)
+      if (scope === 'always') {
+        this.store.db.insert(schema.standingGrants).values({ id: newId('grt'), tool: approval.tool, key, label, createdAt: at })
+          .onConflictDoUpdate({ target: [schema.standingGrants.tool, schema.standingGrants.key], set: { revokedAt: null, createdAt: at } }).run()
+        grantId = this.granted(ticket.id, approval.tool, key)?.id
+      } else {
+        this.store.db.insert(schema.grants).values({ id: newId('grt'), ticketId: ticket.id, tool: approval.tool, key, label, createdAt: at })
+          .onConflictDoUpdate({ target: [schema.grants.ticketId, schema.grants.tool, schema.grants.key], set: { revokedAt: null, createdAt: at } }).run()
+      }
     }
     this.store.atomic(() => {
       this.store.db.update(schema.approvals).set({ status: approve ? 'approved' : 'denied', decidedBy: 'owner', decidedAt: at, note: note ?? null })
@@ -300,7 +317,7 @@ export class Reviewer {
     }
     this.engine.changed(ticket.id)
     this.bus.emit({ type: 'approval.updated', approvalId: id, ticketId: ticket.id })
-    return this.get(id)!
+    return { ...this.get(id)!, ...(grantId ? { grantId } : {}) }
   }
 
   audit(entry: { ticketId?: string | null; actor: string; action: string; tool?: string | null; input?: string | null; risk?: string | null; decision: string; reason?: string | null }): void {
@@ -463,6 +480,16 @@ export class Reviewer {
 /** Why the reviewer model gave no verdict, in the owner's words: not configured, out of budget, call failed, or unreadable reply. */
 function failure(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** The ticket id of a standing grant (「以后这类直接做」): it applies to every task. */
+export const STANDING = '*'
+
+/** Whether an approval may be allowed beyond this once: never destructive actions, never spending. */
+export function canGrant(approval: { risk: string; tool: string; input: Record<string, unknown> }): boolean {
+  if (approval.risk === 'destructive') return false
+  const display = String(approval.input.command ?? '')
+  return !spending(display, approval.tool === 'shell' ? 'shell' : 'tool')
 }
 
 /** What "the same kind of action" means for a task-wide grant: the shell heuristics' categories, or one MCP tool. */

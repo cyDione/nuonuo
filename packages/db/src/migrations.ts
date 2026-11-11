@@ -318,4 +318,15 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX feed_at ON feed(at);
   `,
+  /* 9: v7 standing grants, kinds of action the owner said to just do from now on (「以后这类直接做」) */ `
+  CREATE TABLE standing_grants (
+    id TEXT PRIMARY KEY,
+    tool TEXT NOT NULL,
+    key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    revoked_at INTEGER
+  );
+  CREATE UNIQUE INDEX standing_grants_key ON standing_grants(tool, key);
+  `,
 ]

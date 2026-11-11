@@ -1,6 +1,6 @@
 /**
- * 数据和隐私 (Figma 21 · 15): where everything is kept (only on this computer), how long chats are kept, exporting it all,
- * and clearing memories or chats. Clearing asks first and cannot be undone.
+ * 数据和隐私 (Figma 21 · 15): where everything is kept (only on this computer), how long chats are kept, the raw records
+ * (events and review decisions, v7), exporting it all, and clearing memories or chats. Clearing asks first and cannot be undone.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -8,6 +8,7 @@ import { api, type Health, type PrivacySettings } from '../api'
 import { desktop, isMacDesktop } from '../shell'
 import { setPrefs, usePrefs } from '../prefs'
 import { Btn, Page, Row, Section, SelectInput, Toggle } from './kit'
+import { RawRecords } from './RawRecords'
 
 const KEEP: { id: PrivacySettings['keep']; label: string }[] = [{ id: 'forever', label: '一直保留' }, { id: '365', label: '一年' }, { id: '90', label: '90 天' }, { id: '30', label: '30 天' }]
 
@@ -44,6 +45,7 @@ export function DataPrivacy() {
       </Row>
       <Row label="显示原始记录" sub="给技术用户：聊天里显示它每一步调了什么"><Toggle label="显示原始记录" checked={prefs.showRaw} onChange={showRaw => setPrefs({ showRaw })} /></Row>
     </Section>}
+    <RawRecords />
     <Section title="导出和清除" foot={done ?? '清除之后不能恢复。想留一份，先导出。'}>
       <Row label="导出全部数据" sub="聊天、记忆、目标、动态、定时任务和做过的事，一个 JSON 文件；不含 API key">
         <a href="/api/export" download className="inline-flex h-[28px] items-center rounded-[8px] border border-line bg-card px-3 text-[13px] font-medium hover:border-faint">导出</a>

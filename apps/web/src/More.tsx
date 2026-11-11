@@ -12,7 +12,6 @@ import { useFeed } from './Activity'
 import { useIdeas } from './ideas'
 import { getPrefs, keyLabel, matchesKey, MOD, usePrefs } from './prefs'
 import { go, type Route } from './route'
-import { needsOwner, useTickets } from './tasks'
 import { cx } from './ui'
 
 /** ⌘, opens the full settings from anywhere. */
@@ -37,13 +36,14 @@ const PAGES: { id: Page; label: string; icon: LucideIcon; path: string }[] = [
 export function More({ route }: { route: Route }) {
   const [open, setOpen] = useState(false)
   const prefs = usePrefs()
-  const waiting = (useTickets().data?.tickets ?? []).filter(needsOwner).length + (useFeed().data?.unseen ?? 0)
+  // Only what is new on these pages. 等你点头 is not here: it lives in its chat's card and on top of the right pane's 活动.
+  const fresh = useFeed().data?.unseen ?? 0
   const batch = useIdeas().data?.batch
   const freshIdeas = !!batch && !batch.seen && batch.cards.some(c => !c.dismissed && !c.done)
   const update = useQuery({ queryKey: ['update'], queryFn: () => api.get<UpdateStatus>('/update'), refetchInterval: 30 * 60_000, retry: false }).data
   const current = PAGES.find(p => p.id === route.page)?.id
   const news: Partial<Record<Page, string>> = {
-    ...(waiting > 0 && current !== 'activity' ? { activity: `${waiting} 条新的` } : {}),
+    ...(fresh > 0 && current !== 'activity' ? { activity: `${fresh} 条新的` } : {}),
     ...(freshIdeas && current !== 'ideas' ? { ideas: '今天一批' } : {}),
   }
   const dot = Object.keys(news).length > 0 || !!update?.available

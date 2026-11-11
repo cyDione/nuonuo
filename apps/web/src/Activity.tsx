@@ -1,17 +1,18 @@
 /**
  * 动态 (Figma v6, 19a): what changed in the things 糯糯 watches for you. Only changes show up here, grouped by day; the
  * one that matters most gets the colour card (its number slides from what it was to what it is), everything else is a
- * grey row. The page ends with 「就这些」. What is running and waiting lives in the right pane's 活动, not here.
+ * grey row. The page ends with 「就这些」. What is running and waiting lives in the right pane's 活动, and every raw event
+ * in 设置 · 数据和隐私 · 原始记录 (v7), not here.
  */
 import { SlidingNumber } from '@animate-ui/react/primitives/texts/sliding-number'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bell, Calendar, ChartLine, ChevronDown, ChevronRight, CloudSun, ExternalLink, Heart, House, KeyRound, LineChart, Mail, Newspaper, Package, Plane, Tag, TrendingDown, TrendingUp, Wifi, X, type LucideIcon } from 'lucide-react'
+import { Bell, Calendar, ChartLine, CloudSun, Heart, House, LineChart, Mail, Newspaper, Package, Plane, Tag, TrendingDown, TrendingUp, Wifi, X, type LucideIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type ActivityEvent, type FeedIcon, type FeedItem } from './api'
 import { openTask } from './live'
 import { Avatar, usePersona } from './persona'
 import { SourceIcon, SOURCE_LABEL } from './icons'
-import { Button, cx } from './ui'
+import { cx } from './ui'
 import { go } from './route'
 
 const ICONS: Record<FeedIcon, LucideIcon> = { bell: Bell, tag: Tag, weather: CloudSun, mail: Mail, wifi: Wifi, plane: Plane, calendar: Calendar, package: Package, chart: ChartLine, news: Newspaper, home: House, heart: Heart }
@@ -20,13 +21,6 @@ function dayLabel(at: number) {
   const d = new Date(at), today = new Date()
   const days = Math.round((new Date(today.toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86_400_000)
   return days === 0 ? '今天' : days === 1 ? '昨天' : `${d.getMonth() + 1} 月 ${d.getDate()} 日`
-}
-const ago = (at: number) => {
-  const s = Math.round((Date.now() - at) / 1000)
-  if (s < 60) return '刚刚'
-  if (s < 3600) return `${Math.round(s / 60)} 分钟前`
-  if (s < 86_400) return `${Math.round(s / 3600)} 小时前`
-  return new Date(at).toLocaleDateString()
 }
 
 export const useFeed = () => useQuery({ queryKey: ['feed'], queryFn: () => api.get<{ items: FeedItem[]; unseen: number }>('/feed') })
@@ -85,7 +79,6 @@ export function Activity() {
         {empty ? `还没有变化。想让${persona.name}帮你盯着什么，在聊天里说一声，比如「XM6 降到 2000 以下告诉我」。` : '就这些。有新的我再叫你，不会一直推。'}
       </div>}
 
-      <EventLog events={activity?.events ?? []} />
     </div>
   </div>
 }
@@ -185,51 +178,4 @@ function Noticed({ e }: { e: ActivityEvent }) {
       className="press flex size-7 shrink-0 items-center justify-center rounded-full text-faint opacity-0 group-hover:opacity-100 hover:bg-panel hover:text-fg focus-visible:opacity-100 max-md:opacity-100"><X size={14} /></button>
     <button onClick={() => act.mutate()} disabled={act.isPending} className="press shrink-0 rounded-full bg-panel px-3.5 py-1.5 text-[13px] font-medium shadow-[0_0_0_1px_var(--line)] hover:shadow-[0_0_0_1px_var(--faint)]">帮我处理</button>
   </div>
-}
-
-/** Every event from outside, for when you want to check what came in. Closed by default. */
-function EventLog({ events }: { events: ActivityEvent[] }) {
-  const [open, setOpen] = useState(false)
-  if (!events.length) return null
-  return <section className="mt-12">
-    <button onClick={() => setOpen(v => !v)} aria-expanded={open} className="flex items-center gap-1 text-xs text-faint hover:text-muted">
-      {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}外面进来的所有事件（{events.length}）
-    </button>
-    {open && <div className="anim-fade mt-2 divide-y divide-line rounded-2xl border border-line">
-      {events.map(e => <EventRow key={e.id} e={e} />)}
-    </div>}
-  </section>
-}
-
-function EventRow({ e }: { e: ActivityEvent }) {
-  const tone = { ok: 'text-ok', muted: 'text-faint', warn: 'text-warn', accent: 'text-accent' }[e.outcome.tone]
-  return <div className="flex items-start gap-2.5 px-4 py-2.5 text-sm">
-    <SourceIcon source={e.source} size={14} className="mt-0.5 shrink-0 text-muted" />
-    <div className="min-w-0 flex-1">
-      <div className="flex items-center gap-1.5 text-xs text-muted">
-        <span className="font-medium text-fg">{e.source === 'cron' ? '定时任务' : e.actor}</span>{!e.human && <span className="rounded bg-sunken px-1 text-[10px]">bot</span>}
-        <span className="text-faint">{SOURCE_LABEL[e.source] ?? e.source} · {ago(e.at)}</span>
-        {e.url && <a href={e.url} target="_blank" rel="noreferrer" className="text-accent"><ExternalLink size={11} /></a>}
-      </div>
-      <div className="mt-0.5 line-clamp-2 text-sm">{e.text}</div>
-      <div className={cx('mt-0.5 text-xs', tone)}>{e.outcome.text}</div>
-    </div>
-    {e.ticketId && <button onClick={() => openTask(e.ticketId)} className="shrink-0 text-xs text-accent">详情</button>}
-  </div>
-}
-
-/** What you allowed for the rest of a task (「这件事里都同意」), revocable. Shown in the right pane's 权限; nothing when there is none. */
-export function Grants() {
-  const qc = useQueryClient()
-  const grants = useQuery({ queryKey: ['grants'], queryFn: () => api.get<{ grants: { id: string; ticketId: string; label: string; title: string; createdAt: number }[] }>('/grants') }).data?.grants ?? []
-  const revoke = useMutation({ mutationFn: (id: string) => api.del(`/grants/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['grants'] }) })
-  if (!grants.length) return null
-  return <section className="border-t border-line pt-5">
-    <h3 className="mb-2 text-xs text-muted">这件事里你都同意过的</h3>
-    <div className="space-y-1">{grants.map(g => <div key={g.id} className="flex items-center gap-2.5 rounded-xl py-1.5 text-sm">
-      <KeyRound size={14} className="shrink-0 text-muted" />
-      <span className="min-w-0 flex-1 truncate">{g.label}<span className="text-faint"> · {g.title}</span></span>
-      <Button size="sm" variant="ghost" onClick={() => revoke.mutate(g.id)} disabled={revoke.isPending}>撤回</Button>
-    </div>)}</div>
-  </section>
 }

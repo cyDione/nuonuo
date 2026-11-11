@@ -3,11 +3,13 @@
  * images and PDFs as themselves, and HTML — trackers, dashboards, itineraries — live in an isolated sandbox.
  */
 import { useQuery } from '@tanstack/react-query'
-import { Download, ExternalLink, X } from 'lucide-react'
+import { ChevronRight, Download, ExternalLink, MessageCircle, X } from 'lucide-react'
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { api, type Artifact, type Conversation } from './api'
+import { go } from './route'
 
 export type PreviewKind = 'markdown' | 'csv' | 'image' | 'pdf' | 'html' | 'text' | 'none'
 
@@ -69,6 +71,27 @@ export function ArtifactBody({ id, name }: { id: string; name: string }) {
   return <pre className="max-h-[75vh] overflow-auto rounded-lg bg-sunken p-3 font-mono text-xs whitespace-pre-wrap">{text.data}</pre>
 }
 
+const size = (n: number) => n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
+
+/** Figma v7 G: where it came from (来自 侧聊「…」 ›, back to the conversation it was made in), when, and how big. */
+function Source({ id, onGo }: { id: string; onGo(): void }) {
+  const artifact = useQuery({ queryKey: ['artifacts'], queryFn: () => api.get<{ artifacts: Artifact[] }>('/artifacts') }).data?.artifacts.find(a => a.id === id)
+  const conversation = useQuery({ queryKey: ['conversations'], queryFn: () => api.get<{ conversations: Conversation[] }>('/conversations'), enabled: Boolean(artifact?.conversationId) })
+    .data?.conversations.find(c => c.id === artifact?.conversationId)
+  if (!artifact) return null
+  const main = conversation?.meta.main === true
+  const facts = [new Date(artifact.createdAt).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' }), size(artifact.size)].join(' · ')
+  return <div className="mt-1.5 flex min-w-0 items-center gap-3">
+    {conversation && <button onClick={() => { onGo(); go(main ? '/' : `/c/${conversation.id}`) }}
+      className="press group flex min-w-0 items-center gap-1.5 rounded-full bg-sunken py-1 pr-2 pl-2.5 text-xs font-medium hover:bg-hero-2">
+      <MessageCircle size={13} className="shrink-0 text-muted" />
+      <span className="truncate">来自 {main ? '主聊' : `侧聊「${conversation.title || artifact.title}」`}</span>
+      <ChevronRight size={12} className="shrink-0 text-faint transition-transform duration-200 ease-out group-hover:translate-x-0.5" />
+    </button>}
+    <span className="shrink-0 text-xs text-faint tabular-nums">{facts}</span>
+  </div>
+}
+
 export function ArtifactModal({ id, name, onClose }: { id: string; name: string; onClose(): void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -78,11 +101,14 @@ export function ArtifactModal({ id, name, onClose }: { id: string; name: string;
   // Portalled to <body>: a transformed or clipped ancestor (list rows animate in) would otherwise trap the fixed overlay.
   return createPortal(<div className="anim-fade fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4 " onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
     <div role="dialog" aria-modal="true" aria-label={name} className="anim-pop flex max-h-[92vh] w-full max-w-4xl flex-col rounded-3xl border border-line bg-panel shadow-2xl">
-      <div className="flex items-center gap-2 border-b border-line px-5 py-3">
-        <span className="min-w-0 flex-1 truncate font-display font-semibold">{name}</span>
-        <a href={url(id)} target="_blank" rel="noreferrer" className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title="新窗口打开" aria-label="新窗口打开"><ExternalLink size={16} /></a>
-        <a href={`${url(id)}?download=1`} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title="下载" aria-label="下载"><Download size={16} /></a>
-        <button onClick={onClose} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" aria-label="关闭"><X size={18} /></button>
+      <div className="border-b border-line px-5 py-3">
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate font-display font-semibold">{name}</span>
+          <a href={url(id)} target="_blank" rel="noreferrer" className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title="新窗口打开" aria-label="新窗口打开"><ExternalLink size={16} /></a>
+          <a href={`${url(id)}?download=1`} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title="下载" aria-label="下载"><Download size={16} /></a>
+          <button onClick={onClose} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" aria-label="关闭"><X size={18} /></button>
+        </div>
+        <Source id={id} onGo={onClose} />
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-5"><ArtifactBody id={id} name={name} /></div>
     </div>

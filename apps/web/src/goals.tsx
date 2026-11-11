@@ -147,29 +147,3 @@ function Menu({ g, light }: { g: Goal; light?: boolean }) {
   </div>
 }
 
-/** The right pane's 目标: the goals in short, and what 糯糯 did toward them this week. */
-export function GoalsPaneTab({ onLeave }: { onLeave(): void }) {
-  const data = useGoals().data
-  const active = data?.goals.filter(g => g.status === 'active') ?? []
-  return <div className="space-y-5">
-    <section>
-      <div className="mb-2 flex items-baseline gap-1.5 text-xs"><span className="text-muted">在进行</span><span className="text-faint tabular-nums">{active.length}</span><span className="flex-1" />
-        <button onClick={() => { go('/goals'); onLeave() }} className="group flex items-center text-muted hover:text-fg">去目标页<ChevronRight size={12} className="transition-transform duration-200 ease-out group-hover:translate-x-0.5" /></button></div>
-      <div className="space-y-2">{active.map(g => { const Icon = ICONS[g.icon] ?? Target
-        return <div key={g.id} className="rounded-2xl bg-sunken px-3.5 pt-3 pb-3.5">
-          <div className="flex items-center gap-2.5">
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-panel"><Icon size={14} /></span>
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold">{g.title}</span>
-            <span className="shrink-0 text-xs text-muted tabular-nums">{amount(g)}</span>
-          </div>
-          <Bar value={share(g)} className="mt-3" tone={g.pinned ? 'accent' : 'ink'} />
-        </div> })}</div>
-      {!active.length && <p className="text-sm text-faint">还没有目标。</p>}
-    </section>
-    {data && data.week.length > 0 && <section className="border-t border-line pt-5">
-      <div className="mb-2 text-xs text-muted">这周它帮你做的</div>
-      <ul className="space-y-1.5 text-sm">{data.week.slice(0, 5).map(e => <li key={e.id} className="flex gap-2.5"><span className="mt-2 size-1 shrink-0 rounded-full bg-faint" /><span className="min-w-0">{e.text}</span></li>)}</ul>
-    </section>}
-    <p className="text-xs text-faint">想加一个？直接跟它说「我想……」就行。</p>
-  </div>
-}
