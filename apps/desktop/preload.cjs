@@ -13,4 +13,6 @@ contextBridge.exposeInMainWorld('superAssistantDesktop', {
   prefs: { get: () => ipcRenderer.invoke('prefs:get'), set: patch => ipcRenderer.invoke('prefs:set', patch) },
   // 在访达中显示 a folder.
   reveal: target => ipcRenderer.invoke('reveal', target),
+  // 系统和更新 → 重启并更新: installs the version the service downloaded; resolves 'ok' (the app quits) or why not.
+  update: { install: () => ipcRenderer.invoke('update:install') },
 })

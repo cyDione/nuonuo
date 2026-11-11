@@ -24,13 +24,14 @@ function connectHost(host) {
   return h.includes(':') ? `[${h}]` : h
 }
 
+/** The daemon's /api/health answer ({ ok, version, … }), or undefined when it does not answer. */
 async function health(lock) {
   const t = token()
-  if (!t) return false
+  if (!t) return undefined
   try {
     const res = await fetch(`http://${connectHost(lock.host)}:${lock.port}/api/health`, { headers: { authorization: `Bearer ${t}` }, signal: AbortSignal.timeout(2_000) })
-    return res.ok
-  } catch { return false }
+    return res.ok ? await res.json().catch(() => ({})) : undefined
+  } catch { return undefined }
 }
 
 /** The packaged app carries its own Node.js; in development, GUI apps on macOS start with a minimal PATH, so look where Node usually lives too. */
@@ -58,10 +59,19 @@ function findCli() {
 
 const found = (lock, started) => ({ port: lock.port, host: connectHost(lock.host), token: token(), started })
 
-/** Returns { host, port, token } of a healthy daemon, starting one if needed. */
-async function ensureDaemon(log = console.log) {
+/**
+ * Returns { host, port, token } of a healthy daemon, starting one if needed. With `version` (the packaged app's own), a
+ * daemon of another version (left running from before the app was updated) is stopped and this app's own is started.
+ */
+async function ensureDaemon(log = console.log, version) {
   const running = readLock()
-  if (running && await health(running)) return found(running, false)
+  const answer = running && await health(running)
+  if (answer && (!version || !answer.version || answer.version === version)) return found(running, false)
+  if (answer) {
+    log(`daemon ${answer.version} is not this app's ${version}; restarting it`)
+    stopDaemon()
+    for (let i = 0; i < 50 && readLock(); i++) await new Promise(r => setTimeout(r, 200))
+  }
   const node = findNode()
   const cli = findCli()
   if (!node) throw new Error('找不到 Node.js（安装包里应自带；开发时需要 22.12 或更高版本）。安装 Node，或设置环境变量 SUPER_ASSISTANT_NODE 指向 node 可执行文件。')

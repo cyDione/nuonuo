@@ -9,6 +9,7 @@ import { api, type AccessStatus, type Check, type Health, type UpdatePrefs, type
 import { BRAND, Mascot } from '../persona'
 import { Btn, Choice, Foot, NumberInput, Page, Row, Section, TextInput, Toggle } from './kit'
 import { tx } from '../i18n'
+import { desktop } from '../shell'
 
 const REPO = 'https://github.com/cyDione/super-assistant'
 const uptime = (ms: number) => { const m = Math.round(ms / 60_000); return m < 60 ? tx('{0} 分钟', m) : m < 1440 ? tx('{0} 小时', Math.floor(m / 60)) : tx('{0} 天', Math.floor(m / 1440)) }
@@ -31,14 +32,33 @@ function Updates() {
   const qc = useQueryClient()
   const [updating, setUpdating] = useState<{ from: string; target: string } | null>(null)
   const [lost, setLost] = useState(false)
-  const status = useQuery({ queryKey: ['update'], queryFn: () => api.get<UpdateStatus>('/update'), refetchInterval: updating ? 2000 : false, retry: false })
+  // Desktop app: 立即更新 downloads in the background, then installs through the app (which quits and comes back).
+  const [wantInstall, setWantInstall] = useState(false)
+  const [installError, setInstallError] = useState<string | null>(null)
+  const status = useQuery({ queryKey: ['update'], queryFn: () => api.get<UpdateStatus>('/update'), retry: false,
+    refetchInterval: q => (updating || q.state.data?.download?.state === 'downloading' ? 1500 : false) })
   const check = useMutation({ mutationFn: () => api.post<UpdateStatus>('/update/check'), onSuccess: data => qc.setQueryData(['update'], data) })
   const setPrefs = useMutation({ mutationFn: (patch: Partial<UpdatePrefs>) => api.put<UpdateStatus>('/update/settings', patch), onSuccess: data => qc.setQueryData(['update'], data) })
   const start = useMutation({
     mutationFn: () => api.post<UpdateStatus>('/update'),
-    onSuccess: data => { qc.setQueryData(['update'], data); setLost(false); setUpdating({ from: data.current, target: data.run?.target ?? '' }) },
+    onSuccess: data => {
+      qc.setQueryData(['update'], data)
+      if (data.install === 'desktop') { setWantInstall(true); return }
+      setLost(false); setUpdating({ from: data.current, target: data.run?.target ?? '' })
+    },
   })
   const s = status.data
+  const installApp = async () => {
+    setInstallError(null)
+    const result = await desktop?.update?.install().catch((error: Error) => error.message)
+    if (result && result !== 'ok') setInstallError(result)
+  }
+  const dl = s?.install === 'desktop' && s.available ? s.download : null
+  useEffect(() => {
+    if (!wantInstall || !dl || dl.state === 'downloading') return
+    setWantInstall(false)
+    if (dl.state === 'ready') void installApp()
+  }, [wantInstall, dl?.state])
   // The service restarts mid-update: requests fail for a moment, then the new version answers.
   const reloaded = useRef(false)
   useEffect(() => {
@@ -56,7 +76,10 @@ function Updates() {
   if (!s) return null
   const running = Boolean(updating) || s.run?.state === 'running'
   const stuck = running && slow && Boolean(updating)
-  const state = running ? (stuck ? (lost ? tx('服务没有回来：在终端运行 super-assistant start 看看') : tx('装好了，但服务没有重启：请手动重启')) : lost ? tx('正在重启服务…') : tx('正在安装 {0}…', updating?.target || s.run?.target))
+  const pct = dl?.size ? Math.min(99, Math.floor(dl.received / dl.size * 100)) : 0
+  const state = dl?.state === 'downloading' ? tx('正在下载 {0}… {1}%', dl.tag, pct)
+    : dl?.state === 'ready' ? (s.prefs?.install ? tx('{0} 已下载好，退出时自动安装', dl.tag) : tx('{0} 已下载好', dl.tag))
+    : running ? (stuck ? (lost ? tx('服务没有回来：在终端运行 super-assistant start 看看') : tx('装好了，但服务没有重启：请手动重启')) : lost ? tx('正在重启服务…') : tx('正在安装 {0}…', updating?.target || s.run?.target))
     : s.checkError ? tx('检查失败') : s.available ? tx('{0} 可以更新了', s.latest?.tag) : s.latest ? tx('已是最新') : tx('还没检查过')
   const prefs = s.prefs
   return <>
@@ -70,13 +93,17 @@ function Updates() {
           <a href={s.latest?.url ?? `${REPO}/releases`} target="_blank" rel="noreferrer" className="hover:text-fg">{tx('更新日志')}</a>·<span>{tx('MIT 开源')}</span>
         </div>
       </div>
-      {s.available && s.canUpdate
-        ? <Btn tone="ink" onClick={() => start.mutate()} disabled={start.isPending || running}><Download size={13} />{tx('立即更新')}</Btn>
+      {dl?.state === 'ready' && desktop?.update
+        ? <Btn tone="ink" onClick={() => void installApp()}><Download size={13} />{tx('重启并更新')}</Btn>
+        : s.available && s.canUpdate
+        ? <Btn tone="ink" onClick={() => start.mutate()} disabled={start.isPending || running || dl?.state === 'downloading'}><Download size={13} />{tx('立即更新')}</Btn>
         : <Btn onClick={() => check.mutate()} disabled={check.isPending || running}><RefreshCw size={13} className={check.isPending ? 'animate-spin' : ''} />{tx('检查更新')}</Btn>}
     </div>
-    {(s.checkError || start.error || s.run?.state === 'failed' || (s.available && !s.canUpdate)) && <Foot>
+    {(s.checkError || start.error || installError || dl?.state === 'failed' || s.run?.state === 'failed' || (s.available && !s.canUpdate)) && <Foot>
       {s.checkError && <span className="block text-danger">{tx('检查失败：{0}', s.checkError)}</span>}
       {start.error && <span className="block text-danger">{(start.error as Error).message}</span>}
+      {installError && <span className="block text-danger">{tx('没能自动安装：{0}', installError)}</span>}
+      {dl?.state === 'failed' && <span className="block text-danger">{tx('下载失败：{0}', dl.error)}</span>}
       {s.run?.state === 'failed' && !running && <span className="block text-danger">{tx('更新失败：{0}', s.run.error)}</span>}
       {s.available && !s.canUpdate && <span className="block">{s.hint}</span>}
     </Foot>}
@@ -86,7 +113,7 @@ function Updates() {
       <Row label={tx('更新渠道')} sub={prefs.channel === 'beta' ? tx('测试版更早拿到新东西，也可能不太稳') : undefined}>
         <Choice label={tx('更新渠道')} value={prefs.channel} onChange={channel => setPrefs.mutate({ channel })} options={[{ id: 'stable', label: tx('正式版') }, { id: 'beta', label: tx('测试版') }]} />
       </Row>
-      {s.canUpdate && <Row label={tx('自动下载并安装')} sub={tx('找到新版就装好，服务自己重启')}><Toggle label={tx('自动下载并安装')} checked={prefs.install} disabled={!prefs.auto} onChange={install => setPrefs.mutate({ install })} /></Row>}
+      {s.canUpdate && <Row label={tx('自动下载并安装')} sub={s.install === 'desktop' ? tx('在后台下载好，退出应用时装上') : tx('找到新版就装好，服务自己重启')}><Toggle label={tx('自动下载并安装')} checked={prefs.install} disabled={!prefs.auto} onChange={install => setPrefs.mutate({ install })} /></Row>}
     </Section>}
   </>
 }
