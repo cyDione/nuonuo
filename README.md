@@ -105,7 +105,7 @@ super-assistant start -d
 第一次打开时，糯糯会在主聊里带你走三步：接模型（填你自己的 API key，兼容 OpenAI 或 Anthropic 接口的供应商都可以）、接来源、选主动程度。每一步都能跳过，之后在「设置 · 模型供应商」「设置 · 来源」「设置 · 主动」里改。
 
 > [!NOTE]
-> 发布流程配好 Apple 开发者证书之前，macOS 包只有 ad-hoc 签名，浏览器下载的 dmg 第一次打开会被拦（「无法验证开发者」或「已损坏」）。用上面的 curl 命令安装就不会；已经下载了 dmg 的话，装好后运行 `xattr -dr com.apple.quarantine /Applications/Super-assistant.app`，或到「系统设置 → 隐私与安全性」点「仍要打开」。Windows 包未签名，SmartScreen 提示时点「更多信息 → 仍要运行」。
+> 发布流程配好 Apple 开发者证书之前，macOS 包只有 ad-hoc 签名，浏览器下载的 dmg 第一次打开会被拦（「无法验证开发者」或「已损坏」）。用上面的 curl 命令安装就不会；已经下载了 dmg 的话，打开 dmg 之前先运行 `xattr -cr ~/Downloads/super-assistant-<版本>-mac-<芯片>.dmg`（换成你的 dmg 路径，清掉隔离标记），再照常安装；已经装好的，运行 `xattr -dr com.apple.quarantine /Applications/Super-assistant.app`，或到「系统设置 → 隐私与安全性」点「仍要打开」。Windows 包未签名，SmartScreen 提示时点「更多信息 → 仍要运行」。
 
 > [!TIP]
 > 想让局域网里的手机、电脑也能打开：Linux 运行 `super-assistant start -d --host 0.0.0.0 --port 8080`；桌面端在「设置 · 系统和更新」里把访问改成「局域网」。登录链接就相当于密码，只在可信的网络里这样用。
