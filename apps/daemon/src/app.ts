@@ -13,10 +13,11 @@ import { connectHost, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, 
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
-import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@super-assistant/core'
+import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@super-assistant/core'
 import { kvGet, kvSet } from '@super-assistant/db'
 import { fireRoutine } from '@super-assistant/sources'
 import { runDoctor } from './doctor'
+import { MAX_UPLOAD, Uploads } from './uploads'
 import { search } from './search'
 import { clearChats, exportAll, PrivacySchema, privacySettings, savePrivacySettings, sideChats } from './data'
 import { DEFAULT_NOTIFY, NotifySettingsSchema, notifySettings, saveNotifySettings } from './notices'
@@ -53,6 +54,7 @@ export interface AppControl {
 export function createApp(rt: Runtime, token: string, webRoot?: string, updater?: Updater, closing?: AbortSignal, control: AppControl = {}): Hono {
   const app = new Hono()
   const conversations = new Conversations(rt.store, rt.hub)
+  const uploads = new Uploads(rt.store, rt.uploadsDir)
 
   app.use('*', hostGuard(rt.config))
   app.use('*', webGate(rt.config))
@@ -215,12 +217,38 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.post('/conversations/:id/messages', async c => {
     const id = c.req.param('id')
     if (!conversations.get(id)) throw new HttpError(404, 'missing', 'no such conversation')
-    const { content, replyTo } = await body(c, z.object({ content: z.string().trim().min(1).max(100_000), replyTo: z.string().optional() }))
+    const { content, replyTo, attachments = [], quote } = await body(c, z.object({ content: z.string().trim().max(100_000), replyTo: z.string().optional(),
+      attachments: z.array(z.string()).max(20).optional(), quote: z.string().optional() }).refine(b => b.content.length > 0 || (b.attachments?.length ?? 0) > 0, '消息不能为空'))
     if (!rt.hub.resolve('router')) throw new ModelError('no_model', '主 Agent 还没有配置模型：请到 设置 → 分层模型 选择')
-    const result = rt.engine.receiveMessage(id, content, replyTo ? { replyTo } : {})
+    const files = guard(() => uploads.take(attachments))
+    const quoted = quote ? conversations.message(quote) : undefined
+    if (quote && (!quoted || quoted.conversationId !== id)) throw new HttpError(400, 'invalid', '引用的消息不在这个对话里')
+    const result = rt.engine.receiveMessage(id, content, { ...(replyTo ? { replyTo } : {}), ...(files.length ? { attachments: files } : {}),
+      ...(quoted ? { quote: { messageId: quoted.id, text: quoted.content } } : {}) })
     void conversations.autoTitle(id).then(named => { if (named) rt.bus.emit({ type: 'conversation.updated', conversationId: id }) })
     return c.json({ message: conversations.message(result.messageId), deliveredTo: result.deliveredTo }, 201)
   })
+  // Attachments: uploaded first (a chip in the composer), then sent with the message by id.
+  api.post('/uploads', async c => {
+    const form = await c.req.parseBody()
+    const file = form.file
+    if (!(file instanceof File)) throw new HttpError(400, 'invalid', '缺少文件')
+    if (file.size > MAX_UPLOAD) throw new HttpError(400, "too_large", "文件超过 50MB")
+    const conversationId = typeof form.conversation === 'string' && form.conversation ? form.conversation : undefined
+    if (conversationId && !conversations.get(conversationId)) throw new HttpError(404, 'missing', 'no such conversation')
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const saved = guard(() => uploads.save({ name: file.name, mime: file.type, bytes, ...(conversationId ? { conversationId } : {}) }))
+    return c.json({ upload: { id: saved.id, name: saved.name, mime: saved.mime, size: saved.size } }, 201)
+  })
+  api.get('/uploads/:id', c => {
+    const row = uploads.get(c.req.param('id'))
+    if (!row || !existsSync(row.path)) throw new HttpError(404, 'missing', '附件已不存在')
+    const inline = /^image\/(png|jpeg|gif|webp)$|^application\/pdf$/.test(row.mime) && !c.req.query('download')
+    return new Response(Readable.toWeb(createReadStream(row.path)) as ReadableStream, { headers: { 'content-type': inline ? row.mime : 'application/octet-stream',
+      'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(row.name)}`, 'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'", 'cache-control': 'private, max-age=3600' } })
+  })
+  api.delete('/uploads/:id', c => { if (!uploads.discard(c.req.param('id'))) throw new HttpError(409, 'conflict', '已发送的附件不能删除'); return c.body(null, 204) })
   api.post('/conversations/:id/read', c => { conversations.markRead(c.req.param('id')); return c.json({ ok: true }) })
   api.get('/messages/:id', c => {
     const message = conversations.message(c.req.param('id'))
@@ -348,6 +376,15 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     rules: z.array(z.string().trim().min(1).max(500)).max(50),
     allow: z.array(z.string().trim().min(1).max(300)).max(100), deny: z.array(z.string().trim().min(1).max(300)).max(100),
   }).strict()
+  // 权限 → 文件夹 and 本机应用: one home for what the assistant may touch on this computer.
+  const LocalAccessBody = z.object({
+    folders: z.array(z.object({ path: z.string().trim().min(1).max(1_000), write: z.boolean() })).max(100),
+    never: z.array(z.string().trim().min(1).max(1_000)).max(100),
+    apps: z.partialRecord(z.enum(LOCAL_APPS), z.enum(['auto', 'ask', 'read', 'off'])),
+    sources: z.record(z.string().max(80), z.enum(['read', 'act'])),
+  }).partial().strict()
+  api.get('/settings/access', c => c.json({ settings: rt.access.settings(), defaults: DEFAULT_ACCESS, platform: process.platform }))
+  api.put('/settings/access', async c => c.json({ settings: rt.access.save(await body(c, LocalAccessBody) as Partial<AccessSettings>) }))
   api.get('/settings/review', c => c.json({ settings: rt.reviewer.settings(), defaults: DEFAULT_REVIEW }))
   api.put('/settings/review', async c => {
     const settings = await body(c, ReviewBody)

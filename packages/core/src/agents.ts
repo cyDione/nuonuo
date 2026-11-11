@@ -1,5 +1,5 @@
 /** The router and worker agent definitions: tool sets (enforced by code, not prompt) and how their inbox items read. */
-import { fsTools, recallTool, shellTools, today, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type BrowserManager, type InboxItem, type McpManager, type TurnContext } from '@super-assistant/agent-runtime'
+import { fsTools, recallTool, type FsAccess, shellTools, today, webTools, workerEnv, type AgentDefinition, type AgentRuntime, type BrowserManager, type InboxItem, type McpManager, type TurnContext } from '@super-assistant/agent-runtime'
 import { schema, type Store } from '@super-assistant/db'
 import { tool, type ToolSet } from 'ai'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
@@ -7,6 +7,8 @@ import { z } from 'zod'
 import { clip, DomainError, Engine, ROUTER_SESSION } from './engine'
 import { sourceOfThread, STAGE_LABEL, type Mandate, type Ticket } from './model'
 import { PROACTIVE_WORKER_PROMPT, ROUTER_PROMPT, SUBAGENT_PROMPT, WORKER_PROMPT } from './prompts'
+import type { LocalAccess } from './access'
+import { gateSourceTools, type LocalApps } from './localapps'
 import type { Instructions } from './instructions'
 import { proactiveSettings, saveProactiveSettings } from './proactive'
 import type { Memory, MemoryTrust } from './memory'
@@ -49,6 +51,8 @@ export interface AgentExtensions {
   sharedPrompt?(role: 'router' | 'worker', ticket?: Ticket): string
   /** Context recalled for new input (memory): appended to the input it was recalled for. */
   inlineContext?(text: string, scope: string | undefined): Promise<string>
+  /** Which of the owner's folders the file tools may reach (权限 → 文件夹). */
+  fsAccess?(ticket: Ticket): FsAccess | undefined
 }
 
 export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engine, ext: AgentExtensions = {}): { reportedThisTurn: Set<string> } {
@@ -362,7 +366,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       const ticket = engine.ticket(ctx.session.ticketId!)
       const exec = engine.execution()
       return {
-        ...fsTools(ticket.directory, runtime.blobs),
+        ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket)),
         ...shellTools(runtime.jobs, runtime.blobs, {
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
           env: workerEnv({ SUPER_ASSISTANT_TICKET: ticket.id, SUPER_ASSISTANT_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
@@ -520,7 +524,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       const ticket = engine.ticket(ctx.session.ticketId!)
       const exec = engine.execution()
       return {
-        ...fsTools(ticket.directory, runtime.blobs),
+        ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket)),
         ...shellTools(runtime.jobs, runtime.blobs, {
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
           env: workerEnv({ SUPER_ASSISTANT_TICKET: ticket.id, SUPER_ASSISTANT_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
@@ -565,6 +569,7 @@ export function combineExtensions(...exts: AgentExtensions[]): AgentExtensions {
   const join = (parts: (string | undefined)[]) => parts.filter(Boolean).join('\n\n')
   const gate = exts.find(e => e.gateShell)?.gateShell
   const wrap = exts.find(e => e.wrapShell)?.wrapShell
+  const fsAccess = exts.find(e => e.fsAccess)?.fsAccess
   return {
     routerPrompt: () => join(exts.map(e => e.routerPrompt?.())),
     routerTools: () => Object.assign({}, ...exts.map(e => e.routerTools?.() ?? {})),
@@ -576,6 +581,28 @@ export function combineExtensions(...exts: AgentExtensions[]): AgentExtensions {
     inlineContext: async (text, scope) => join(await Promise.all(exts.map(e => e.inlineContext?.(text, scope) ?? Promise.resolve('')))),
     ...(gate ? { gateShell: gate } : {}),
     ...(wrap ? { wrapShell: wrap } : {}),
+    ...(fsAccess ? { fsAccess } : {}),
+  }
+}
+
+/** Puts source tools that reach the owner's apps (Google Calendar) under the same 权限 levels as the local ones. */
+export function gatedSourceExtension(ext: AgentExtensions, access: LocalAccess, reviewer: Reviewer | undefined): AgentExtensions {
+  return { ...ext, workerTools: (ticket, ctx) => gateSourceTools(ext.workerTools?.(ticket, ctx) ?? {}, ticket, ctx.session.id, access, reviewer) }
+}
+
+/** The owner's apps on this Mac (日历, 提醒事项, 备忘录, 通讯录, 照片), at their levels in 权限. */
+export function localAppsExtension(apps: LocalApps): AgentExtensions {
+  return {
+    workerTools: (ticket, ctx) => isProactive(ticket) ? {} : apps.tools(ticket, ctx.session.id),
+    workerPrompt: ticket => isProactive(ticket) ? undefined : apps.prompt(),
+  }
+}
+
+/** The owner's folder rules for workers: file tools reach allowed folders and the attachments, never the never-touch ones. */
+export function accessExtension(access: LocalAccess, uploadsDir: string): AgentExtensions {
+  return {
+    fsAccess: () => (path, mode) => access.check(path, mode, [uploadsDir]),
+    workerPrompt: () => `## The owner's folders\n${access.describe()}\nFiles the owner attached to messages are under ${uploadsDir} (read them, view_image for pictures); copy one into the working directory before changing it.`,
   }
 }
 

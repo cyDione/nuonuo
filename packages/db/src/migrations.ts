@@ -329,4 +329,17 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE UNIQUE INDEX standing_grants_key ON standing_grants(tool, key);
   `,
+  /* 10: files the owner attached to messages (+ 添加文件, dropped into the chat or onto desktop 糯糯) */ `
+  CREATE TABLE uploads (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT,
+    message_id TEXT,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX uploads_conversation ON uploads(conversation_id, created_at);
+  `,
 ]

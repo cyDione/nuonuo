@@ -4,6 +4,7 @@
  * An escalated action does not block the worker: it becomes an approval card, and the command runs (and its result reaches
  * the worker) once the owner approves. Every decision is written to the audit log.
  */
+import type { LocalAccess } from './access'
 import type { AgentRuntime, Bus } from '@super-assistant/agent-runtime'
 import { kvGet, newId, schema, type Store } from '@super-assistant/db'
 import type { ModelHub } from '@super-assistant/models'
@@ -193,6 +194,12 @@ export class Reviewer {
       this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk: 'destructive', decision: 'block', reason })
       return { action: 'block', by: 'rule', reason }
     }
+    const never = this.access?.shellTouchesNever(command)
+    if (never) {
+      const reason = `命令碰到了「永远不碰」的文件夹 ${never}。不要绕过；需要的话在结果里说明，由主人决定`
+      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk: 'destructive', decision: 'block', reason })
+      return { action: 'block', by: 'rule', reason }
+    }
     const spend = spending(command, 'shell')
     if (spend) return this.escalate(ticket, sessionId, command, cwd, risk === 'normal' ? 'external' : risk, `${spend}：花钱的事每次都问你`)
     if (risk === 'normal') return { action: 'allow', by: 'normal' }
@@ -331,6 +338,8 @@ export class Reviewer {
 
   /** Worker environment captured at escalation, so an approved command runs as the worker would have run it. */
   envFor?: (ticket: Ticket) => Record<string, string>
+  /** The owner's never-touch folders (权限 → 文件夹), enforced on shell commands too. */
+  access?: LocalAccess
 
   private escalate(ticket: Ticket, sessionId: string, command: string, cwd: string, risk: Risk, reason: string): GateDecision {
     return this.escalateAction(ticket, sessionId, 'shell', command, { command, cwd, env: this.envFor?.(ticket) ?? {} }, risk, reason)
@@ -378,6 +387,19 @@ export class Reviewer {
   /** How an approved action of a non-shell tool (an MCP call) is carried out. */
   registerExecutor(tool: string, run: (input: Record<string, unknown>) => Promise<string>): void {
     this.executors.set(tool, run)
+  }
+
+  /**
+   * An action the owner set to 先问你 (a local app's write, a calendar event): asked on an approval card every time,
+   * unless the owner said 这类以后直接做 for it. Silent proactive work is blocked instead, as for any approval.
+   */
+  askOwner(ticket: Ticket, sessionId: string, tool: string, display: string, input: Record<string, unknown>, reason: string): GateDecision {
+    const granted = this.granted(ticket.id, tool, grantKey(tool, display, input))
+    if (granted) {
+      this.audit({ ticketId: ticket.id, actor: 'owner', action: 'review', tool, input: display, risk: 'external', decision: 'allow', reason: `你已允许：${granted.label}` })
+      return { action: 'allow', by: 'rule' }
+    }
+    return this.escalateAction(ticket, sessionId, tool, display, input, 'external', reason)
   }
 
   /**
@@ -502,5 +524,6 @@ export function grantKey(tool: string, display: string, input: Record<string, un
 export function grantLabel(tool: string, display: string, input: Record<string, unknown> = {}): string {
   if (tool === 'shell') return classifyShell(display).reasons.join('、') || '运行命令'
   if (tool === 'mcp') return `调用 ${String(input.server ?? '')} 的 ${String(input.tool ?? '')}`
+  if (typeof input.label === 'string') return input.label
   return tool
 }
