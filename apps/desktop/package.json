@@ -1,7 +1,7 @@
 {
   "name": "@nuonuo/desktop",
   "productName": "Nuonuo",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "license": "MIT",
   "private": true,
   "description": "Nuonuo desktop app for macOS and Windows: window, tray, notifications, global shortcut, with its own Node.js and service",

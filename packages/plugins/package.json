@@ -1,6 +1,6 @@
 {
   "name": "@nuonuo/plugins",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "license": "MIT",
   "private": true,
   "description": "First-party plugins: Telegram and Gmail",
