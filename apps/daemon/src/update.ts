@@ -4,11 +4,16 @@
  * The check reads the latest GitHub Release of the public repository; no sign-in is needed (GITHUB_TOKEN or GH_TOKEN,
  * when set, is sent to get a higher rate limit). The headless Linux package updates itself by running install.sh, the
  * same script a fresh install uses, against the installation this process runs from; the data directory is never
- * touched. The desktop app only reports the new version, with a link to its installer.
+ * touched. For the desktop app (macOS, Windows) the service downloads the new version in the background, checks it
+ * against the SHA-256 digest GitHub publishes for it and stages it under <home>/updates; the app installs it when it
+ * quits or when the owner asks (apps/desktop/lib/update.cjs), because only the app can quit itself and swap its files.
  */
-import { spawn } from 'node:child_process'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { closeSync, createWriteStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { VERSION } from './config'
 
 export const REPO = 'cyDione/super-assistant'
@@ -20,6 +25,16 @@ export function assetPattern(desktop: boolean, platform: NodeJS.Platform = proce
   if (!desktop) return new RegExp(`^super-assistant-.+-linux-${arch}\\.tar\\.gz$`)
   const os = platform === 'darwin' ? 'mac' : platform === 'win32' ? 'win' : 'linux'
   return new RegExp(`^super-assistant-.+-${os}-${arch}[.-]`)
+}
+
+/**
+ * The file the desktop app updates itself from: the zip of the .app on macOS (unpacked and swapped in place, the same
+ * way install.sh installs it), the NSIS installer on Windows (run silently). Other systems have none.
+ */
+export function installerPattern(platform: NodeJS.Platform = process.platform, arch: string = process.arch): RegExp | null {
+  if (platform === 'darwin') return new RegExp(`^super-assistant-.+-mac-${arch}\\.zip$`)
+  if (platform === 'win32') return new RegExp(`^super-assistant-.+-win-${arch}-setup\\.exe$`)
+  return null
 }
 
 /** How this process was installed: from the release package (can update itself) or run from a source checkout. */
@@ -71,24 +86,33 @@ export function githubToken(env: NodeJS.ProcessEnv = process.env): string | unde
 const headers = (token: string | undefined, accept: string) =>
   ({ ...(token ? { authorization: `Bearer ${token}` } : {}), accept, 'user-agent': 'super-assistant-updater' })
 
-export interface Release { tag: string; version: string; url: string; notes: string; publishedAt: string | null; hasPackage: boolean }
+export interface Asset { name: string; url: string; size: number; digest: string | null }
+export interface Release { tag: string; version: string; url: string; notes: string; publishedAt: string | null; hasPackage: boolean
+  /** The file this install updates itself from (the desktop app's), when the release has one. */
+  installer?: Asset | null }
 
 export async function fetchLatestRelease(token: string | undefined, fetchImpl: typeof fetch = fetch, env: NodeJS.ProcessEnv = process.env,
-  asset: RegExp = assetPattern(false), prerelease = false): Promise<Release> {
+  asset: RegExp = assetPattern(false), prerelease = false, installer: RegExp | null = null): Promise<Release> {
   // The beta channel takes the newest release, pre-releases included; /releases/latest skips them.
   const res = await fetchImpl(`${api(env)}/releases${prerelease ? '?per_page=15' : '/latest'}`, { headers: headers(token, 'application/vnd.github+json'), signal: AbortSignal.timeout(20_000) })
   if (res.status === 404) throw new Error('还没有发布任何版本')
   if (res.status === 401) throw new Error('GITHUB_TOKEN 无效或已过期（检查更新不需要令牌，可以删掉它）')
   if (res.status === 403 || res.status === 429) throw new Error('GitHub 访问频率受限，稍后再试（或在数据目录的 env 文件里设置 GITHUB_TOKEN）')
   if (!res.ok) throw new Error(`GitHub 返回 ${res.status}`)
-  type Raw = { tag_name: string; html_url: string; body?: string | null; published_at?: string | null; draft?: boolean; assets?: { name: string }[] }
+  type Raw = { tag_name: string; html_url: string; body?: string | null; published_at?: string | null; draft?: boolean
+    assets?: { name: string; browser_download_url?: string; size?: number; digest?: string | null }[] }
   const data = await res.json() as Raw | Raw[]
   const r = Array.isArray(data) ? data.find(x => !x.draft) : data
   if (!r) throw new Error('还没有发布任何版本')
   return {
     tag: r.tag_name, version: r.tag_name.replace(/^v/i, ''), url: r.html_url, notes: (r.body ?? '').slice(0, 4000),
-    publishedAt: r.published_at ?? null, hasPackage: (r.assets ?? []).some(a => asset.test(a.name)),
+    publishedAt: r.published_at ?? null, hasPackage: (r.assets ?? []).some(a => asset.test(a.name)), installer: pick(r.assets, installer),
   }
+}
+
+function pick(assets: { name: string; browser_download_url?: string; size?: number; digest?: string | null }[] | undefined, pattern: RegExp | null): Asset | null {
+  const a = pattern ? (assets ?? []).find(x => pattern.test(x.name) && x.browser_download_url) : undefined
+  return a ? { name: a.name, url: a.browser_download_url!, size: a.size ?? 0, digest: a.digest ?? null } : null
 }
 
 /** install.sh as published at `tag` (so an update always runs the newest installer). */
@@ -102,6 +126,12 @@ async function fetchInstaller(token: string | undefined, tag: string, fetchImpl:
 
 export interface Run { state: 'running' | 'installed' | 'failed'; target: string; startedAt: number; log: string; error?: string }
 
+/**
+ * The desktop app's new version, downloaded by the service. `path` (once ready) is what the app installs from: the
+ * unpacked Super-assistant.app on macOS, the setup .exe on Windows.
+ */
+export interface Download { state: 'downloading' | 'ready' | 'failed'; tag: string; version: string; received: number; size: number; path?: string; error?: string }
+
 export interface UpdateStatus {
   current: string
   install: Install['kind']
@@ -113,6 +143,8 @@ export interface UpdateStatus {
   checkError: string | null
   /** The update run started from this process, if any. */
   run: Run | null
+  /** Desktop app: the downloaded new version, if any. */
+  download: Download | null
   hint: string
   prefs: UpdatePrefs
 }
@@ -126,15 +158,23 @@ export interface UpdaterOptions {
   restart?: () => void
   /** Run by the systemd service (default: detected with runsAsService). */
   service?: boolean
-  /** Started by the desktop app: report new versions, but the installer is downloaded by hand. */
+  /** Started by the desktop app: new versions are downloaded here and installed by the app. */
   desktop?: boolean
+  /** The system and CPU the desktop download is for (tests). */
+  platform?: NodeJS.Platform
+  arch?: string
 }
 
 const DAY = 24 * 60 * 60 * 1000
 
-/** 设置 → 系统和更新: check by itself, which channel, and whether a found update installs by itself (package installs only). */
+/**
+ * 设置 → 系统和更新: check by itself, which channel, and whether a found update downloads and installs by itself (the
+ * Linux package installs and restarts; the desktop app downloads in the background and installs when it quits).
+ */
 export interface UpdatePrefs { auto: boolean; channel: 'stable' | 'beta'; install: boolean }
-export const DEFAULT_UPDATE_PREFS: UpdatePrefs = { auto: true, channel: 'stable', install: false }
+export const DEFAULT_UPDATE_PREFS: UpdatePrefs = { auto: true, channel: 'stable', install: true }
+/** The name of the app inside the macOS zip. */
+export const MAC_APP = 'Super-assistant.app'
 
 export class Updater {
   readonly install: Install
@@ -143,6 +183,10 @@ export class Updater {
   private checkError: string | null = null
   private checking: Promise<void> | null = null
   private run: UpdateStatus['run'] = null
+  private download: Download | null = null
+  private downloading: Promise<UpdateStatus> | null = null
+  private readonly platform: NodeJS.Platform
+  private readonly arch: string
   private timer: NodeJS.Timeout | null = null
   private readonly env: NodeJS.ProcessEnv
   private readonly fetchImpl: typeof fetch
@@ -154,6 +198,8 @@ export class Updater {
     this.env = opts.env ?? process.env
     this.fetchImpl = opts.fetch ?? fetch
     this.service = opts.service ?? runsAsService(this.env)
+    this.platform = opts.platform ?? process.platform
+    this.arch = opts.arch ?? process.arch
     this.restore()
   }
 
@@ -162,7 +208,11 @@ export class Updater {
     if (this.env.SUPER_ASSISTANT_UPDATE_CHECK === '0' || (this.install.kind !== 'package' && this.install.kind !== 'desktop')) return
     const tick = () => {
       if (!this.prefs.auto) return
-      void this.check().then(s => { if (this.prefs.install && s.available && s.canUpdate && this.run?.state !== 'running') return this.update() })
+      void this.check().then(s => {
+        if (!this.prefs.install || !s.available || !s.canUpdate) return
+        if (this.install.kind === 'desktop') return this.fetchDesktop()
+        if (this.run?.state !== 'running') return this.update()
+      })
         .catch(() => { /* recorded in checkError or run */ })
     }
     const first = setTimeout(tick, 15_000)
@@ -177,13 +227,14 @@ export class Updater {
     const available = Boolean(this.latest && this.latest.hasPackage && compareVersions(this.latest.version, VERSION) > 0)
     const hint = this.install.kind === 'source'
       ? `源码运行：在 ${this.install.root} 里 git pull && pnpm install && pnpm build 后重启`
-      : this.install.kind === 'desktop' ? '桌面版：从发布页下载新版安装包，覆盖安装即可（数据会保留）'
+      : this.install.kind === 'desktop' ? (this.desktopCanUpdate() ? '新版本在后台下载好后，退出应用时自动安装（数据会保留）' : '桌面版：从发布页下载新版安装包，覆盖安装即可（数据会保留）')
       : this.install.kind === 'other' ? '这种安装方式不支持自动更新'
       : this.service ? '更新后 systemd 服务会自动重启' : '更新后服务会自动重启'
     if (this.run?.state === 'running') this.run = { ...this.run, log: tail(join(this.opts.home, 'logs/update.log')) }
     return {
-      current: VERSION, install: this.install.kind, canUpdate: this.install.kind === 'package' && process.platform === 'linux',
-      checkedAt: this.checkedAt, latest: this.latest, available, checkError: this.checkError, run: this.run, hint, prefs: this.prefs,
+      current: VERSION, install: this.install.kind,
+      canUpdate: this.install.kind === 'package' ? process.platform === 'linux' : this.install.kind === 'desktop' && this.desktopCanUpdate(),
+      checkedAt: this.checkedAt, latest: this.latest, available, checkError: this.checkError, run: this.run, download: this.download, hint, prefs: this.prefs,
     }
   }
 
@@ -192,7 +243,9 @@ export class Updater {
     if (!this.checking) {
       this.checking = (async () => {
         try {
-          this.latest = await fetchLatestRelease(githubToken(this.env), this.fetchImpl, this.env, assetPattern(this.install.kind === 'desktop'), this.prefs.channel === 'beta')
+          const desktop = this.install.kind === 'desktop'
+          this.latest = await fetchLatestRelease(githubToken(this.env), this.fetchImpl, this.env, assetPattern(desktop, this.platform, this.arch),
+            this.prefs.channel === 'beta', desktop ? installerPattern(this.platform, this.arch) : null)
           this.checkError = null
         } catch (error) {
           this.checkError = (error as Error).message
@@ -233,6 +286,14 @@ export class Updater {
    * otherwise `restart` is called once it finished. Progress is in status().run and <home>/logs/update.log.
    */
   async update(): Promise<UpdateStatus> {
+    // The desktop app: download (the app asks the service, then installs what it staged).
+    if (this.install.kind === 'desktop') {
+      const status = await this.check()
+      if (!status.canUpdate) throw new Error(status.hint)
+      if (!status.available) throw new Error(`已是最新版本（${VERSION}）`)
+      void this.fetchDesktop()
+      return this.status()
+    }
     if (this.run?.state === 'running') return this.status()
     const { tag, script, env } = await this.prepare()
     const logDir = join(this.opts.home, 'logs')
@@ -263,6 +324,63 @@ export class Updater {
     return this.status()
   }
 
+  private desktopCanUpdate(): boolean { return installerPattern(this.platform, this.arch) !== null }
+  private updatesDir() { return join(this.opts.home, 'updates') }
+
+  /**
+   * Downloads the latest release's desktop installer in the background (concurrent calls share one download), checks its
+   * SHA-256 against GitHub's digest and stages it: on macOS the zip is unpacked with ditto and the quarantine flag is
+   * cleared, so Gatekeeper does not stop the updated app. Progress is in status().download.
+   */
+  fetchDesktop(): Promise<UpdateStatus> {
+    const latest = this.latest
+    const asset = latest?.installer
+    if (!latest || !asset || compareVersions(latest.version, VERSION) <= 0) return Promise.resolve(this.status())
+    if (this.download?.state === 'ready' && this.download.tag === latest.tag) return Promise.resolve(this.status())
+    if (this.downloading) return this.downloading
+    this.downloading = (async () => {
+      const dir = join(this.updatesDir(), latest.tag)
+      const file = join(dir, asset.name)
+      this.download = { state: 'downloading', tag: latest.tag, version: latest.version, received: 0, size: asset.size }
+      try {
+        // Older versions and half-finished downloads go; only this one is kept.
+        rmSync(this.updatesDir(), { recursive: true, force: true })
+        mkdirSync(dir, { recursive: true })
+        const res = await this.fetchImpl(asset.url, { headers: { 'user-agent': 'super-assistant-updater' }, redirect: 'follow', signal: AbortSignal.timeout(30 * 60_000) })
+        if (!res.ok || !res.body) throw new Error(`下载 ${asset.name} 失败：GitHub 返回 ${res.status}`)
+        const hash = createHash('sha256')
+        const progress = this.download
+        const body = Readable.fromWeb(res.body as import('node:stream/web').ReadableStream)
+        body.on('data', (chunk: Buffer) => { hash.update(chunk); progress.received += chunk.length })
+        await pipeline(body, createWriteStream(`${file}.part`))
+        if (asset.size && progress.received !== asset.size) throw new Error(`下载不完整（${progress.received} / ${asset.size} 字节）`)
+        const digest = `sha256:${hash.digest('hex')}`
+        if (asset.digest && asset.digest.toLowerCase() !== digest) throw new Error(`${asset.name} 校验失败，已丢弃`)
+        renameSync(`${file}.part`, file)
+        let path = file
+        if (this.platform === 'darwin') {
+          const out = join(dir, 'app')
+          const unzip = spawnSync('ditto', ['-x', '-k', file, out], { encoding: 'utf8' })
+          if (unzip.status !== 0) throw new Error(`解压 ${asset.name} 失败：${(unzip.stderr || unzip.error?.message || '').trim()}`)
+          path = join(out, MAC_APP)
+          if (!existsSync(path)) throw new Error(`${asset.name} 里没有 ${MAC_APP}`)
+          // A file the service downloads itself carries no quarantine flag; clear it anyway, so Gatekeeper never stops the update.
+          spawnSync('xattr', ['-dr', 'com.apple.quarantine', path])
+          rmSync(file, { force: true })
+        }
+        this.download = { ...progress, state: 'ready', path }
+        writeFileSync(join(this.updatesDir(), 'ready.json'), JSON.stringify(this.download))
+      } catch (error) {
+        this.download = { ...this.download!, state: 'failed', error: (error as Error).message }
+        rmSync(`${file}.part`, { force: true })
+      } finally {
+        this.downloading = null
+      }
+      return this.status()
+    })()
+    return this.downloading
+  }
+
   setPrefs(patch: Partial<UpdatePrefs>): UpdateStatus {
     this.prefs = { ...this.prefs, ...patch }
     try { writeFileSync(this.prefsFile(), JSON.stringify(this.prefs)) } catch { /* best effort */ }
@@ -284,6 +402,15 @@ export class Updater {
       this.checkError = saved.checkError
     } catch { /* first run */ }
     try { this.prefs = { ...DEFAULT_UPDATE_PREFS, ...JSON.parse(readFileSync(this.prefsFile(), 'utf8')) as Partial<UpdatePrefs> } } catch { /* defaults */ }
+    if (this.install.kind !== 'desktop') return
+    // A download staged before a restart is still ready; once that version runs (or the files are gone) it is cleaned up.
+    try {
+      const ready = JSON.parse(readFileSync(join(this.updatesDir(), 'ready.json'), 'utf8')) as Download
+      if (ready.state === 'ready' && ready.path && existsSync(ready.path) && compareVersions(ready.version, VERSION) > 0) this.download = ready
+      else rmSync(this.updatesDir(), { recursive: true, force: true })
+    } catch {
+      if (existsSync(this.updatesDir()) && readdirSync(this.updatesDir()).length) rmSync(this.updatesDir(), { recursive: true, force: true })
+    }
   }
 }
 
