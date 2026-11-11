@@ -82,7 +82,7 @@ loginctl enable-linger $USER      # 仅 Linux：没登录桌面时也保持运�
 ```
 
 **5. 可选**：
-- **自己打包**：Linux 无桌面包 `pnpm build && bash scripts/package-linux.sh`（打的是本机 CPU 的包）；桌面端 `pnpm build`，再在 `apps/desktop` 里运行 `pnpm dist:mac` / `pnpm dist:win`（同样只能打本机系统和 CPU 的包）。GitHub Actions 的 “Release” 工作流在 6 台对应的机器上打全部的包；推送 `v*` 标签时自动发布 Release。发版前先用 `pnpm set-version 0.2.0` 把所有包改成同一个版本号并提交，再打 `v0.2.0` 标签；标签和版本号不一致时，工作流会报错并且不发布。也可以不打标签：在 Actions → Release → Run workflow 里填版本号（和可选的发布说明）手动运行，6 个包都打成功后，工作流自己创建 `v0.2.0` 标签和 Release；这个版本已经有标签或 Release 时，它直接报错，不会重复发布。
+- **自己打包**：Linux 无桌面包 `pnpm build && bash scripts/package-linux.sh`（打的是本机 CPU 的包）；桌面端 `pnpm build`，再在 `apps/desktop` 里运行 `pnpm dist:mac` / `pnpm dist:win`（同样只能打本机系统和 CPU 的包）。GitHub Actions 的 “Release” 工作流在 6 台对应的机器上打全部的包；推送 `v*` 标签时自动发布 Release。发版前先用 `pnpm set-version 0.2.0` 把所有包改成同一个版本号并提交，再打 `v0.2.0` 标签；标签和版本号不一致时，工作流会报错并且不发布。也可以不打标签：在 Actions → Release → Run workflow 里填版本号（和可选的发布说明）手动运行，6 个包都打成功后，工作流自己创建 `v0.2.0` 标签和 Release；这个版本已经有标签或 Release 时，它直接报错，不会重复发布。已经发布的版本打包中途停了，就勾上 rebuild 再运行一次，它会按原来的标签重新打包，并把包传到原来的 Release 上。
 - **在外面用**：启用 Telegram 插件，用手机指挥家里的电脑，不需要开放端口。或者用 SSH 端口转发 `ssh -L 7420:127.0.0.1:7420 你的电脑`，再在本地打开登录链接；在同一个局域网里，也可以让服务监听局域网地址（见上面的「地址和端口」）。
 - **GitHub**：在「设置 → 来源 → GitHub」点「授权 GitHub」，页面会给出一个验证码，在 github.com/login/device 输入并同意即可（设备码授权，不需要回调地址，通过 SSH 端口转发访问也能用）；再填写要监听的仓库。授权后智能体的 `gh` 和 git 也用这个授权。没有授权时仍会退回到 `env` 里的 `GITHUB_TOKEN` 或本机 `gh auth login`。
 - **Gmail**：启用 Gmail 插件，在「设置 → 来源 → Gmail」点「授权 Gmail」，用 Google 账号登录并同意，浏览器会跳回本机服务（经 `ssh -L` 转发也可以）。随时可以点「断开授权」，会同时在 Google 那边撤销。
