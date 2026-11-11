@@ -169,5 +169,5 @@ pnpm check   # 类型检查 + 测试 + 构建
 ## 数据与安全
 
 - **数据目录**：默认是 `~/.super-assistant/`，可用 `SUPER_ASSISTANT_HOME` 修改。里面包括：`state.db`（SQLite）、`token`（访问令牌，权限 0600）、`work/`、`memory/`、`logs/`。
-- **API key 存放位置**：只存在系统钥匙串里（macOS Keychain / Linux Secret Service），不进数据库、不进日志，也不会进入模型上下文。如果钥匙串不可用（例如无桌面的 Linux），会自动改用 `secrets/secrets.enc`（AES-256-GCM，密钥 `master.key` 的权限为 0600）。`SUPER_ASSISTANT_SECRETS=file|keychain` 可以强制指定其中一种。
+- **API key 存放位置**：不进数据库、不进日志，也不会进入模型上下文。macOS 上默认存在加密文件里（免得每次启动都弹钥匙串密码）；Linux / Windows 优先用系统钥匙串（Secret Service / 凭据管理器），钥匙串不可用时（例如无桌面的 Linux）自动改用 `secrets/secrets.enc`（AES-256-GCM，密钥 `master.key` 的权限为 0600）。`SUPER_ASSISTANT_SECRETS=file|keychain` 可以强制指定其中一种。
 - **网络访问控制**：默认只监听 `127.0.0.1`（可以改成局域网地址，见上面「地址和端口」）。所有 API 都需要访问令牌（HttpOnly + SameSite=Strict 的 cookie，或 Bearer 头），并校验 `Host` 与 `Origin`，防止 DNS rebinding 和其他网页伪造请求。
