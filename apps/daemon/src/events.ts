@@ -15,6 +15,7 @@ export type ClientEvent =
   | { type: 'activity.updated' }
   | { type: 'persona.updated' }
   | { type: 'goals.updated' }
+  | { type: 'skills.updated' }
   | { type: 'feed.updated' }
   | { type: 'ideas.updated' }
   | { type: 'notice'; id: string; kind: string; title: string; body: string; hash: string; silent: boolean }
@@ -54,6 +55,7 @@ export class EventMapper {
       case 'activity.updated': return [{ type: 'activity.updated' }]
       case 'persona.updated': return [{ type: 'persona.updated' }]
       case 'goals.updated': return [{ type: 'goals.updated' }]
+      case 'skills.updated': return [{ type: 'skills.updated' }]
       case 'feed.updated': return [{ type: 'feed.updated' }]
       case 'ideas.updated': return [{ type: 'ideas.updated' }]
       case 'notice': return [{ type: 'notice', id: e.id, kind: e.kind, title: e.title, body: e.body, hash: e.hash, silent: e.silent }]

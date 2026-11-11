@@ -55,6 +55,8 @@ export class BrowserManager {
   private pages = new Map<string, Page>()
   /** Tasks whose page the owner is operating right now. */
   readonly handoffs = new Set<string>()
+  /** What each task did in its tab, with a small picture after each step (活动 shows them). Last 30 per task. */
+  private stepLog = new Map<string, { at: number; action: string; url: string; title: string; shot?: Buffer }[]>()
 
   constructor(private profileDir: string, private executablePath?: () => Promise<string | undefined>) {}
 
@@ -103,10 +105,11 @@ export class BrowserManager {
   }
 
   /** The owner's input during a handoff: a click at a point of the screenshot, typed text, a key, or a new address. */
-  async input(ticketId: string, action: { type: 'click'; x: number; y: number } | { type: 'type'; text: string } | { type: 'key'; key: string } | { type: 'goto'; url: string } | { type: 'scroll'; dy: number }) {
+  async input(ticketId: string, action: { type: 'click'; x: number; y: number } | { type: 'type'; text: string } | { type: 'paste'; text: string } | { type: 'key'; key: string } | { type: 'goto'; url: string } | { type: 'scroll'; dy: number }) {
     const page = await this.page(ticketId)
     if (action.type === 'click') await page.mouse.click(action.x, action.y)
     else if (action.type === 'type') await page.keyboard.type(action.text, { delay: 20 })
+    else if (action.type === 'paste') await page.keyboard.insertText(action.text)
     else if (action.type === 'key') await page.keyboard.press(action.key)
     else if (action.type === 'scroll') await page.mouse.wheel(0, action.dy)
     else await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
@@ -118,6 +121,29 @@ export class BrowserManager {
     await this.pages.get(ticketId)?.close().catch(() => {})
     this.pages.delete(ticketId)
     this.handoffs.delete(ticketId)
+  }
+
+  /** Records a step the agent took, with a small JPEG of the page after it. */
+  async record(ticketId: string, action: string): Promise<void> {
+    const page = this.pages.get(ticketId)
+    if (!page || page.isClosed()) return
+    const shot = await page.screenshot({ type: 'jpeg', quality: 50, scale: 'css' }).catch(() => undefined)
+    const list = this.stepLog.get(ticketId) ?? []
+    list.push({ at: Date.now(), action, url: page.url(), title: await page.title().catch(() => ''), ...(shot ? { shot } : {}) })
+    this.stepLog.set(ticketId, list.slice(-30))
+  }
+
+  steps(ticketId: string): { n: number; at: number; action: string; url: string; title: string; shot: boolean }[] {
+    return (this.stepLog.get(ticketId) ?? []).map((s, n) => ({ n, at: s.at, action: s.action, url: s.url, title: s.title, shot: Boolean(s.shot) }))
+  }
+
+  stepShot(ticketId: string, n: number): Buffer | undefined { return this.stepLog.get(ticketId)?.[n]?.shot }
+
+  /** Where the task's tab is now (看它的浏览器). */
+  async state(ticketId: string): Promise<{ url: string; title: string; handoff: boolean } | null> {
+    const page = this.pages.get(ticketId)
+    if (!page || page.isClosed()) return null
+    return { url: page.url(), title: await page.title().catch(() => ''), handoff: this.handoffs.has(ticketId) }
   }
 
   async close(): Promise<void> {
@@ -139,6 +165,7 @@ export class BrowserManager {
           const page = await this.page(ticketId)
           await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
           await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {})
+          await this.record(ticketId, `打开 ${url}`)
           return this.snapshot(ticketId, blobs)
         },
       }),
@@ -153,8 +180,10 @@ export class BrowserManager {
         execute: async ({ ref }) => {
           guard()
           const page = await this.page(ticketId)
+          const label = await page.locator(`[data-sa-ref="${ref}"]`).first().innerText({ timeout: 2_000 }).catch(() => '')
           await page.click(`[data-sa-ref="${ref}"]`, { timeout: 10_000 })
           await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {})
+          await this.record(ticketId, `点了「${label.trim().slice(0, 30) || ref}」`)
           return this.snapshot(ticketId, blobs)
         },
       }),
@@ -164,8 +193,10 @@ export class BrowserManager {
         execute: async ({ ref, text, submit }) => {
           guard()
           const page = await this.page(ticketId)
+          const secret = (await page.locator(`[data-sa-ref="${ref}"]`).first().getAttribute('type', { timeout: 2_000 }).catch(() => null)) === 'password'
           await page.fill(`[data-sa-ref="${ref}"]`, text, { timeout: 10_000 })
           if (submit) { await page.press(`[data-sa-ref="${ref}"]`, 'Enter'); await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {}) }
+          await this.record(ticketId, `${secret ? '输入了密码' : `输入「${text.slice(0, 30)}」`}${submit ? '并提交' : ''}`)
           return this.snapshot(ticketId, blobs)
         },
       }),

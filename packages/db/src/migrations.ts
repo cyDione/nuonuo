@@ -342,4 +342,10 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX uploads_conversation ON uploads(conversation_id, created_at);
   `,
+  /* 11: 动态 👍/👎/收藏, and 目标 sub-goals in the owner's order */ `
+  ALTER TABLE feed ADD COLUMN reaction TEXT;
+  ALTER TABLE feed ADD COLUMN saved INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE goals ADD COLUMN parent_id TEXT;
+  ALTER TABLE goals ADD COLUMN position REAL;
+  `,
 ]

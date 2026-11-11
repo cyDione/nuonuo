@@ -201,6 +201,89 @@ describe('attachments and folder access', () => {
   })
 })
 
+describe('Muse features (backend)', () => {
+  const withModel = async () => {
+    const { provider } = await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
+    await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
+  }
+  const json = (method: string, b: unknown) => ({ method, body: JSON.stringify(b) })
+
+  it('keeps 👍/👎/收藏 on 动态 and tells the agent the taste', async () => {
+    const item = rt.feed.post({ title: 'XM6 降价了' })
+    const up = await (await call(`/api/feed/${item.id}/react`, json('POST', { reaction: 'up' }))).json() as any
+    expect(up.item.reaction).toBe('up')
+    expect((await (await call(`/api/feed/${item.id}/save`, json('POST', { saved: true }))).json() as any).item.saved).toBe(true)
+    expect(rt.feed.taste()).toContain('👍 XM6 降价了')
+    const other = rt.feed.post({ title: '天气' })
+    await call(`/api/feed/${other.id}/react`, json('POST', { reaction: 'down' }))
+    expect(rt.feed.list().map(i => i.id)).toEqual([item.id])
+  })
+
+  it('adds steps under a goal and keeps the dragged order', async () => {
+    const a = rt.goals.create({ title: '攒钱买相机', target: 12000, unit: '元' })
+    const b = rt.goals.create({ title: '睡得更早', style: 'days', target: 21 })
+    const step = await call('/api/goals', json('POST', { title: '每月存 2000', target: 6, unit: '次', parentId: a.id }))
+    expect(step.status).toBe(201)
+    const { goal } = await step.json() as any
+    expect((await call('/api/goals', json('POST', { title: 'x', target: 1, parentId: goal.id }))).status).toBe(400)
+    const order = await (await call('/api/goals/order', json('PUT', { ids: [b.id, a.id] }))).json() as any
+    expect(order.goals.map((g: any) => g.title)).toEqual(['睡得更早', '攒钱买相机', '每月存 2000'])
+    expect(rt.goals.describe()).toMatch(/攒钱买相机.*\n  └ .*每月存 2000/)
+    rt.goals.remove(a.id)
+    expect(rt.goals.list().map(g => g.title)).toEqual(['睡得更早'])
+  })
+
+  it('takes back, edits and regenerates messages', async () => {
+    await withModel()
+    const { conversation } = await (await call('/api/conversations', { method: 'POST', body: '{}' })).json() as any
+    const { message } = await (await call(`/api/conversations/${conversation.id}/messages`, json('POST', { content: '订明天的票' }))).json() as any
+    const edited = await call(`/api/messages/${message.id}/edit`, json('POST', { content: '订后天的票' }))
+    expect(edited.status).toBe(201)
+    const old = rt.store.db.select().from(schema.messages).all().find(m => m.id === message.id)!
+    expect(old).toMatchObject({ content: '', meta: { recalled: true, edited: true } })
+    expect((await call(`/api/messages/${message.id}/recall`, { method: 'POST' })).status).toBe(409)
+    for (let i = 0; i < 5; i++) { await new Promise(r => setTimeout(r, 40)); await rt.agents.idle() }
+    const reply = rt.store.db.select().from(schema.messages).all().find(m => m.role === 'assistant')!
+    expect((await call(`/api/messages/${reply.id}/regenerate`, { method: 'POST' })).status).toBe(200)
+    expect(rt.store.db.select().from(schema.messages).all().find(m => m.id === reply.id)!.meta).toMatchObject({ superseded: true })
+    await rt.agents.idle()
+  })
+
+  it('puts 带你去 links and cards on the assistant\'s message', () => {
+    const cnv = rt.engine.mainConversation()
+    const id = rt.engine.reply({ conversationId: cnv, text: '在这里改', extra: { open: { route: 'pane/permissions', label: '打开权限' } } })
+    expect(rt.store.db.select().from(schema.messages).all().find(m => m.id === id)!.meta).toMatchObject({ open: { route: 'pane/permissions' } })
+  })
+
+  it('lists a routine\'s runs', async () => {
+    const routine = rt.routines.create({ name: '早报', schedule: '0 8 * * *', prompt: '说说今天' })
+    await call(`/api/routines/${routine.id}/run`, { method: 'POST' })
+    const { runs } = await (await call(`/api/routines/${routine.id}/runs`)).json() as any
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ ok: true })
+    await rt.agents.idle()
+  })
+
+  it('keeps 会做的事: the owner\'s are on, the assistant\'s wait to be switched on', async () => {
+    const res = await call('/api/skills', json('POST', { name: '整理周报', when: '主人说写周报', steps: '- 看日历\n- 看提交' }))
+    expect(res.status).toBe(201)
+    const { skill } = await res.json() as any
+    expect(skill).toMatchObject({ enabled: true, by: 'owner' })
+    const proposed = rt.skills.create({ name: '订餐', when: '订外卖', steps: '- 先问忌口' }, 'assistant')
+    expect(proposed.enabled).toBe(false)
+    expect((await (await call(`/api/skills/${proposed.id}`, json('PATCH', { enabled: true }))).json() as any).skill.enabled).toBe(true)
+    expect((await call('/api/skills', json('POST', { name: '整理周报', when: 'x', steps: 'y' }))).status).toBe(400)
+  })
+
+  it('imports memories from another assistant after a preview', async () => {
+    const text = '以下是我记得的关于你的内容：\n- 住在杭州\n- 喜欢简短的回答\n\n## 工作方式\n1. 先给结论'
+    const { items } = await (await call('/api/memories/import/preview', json('POST', { text }))).json() as any
+    expect(items).toEqual([{ kind: 'profile', text: '住在杭州' }, { kind: 'profile', text: '喜欢简短的回答' }, { kind: 'lesson', text: '先给结论' }])
+    const done = await (await call('/api/memories/import', json('POST', { items: items.slice(0, 2) }))).json() as any
+    expect(done).toEqual({ added: 2, existing: 0, skipped: 0 })
+  })
+})
+
 describe('reply streaming', () => {
   it('reads partial JSON strings', () => {
     expect(partialString('{"conversation_id":"cnv_1","text":"你好\\n世', 'text')).toBe('你好\n世')

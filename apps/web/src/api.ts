@@ -98,6 +98,7 @@ export type ServerEvent =
   | { type: 'activity.updated' }
   | { type: 'persona.updated' }
   | { type: 'goals.updated' }
+  | { type: 'skills.updated' }
   | { type: 'feed.updated' }
   | Notice
   | { type: 'message.updated'; conversationId: string; messageId: string }

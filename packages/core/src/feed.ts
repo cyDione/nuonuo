@@ -4,7 +4,7 @@
  */
 import { newId, schema, type Store } from '@super-assistant/db'
 import { tool, type ToolSet } from 'ai'
-import { and, desc, eq, gte } from 'drizzle-orm'
+import { and, desc, eq, gte, or } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AgentExtensions } from './agents'
 
@@ -20,7 +20,7 @@ export class Feed {
 
   /** The last two weeks, newest first, without what the owner put away. */
   list(): FeedItem[] {
-    return this.store.db.select().from(schema.feed).where(and(eq(schema.feed.dismissed, false), gte(schema.feed.at, this.now() - DAYS))).orderBy(desc(schema.feed.at)).all()
+    return this.store.db.select().from(schema.feed).where(and(eq(schema.feed.dismissed, false), or(gte(schema.feed.at, this.now() - DAYS), eq(schema.feed.saved, true)))).orderBy(desc(schema.feed.at)).all()
   }
 
   get(id: string): FeedItem {
@@ -43,6 +43,29 @@ export class Feed {
     this.get(id)
     this.store.db.update(schema.feed).set({ dismissed: true }).where(eq(schema.feed.id, id)).run()
     this.changed()
+  }
+
+  /** 👍 / 👎 on an item (null clears it). A 👎 also puts it away. */
+  react(id: string, reaction: 'up' | 'down' | null): FeedItem {
+    this.get(id)
+    this.store.db.update(schema.feed).set({ reaction, ...(reaction === 'down' ? { dismissed: true } : {}) }).where(eq(schema.feed.id, id)).run()
+    this.changed()
+    return this.get(id)
+  }
+
+  /** 收藏: a saved item stays in 动态 past the two weeks. */
+  save(id: string, saved: boolean): FeedItem {
+    this.get(id)
+    this.store.db.update(schema.feed).set({ saved }).where(eq(schema.feed.id, id)).run()
+    this.changed()
+    return this.get(id)
+  }
+
+  /** What the owner liked and disliked lately, for the agent deciding what is worth posting. */
+  taste(): string {
+    const rows = this.store.db.select().from(schema.feed).where(gte(schema.feed.at, this.now() - 60 * 86_400_000)).orderBy(desc(schema.feed.at)).all().filter(r => r.reaction).slice(0, 20)
+    if (!rows.length) return ''
+    return `The owner's reactions to recent 动态 items (post more like 👍, fewer like 👎):\n${rows.map(r => `- ${r.reaction === 'up' ? '👍' : '👎'} ${r.title}`).join('\n')}`
   }
 
   /** The owner opened 动态: everything up to now has been seen. */
@@ -80,7 +103,7 @@ export function feedExtension(feed: Feed): AgentExtensions {
   })
   return {
     routerPrompt: () => `## 动态
-When something you watch for the owner changes, post it with post_update instead of interrupting the chat, unless it needs them now.`,
+When something you watch for the owner changes, post it with post_update instead of interrupting the chat, unless it needs them now.${feed.taste() ? `\n${feed.taste()}` : ''}`,
     routerTools: (): ToolSet => ({ post_update: post() }),
     workerTools: (ticket): ToolSet => ({ post_update: post(ticket.id) }),
   }
