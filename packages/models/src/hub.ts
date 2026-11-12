@@ -14,7 +14,7 @@ import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOpt
 import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
 import { DECISION_ROLES, resolveRole, roleSpec, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId } from './roles'
 import type { SecretStore } from './secrets'
-import { mergeCatalogs, MODEL_TYPES, pickDefaultModel, typeFromId, type ModelInfo, type ModelType } from './discovery'
+import { mergeCatalogs, MODEL_TYPES, pickDefaultModel, typeFromId, type ModelInfo, type ModelPrice, type ModelType } from './discovery'
 import { decisionEndpoints, systemOneClient, type SystemOneRequest, type SystemOneResponse } from './systemone'
 
 export class ModelError extends Error {
@@ -47,6 +47,7 @@ export function isRetryable(error: unknown): boolean {
 
 interface CachedModels { at: number; models: ModelInfo[] }
 const modelsKey = (providerId: string) => `models:${providerId}`
+const CATALOG_MAX_AGE = 24 * 3_600_000
 
 const startOfDay = (now: number) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime() }
 
@@ -161,6 +162,52 @@ export class ModelHub {
     try { models = await this.listModels(providerId) } catch { models = this.cachedModels(providerId)?.models ?? [] }
     const model = pickDefaultModel(models)
     return model && this.applyDefaultModel(providerId, model) ? model : undefined
+  }
+
+  /**
+   * What the provider's list says about a model (context window, image input, price), from the last list fetched. When no
+   * list was fetched in the last day, one is fetched in the background for next time. Undefined when nothing is known.
+   */
+  modelInfo(ref: ModelRef): ModelInfo | undefined {
+    const cached = this.cachedModels(ref.providerId)
+    if (!cached || this.now() - cached.at > CATALOG_MAX_AGE) this.refreshInBackground(ref.providerId)
+    return cached?.models.find(m => m.id === ref.model)
+  }
+
+  private refreshing = new Map<string, number>()
+  private refreshInBackground(providerId: string): void {
+    const last = this.refreshing.get(providerId)
+    if (last !== undefined && this.now() - last < 10 * 60_000) return
+    this.refreshing.set(providerId, this.now())
+    try { this.getProvider(providerId) } catch { return }
+    void this.listModels(providerId).catch(() => { /* offline or no key: try again later */ })
+  }
+
+  /** Fetches every provider's list in the background (at start), so limits and prices are known before the first call. */
+  refreshCatalogs(): void {
+    for (const p of this.listProviders()) if (!DECISION_KINDS.includes(p.kind)) this.refreshInBackground(p.id)
+  }
+
+  /**
+   * The smallest context window among the models a layer may run on (its chain after inheritance), when the provider lists
+   * it for every one of them; undefined when any is unknown, so the caller keeps its own default.
+   */
+  contextWindow(role: RoleId): number | undefined {
+    const chain = this.resolve(role)?.config.chain ?? []
+    if (!chain.length) return undefined
+    const windows = chain.map(ref => this.modelInfo(ref)?.context)
+    return windows.every((w): w is number => w !== undefined) ? Math.min(...windows) : undefined
+  }
+
+  /** Whether a layer's primary model takes images: true or false where the provider says, undefined where it does not. */
+  acceptsImages(role: RoleId): boolean | undefined {
+    const ref = this.resolve(role)?.config.chain[0]
+    return ref ? this.modelInfo(ref)?.vision : undefined
+  }
+
+  /** A model's price: what the owner set on the provider wins, else what the provider's list says. */
+  priceOf(ref: ModelRef): ModelPrice | undefined {
+    return this.getProvider(ref.providerId).options.prices?.[ref.model] ?? this.modelInfo(ref)?.price
   }
 
   private configured(): boolean {
@@ -394,7 +441,7 @@ export class ModelHub {
     const cacheWrite = usage?.inputTokens.cacheWrite ?? 0
     let cost: number | null = null
     try {
-      const price = this.getProvider(ref.providerId).options.prices?.[ref.model]
+      const price = this.priceOf(ref)
       if (price && usage) {
         const noCache = usage.inputTokens.noCache ?? Math.max(0, input - cacheRead - cacheWrite)
         cost = (noCache * (price.input ?? 0) + output * (price.output ?? 0) + cacheRead * (price.cacheRead ?? price.input ?? 0)
