@@ -178,81 +178,89 @@ export class Reviewer {
     return { ...DEFAULT_REVIEW, ...rest, external }
   }
 
-  /** Decides on a shell command a worker wants to run. */
-  async gateShell(ticket: Ticket, sessionId: string, command: string, cwd: string): Promise<GateDecision> {
+  /**
+   * Decides on a shell command a worker wants to run. With `remote`, the command runs on a cloud computer (see
+   * packages/sources/src/computer.ts) rather than this machine: the owner's folders are out of its reach, so the checks
+   * about them are skipped, and an approved command is carried out by the executor registered for `remote.tool`.
+   */
+  async gateShell(ticket: Ticket, sessionId: string, command: string, cwd: string, remote?: { tool: string; input: Record<string, unknown> }): Promise<GateDecision> {
     let { risk, reasons } = classifyShell(command)
+    const tool = remote?.tool ?? 'shell'
+    const escalate = (r: Risk, reason: string) => remote
+      ? this.escalateAction(ticket, sessionId, remote.tool, command, remote.input, r, reason)
+      : this.escalate(ticket, sessionId, command, cwd, r, reason)
     // Without the Docker sandbox the shell can reach any file, so a command that writes outside the task's directory
     // and the folders allowed for changing is not "normal": it goes through the review like sending something out.
-    const outside = risk === 'normal' && !this.sandboxed?.(ticket) ? this.access?.shellWritesOutside(command, cwd) : undefined
+    const outside = risk === 'normal' && !remote && !this.sandboxed?.(ticket) ? this.access?.shellWritesOutside(command, cwd) : undefined
     if (outside) { risk = 'external'; reasons = [`改动工作目录和允许的文件夹以外的文件（${outside}）`] }
     const settings = this.settings()
     const matches = (patterns: string[]) => patterns.find(p => { try { return new RegExp(p).test(command) } catch { return false } })
     const denied = matches(settings.deny)
     if (denied) {
-      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk, decision: 'block', reason: `命中禁止规则 /${denied}/` })
+      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool, input: command, risk, decision: 'block', reason: `命中禁止规则 /${denied}/` })
       return { action: 'block', by: 'rule', reason: `命中禁止规则 /${denied}/` }
     }
     const secret = credentialAccess(command)
     if (secret) {
       const reason = `命令会读取${secret}。智能体不接触凭据本身：需要访问权限时，在结果里说明需要什么，由主人配置`
-      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk: 'destructive', decision: 'block', reason })
+      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool, input: command, risk: 'destructive', decision: 'block', reason })
       return { action: 'block', by: 'rule', reason }
     }
     // A source the owner set to 只能看 in 权限: nothing gets published there from the shell either.
     if (this.access?.settings().sources.github === 'read' && reasons.some(r => /GitHub|推送到远程仓库/.test(r))) {
       const reason = '你把 GitHub 设成了只能看：不在那里发评论、推代码。需要的话在结果里说明，由主人决定'
-      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk, decision: 'block', reason })
+      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool, input: command, risk, decision: 'block', reason })
       return { action: 'block', by: 'rule', reason }
     }
-    const never = this.access?.shellTouchesNever(command)
+    const never = remote ? undefined : this.access?.shellTouchesNever(command)
     if (never) {
       const reason = `命令碰到了「永远不碰」的文件夹 ${never}。不要绕过；需要的话在结果里说明，由主人决定`
-      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk: 'destructive', decision: 'block', reason })
+      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool, input: command, risk: 'destructive', decision: 'block', reason })
       return { action: 'block', by: 'rule', reason }
     }
     const spend = spending(command, 'shell')
-    if (spend) return this.escalate(ticket, sessionId, command, cwd, risk === 'normal' ? 'external' : risk, `${spend}：花钱的事每次都问你`)
+    if (spend) return escalate(risk === 'normal' ? 'external' : risk, `${spend}：花钱的事每次都问你`)
     if (risk === 'normal') return { action: 'allow', by: 'normal' }
     const level = risk === 'destructive' ? settings.destructive : settings.external
     if (level === 'deny') {
       const reason = `${reasons.join('、')}：按你的权限设置，这类事不让做`
-      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk, decision: 'block', reason })
+      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool, input: command, risk, decision: 'block', reason })
       return { action: 'block', by: 'rule', reason }
     }
-    const granted = risk !== 'destructive' ? this.granted(ticket.id, 'shell', grantKey('shell', command)) : undefined
+    const granted = risk !== 'destructive' ? this.granted(ticket.id, tool, grantKey(tool, command)) : undefined
     if (granted) {
-      this.audit({ ticketId: ticket.id, actor: 'owner', action: 'review', tool: 'shell', input: command, risk, decision: 'allow', reason: `你已允许这件事里：${granted.label}` })
+      this.audit({ ticketId: ticket.id, actor: 'owner', action: 'review', tool, input: command, risk, decision: 'allow', reason: `你已允许这件事里：${granted.label}` })
       return { action: 'allow', by: 'rule' }
     }
     const allowed = matches(settings.allow)
     if (allowed) {
-      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool: 'shell', input: command, risk, decision: 'allow', reason: `命中放行规则 /${allowed}/` })
+      this.audit({ ticketId: ticket.id, actor: 'rule', action: 'review', tool, input: command, risk, decision: 'allow', reason: `命中放行规则 /${allowed}/` })
       return { action: 'allow', by: 'rule' }
     }
     if (level === 'allow') {
-      this.audit({ ticketId: ticket.id, actor: 'system', action: 'review', tool: 'shell', input: command, risk, decision: 'allow', reason: '按你的权限设置直接做' })
+      this.audit({ ticketId: ticket.id, actor: 'system', action: 'review', tool, input: command, risk, decision: 'allow', reason: '按你的权限设置直接做' })
       return { action: 'allow', by: 'threshold' }
     }
     const heuristics = reasons.join('、')
     // The most dangerous class is never left to a model's judgement by default, even when the request names the action.
-    if (risk === 'destructive' && level === 'ask') return this.escalate(ticket, sessionId, command, cwd, risk, `${heuristics}：高风险操作，需要你在执行前确认`)
-    if (level === 'ask' || settings.mode === 'ask') return this.escalate(ticket, sessionId, command, cwd, risk, `${heuristics}，按设置需要你批准`)
+    if (risk === 'destructive' && level === 'ask') return escalate(risk, `${heuristics}：高风险操作，需要你在执行前确认`)
+    if (level === 'ask' || settings.mode === 'ask') return escalate(risk, `${heuristics}，按设置需要你批准`)
 
     let verdict: Verdict
     try {
       verdict = await this.verdict(ticket.id, this.reviewPrompt(ticket, command, cwd, risk, heuristics, settings))
     } catch (error) {
-      return this.escalate(ticket, sessionId, command, cwd, risk, `${heuristics}；${failure(error)}，转给你决定`)
+      return escalate(risk, `${heuristics}；${failure(error)}，转给你决定`)
     }
     if (verdict.decision === 'allow') {
-      this.audit({ ticketId: ticket.id, actor: 'reviewer', action: 'review', tool: 'shell', input: command, risk, decision: 'allow', reason: verdict.reason })
+      this.audit({ ticketId: ticket.id, actor: 'reviewer', action: 'review', tool, input: command, risk, decision: 'allow', reason: verdict.reason })
       return { action: 'allow', by: 'reviewer' }
     }
     if (verdict.decision === 'block') {
-      this.audit({ ticketId: ticket.id, actor: 'reviewer', action: 'review', tool: 'shell', input: command, risk, decision: 'block', reason: verdict.reason })
+      this.audit({ ticketId: ticket.id, actor: 'reviewer', action: 'review', tool, input: command, risk, decision: 'block', reason: verdict.reason })
       return { action: 'block', by: 'reviewer', reason: verdict.reason }
     }
-    return this.escalate(ticket, sessionId, command, cwd, risk, verdict.reason)
+    return escalate(risk, verdict.reason)
   }
 
   /**
@@ -529,12 +537,14 @@ export function canGrant(approval: { risk: string; tool: string; input: Record<s
 /** What "the same kind of action" means for a task-wide grant: the shell heuristics' categories, or one MCP tool. */
 export function grantKey(tool: string, display: string, input: Record<string, unknown> = {}): string {
   if (tool === 'shell') return classifyShell(display).reasons.slice().sort().join('+') || 'shell'
+  if (tool === 'computer') return `computer:${classifyShell(display).reasons.slice().sort().join('+')}`
   if (tool === 'mcp') return `${String(input.server ?? '')}.${String(input.tool ?? '')}`
   return tool
 }
 
 export function grantLabel(tool: string, display: string, input: Record<string, unknown> = {}): string {
   if (tool === 'shell') return classifyShell(display).reasons.join('、') || '运行命令'
+  if (tool === 'computer') return `在云电脑上${classifyShell(display).reasons.join('、') || '运行命令'}`
   if (tool === 'mcp') return `调用 ${String(input.server ?? '')} 的 ${String(input.tool ?? '')}`
   if (typeof input.label === 'string') return input.label
   return tool

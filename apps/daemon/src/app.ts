@@ -17,7 +17,7 @@ import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
 import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@nuonuo/core'
 import { kvGet, kvSet, newId, schema } from '@nuonuo/db'
-import { BRIDGE_JS, fireRoutine, WINDOW_HEADERS } from '@nuonuo/sources'
+import { BRIDGE_JS, ComputerError, fireRoutine, WINDOW_HEADERS } from '@nuonuo/sources'
 import { MOOD_PLUGIN_ID, moodView, pinDiary, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodValues } from '@nuonuo/plugins'
 import { runDoctor } from './doctor'
 import { MAX_UPLOAD, Uploads } from './uploads'
@@ -72,6 +72,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     if (error instanceof ModelError) {
       return c.json({ error: { code: error.code, message: error.message } }, error.code === 'unknown_provider' ? 404 : 400)
     }
+    if (error instanceof ComputerError) return c.json({ error: { code: 'computer', message: error.message } }, 400)
     console.error(error)
     return c.json({ error: { code: 'internal', message: describeError(error) } }, 500)
   })
@@ -719,8 +720,28 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     maxWorkers: z.number().int().min(1).max(16), foregroundSeconds: z.number().min(1).max(600), timeoutMinutes: z.number().int().min(1).max(24 * 60),
     blockedCommands: z.array(z.string().trim().min(1).max(64)).max(100), workspaceRoots: z.array(z.string().trim().min(1).max(500)).max(50),
     sandbox: z.object({ mode: z.enum(['off', 'external', 'all']), image: z.string().trim().min(1).max(200), network: z.enum(['bridge', 'none']) }).strict(),
+    environment: z.enum(['auto', 'local']).optional(),
   }).strict()
   api.get('/settings/execution', c => c.json({ settings: rt.engine.execution(), defaults: DEFAULT_EXECUTION }))
+
+  // Cloud computers (云电脑) connected by plugins: their state, waking one, and nuonuo's browsers on it.
+  api.get('/computers', async c => c.json({ computers: await rt.computers.views(), environment: rt.engine.execution().environment }))
+  api.post('/computers/:id/wake', async c => {
+    const computer = rt.computers.get(c.req.param('id'))
+    rt.computers.stale(computer)
+    await rt.computers.ready(computer)
+    return c.json({ computers: await rt.computers.views() })
+  })
+  api.get('/computers/:id/browsers', async c => {
+    const computer = rt.computers.get(c.req.param('id'))
+    const st = await computer.status()
+    if (st.state !== 'ready') return c.json({ browsers: [], asleep: true })
+    return c.json({ ...(await rt.computers.browser(computer, { op: 'list' })), asleep: false })
+  })
+  api.post('/computers/:id/browsers/:name/close', async c => {
+    const computer = rt.computers.get(c.req.param('id'))
+    return c.json(await rt.computers.browser(computer, { op: 'close', browser: c.req.param('name') }))
+  })
   api.put('/settings/execution', async c => {
     const settings = await body(c, ExecutionBody)
     kvSet(rt.store, 'settings:execution', settings)

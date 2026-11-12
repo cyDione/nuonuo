@@ -20,6 +20,7 @@ import { installDependencies } from './plugin-deps'
 import { fetchPlugin, parseOrigin } from './plugin-install'
 import { PluginSandbox, sandboxWanted } from './plugin-sandbox'
 import { coerce, defaultValue, readSettings, readWindow, windowFile, type PluginWindow } from './plugin-window'
+import { computerProblem, defineComputer, type BoundComputer, type ComputerKind } from './computer'
 import { SECRET_SET, type SourceRegistry } from './registry'
 
 export interface NuonuoPlugin {
@@ -57,6 +58,11 @@ export interface NuonuoPlugin {
    * gets back what the function returns (plain JSON). Nothing else of the plugin is reachable from the page.
    */
   windowCalls?: Record<string, (ctx: PluginContext, input: unknown) => unknown>
+  /**
+   * Cloud computers (云电脑) the plugin connects: how to reach one provider's machine. The shared layer in computer.ts
+   * sets up nuonuo's own space there and gives the workers its shell, files and browsers (see docs/13-computers.md).
+   */
+  computers?: ComputerKind[]
 }
 
 /** What a plugin's own tools and prompts receive. */
@@ -102,7 +108,7 @@ export const definePlugin = <T extends NuonuoPlugin>(plugin: T): T => plugin
 
 /** Everything a plugin may use from the host, passed to its factory. */
 export const defineChannel = makeDefineChannel(z)
-export const sdk = { apiVersion: PLUGIN_API_VERSION, definePlugin, defineChannel, ChannelError, oauth, appToken, tool, jsonSchema, z }
+export const sdk = { apiVersion: PLUGIN_API_VERSION, definePlugin, defineChannel, defineComputer, ChannelError, oauth, appToken, tool, jsonSchema, z }
 export type PluginSdk = typeof sdk
 export type PluginModule = NuonuoPlugin | ((sdk: PluginSdk) => NuonuoPlugin | Promise<NuonuoPlugin>)
 
@@ -123,6 +129,8 @@ export interface PluginInfo extends PluginManifest {
   mcpServers: string[]
   /** Names of its own tools and skills. */
   tools: string[]
+  /** The cloud computers it connects (titles). */
+  computers?: string[]
   skills: string[]
   /** What installing its dependencies left to say (install scripts not run, optional ones skipped). */
   notes?: string[]
@@ -275,6 +283,16 @@ export class PluginManager {
     return [...new Set([...Object.keys(this.ownTools(m.id, () => plugin.routerTools?.(this.context(m)))), ...Object.keys(this.ownTools(m.id, () => plugin.workerTools?.(this.context(m))))])]
   }
 
+  /** The cloud computers of the loaded plugins, with each plugin's context bound (see computer.ts). */
+  computers(): BoundComputer[] {
+    return [...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.computers ?? []).map((k): BoundComputer => {
+      const ctx = () => this.context(manifest)
+      return { id: k.id, title: k.title, ...(k.description ? { description: k.description } : {}), pluginId: manifest.id, capabilities: k.capabilities,
+        status: () => k.status(ctx()), wake: () => k.wake(ctx()), exec: request => k.exec(ctx(), request),
+        ...(typeof k.keepAwake === 'function' ? { keepAwake: (request: { key: string; seconds: number }) => k.keepAwake!(ctx(), request) } : {}) }
+    }))
+  }
+
   /** Acting tools of loaded plugins (their `writes`): asked about before every call. */
   askFirstTools(): Set<string> {
     return new Set([...[...this.builtIns.values()].map(p => this.builtInEntry(p)), ...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.writes ?? []).filter(n => n.startsWith(`${manifest.id}_`))))
@@ -311,7 +329,7 @@ export class PluginManager {
       const notes = kvGet<string[]>(this.store, `plugin:${m.id}:notes`)
       return { ...m, enabled: this.enabled(m.id), loaded: Boolean(loaded), builtIn: false, sources: (loaded?.plugin.sources ?? []).map(k => k.id),
         mcpServers: loaded ? this.mcpServers().map(c => c.name).filter(n => n.startsWith(`${m.id}_`)) : [], tools: loaded ? this.toolNames(loaded.plugin, m) : [],
-        skills: (loaded?.plugin.skills ?? []).map(sk => String(sk.name)), ...(origin ? { origin } : {}), ...(notes?.length ? { notes } : {}), ...(error ? { error } : {}) }
+        skills: (loaded?.plugin.skills ?? []).map(sk => String(sk.name)), ...(loaded?.plugin.computers?.length ? { computers: loaded.plugin.computers.map(k => k.title) } : {}), ...(origin ? { origin } : {}), ...(notes?.length ? { notes } : {}), ...(error ? { error } : {}) }
     })
     return [...builtIn, ...external]
   }
@@ -433,6 +451,8 @@ export class PluginManager {
         if (sv.transport === 'stdio' ? !sv.command : sv.transport === 'http' ? !sv.url : true) throw new Error(`MCP 服务 ${sv.name} 缺少 command 或 url`)
       }
       if (plugin.skills !== undefined && !Array.isArray(plugin.skills)) throw new Error('skills 必须是数组')
+      if (plugin.computers !== undefined && !Array.isArray(plugin.computers)) throw new Error('computers 必须是数组')
+      for (const k of plugin.computers ?? []) { const problem = computerProblem(k); if (problem) throw new Error(problem) }
       this.loaded.set(manifest.id, { plugin, manifest })
       kvSet(this.store, `plugin:${manifest.id}:sources`, (plugin.sources ?? []).map(k => k.id))
       this.skills?.syncPlugin(manifest.id, plugin.skills ?? [])

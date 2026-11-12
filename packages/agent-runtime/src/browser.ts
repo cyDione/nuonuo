@@ -33,7 +33,7 @@ export async function findBrowser(): Promise<string | undefined> {
 }
 
 /** Marks visible interactive elements with refs and returns a compact text view of the page. */
-const SNAPSHOT_SCRIPT = `(() => {
+export const SNAPSHOT_SCRIPT = `(() => {
   const visible = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' }
   const nodes = [...document.querySelectorAll('a[href], button, input, select, textarea, [role=button], [role=link], [role=checkbox], [contenteditable=true]')].filter(visible)
   let n = 0

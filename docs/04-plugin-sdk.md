@@ -17,6 +17,7 @@
 | 授权 | `sdk.oauth(...)` / `sdk.appToken(...)` | 来源设置卡片上的「授权」按钮，令牌进钥匙串 |
 | 设置 | package.json `nuonuo.settings` | 插件窗口的「设置」页，按字段自动生成；代码里 `ctx.settings.get` |
 | 自己的页面 | package.json `nuonuo.window` + `windowCalls` | 插件页上的「打开」，页面完全由插件自己写 |
+| 云电脑 | `computers`（用 `defineComputer`） | Worker 的默认执行环境：shell、docker、多个浏览器，见 [云电脑](13-computers.md) |
 
 插件只通过这些接入点和系统打交道，拿不到数据库，也不能冒充别的来源或内置工具（见最后的「安全」）。内置的「个性与心境」就是只用 `inlineContext`、`routerTools` 和插件状态拼出来的，见 [`packages/plugins/src/mood.ts`](../packages/plugins/src/mood.ts)。
 
@@ -183,6 +184,7 @@ export default ({ definePlugin }) => definePlugin({
 | `skills` | 会做的事：`{ name, when, steps }` |
 | `mcpServers` | MCP 服务器 |
 | `windowCalls` | 自己的页面能调用的函数 |
+| `computers` | 云电脑供应商，用 `defineComputer` 声明，见 [云电脑](13-computers.md) |
 
 工具、提示词、`inlineContext` 和 `windowCalls` 收到的 `ctx` 是同一个：`id`、`dir`、`state.get/set`、`settings.get`、`log`。来源的 `ctx` 不一样，见下面的「上下文 `ctx`」。
 
