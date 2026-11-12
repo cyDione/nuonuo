@@ -131,7 +131,15 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json({ ok: true })
   })
   api.get('/doctor', async c => c.json({ checks: await runDoctor(rt) }))
-  api.get('/catalog', c => c.json({ presets: PROVIDER_PRESETS, roles: ROLES, reasoningLevels: REASONING_LEVELS }))
+  // Presets carry the live model table's newest models (models.dev, refreshed daily), else their bundled suggestions.
+  api.get('/catalog', c => c.json({ presets: rt.hub.catalog?.presets() ?? PROVIDER_PRESETS, roles: ROLES, reasoningLevels: REASONING_LEVELS,
+    models: rt.hub.catalog?.status() ?? { source: null, fetchedAt: null, live: false } }))
+  api.post('/catalog/refresh', async c => {
+    const catalog = rt.hub.catalog
+    if (!catalog) throw new HttpError(404, 'not_found', '没有在线模型表')
+    try { await catalog.refresh() } catch (error) { throw new HttpError(409, 'catalog_failed', `模型表更新失败：${(error as Error).message}`) }
+    return c.json({ presets: catalog.presets(), models: catalog.status() })
+  })
 
   // Providers
   api.get('/providers', c => c.json({ providers: rt.hub.listProviders() }))

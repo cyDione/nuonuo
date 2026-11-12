@@ -11,6 +11,7 @@ describe('shutdown', () => {
   it('stops even while a web UI tab holds the event stream open', async () => {
     process.env.NUONUO_HOME = mkdtempSync(join(tmpdir(), 'sa-home-'))
     process.env.NUONUO_SECRETS = 'file'
+    process.env.NUONUO_MODEL_CATALOG_URL = 'off'
     const config = resolveConfig({ port: 0 })
     const started = await startDaemon(config)
     const port = (started.server.address() as AddressInfo).port

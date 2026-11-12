@@ -6,7 +6,7 @@ import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, local
 import { Effects, kvGet, kvSet, openStore, type Store } from '@nuonuo/db'
 import { gmailPlugin, telegramPlugin } from '@nuonuo/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@nuonuo/sources'
-import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@nuonuo/models'
+import { DECISION_KINDS, EnvAwareSecrets, LiveCatalog, ModelError, ModelHub, openSecretStore, type SecretStore } from '@nuonuo/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import type { ToolSet } from 'ai'
@@ -78,6 +78,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const { store: base, note } = await openSecretStore(config.home)
     const secrets = new EnvAwareSecrets(base)
     const hub = new ModelHub(store, secrets)
+    hub.catalog = new LiveCatalog({ file: join(config.home, 'model-catalog.json') })
     await bootstrapModels(hub)
     const effects = new Effects(store)
     const bus = new Bus()
@@ -186,6 +187,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     let watchdogTimer: NodeJS.Timeout | undefined
     let memoryTimer: NodeJS.Timeout | undefined
     let ideasTimer: NodeJS.Timeout | undefined
+    let catalogTimer: NodeJS.Timeout | undefined
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
@@ -195,6 +197,11 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         agents.recover(session => engine.recoveryNote(session.id, session.role))
         void plugins.loadEnabled().finally(() => sources.startAll())
         void mcp.sync()
+        // The live model table (models.dev): on start when over a day old, then checked every few hours.
+        const catalog = hub.catalog!
+        void catalog.refreshIfStale()
+        catalogTimer = setInterval(() => { void catalog.refreshIfStale() }, 6 * 3_600_000)
+        catalogTimer.unref?.()
         // Healing the main agent needs no model; the watchdog agent's judgement does.
         watchdogTimer = setInterval(() => { try { const healed = watchdog.healRouter() ?? null; if (hub.resolve('watchdog')) watchdog.tick(healed) } catch (e) { console.error('[watchdog]', e) } }, 60_000)
         // Nightly memory upkeep (expire episodes, merge duplicates); also on start when the last run is over a day old.
@@ -222,6 +229,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         clearInterval(watchdogTimer)
         clearInterval(memoryTimer)
         clearInterval(ideasTimer)
+        clearInterval(catalogTimer)
         await mcp.close()
         await plugins.close()
         await browser.close()

@@ -15,6 +15,7 @@ import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
 import { DECISION_ROLES, resolveRole, roleSpec, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId } from './roles'
 import type { SecretStore } from './secrets'
 import { mergeCatalogs, MODEL_TYPES, typeFromId, type ModelInfo, type ModelType } from './discovery'
+import type { LiveCatalog } from './live-catalog'
 import { decisionEndpoints, systemOneClient, type SystemOneRequest, type SystemOneResponse } from './systemone'
 
 export class ModelError extends Error {
@@ -48,6 +49,9 @@ export function isRetryable(error: unknown): boolean {
 const startOfDay = (now: number) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime() }
 
 export class ModelHub {
+  /** The live model table; without one, presets offer their bundled suggestions. */
+  catalog: LiveCatalog | undefined
+
   constructor(private store: Store, private secrets: SecretStore, private factory: ModelFactory = defaultFactory,
     private now: () => number = Date.now) {}
 
@@ -151,7 +155,7 @@ export class ModelHub {
     const typed = (m: string): ModelInfo => ({ id: m, type: typeFromId(m, p.kind) })
     const suggested = [
       ...(decisionLayer && !live.some(m => m.type === 'decision') ? DECISION_MODEL_SUGGESTIONS : []),
-      ...(presetOf(p.kind, p.baseUrl)?.suggestedModels ?? []),
+      ...(this.presetSuggestions(p.kind, p.baseUrl)),
     ].map(typed)
     const seen = new Set<string>()
     let all = [...suggested, ...live].filter(m => !seen.has(m.id) && seen.add(m.id))
@@ -161,6 +165,12 @@ export class ModelHub {
     all = all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m.type) - rank(b.m.type) || a.i - b.i).map(({ m }) => m)
     const result = { models: all.map(m => m.id), types: Object.fromEntries(all.map(m => [m.id, m.type])) as Record<string, ModelType> }
     return error === undefined ? result : { ...result, error }
+  }
+
+  private presetSuggestions(kind: ProviderKind, baseUrl: string | null): string[] {
+    const preset = presetOf(kind, baseUrl)
+    if (!preset) return []
+    return this.catalog ? this.catalog.suggestions(preset) : preset.suggestedModels
   }
 
   /**
