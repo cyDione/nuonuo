@@ -150,12 +150,12 @@ export class Engine {
     const t = this.store.db.select().from(schema.triggers).where(eq(schema.triggers.id, triggerId)).get()
     if (!t || !t.human) return false
     if (t.source === 'webchat' || t.source === 'cron') return t.actor === 'owner'
-    return (t.source === 'telegram' || Boolean(this.opts.sources?.isChannel?.(t.source))) && this.allowed(t.source, t.actor)
+    return Boolean(this.opts.sources?.isChannel?.(t.source)) && this.allowed(t.source, t.actor)
   }
 
   /** The web, routines, the watchdog and chat apps (Telegram, Feishu, Discord…): short replies, the owner's own words. */
   isChatSource(source: string): boolean {
-    return ['webchat', 'watchdog', 'cron', 'telegram'].includes(source) || Boolean(this.opts.sources?.isChannel?.(source))
+    return ['webchat', 'watchdog', 'cron'].includes(source) || Boolean(this.opts.sources?.isChannel?.(source))
   }
 
   /** A session that has read other people's words is tainted: what it remembers goes to the owner's review queue. */

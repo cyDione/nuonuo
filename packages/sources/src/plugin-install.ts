@@ -9,6 +9,14 @@ import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 
+/**
+ * The npm registry plugins and their dependencies come from: `NUONUO_NPM_REGISTRY`, else npm's own `npm_config_registry`
+ * (a mirror such as https://registry.npmmirror.com), else the public registry. Read at call time.
+ */
+export function npmRegistry(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.NUONUO_NPM_REGISTRY?.trim() || env.npm_config_registry?.trim() || 'https://registry.npmjs.org').replace(/\/+$/, '')
+}
+
 export type PluginOrigin =
   | { kind: 'folder'; path: string }
   | { kind: 'github'; repo: string; ref?: string; subdir?: string }
@@ -81,7 +89,7 @@ export async function fetchPlugin(origin: PluginOrigin, into: string, fetchImpl:
 }
 
 async function npmTarball(origin: { name: string; version?: string }, fetchImpl: typeof fetch): Promise<string> {
-  const res = await fetchImpl(`https://registry.npmjs.org/${origin.name.replace('/', '%2F')}`, { signal: AbortSignal.timeout(30_000), headers: { accept: 'application/json' } })
+  const res = await fetchImpl(`${npmRegistry()}/${origin.name.replace('/', '%2F')}`, { signal: AbortSignal.timeout(30_000), headers: { accept: 'application/json' } })
   if (res.status === 404) throw new Error(`npm 上没有 ${origin.name}`)
   if (!res.ok) throw new Error(`npm 返回 ${res.status}`)
   const meta = await res.json() as { 'dist-tags'?: Record<string, string>; versions?: Record<string, { dist?: { tarball?: string } }> }
