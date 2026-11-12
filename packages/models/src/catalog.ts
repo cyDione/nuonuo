@@ -23,18 +23,19 @@ export interface ProviderPreset {
   baseUrl?: string
   /** Local runtimes accept any key. */
   keyRequired: boolean
-  /** Starting points only; the settings page can list a provider's live models or take any id. */
+  /**
+   * Ids a provider serves without listing them. Model ids are never kept here as defaults: they go out of date. The settings
+   * page shows the provider's live list (newest first), and a new install starts on a model picked from that list.
+   */
   suggestedModels: string[]
   docsUrl?: string
 }
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
-  { id: 'anthropic', kind: 'anthropic', label: 'Anthropic', keyRequired: true, docsUrl: 'https://console.anthropic.com/settings/keys',
-    suggestedModels: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'] },
+  { id: 'anthropic', kind: 'anthropic', label: 'Anthropic', keyRequired: true, docsUrl: 'https://console.anthropic.com/settings/keys', suggestedModels: [] },
   { id: 'openai', kind: 'openai', label: 'OpenAI', keyRequired: true, docsUrl: 'https://platform.openai.com/api-keys', suggestedModels: [] },
   { id: 'google', kind: 'google', label: 'Google Gemini', keyRequired: true, docsUrl: 'https://aistudio.google.com/apikey', suggestedModels: [] },
-  { id: 'deepseek', kind: 'deepseek', label: 'DeepSeek', keyRequired: true, docsUrl: 'https://platform.deepseek.com/api_keys',
-    suggestedModels: ['deepseek-chat', 'deepseek-reasoner'] },
+  { id: 'deepseek', kind: 'deepseek', label: 'DeepSeek', keyRequired: true, docsUrl: 'https://platform.deepseek.com/api_keys', suggestedModels: [] },
   { id: 'typesafe', kind: 'typesafe', label: 'TypeSafe Jev（仅审核层）', baseUrl: 'https://api.typesafe.ai/v1', keyRequired: true,
     docsUrl: 'https://docs.typesafe.ai', suggestedModels: ['jev-latest'] },
   { id: 'openrouter', kind: 'openai-compatible', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', keyRequired: true, suggestedModels: [] },

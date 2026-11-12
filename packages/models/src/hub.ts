@@ -5,16 +5,16 @@
  */
 import type { LanguageModelV4, LanguageModelV4CallOptions, LanguageModelV4StreamPart, LanguageModelV4Usage } from '@ai-sdk/provider'
 import { APICallError } from '@ai-sdk/provider'
-import { newId, schema, type Store } from '@nuonuo/db'
+import { kvGet, kvSet, newId, schema, type Store } from '@nuonuo/db'
 import { embed, generateText } from 'ai'
 import { and, eq, gte, sql } from 'drizzle-orm'
-import { DECISION_MODEL_SUGGESTIONS, isDecisionModel, presetOf, type ProviderKind } from './catalog'
+import { DECISION_KINDS, DECISION_MODEL_SUGGESTIONS, isDecisionModel, presetOf, type ProviderKind } from './catalog'
 import type { EmbeddingModelV4 } from '@ai-sdk/provider'
 import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOptions, type ProviderRecord } from './factory'
 import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
 import { DECISION_ROLES, resolveRole, roleSpec, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId } from './roles'
 import type { SecretStore } from './secrets'
-import { mergeCatalogs, MODEL_TYPES, typeFromId, type ModelInfo, type ModelType } from './discovery'
+import { mergeCatalogs, MODEL_TYPES, pickDefaultModel, typeFromId, type ModelInfo, type ModelType } from './discovery'
 import { decisionEndpoints, systemOneClient, type SystemOneRequest, type SystemOneResponse } from './systemone'
 
 export class ModelError extends Error {
@@ -44,6 +44,9 @@ export function isRetryable(error: unknown): boolean {
   return ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'UND_ERR_CONNECT_TIMEOUT'].includes(code ?? '')
     || (error instanceof Error && error.name === 'TimeoutError')
 }
+
+interface CachedModels { at: number; models: ModelInfo[] }
+const modelsKey = (providerId: string) => `models:${providerId}`
 
 const startOfDay = (now: number) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime() }
 
@@ -97,6 +100,7 @@ export class ModelHub {
         if (chain.length !== config.chain.length) this.saveRole(role, { ...config, chain })
       }
       this.store.db.delete(schema.providers).where(eq(schema.providers.id, id)).run()
+      kvSet(this.store, modelsKey(id), null)
     })
     if (current.secretRef) this.secrets.delete(current.secretRef)
   }
@@ -123,30 +127,63 @@ export class ModelHub {
   /** First start only: puts the main layer on `model` (the other layers inherit it); does nothing once any layer is configured. */
   applyDefaultModel(providerId: string, model: string): boolean {
     this.getProvider(providerId)
-    if (Object.values(this.roleConfigs()).some(c => c.chain.length > 0)) return false
+    if (this.configured()) return false
     this.saveRole('router', { enabled: true, chain: [{ providerId, model }] })
     return true
   }
 
-  /** Every model the provider serves, tagged by type (chat, embedding, rerank, decision…). */
+  /**
+   * Every model the provider serves, tagged by type, fetched live (newest first where the provider dates its models). Each
+   * successful list is kept, so a provider that is briefly unreachable still offers what it served last time.
+   */
   async listModels(id: string): Promise<ModelInfo[]> {
     const p = this.getProvider(id)
     const list = this.factory.listModels ? await this.factory.listModels(p, this.key(p)) : await listProviderModels(p, this.key(p))
-    return mergeCatalogs(list.map(m => (typeof m === 'string' ? { id: m, type: typeFromId(m, p.kind) } : m)))
+    const models = mergeCatalogs(list.map(m => (typeof m === 'string' ? { id: m, type: typeFromId(m, p.kind) } : m)))
+    kvSet(this.store, modelsKey(id), { at: this.now(), models } satisfies CachedModels)
+    return models
+  }
+
+  /** The provider's last successful live list, if any. */
+  cachedModels(id: string): { at: number; models: ModelInfo[] } | undefined {
+    return kvGet<CachedModels>(this.store, modelsKey(id))
   }
 
   /**
-   * What the settings page offers for a provider: all its models (chat, embedding, rerank, Jev…) with each one's type, plus
-   * its preset's suggestions. With a layer, the models of the kind that layer runs come first: embedding models on the
-   * embedding layer, decision models on the reviewer, chat models elsewhere. The reviewer is always offered Jev, since
-   * gateways serve it without listing it, and a decision model is never offered on a layer that cannot use it. A failed live
-   * list still returns the suggestions, with the reason in `error`, and is fetched again on the next call (nothing is cached).
+   * First use only: when no layer has a model yet, puts the layers on a model picked from what the provider lists right
+   * now (see {@link pickDefaultModel}), so a new install never starts on an id from an out-of-date table. Returns the model
+   * set, or undefined when a layer is already configured, the provider serves decisions only or lists no chat model.
    */
-  async modelOptions(id: string, role?: RoleId): Promise<{ models: string[]; types: Record<string, ModelType>; error?: string }> {
+  async applyLiveDefault(providerId: string): Promise<string | undefined> {
+    const p = this.getProvider(providerId)
+    if (DECISION_KINDS.includes(p.kind) || this.configured()) return undefined
+    let models: ModelInfo[]
+    try { models = await this.listModels(providerId) } catch { models = this.cachedModels(providerId)?.models ?? [] }
+    const model = pickDefaultModel(models)
+    return model && this.applyDefaultModel(providerId, model) ? model : undefined
+  }
+
+  private configured(): boolean {
+    return Object.values(this.roleConfigs()).some(c => c.chain.length > 0)
+  }
+
+  /**
+   * What the settings page offers for a provider: all its models (chat, embedding, rerank, Jev…) with each one's type,
+   * newest first within a kind. With a layer, the models of the kind that layer runs come first: embedding models on the
+   * embedding layer, decision models on the reviewer, chat models elsewhere. The reviewer is always offered Jev, since
+   * gateways serve it without listing it, and a decision model is never offered on a layer that cannot use it. The list is
+   * fetched live on every call; when that fails it falls back to the last list the provider gave, with the reason in `error` and the age of the fallback in `cachedAt`.
+   */
+  async modelOptions(id: string, role?: RoleId): Promise<{ models: string[]; types: Record<string, ModelType>; error?: string; cachedAt?: number }> {
     const p = this.getProvider(id)
     let live: ModelInfo[] = []
     let error: string | undefined
-    try { live = await this.listModels(id) } catch (e) { error = describeError(e) }
+    let cachedAt: number | undefined
+    try { live = await this.listModels(id) } catch (e) {
+      error = describeError(e)
+      const cached = this.cachedModels(id)
+      if (cached) { live = cached.models; cachedAt = cached.at }
+    }
     const decisionLayer = role !== undefined && DECISION_ROLES.includes(role)
     const typed = (m: string): ModelInfo => ({ id: m, type: typeFromId(m, p.kind) })
     const suggested = [
@@ -160,7 +197,7 @@ export class ModelHub {
     const rank = (t: ModelType) => (t === first ? -1 : t === 'chat' ? 0 : MODEL_TYPES.indexOf(t) + 1)
     all = all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m.type) - rank(b.m.type) || a.i - b.i).map(({ m }) => m)
     const result = { models: all.map(m => m.id), types: Object.fromEntries(all.map(m => [m.id, m.type])) as Record<string, ModelType> }
-    return error === undefined ? result : { ...result, error }
+    return error === undefined ? result : { ...result, error, ...(cachedAt === undefined ? {} : { cachedAt }) }
   }
 
   /**
