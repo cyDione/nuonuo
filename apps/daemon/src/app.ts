@@ -1,6 +1,6 @@
 /** HTTP surface of the daemon: the JSON API under /api, the login link under /auth, and the web UI's static files. */
 import { serveStatic } from '@hono/node-server/serve-static'
-import { describeError, ModelError, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type ProviderKind, type RoleId } from '@nuonuo/models'
+import { describeError, KINDS, ModelError, PROVIDER_KINDS, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type RoleId } from '@nuonuo/models'
 import { Hono, type Context } from 'hono'
 import { setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
@@ -25,11 +25,10 @@ import { DEFAULT_NOTIFY, NotifySettingsSchema, notifySettings, saveNotifySetting
 import type { Runtime } from './runtime'
 import type { Updater } from './update'
 
-const KINDS = ['anthropic', 'openai', 'google', 'deepseek', 'openai-compatible', 'typesafe'] as const satisfies readonly ProviderKind[]
 const PricesSchema = z.record(z.string(), z.object({ input: z.number().min(0).optional(), output: z.number().min(0).optional(),
   cacheRead: z.number().min(0).optional(), cacheWrite: z.number().min(0).optional() }).strict())
 const ProviderBody = z.object({
-  kind: z.enum(KINDS), name: z.string().trim().min(1).max(60), baseUrl: z.string().url().nullish().or(z.literal('')),
+  kind: z.enum(PROVIDER_KINDS), name: z.string().trim().min(1).max(60), baseUrl: z.string().url().nullish().or(z.literal('')),
   apiKey: z.string().max(500).nullish(), options: z.object({ prices: PricesSchema.optional(), headers: z.record(z.string(), z.string()).optional(), decisionsUrl: z.string().url().optional() }).optional(),
 })
 const ConversationPatch = z.object({ title: z.string().trim().min(1).max(80).optional(), pinned: z.boolean().optional(), archived: z.boolean().optional() }).strict()
@@ -134,7 +133,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json({ ok: true })
   })
   api.get('/doctor', async c => c.json({ checks: await runDoctor(rt) }))
-  api.get('/catalog', c => c.json({ presets: PROVIDER_PRESETS, roles: ROLES, reasoningLevels: REASONING_LEVELS }))
+  api.get('/catalog', c => c.json({ presets: PROVIDER_PRESETS, kinds: Object.fromEntries(Object.entries(KINDS).map(([k, v]) => [k, { label: v.label }])), roles: ROLES, reasoningLevels: REASONING_LEVELS }))
 
   // Providers
   api.get('/providers', c => c.json({ providers: rt.hub.listProviders() }))

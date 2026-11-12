@@ -2,23 +2,15 @@
  * Providers whose key lives in an environment variable. The key is read from `process.env` at call time and is never copied
  * into the keychain, the database or a worker's shell (workers get a sanitized environment).
  */
-import type { ProviderKind } from './catalog'
+import { PROVIDER_PRESETS, type ProviderKind } from './catalog'
 import type { SecretStore } from './secrets'
 
 export interface EnvProviderSpec { env: string[]; kind: ProviderKind; name: string; baseUrl?: string; baseUrlEnv?: string }
 
-export const ENV_PROVIDERS: readonly EnvProviderSpec[] = [
-  { env: ['ANTHROPIC_API_KEY'], kind: 'anthropic', name: 'Anthropic', baseUrlEnv: 'ANTHROPIC_BASE_URL' },
-  { env: ['OPENAI_API_KEY'], kind: 'openai', name: 'OpenAI', baseUrlEnv: 'OPENAI_BASE_URL' },
-  { env: ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'], kind: 'google', name: 'Google Gemini' },
-  { env: ['DEEPSEEK_API_KEY'], kind: 'deepseek', name: 'DeepSeek', baseUrlEnv: 'DEEPSEEK_BASE_URL' },
-  { env: ['TYPESAFE_API_KEY'], kind: 'typesafe', name: 'TypeSafe Jev', baseUrl: 'https://api.typesafe.ai/v1' },
-  { env: ['OPENROUTER_API_KEY'], kind: 'openai-compatible', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1' },
-  { env: ['DASHSCOPE_API_KEY'], kind: 'openai-compatible', name: '通义千问 DashScope', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
-  { env: ['MOONSHOT_API_KEY'], kind: 'openai-compatible', name: 'Moonshot Kimi', baseUrl: 'https://api.moonshot.cn/v1' },
-  { env: ['ZHIPU_API_KEY'], kind: 'openai-compatible', name: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
-  { env: ['SILICONFLOW_API_KEY'], kind: 'openai-compatible', name: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1' },
-]
+/** The presets that carry `env`, in the shape registration needs. */
+export const ENV_PROVIDERS: readonly EnvProviderSpec[] = PROVIDER_PRESETS.filter(p => p.env?.length).map(p => ({
+  env: p.env!, kind: p.kind, name: p.name ?? p.label, ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}), ...(p.baseUrlEnv ? { baseUrlEnv: p.baseUrlEnv } : {}),
+}))
 
 export const ENV_REF = 'env:'
 
