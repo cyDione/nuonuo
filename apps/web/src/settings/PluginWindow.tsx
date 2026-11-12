@@ -133,7 +133,7 @@ function PluginSettings({ id, onDirty }: { id: string; onDirty(dirty: boolean): 
   const fields = [...data.fields.filter(f => !f.advanced), ...data.fields.filter(f => f.advanced)]
   return <>
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
-      <div className="divide-y divide-line rounded-xl bg-card px-4">
+      <div className="divide-y divide-line rounded-xl bg-sunken px-4">
         {fields.map(f => <FieldRow key={f.key} f={f} value={values[f.key]} onChange={v => setValues(s => ({ ...s, [f.key]: v }))} />)}
       </div>
       <p className="mt-2 px-1 text-xs leading-5 text-faint">{tx('这些设置由插件声明，存在本机；密钥类的放进钥匙串。')}</p>
