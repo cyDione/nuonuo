@@ -28,24 +28,12 @@ Nuonuo 是一个**主动的个人助理**。它不是写代码的 Agent，也不
 
 ## 看看它
 
-<table>
-  <tr>
-    <td width="50%"><img src="docs/assets/screens/activity.png" alt="右侧栏「活动」" /></td>
-    <td width="50%"><img src="docs/assets/screens/who.png" alt="右侧栏「它是谁」：名字、样子、灵魂和记忆" /></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>右侧栏「活动」：等你点头的、正在做的、做过的</sub></td>
-    <td align="center"><sub>「它是谁」：名字、样子、灵魂、记忆和会做的事</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/assets/screens/dark.png" alt="深色模式" /></td>
-    <td width="50%"><img src="docs/assets/screens/english.png" alt="English 界面" /></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>纯黑底的深色模式，主题色可换</sub></td>
-    <td align="center"><sub>English 界面和「更多」菜单</sub></td>
-  </tr>
-</table>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/stage-dark.png" />
+  <img src="docs/assets/readme/stage-light.png" width="100%" alt="界面一览：左边是侧栏和主聊，中间是对话和一张「要花钱，等你确认」的卡片，右侧栏「活动」里是等你点头的和正在做的事；后面叠着同一屏的深色模式" />
+</picture>
+
+<sub>界面截图来自真实运行的界面，数据是示例。浅色和深色跟随你的系统设置。</sub>
 
 ## 它怎么做事
 
@@ -60,12 +48,22 @@ Nuonuo 是一个**主动的个人助理**。它不是写代码的 Agent，也不
 
 **聊天**
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.png" />
+  <img src="docs/assets/readme/chat-light.png" width="100%" alt="聊天：像发消息一样把事交给它。对话里只有你和糯糯，要花钱的操作以卡片出现等你确认，正在做的事在右侧栏" />
+</picture>
+
 - **主聊加侧聊**：主聊一直都在，一件独立的事开一个侧聊。对话里只有你和糯糯说的话，工具调用和执行过程放在右侧栏「活动」里。它干活的时候，你随时可以插话。
 - **像聊天软件一样顺手**：拖进来、粘贴或点 + 就能发文件；可以回复某一条消息；10 分钟内能撤回或修改自己的消息，也能让它重新回答；⌘F 在当前对话里查找，⌘K（Windows / Linux 上是 Ctrl+K）搜索全部对话、成果和记忆；说一句「整理一下前面的」，前面的聊天会压缩成一段摘要。
 - **回复带卡片**：日程、提醒、地点和需要你批准的操作都会以卡片出现，有的还附「带你去」链接，一点就跳到 App 里对应的位置。
 - **成果直接预览**：它做出来的网页、表格、文档在聊天里直接打开，预览上写着它来自哪个侧聊。
 
 **主动**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/proactive-dark.png" />
+  <img src="docs/assets/readme/proactive-light.png" width="100%" alt="主动：「给你的点子」卡片墙、一张降价提醒卡（¥2,299 降到 ¥1,999）和一个睡眠目标卡" />
+</picture>
 
 - **动态和点子**：没人找它的外部事件，先经过程序规则，再由过滤模型按你选的主动程度判断。它可以先在本地悄悄做，有价值才告诉你。每条动态可以 👍 / 👎 / 收藏。
 - **目标**：交给它一个目标，它在后台慢慢推进。它会建议小目标，你选「加上」或「不用了」；目标可以拖动排序。
@@ -74,6 +72,11 @@ Nuonuo 是一个**主动的个人助理**。它不是写代码的 Agent，也不
 
 **它是谁**
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/who-dark.png" />
+  <img src="docs/assets/readme/who-light.png" width="100%" alt="它是谁：糯糯的六种表情，以及右侧栏「它是谁」里的名字、样子、灵魂、记忆和心境" />
+</picture>
+
 - **灵魂和记忆**：右侧栏「它是谁」里有两个按钮，打开后都是一篇 Markdown，可以预览，也可以直接改。灵魂有历史版本，记忆带来源和有效期。
 - **从别的 AI 搬家**：第一次打开时可以导入你在别的 AI 里的记忆，你确认后才写入。
 - **会做的事**：它学会的技能列在「它是谁」里。
@@ -81,6 +84,11 @@ Nuonuo 是一个**主动的个人助理**。它不是写代码的 Agent，也不
 - **有自己的样子**：糯糯的表情会随状态变化。界面是纯白或纯黑底，一个主题色同时决定界面和糯糯的颜色。它有自己的提示音，偶尔会给你的消息贴个表情。
 
 **连接与权限**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/connect-dark.png" />
+  <img src="docs/assets/readme/connect-light.png" width="100%" alt="连接与权限：糯糯周围是网页、桌面端、Telegram、飞书、Discord、企业微信、钉钉、Slack、GitHub、Gmail、日历、本机 App；右边是「权限」页，钥匙串和 .ssh 默认不碰" />
+</picture>
 
 - **在哪都能找它**：网页、桌面端、Telegram、飞书、Discord、企业微信、钉钉、Slack、GitHub（在 Issue / PR 里 @它就能派活）、Gmail、Google 日历；Mac 上还能用提醒事项、备忘录等本机 App。回复回到你找它的地方。
 - **权限你说了算**：右侧栏「权限」里设置哪些文件夹只能看、能改、永远不碰（.ssh、钥匙串这类凭据目录默认不碰），本机 App 和账号也按等级管理。
@@ -189,6 +197,11 @@ nuonuo start -d
 
 糯糯不只是换个语气。它有一份稳定的「自己」，加上一份会动的心境；两者都只影响它**怎么说**，从不影响它**帮你多少**。
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/mood-dark.png" />
+  <img src="docs/assets/readme/mood-light.png" width="100%" alt="个性与心境窗口：「此刻」页有四个滑杆（心情、精力、耐心、信任）和最近 50 轮的曲线，后面叠着「性格」页和「日记」页" />
+</picture>
+
 **能做什么**
 
 | | 是什么 | 怎么变 |
@@ -206,19 +219,12 @@ nuonuo start -d
 
 **怎么接进架构**
 
-```
-你的新消息
-  │
-  ├─ inlineContext（插件钩子，1.5 秒内返回）
-  │    读取心境 → 时间衰减 → 猜你的状态（急 / 想倾诉 / 办事）→ 挑姿态
-  │    → 一段 <mood> 附在这一轮输入的末尾（不进系统提示词，提示词缓存不受影响）
-  │
-  ├─ 主 Agent 回复你，同一步里调用 mood_sync 汇报这一轮：
-  │    你的情绪和强度、对它的态度、是夸还是嫌，可选一条日记
-  │
-  └─ applyReport：按敏感度改心情 / 精力 / 耐心 / 信任，记进 50 轮的曲线
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/moodloop-dark.png" />
+  <img src="docs/assets/readme/moodloop-light.png" width="100%" alt="每一轮对话心境转一圈：1 你的新消息，插件钩子 inlineContext 先跑；2 读心境，按时间回落；3 猜你此刻是急、想倾诉还是要办事；4 挑一个姿态，把一段 &lt;mood&gt; 附在这一轮末尾；5 糯糯回复你，顺手用 mood_sync 汇报；6 按敏感度更新心情、精力、耐心、信任。右边是六种姿态，从上往下第一个符合的生效：冷淡抽离、战友破局、先接住、专注干活、老友互怼、清醒搭档" />
+</picture>
 
+- 心境那段 `<mood>` 附在这一轮输入的末尾，不进系统提示词，提示词缓存不受影响。
 - 性格底色和底线存在人设里（`packages/core/src/persona.ts`），进系统提示词，一直生效，心境关着也一样。
 - 会动的部分是一个内置插件（`packages/plugins/src/mood.ts`），用的就是第三方插件也能用的钩子：`inlineContext`、`routerTools`、插件状态。它自己不调用模型，没有额外开销；主 Agent 漏报一轮就当什么都没发生。
 - 它不写长期记忆，日记也只存在插件自己的状态里；关掉后不再注入任何东西，数值保留，回到平时也不会清掉信任。
@@ -229,8 +235,8 @@ nuonuo start -d
 整个系统是一个本机进程：一个 Node 服务、一个 SQLite 文件，加一个可以直接用文本编辑器查看的数据目录。
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/architecture-dark.svg" />
-  <img src="docs/assets/readme/architecture-light.svg" width="100%" alt="架构图：来源的事件里，你直接说的话直接交给主 Agent 糯糯，其他事件先过两级过滤，值得看的进动态和点子；糯糯没有 shell，只把事情派给并行的 Worker；Worker 的动作先过审核，放行的进执行环境，高风险的先问你；底座是 SQLite 和每分钟巡检的 Watchdog" />
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/arch-dark.png" />
+  <img src="docs/assets/readme/arch-light.png" width="100%" alt="架构图，四步从左到右：1 进来：你（网页、桌面端、IM）和 GitHub、Gmail、日历、定时任务、插件来源；2 分拣：你直接说的话直达糯糯，其他事件先过两级过滤，值得看的进动态、点子、目标，要做的交给糯糯；3 糯糯接手：主 Agent 没有 shell，只派活、回复、记忆，记忆走旁路；4 后台干活：并行的 Worker 动作先过审核，放行的进执行环境（Shell、浏览器、MCP、本机 App），高风险的变成卡片问你。做完糯糯用一句话加成果告诉你。订阅直通让同一件事的后续直接交给 Worker。底座是 SQLite、Watchdog 和插件沙箱" />
 </picture>
 
 - **主 Agent 和 Worker 分开**：主 Agent 常驻，负责分派和回复，用快而便宜的模型；Worker 每件事一个，用最强的模型，只向主 Agent 汇报。
