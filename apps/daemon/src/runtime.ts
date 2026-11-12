@@ -1,10 +1,11 @@
 /** Composition root: opens the data directory, the state database, the secret store and the model hub, and owns shutdown. */
+import { ChannelApprovals } from './channel-approvals'
 import { pruneChats, pruneRuntime } from './data'
 import { Notices } from './notices'
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@nuonuo/agent-runtime'
 import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@nuonuo/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@nuonuo/db'
-import { gmailPlugin, telegramPlugin } from '@nuonuo/plugins'
+import { discordPlugin, feishuPlugin, gmailPlugin, telegramPlugin } from '@nuonuo/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@nuonuo/sources'
 import { Devices } from './clients'
 import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@nuonuo/models'
@@ -92,6 +93,8 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const plugins = new PluginManager(join(config.home, 'plugins'), sources, store)
     plugins.registerBuiltIn(telegramPlugin)
     plugins.registerBuiltIn(gmailPlugin)
+    plugins.registerBuiltIn(feishuPlugin)
+    plugins.registerBuiltIn(discordPlugin)
     const ownMcp = () => kvGet<McpServerConfig[]>(store, 'settings:mcp') ?? []
     // Plugins' servers join the owner's; a name the owner already uses stays the owner's.
     const mcp = new McpManager(() => { const own = ownMcp(); const names = new Set(own.map(s => s.name)); return [...own, ...plugins.mcpServers().filter(s => !names.has(s.name))] }, agents.blobs)
@@ -186,6 +189,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     })
     const notices = new Notices(store, bus, { feed, ideas, reviewer, ticketConversation: id => { try { return engine.conversationOfTicket(id) } catch { return null } } })
     notices.register()
+    new ChannelApprovals(bus, engine, reviewer, sources).register()
     let watchdogTimer: NodeJS.Timeout | undefined
     let memoryTimer: NodeJS.Timeout | undefined
     let ideasTimer: NodeJS.Timeout | undefined

@@ -81,7 +81,7 @@ Nuonuo 是一个**主动的个人助理**。它不是写代码的 Agent，也不
 
 **连接与权限**
 
-- **在哪都能找它**：网页、桌面端、Telegram、GitHub（在 Issue / PR 里 @它就能派活）、Gmail、Google 日历；Mac 上还能用提醒事项、备忘录等本机 App。回复回到你找它的地方。
+- **在哪都能找它**：网页、桌面端、Telegram、飞书、Discord、GitHub（在 Issue / PR 里 @它就能派活）、Gmail、Google 日历；Mac 上还能用提醒事项、备忘录等本机 App。回复回到你找它的地方。
 - **权限你说了算**：右侧栏「权限」里设置哪些文件夹只能看、能改、永远不碰（.ssh、钥匙串这类凭据目录默认不碰），本机 App 和账号也按等级管理。
 - **该问的时候问你**：有后果的动作要经过审核，高风险的先问你。审批卡上点「以后这类直接做」，同类操作就不再问，随时能撤销；花钱和删除每次都问。遇到需要登录的网页，由你接管浏览器。
 - **自带模型（BYOK）**：主 Agent、Worker、过滤、审核等各层可以分别选模型，并设置用量预算。API key 不会进模型上下文。
@@ -211,7 +211,7 @@ apps/desktop            Electron 桌面端：托盘、通知、快速问
 packages/core           领域层：Trigger / Thread / Ticket / 订阅 / 汇报，主 Agent 与 Worker，审核、记忆、Watchdog
 packages/agent-runtime  Agent 运行时：事件日志、步间注入、后台命令、文件 / Shell / 网页工具、recall
 packages/sources        来源插件协议、GitHub 来源、定时任务
-packages/plugins        内置插件：Telegram、Gmail
+packages/plugins        内置插件：Telegram、飞书、Discord、Gmail
 packages/plugin-sdk     插件 SDK
 packages/models         供应商、密钥存储、分层模型、用量账本
 packages/db             SQLite + Drizzle、迁移、持久化副作用队列

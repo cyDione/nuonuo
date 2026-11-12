@@ -17,6 +17,7 @@ export default defineConfig({
       if (existsSync('../web/dist')) cpSync('../web/dist', 'dist/web', { recursive: true })
       // The plugin sandbox starts this file in its own process (packages/sources/src/plugin-sandbox.ts).
       cpSync('../../packages/sources/src/plugin-runner.mjs', 'dist/plugin-runner.mjs')
+      cpSync('../../packages/sources/src/channel.mjs', 'dist/channel.mjs')
     },
   },
 })

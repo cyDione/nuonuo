@@ -19,8 +19,7 @@ const CONTEXT_MESSAGES = 6
 /** Retries of a failed router turn, the first after routerRetryMs(), then doubling. */
 const ROUTER_RETRIES = 3
 const routerRetryMs = () => Number(process.env.NUONUO_ROUTER_RETRY_MS) || 5_000
-/** Chat channels keep replies short (article §4.2: ≤ 100 words); the full result stays in the work's details. */
-const CHAT_SOURCES = new Set(['webchat', 'telegram', 'watchdog', 'cron'])
+/** Chat channels (engine.isChatSource) keep replies short (article §4.2: ≤ 100 words); the full result stays in the work's details. */
 const CHAT_LIMIT = 120
 const DETAILED_LIMIT = 600
 const MAX_SUBAGENTS = 4
@@ -231,7 +230,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
           const source = reply_to || ticket_id ? engine.replySource(reply_to, ticket_id) : conversationSource(conversationId)
           const length = chatLength(text)
           const limit = detailed ? DETAILED_LIMIT : CHAT_LIMIT
-          if (CHAT_SOURCES.has(source) && length > limit) {
+          if (engine.isChatSource(source) && length > limit) {
             return { ok: false, error: `Not sent: about ${length} words; chat replies must stay under ${limit}. Say only the outcome and key facts${ticket_id ? ' — the full result stays in the work\'s details' : ''}, then call reply again.` }
           }
           return { ok: true, message_id: engine.reply({ conversationId, text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}),

@@ -1,6 +1,6 @@
 # 插件 SDK
 
-插件给智能体增加**来源**（Source）：一条事件流，加上回到原处的回复渠道。也可以给主 Agent 和 Worker 增加工具、提示词和环境变量。GitHub、定时任务、Telegram、Gmail 都是按这套协议写的；第三方插件和它们用的是同一套接口。
+插件给智能体增加**来源**（Source）：一条事件流，加上回到原处的回复渠道。也可以给主 Agent 和 Worker 增加工具、提示词和环境变量。GitHub、定时任务、Telegram、飞书、Discord、Gmail 都是按这套协议写的；第三方插件和它们用的是同一套接口。
 
 ## 安装与启用
 
@@ -61,6 +61,8 @@ export default function plugin({ definePlugin, z, tool }) {
 
 完整的示例见 [`examples/plugins/rss-watch`](../examples/plugins/rss-watch/index.mjs)。用 TypeScript 写插件时，从 `@nuonuo/plugin-sdk` 导入类型即可。
 
+**接聊天软件**（微信、飞书、Discord、Slack……）不要从 `SourceKind` 写起，用 SDK 里的 `defineChannel`：准入名单、群里 @、`/new`、长消息切分、在聊天里回答确认、断线重连都已经写好，适配器只管连接和翻译消息。见 [聊天渠道](12-channels.md)。
+
 ## 工具、提示词和会做的事
 
 不需要事件来源的插件，可以直接给智能体加工具和提示词，也可以带上「会做的事」（技能）：
@@ -108,6 +110,7 @@ definePlugin({
 | `poll(ctx)` | | 设置页「立即同步」按钮会调用它 |
 | `allowed(ctx, actor)` | | 这个账号能不能通过这个来源派活。不实现时，任何人都不能派活 |
 | `send(ctx, message)` | | 回复渠道。会话已不存在时返回 `'gone'`；抛出异常则稍后重试（退避 5 秒到 300 秒） |
+| `capabilities` | | 聊天软件的能力声明，`defineChannel` 会填好（见 [聊天渠道](12-channels.md)） |
 | `threadInfo` | | 生成卡片上显示的线程摘要 |
 | `routerPrompt` / `routerTools` | | 给主 Agent 增加的提示词和工具 |
 | `workerPrompt` / `workerTools` / `workerEnv` | | 给 Worker 增加的提示词、工具和环境变量 |

@@ -80,6 +80,8 @@ export interface SourcePort {
   allowed(source: string, actor: string): boolean
   /** Whether the source can carry replies back (GitHub can; routines cannot, so their replies stay in the web). */
   hasChannel(source: string): boolean
+  /** Whether the source is a chat app (made with defineChannel): its replies stay short and the owner's words there count as chat. */
+  isChannel?(source: string): boolean
   /** Queues a message for the source's channel inside the caller's transaction. */
   send(message: { messageId: string; source: string; threadId: string; text: string; ticketId?: string }): void
 }

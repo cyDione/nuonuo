@@ -136,6 +136,40 @@ describe('third-party plugin context', () => {
   })
 })
 
+describe('chat channels in the sandbox', () => {
+  it('builds a third-party channel with defineChannel, with the shared fields, capabilities and approvals over IPC', async () => {
+    const { dir, plugins, engine } = setup()
+    mkdirSync(join(dir, 'echo'))
+    writeFileSync(join(dir, 'echo', 'package.json'), JSON.stringify({ name: 'echo', nuonuo: { plugin: './index.mjs' } }))
+    writeFileSync(join(dir, 'echo', 'index.mjs'), `export default ({ definePlugin, defineChannel, z }) => definePlugin({ id: 'echo', sources: [defineChannel({
+  id: 'echo', title: 'Echo', capabilities: { inbound: 'websocket', buttons: true, maxLength: 500 },
+  config: z.object({ room: z.string().default('c1') }), fields: [{ key: 'room', type: 'text', label: 'Room' }],
+  async connect(io) {
+    await io.message({ id: 'm1', chat: { id: io.config.room, type: 'private' }, from: { id: 'u1', name: 'U' }, text: '你好' })
+    io.online()
+    await new Promise(r => io.signal.addEventListener('abort', r))
+  },
+  async poll(io) { io.state.set('toast', await io.action({ data: 'nuonuo:apv:yes:apv_9', from: { id: 'u1' }, chat: { id: 'c1' } })) },
+  async send(io, target, out) { io.state.set('out', { target, out }); return { id: 'x' } },
+})] })`)
+    await plugins.setEnabled('echo', true)
+    expect(registry.list().find(s => s.id === 'echo')!.fields.map(f => f.key)).toEqual(['room', 'allowed', 'approvals'])
+    await registry.save('echo', { enabled: true, config: { room: 'c1', allowed: ['u1'], approvals: true } })
+    await vi.waitFor(() => expect(store.db.select().from(schema.triggers).all().map(t => [t.id, t.threadId, (t.disposition as any)?.ignored ?? 'routed'])).toEqual([['echo:c1:m1', 'echo:c1:0', 'routed']]))
+    expect(registry.approvalsIn('echo')).toBe(true)
+    expect(engine).toBeTruthy()
+
+    const answers: unknown[] = []
+    registry.onApprovalAnswer = (source, id, approve, by) => { answers.push([source, id, approve, by]) }
+    await registry.pollNow('echo')
+    await vi.waitFor(() => expect(kvGet(store, 'source:echo:toast')).toBe('已同意'))
+    expect(answers).toEqual([['echo', 'apv_9', true, 'Echo u1']])
+    registry.onApprovalAnswer = () => { throw new Error('这个确认不属于这里的任务') }
+    await registry.pollNow('echo')
+    await vi.waitFor(() => expect(kvGet(store, 'source:echo:toast')).toBe('这个确认不属于这里的任务'))
+  })
+})
+
 describe('secret fields', () => {
   it('live in the secret store, reach the source, and are masked in the settings view', async () => {
     const { secrets } = setup()

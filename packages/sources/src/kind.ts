@@ -8,6 +8,7 @@ import type { Engine, Ticket } from '@nuonuo/core'
 import type { Store } from '@nuonuo/db'
 import type { ToolSet } from 'ai'
 import type { z } from 'zod'
+import type { ChannelCapabilities } from './channel.mjs'
 
 /** `links`: shortcuts shown under the field (e.g. where to create the OAuth client whose ID goes here). */
 interface FieldBase { key: string; label: string; hint?: string; advanced?: true; links?: { label: string; href: string }[] }
@@ -38,6 +39,11 @@ export interface SourceContext<C> {
   secret: { get(name: string): string | undefined; set(name: string, value: string): void; delete(name: string): void }
   /** Posts a notice to the owner in this source's own conversation (no model involved). */
   notify(text: string, opts?: { title?: string }): void
+  /**
+   * Answers an approval (「要不要做」) on the owner's behalf, for a chat channel whose owner turned on 允许在这里回答.
+   * Accepted only for a task that came from this source's own threads. `by` says who answered (shown in the audit).
+   */
+  approvals?: { answer(id: string, approve: boolean, by: string): void | Promise<void> }
 }
 
 export interface SourceAction { id: string; label: string; path: string; show?: 'authorized' | 'unauthorized'; confirm?: string; primary?: true }
@@ -45,7 +51,17 @@ export interface SourceAction { id: string; label: string; path: string; show?: 
 /** An OAuth device-flow code for the owner to enter on the provider's page. */
 export interface DeviceCode { userCode: string; verificationUri: string; expiresIn: number; poll: string }
 
-export interface OutgoingMessage { messageId: string; threadId: string; text: string; ticketId?: string }
+export interface OutgoingMessage {
+  messageId: string
+  threadId: string
+  text: string
+  ticketId?: string
+  /**
+   * Set when the message asks for (or reports the answer to) an approval, sent only to channels that declare
+   * capabilities and whose owner allowed approvals there. `pending` asks; the other states mark the earlier card.
+   */
+  approval?: { id: string; state: 'pending' | 'approved' | 'denied' | 'expired' }
+}
 
 export interface SourceKind<C = any> {
   id: string
@@ -53,6 +69,8 @@ export interface SourceKind<C = any> {
   description: string
   schema: z.ZodType<C>
   fields: FieldSpec[]
+  /** What a chat app can do (sources made with `defineChannel`); see channel.d.mts. */
+  capabilities?: ChannelCapabilities
   /** Built-in sources that run until switched off. */
   defaultEnabled?: boolean
   /**
