@@ -441,7 +441,7 @@ describe('Jev through a multi-provider gateway', () => {
     }) as typeof fetch
     const p = { id: 'p', kind: 'openai-compatible' as const, name: 'gw', baseUrl: 'https://gw.example/v1', secretRef: null, options: {} }
     expect(await listProviderModels(p, 'k', fetchImpl)).toEqual([
-      { id: 'cohere/embed-5-fast', type: 'embedding' }, { id: 'openai/gpt-x', type: 'chat' },
+      { id: 'cohere/embed-5-fast', type: 'embedding', vision: true }, { id: 'openai/gpt-x', type: 'chat', vision: false },
       { id: 'qwen/qwen3-emb-8b', type: 'embedding' }, { id: 'typesafe/jev-latest', type: 'decision' }])
     expect(hits).toContain('POST https://gw.example/v1/systemone')
     // No decision endpoint and no embeddings list: just /models, and a failed /models still fails.
