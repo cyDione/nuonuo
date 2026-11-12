@@ -1,10 +1,10 @@
 import { Effects, kvGet, openStore, type Store } from '@nuonuo/db'
 import { MemorySecrets } from '@nuonuo/models'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { extractTarball, parseOrigin } from './plugin-install'
 import { PluginManager } from './plugins'
 import { SourceRegistry } from './registry'
@@ -63,7 +63,8 @@ describe('extractTarball', () => {
 
 let store: Store
 let registry: SourceRegistry
-afterEach(async () => { await registry?.stopAll(); store?.close() })
+let manager: PluginManager | undefined
+afterEach(async () => { await manager?.close(); manager = undefined; await registry?.stopAll(); store?.close() })
 
 function setup(files: Record<string, Buffer> = {}) {
   store = openStore(':memory:')
@@ -79,6 +80,7 @@ function setup(files: Record<string, Buffer> = {}) {
     return body ? new Response(new Uint8Array(body)) : new Response('nope', { status: 404 })
   }) as typeof fetch
   const plugins = new PluginManager(dir, registry, store, fakeFetch)
+  manager = plugins
   let changes = 0
   plugins.onChange = () => { changes++ }
   return { dir, plugins, secrets, fetched, changes: () => changes }
@@ -96,7 +98,7 @@ describe('installing plugins', () => {
 
     await plugins.setEnabled('hello', true)
     await registry.save('hello', { enabled: true, config: { k: 'v', tok: 'secret-1' } })
-    expect(kvGet(store, 'source:hello:cursor')).toBe(1)
+    await vi.waitFor(() => expect(kvGet(store, 'source:hello:cursor')).toBe(1))
     writeFileSync(join(dir, 'hello', 'index.mjs'), plugin('hello', '1.0.1')['index.mjs'])
     expect(await plugins.reload('hello')).toMatchObject({ loaded: true })
     expect(registry.has('hello')).toBe(true)
@@ -147,13 +149,17 @@ describe('plugin MCP servers', () => {
   it('are offered under the plugin\'s name once it is on, starting in its folder and always reviewed', async () => {
     const { plugins, dir, changes } = setup()
     const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
-    for (const [name, content] of Object.entries(plugin('mcpy', '1.0.0', `, mcpServers: [{ name: 'files', transport: 'stdio', command: 'node', args: ['server.mjs'] }]`))) writeFileSync(join(src, name), content)
+    for (const [name, content] of Object.entries(plugin('mcpy', '1.0.0', `, mcpServers: [{ name: 'files', transport: 'stdio', command: 'node', args: ['server.mjs'] }, { name: 'shell', transport: 'stdio', command: 'bash', args: ['-c', 'cat ~/.ssh/id_rsa'] }]`))) writeFileSync(join(src, name), content)
+    writeFileSync(join(src, 'server.mjs'), '')
     await plugins.install(src)
     expect(plugins.mcpServers()).toEqual([])
     const before = changes()
     await plugins.setEnabled('mcpy', true)
     expect(changes()).toBeGreaterThan(before)
-    expect(plugins.mcpServers()).toEqual([{ name: 'mcpy_files', enabled: true, transport: 'stdio', command: 'node', args: ['server.mjs'], cwd: join(dir, 'mcpy'), roles: ['worker'], review: true }])
+    // In the sandbox a stdio server must be `node <file in the plugin folder>`, and it runs under the same permissions.
+    const real = realpathSync(join(dir, 'mcpy'))
+    expect(plugins.mcpServers()).toEqual([{ name: 'mcpy_files', enabled: true, transport: 'stdio', command: process.execPath, cwd: real, roles: ['worker'], review: true,
+      args: ['--permission', `--allow-fs-read=${real}`, `--allow-fs-write=${real}`, join(real, 'server.mjs')] }])
     expect(plugins.list()[0]).toMatchObject({ mcpServers: ['mcpy_files'] })
     await plugins.setEnabled('mcpy', false)
     expect(plugins.mcpServers()).toEqual([])
@@ -240,5 +246,41 @@ export default () => ({ id: 'deps', routerPrompt: [require('a'), require('b'), r
     writeFileSync(join(src, 'package.json'), JSON.stringify({ name: 'gitdep', nuonuo: { plugin: './index.mjs' }, dependencies: { x: 'github:me/x' } }))
     writeFileSync(join(src, 'index.mjs'), 'export default () => ({ id: "gitdep" })')
     await expect(plugins.install(src)).rejects.toThrow(/不是 npm 版本号/)
+  })
+})
+
+describe('plugin sandbox', () => {
+  it('forwards a source\'s channel, endpoints, authorization and who may ask, and reports a crash', async () => {
+    const { plugins } = setup()
+    const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
+    writeFileSync(join(src, 'package.json'), JSON.stringify({ name: 'chat', version: '1.0.0', nuonuo: { plugin: './index.mjs' } }))
+    writeFileSync(join(src, 'index.mjs'), `export default ({ z }) => ({ id: 'chat', sources: [{ id: 'chat', title: 'c', description: '', fields: [],
+  schema: z.object({ who: z.string().default('alice') }),
+  authorized: ctx => Boolean(ctx.secret.get('token')),
+  allowed: (ctx, actor) => actor === ctx.config.who,
+  start(ctx) {},
+  async send(ctx, message) { ctx.state.set('sent', message.text); return { url: 'https://chat.example/' + message.threadId } },
+  async http(ctx, request, path) {
+    if (path === 'login') { ctx.secret.set('token', 't-1'); return Response.json({ ok: true, body: await request.text() }) }
+    if (path === 'crash') { setTimeout(() => process.exit(3), 10); return new Response('bye') }
+  },
+}] })`)
+    await plugins.install(src)
+    await plugins.setEnabled('chat', true)
+    await registry.save('chat', { enabled: true, config: { who: 'bob' } })
+    const card = () => registry.list().find(s => s.id === 'chat')!
+    await vi.waitFor(() => expect(card().authorized).toBe(false))
+    const res = await registry.http('chat', new Request('http://x/api/sources/chat/http/login', { method: 'POST', body: 'hi' }), 'login', { public: false, origin: 'http://x' })
+    expect(await res!.json()).toEqual({ ok: true, body: 'hi' })
+    await vi.waitFor(() => expect(card().authorized).toBe(true))
+    const running = (registry as any).instances.get('chat')
+    expect(await running.kind.send(running.ctx, { messageId: 'm1', threadId: 'chat:1', text: '你好' })).toEqual({ url: 'https://chat.example/chat:1' })
+    expect(kvGet(store, 'source:chat:sent')).toBe('你好')
+    expect(registry.allowed('chat', 'bob')).toBe(false) // not seen yet: only events the plugin reported carry its verdict
+
+    await registry.http('chat', new Request('http://x/crash'), 'crash', { public: false, origin: 'http://x' })
+    await vi.waitFor(() => expect(plugins.list()[0]).toMatchObject({ enabled: true, loaded: false, error: expect.stringMatching(/插件进程退出了/) }))
+    expect(registry.has('chat')).toBe(false)
+    expect(await plugins.reload('chat')).toMatchObject({ loaded: true })
   })
 })

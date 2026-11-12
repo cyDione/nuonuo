@@ -16,6 +16,7 @@ import { z } from 'zod'
 import type { SourceKind } from './kind'
 import { installDependencies } from './plugin-deps'
 import { fetchPlugin, parseOrigin } from './plugin-install'
+import { PluginSandbox, sandboxWanted } from './plugin-sandbox'
 import type { SourceRegistry } from './registry'
 
 export interface NuonuoPlugin {
@@ -106,10 +107,14 @@ export class PluginManager {
 
   private skills: Skills | undefined
   private fetchImpl: typeof fetch
+  private sandboxes = new Map<string, PluginSandbox>()
+  /** Whether third-party plugins run in their own restricted process (see plugin-sandbox.ts). */
+  readonly sandboxed: boolean
 
-  constructor(private dir: string, private registry: SourceRegistry, private store: Store, opts: { fetch?: typeof fetch; skills?: Skills } | typeof fetch = {}) {
+  constructor(private dir: string, private registry: SourceRegistry, private store: Store, opts: { fetch?: typeof fetch; skills?: Skills; sandbox?: boolean } | typeof fetch = {}) {
     const o = typeof opts === 'function' ? { fetch: opts } : opts
     this.fetchImpl = o.fetch ?? fetch
+    this.sandboxed = o.sandbox ?? sandboxWanted()
     if (o.skills) this.useSkills(o.skills)
   }
 
@@ -188,7 +193,7 @@ export class PluginManager {
       const origin = kvGet<string>(this.store, `plugin:${m.id}:origin`)
       const notes = kvGet<string[]>(this.store, `plugin:${m.id}:notes`)
       return { ...m, enabled: this.enabled(m.id), loaded: Boolean(loaded), builtIn: false, sources: (loaded?.plugin.sources ?? []).map(k => k.id),
-        mcpServers: (loaded?.plugin.mcpServers ?? []).map(sv => mcpName(m.id, sv.name)), tools: loaded ? this.toolNames(loaded.plugin, m) : [],
+        mcpServers: loaded ? this.mcpServers().map(c => c.name).filter(n => n.startsWith(`${m.id}_`)) : [], tools: loaded ? this.toolNames(loaded.plugin, m) : [],
         skills: (loaded?.plugin.skills ?? []).map(sk => String(sk.name)), ...(origin ? { origin } : {}), ...(notes?.length ? { notes } : {}), ...(error ? { error } : {}) }
     })
     return [...builtIn, ...external]
@@ -204,12 +209,16 @@ export class PluginManager {
 
   /** MCP servers of the loaded plugins, ready for the MCP manager. */
   mcpServers(): McpServerConfig[] {
-    return [...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.mcpServers ?? []).map(sv => ({
+    return [...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.mcpServers ?? []).flatMap((sv): McpServerConfig[] => {
+      const box = this.sandboxes.get(manifest.id)
+      if (box) { const c = box.mcpServer(sv, mcpName(manifest.id, sv.name)); return c ? [c] : [] }
+      return [{
       name: mcpName(manifest.id, sv.name), enabled: true, transport: sv.transport,
       ...(sv.command ? { command: sv.command } : {}), ...(sv.args ? { args: sv.args } : {}), ...(sv.env ? { env: sv.env } : {}),
       ...(sv.url ? { url: sv.url } : {}), ...(sv.headers ? { headers: sv.headers } : {}),
       cwd: manifest.dir, roles: sv.roles?.length ? sv.roles : ['worker' as const], review: true,
-    })))
+    }]
+    }))
   }
 
   /**
@@ -267,8 +276,9 @@ export class PluginManager {
     const manifest = this.scan().find(m => m.id === id)
     if (!manifest) throw new Error(`没有插件 ${id}`)
     const sources = [...new Set([...(this.loaded.get(id)?.plugin.sources ?? []).map(k => k.id), ...(kvGet<string[]>(this.store, `plugin:${id}:sources`) ?? [])])]
-    for (const source of sources) this.registry.forget(source)
+    const kinds = new Map((this.loaded.get(id)?.plugin.sources ?? []).map(k => [k.id, k]))
     await this.unload(id)
+    for (const source of sources) this.registry.forget(source, kinds.get(source))
     rmSync(manifest.dir, { recursive: true, force: true })
     for (const { key } of this.store.db.select({ key: schema.kv.key }).from(schema.kv).all()) if (key.startsWith(`plugin:${id}:`)) kvSet(this.store, key, null)
     this.skills?.removePlugin(id)
@@ -292,11 +302,7 @@ export class PluginManager {
     this.errors.delete(manifest.id)
     try {
       if (manifest.apiVersion > PLUGIN_API_VERSION) throw new Error(`需要插件接口版本 ${manifest.apiVersion}，当前是 ${PLUGIN_API_VERSION}`)
-      // A query string busts Node's module cache so a re-enabled plugin picks up edits.
-      const mod = await import(`${pathToFileURL(manifest.entry).href}?v=${Date.now()}`) as { default?: PluginModule }
-      const exported = mod.default
-      if (!exported) throw new Error('入口模块没有 default 导出')
-      const plugin = typeof exported === 'function' ? await exported(sdk) : exported
+      const plugin = this.sandboxed ? await this.startSandbox(manifest) : await importPlugin(manifest)
       if (!plugin || typeof plugin !== 'object' || typeof plugin.id !== 'string') throw new Error('插件必须导出包含 id 的对象')
       for (const kind of plugin.sources ?? []) {
         if (!ID.test(kind.id)) throw new Error(`来源 id "${kind.id}" 不合法`)
@@ -315,15 +321,38 @@ export class PluginManager {
       for (const kind of plugin.sources ?? []) if (this.registry.settings(kind.id).enabled) await this.registry.save(kind.id, this.registry.settings(kind.id))
     } catch (error) {
       this.errors.set(manifest.id, error instanceof Error ? error.message : String(error))
+      await this.sandboxes.get(manifest.id)?.stop()
+      this.sandboxes.delete(manifest.id)
       throw error
     }
   }
 
+  /** Stops every plugin process (the service is shutting down). */
+  async close(): Promise<void> {
+    await Promise.all([...this.sandboxes.values()].map(b => b.stop()))
+    this.sandboxes.clear()
+  }
+
+  private async startSandbox(manifest: PluginManifest): Promise<NuonuoPlugin> {
+    const box = new PluginSandbox(manifest, {
+      store: this.store, ...(this.registry.secretStore ? { secrets: this.registry.secretStore } : {}),
+      onExit: reason => {
+        if (this.sandboxes.get(manifest.id) !== box) return
+        this.errors.set(manifest.id, reason)
+        void this.unload(manifest.id).finally(() => this.onChange?.())
+      },
+    })
+    this.sandboxes.set(manifest.id, box)
+    return box.start()
+  }
+
   private async unload(id: string): Promise<void> {
     const entry = this.loaded.get(id)
-    if (!entry) return
-    for (const kind of entry.plugin.sources ?? []) await this.registry.unregister(kind.id)
+    const box = this.sandboxes.get(id)
+    this.sandboxes.delete(id)
+    if (entry) for (const kind of entry.plugin.sources ?? []) await this.registry.unregister(kind.id)
     this.loaded.delete(id)
+    await box?.stop()
   }
 }
 
@@ -344,4 +373,12 @@ function readManifest(dir: string): PluginManifest | undefined {
   if (!entry.startsWith(dir + sep)) throw new Error('入口文件必须在插件目录内')
   return { id, name: meta.name ?? pkg.name ?? id, version: pkg.version ?? '0.0.0', description: meta.description ?? pkg.description ?? '', dir, entry,
     apiVersion: Number(meta.apiVersion ?? 1) }
+}
+
+/** Runs a plugin inside the service (sandbox off). A query string busts Node's module cache so a re-enabled plugin picks up edits. */
+async function importPlugin(manifest: PluginManifest): Promise<NuonuoPlugin> {
+  const mod = await import(`${pathToFileURL(manifest.entry).href}?v=${Date.now()}`) as { default?: PluginModule }
+  const exported = mod.default
+  if (!exported) throw new Error('入口模块没有 default 导出')
+  return typeof exported === 'function' ? await exported(sdk) : exported
 }
