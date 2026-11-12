@@ -52,7 +52,10 @@ const shown = (root: string, file: string) => {
 
 const IMAGE: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' }
 
-export function fsTools(root: string, blobs: Blobs, access?: FsAccess) {
+/** `describeImage`: set when the model running the tools cannot take images; view_image then returns a description instead. */
+export interface FsToolOptions { describeImage?: (data: string, mediaType: string) => Promise<string> }
+
+export function fsTools(root: string, blobs: Blobs, access?: FsAccess, opts: FsToolOptions = {}) {
   const at = (path: string, mode: 'read' | 'write') => resolvePath(root, path, mode, access)
   return {
     read_file: tool({
@@ -151,9 +154,13 @@ export function fsTools(root: string, blobs: Blobs, access?: FsAccess) {
         const mediaType = IMAGE[extname(file).toLowerCase()]
         if (!mediaType) throw new Error('只支持 png、jpg、gif、webp 图片')
         if (statSync(file).size > 8 * 1024 * 1024) throw new Error('图片超过 8MB')
-        return { mediaType, data: readFileSync(file).toString('base64') }
+        const data = readFileSync(file).toString('base64')
+        if (opts.describeImage) return { mediaType, data: '', description: await opts.describeImage(data, mediaType) }
+        return { mediaType, data, description: undefined as string | undefined }
       },
-      toModelOutput: ({ output }) => ({ type: 'content', value: [{ type: 'image-data', data: output.data, mediaType: output.mediaType }] }),
+      toModelOutput: ({ output }) => output.description !== undefined
+        ? { type: 'text', value: `（这个模型看不了图片，下面是视觉层模型的描述）\n${output.description}` }
+        : { type: 'content', value: [{ type: 'image-data', data: output.data, mediaType: output.mediaType }] },
     }),
   }
 }

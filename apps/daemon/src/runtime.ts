@@ -83,6 +83,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const secrets = new EnvAwareSecrets(base)
     const hub = new ModelHub(store, secrets)
     await bootstrapModels(hub)
+    hub.refreshCatalogs()
     const effects = new Effects(store)
     const bus = new Bus()
     const agents = new AgentRuntime(store, hub, bus)

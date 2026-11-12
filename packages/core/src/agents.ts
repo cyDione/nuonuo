@@ -425,7 +425,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       const exec = engine.execution()
       return {
         ...(ext.workerTools?.(ticket, ctx) ?? {}),
-        ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket)),
+        ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket), { describeImage: runtime.imageReader(ctx.session.modelRole, ticket.id) }),
         ...shellTools(runtime.jobs, runtime.blobs, {
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
           env: workerEnv({ NUONUO_TICKET: ticket.id, NUONUO_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
@@ -582,7 +582,7 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       const ticket = engine.ticket(ctx.session.ticketId!)
       const exec = engine.execution()
       return {
-        ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket)),
+        ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket), { describeImage: runtime.imageReader(ctx.session.modelRole, ticket.id) }),
         ...shellTools(runtime.jobs, runtime.blobs, {
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
           env: workerEnv({ NUONUO_TICKET: ticket.id, NUONUO_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),

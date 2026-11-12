@@ -1,4 +1,4 @@
-import { openStore, type Store } from '@nuonuo/db'
+import { kvSet, openStore, type Store } from '@nuonuo/db'
 import { MemorySecrets, ModelHub } from '@nuonuo/models'
 import { MockLanguageModelV4 } from 'ai/test'
 import { tool } from 'ai'
@@ -26,7 +26,7 @@ function setup(script: (opts: any, call: number) => Scripted | Promise<Scripted>
   const p = hub.createProvider({ kind: 'openai', name: 'mock', apiKey: 'k' })
   hub.saveRole('router', { chain: [{ providerId: p.id, model: 'm' }] })
   runtime = new AgentRuntime(store, hub, new Bus(), options)
-  return { model, hub }
+  return { model, hub, provider: p.id }
 }
 
 const def = (extra: Partial<AgentDefinition> = {}): AgentDefinition => ({
@@ -134,6 +134,30 @@ describe('AgentRuntime', () => {
     expect(history[0]).toMatchObject({ role: 'user' })
     expect(String(history[0]!.content)).toContain('摘要：做过 A 和 B')
     expect(history.slice(1).map(m => m.role)[0]).toBe('user')
+  })
+})
+
+describe('model limits', () => {
+  const listed = (providerId: string, models: unknown[]) => kvSet(store, `models:${providerId}`, { at: Date.now(), models })
+
+  it('compacts at a share of the listed context window, else at the default', () => {
+    const { provider } = setup(() => ({ text: 'x' }))
+    const session = runtime.session(runtime.createSession('test', 'router'))!
+    listed(provider, [])
+    expect(runtime.compactAt(session)).toBe(120_000)
+    listed(provider, [{ id: 'm', type: 'chat', context: 32_000 }])
+    expect(runtime.compactAt(session)).toBe(22_400)
+  })
+
+  it('has the vision layer describe images for a model that cannot see them', async () => {
+    const { hub, provider } = setup(opts => ({ text: JSON.stringify(opts.prompt).includes('"type":"file"') ? 'a red square' : 'x' }))
+    hub.saveRole('vision', { chain: [{ providerId: provider, model: 'eyes' }] })
+    listed(provider, [{ id: 'm', type: 'chat', vision: true }, { id: 'eyes', type: 'chat', vision: true }])
+    expect(runtime.imageReader('router')).toBeUndefined()
+    listed(provider, [{ id: 'm', type: 'chat', vision: false }, { id: 'eyes', type: 'chat', vision: true }])
+    expect(await runtime.imageReader('router')!('aGk=', 'image/png')).toBe('a red square')
+    listed(provider, [{ id: 'm', type: 'chat', vision: false }, { id: 'eyes', type: 'chat', vision: false }])
+    expect(runtime.imageReader('router')).toBeUndefined()
   })
 })
 

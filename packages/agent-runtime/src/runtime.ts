@@ -51,7 +51,10 @@ export interface TurnEndInfo { steps: number; lastText: string; stepLimit: boole
 
 export interface RuntimeOptions {
   maxWorkers?: number
-  /** Compact a session once a step's prompt exceeds this many tokens. */
+  /**
+   * Compact a session once a step's prompt exceeds this many tokens. Unset: a share of the layer's context window where the
+   * provider lists it ({@link COMPACT_SHARE}), else {@link DEFAULT_COMPACT_AT}.
+   */
   compactAtTokens?: number
   /** Messages kept verbatim at the end of a compacted history. */
   keepRecent?: number
@@ -61,6 +64,11 @@ export interface RuntimeOptions {
    */
   stepIdleMs?: number
 }
+
+/** Where a session is compacted when the layer's context window is unknown. */
+export const DEFAULT_COMPACT_AT = 120_000
+/** The share of a known context window a prompt may fill before the session is compacted (room for the reply and tools). */
+export const COMPACT_SHARE = 0.7
 
 /** A model step that went quiet for too long; retried like a dropped connection. */
 export class StepTimeoutError extends Error {
@@ -83,10 +91,10 @@ export class AgentRuntime {
   private stopped = false
   private idleWaiters: (() => void)[] = []
   private resolvers = new Map<string, (ref: string, page?: number) => string | undefined>()
-  readonly options: Required<RuntimeOptions>
+  readonly options: Required<Omit<RuntimeOptions, 'compactAtTokens'>> & Pick<RuntimeOptions, 'compactAtTokens'>
 
   constructor(private store: Store, private hub: ModelHub, readonly bus: Bus, options: RuntimeOptions = {}) {
-    this.options = { maxWorkers: 3, compactAtTokens: 120_000, keepRecent: 12, stepIdleMs: 180_000, ...options }
+    this.options = { maxWorkers: 3, keepRecent: 12, stepIdleMs: 180_000, ...options }
     this.blobs = new Blobs(store)
     this.jobs = new Jobs(store, (sessionId, result, command) => this.jobFinished(sessionId, result, command))
     this.registerResolver('blob', (ref, page) => {
@@ -212,6 +220,29 @@ export class AgentRuntime {
 
   // ── History ────────────────────────────────────────────────────────────────
 
+  /**
+   * For a layer whose model cannot take images (as its provider lists it): a function that has the vision layer describe an
+   * image, for view_image. Undefined when the layer can (or may) see images itself, or no vision model that can is set.
+   */
+  imageReader(role: RoleId, ref?: string): ((data: string, mediaType: string) => Promise<string>) | undefined {
+    if (this.hub.acceptsImages(role) !== false || !this.hub.resolve('vision') || this.hub.acceptsImages('vision') === false) return undefined
+    return async (data, mediaType) => {
+      const result = await generateText({ model: this.hub.model('vision', ref ? { ref } : {}), maxOutputTokens: 2_000,
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: 'Describe this image for someone who cannot see it: every piece of visible text verbatim, the layout, and anything notable. Plain text, no preamble.' },
+          { type: 'image', image: data, mediaType },
+        ] }] })
+      return result.text.trim()
+    }
+  }
+
+  /** The prompt size past which a session is compacted: the owner's setting, else a share of its layer's context window. */
+  compactAt(session: SessionRecord): number {
+    if (this.options.compactAtTokens !== undefined) return this.options.compactAtTokens
+    const window = this.hub.contextWindow(session.modelRole)
+    return window ? Math.floor(window * COMPACT_SHARE) : DEFAULT_COMPACT_AT
+  }
+
   /** The messages sent to the model: a compaction summary (if any) followed by the events after it. */
   history(sessionId: string): ModelMessage[] {
     const compaction = this.store.db.select().from(schema.sessionEvents)
@@ -270,7 +301,7 @@ export class AgentRuntime {
         const step = await this.stepWithRetry(session, def, controller.signal)
         steps++
         if (step.text) lastText = step.text
-        if (step.inputTokens > this.options.compactAtTokens) await this.compact(session).catch(() => { /* retried next step */ })
+        if (step.inputTokens > this.compactAt(session)) await this.compact(session).catch(() => { /* retried next step */ })
         if (step.finishReason === 'tool-calls' && !controller.signal.aborted) continue
         if (this.pending(session.id).length > 0 && !controller.signal.aborted) continue
         break

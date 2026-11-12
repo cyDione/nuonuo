@@ -9,8 +9,18 @@ import { isDecisionModel, type ProviderKind } from './catalog'
 export type ModelType = 'chat' | 'embedding' | 'rerank' | 'decision' | 'image' | 'audio' | 'video'
 export const MODEL_TYPES: readonly ModelType[] = ['chat', 'embedding', 'rerank', 'decision', 'image', 'audio', 'video']
 
-/** `created` is when the provider released the model (ms since epoch), from the list's own metadata when it has it. */
-export interface ModelInfo { id: string; type: ModelType; created?: number }
+/** USD per million tokens. */
+export interface ModelPrice { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
+
+/**
+ * `created` is when the provider released the model (ms since epoch). `context` (tokens the model reads), `maxOutput`,
+ * `vision` (takes images) and `price` come from the list's own metadata where the provider gives them (OpenRouter, Gemini,
+ * most gateways); each is left out when the list says nothing, so callers fall back rather than guess.
+ */
+export interface ModelInfo { id: string; type: ModelType; created?: number; context?: number; maxOutput?: number; vision?: boolean; price?: ModelPrice }
+
+/** The capabilities part of a {@link ModelInfo}. */
+export type ModelCaps = Pick<ModelInfo, 'context' | 'maxOutput' | 'vision' | 'price'>
 
 const RERANK = /rerank/i
 const EMBEDDING = /embed|(^|[/_.:-])(bge|e5|gte|m3e|bce)([-_.:]|$)/i
@@ -73,6 +83,57 @@ function createdOf(o: Record<string, unknown>): number | undefined {
   return undefined
 }
 
+const positive = (v: unknown): number | undefined => {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined
+}
+const firstNumber = (o: Record<string, unknown> | undefined, keys: string[]) => {
+  if (!o) return undefined
+  for (const key of keys) { const n = positive(o[key]); if (n !== undefined) return Math.round(n) }
+  return undefined
+}
+const obj = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined)
+
+/**
+ * What a list entry says about the model's limits and price. Reads the shapes providers use: OpenRouter (`context_length`,
+ * `top_provider.max_completion_tokens`, `architecture.input_modalities`, `pricing` in USD per token), Gemini
+ * (`inputTokenLimit`, `outputTokenLimit`), Anthropic (`max_input_tokens`, `max_tokens`) and gateway variants.
+ */
+export function capsOf(o: Record<string, unknown>): ModelCaps {
+  const out: ModelCaps = {}
+  const top = obj(o.top_provider)
+  const limits = obj(o.limits) ?? obj(o.limit)
+  const context = firstNumber(o, ['context_length', 'context_window', 'contextWindow', 'max_context_length', 'max_input_tokens', 'inputTokenLimit', 'input_token_limit', 'max_model_len'])
+    ?? firstNumber(top, ['context_length']) ?? firstNumber(limits, ['context', 'context_window', 'max_input_tokens', 'input'])
+  if (context) out.context = context
+  const maxOutput = firstNumber(top, ['max_completion_tokens']) ?? firstNumber(o, ['max_output_tokens', 'outputTokenLimit', 'output_token_limit', 'max_completion_tokens', 'max_tokens'])
+    ?? firstNumber(limits, ['output', 'max_output_tokens'])
+  if (maxOutput) out.maxOutput = maxOutput
+  const inputs: string[] = []
+  const add = (v: unknown) => { if (Array.isArray(v)) for (const x of v) if (typeof x === 'string') inputs.push(x.toLowerCase()) }
+  const arch = obj(o.architecture)
+  add(arch?.input_modalities); add(o.input_modalities); add(obj(o.modalities)?.input)
+  if (typeof arch?.modality === 'string') add(arch.modality.split('->')[0]!.split('+'))
+  const caps = obj(o.capabilities)
+  if (inputs.length) out.vision = inputs.some(m => m.startsWith('image'))
+  else if (typeof caps?.vision === 'boolean') out.vision = caps.vision
+  else if (typeof o.vision === 'boolean') out.vision = o.vision
+  else if (typeof o.supports_vision === 'boolean') out.vision = o.supports_vision
+  const pricing = obj(o.pricing)
+  if (pricing) {
+    // OpenRouter and gateways copying it: strings in USD per token. A `per_million` variant is taken as it is.
+    const perToken = (key: string) => { const n = typeof pricing[key] === 'string' || typeof pricing[key] === 'number' ? Number(pricing[key]) : NaN; return Number.isFinite(n) && n >= 0 ? n * 1_000_000 : undefined }
+    const price: ModelPrice = {}
+    const set = (k: keyof ModelPrice, v: number | undefined) => { if (v !== undefined) price[k] = Math.round(v * 1e6) / 1e6 }
+    set('input', perToken('prompt') ?? positive(pricing.input_per_million))
+    set('output', perToken('completion') ?? positive(pricing.output_per_million))
+    set('cacheRead', perToken('input_cache_read'))
+    set('cacheWrite', perToken('input_cache_write'))
+    if (Object.keys(price).length) out.price = price
+  }
+  return out
+}
+
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
 /** Newest first where the provider dates its models, then the undated ones by id. */
@@ -123,28 +184,34 @@ export function parseModelCatalog(body: unknown, kind: ProviderKind = 'openai-co
     let id: string | undefined
     let meta: ModelType | undefined
     let created: number | undefined
+    let caps: ModelCaps = {}
     if (typeof m === 'string') id = m.trim()
     else if (m && typeof m === 'object') {
       const o = m as Record<string, unknown>
       id = [o.id, o.model, o.name].find((v): v is string => typeof v === 'string' && v.trim() !== '')?.trim().replace(/^models\//, '')
       meta = typeFromMeta(o)
       created = createdOf(o)
+      caps = capsOf(o)
     }
     if (!id || out.has(id)) continue
     const fromId = typeFromId(id, kind)
     const type = fromId === 'decision' ? 'decision' : meta ?? (fromId === 'chat' && fallback ? fallback : fromId)
-    out.set(id, created === undefined ? { id, type } : { id, type, created })
+    out.set(id, { id, type, ...(created === undefined ? {} : { created }), ...caps })
   }
   return sortCatalog([...out.values()])
 }
 
-/** Merges model lists; an earlier list's entry wins, except that a specific type beats a guessed "chat". A known date is kept. */
+/**
+ * Merges model lists; an earlier list's entry wins, except that a specific type beats a guessed "chat". What one list knows
+ * and the winner does not (a date, the context window, a price) is kept.
+ */
 export function mergeCatalogs(...lists: ModelInfo[][]): ModelInfo[] {
   const out = new Map<string, ModelInfo>()
   for (const list of lists) for (const m of list) {
     const seen = out.get(m.id)
-    if (!seen || (seen.type === 'chat' && m.type !== 'chat')) out.set(m.id, seen?.created !== undefined && m.created === undefined ? { ...m, created: seen.created } : m)
-    else if (seen.created === undefined && m.created !== undefined) out.set(m.id, { ...seen, created: m.created })
+    if (!seen) { out.set(m.id, m); continue }
+    const [winner, other] = seen.type === 'chat' && m.type !== 'chat' ? [m, seen] : [seen, m]
+    out.set(m.id, { ...other, ...winner, type: winner.type })
   }
   return sortCatalog([...out.values()])
 }
