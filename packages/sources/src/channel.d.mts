@@ -87,7 +87,7 @@ export interface ChannelIO<C> {
   action(a: ChannelAction): Promise<string | undefined>
 }
 
-export interface ChannelSpec<C> extends Partial<Pick<SourceKind<C>, 'icon' | 'actions' | 'authorized' | 'http' | 'routerPrompt' | 'routerTools' | 'workerPrompt' | 'workerTools' | 'workerEnv' | 'writes' | 'apps' | 'calendar' | 'defaultEnabled'>> {
+export interface ChannelSpec<C> extends Partial<Pick<SourceKind<C>, 'icon' | 'firstRun' | 'actions' | 'authorized' | 'http' | 'routerPrompt' | 'routerTools' | 'workerPrompt' | 'workerTools' | 'workerEnv' | 'writes' | 'apps' | 'calendar' | 'defaultEnabled'>> {
   id: string
   title: string
   description?: string
@@ -128,3 +128,4 @@ export declare function parseChannelThread(source: string, threadId: string): Ch
 export declare function plainText(markdown: string): string
 export declare function runSocket(socket: SocketLike, handlers: SocketHandlers, signal?: AbortSignal): Promise<void>
 export declare function splitText(text: string, max: number): string[]
+export declare function fetchFile(url: string, opts?: { headers?: Record<string, string>; fetch?: typeof fetch; maxBytes?: number; timeoutMs?: number }): Promise<{ bytes: Uint8Array; mime?: string }>

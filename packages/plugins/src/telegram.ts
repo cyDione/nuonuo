@@ -3,7 +3,7 @@
  * URL needed). Everything chat apps share (who may ask, /new, splitting, approvals) comes from the channel layer; this
  * file only speaks the Bot API.
  */
-import { ChannelError, defineChannel, definePlugin, z, type ChannelIO, type ChannelMessage } from '@nuonuo/plugin-sdk'
+import { ChannelError, fetchFile, defineChannel, definePlugin, z, type ChannelIO, type ChannelMessage } from '@nuonuo/plugin-sdk'
 import pkg from '../package.json' with { type: 'json' }
 
 export const TelegramConfig = z.object({
@@ -47,13 +47,6 @@ function filesOf(msg: TgMessage): NonNullable<ChannelMessage['files']> {
 }
 
 /** Downloads a received file (Uint8Array), refusing anything over the channel's limit. */
-async function grab(f: typeof fetch, url: string, headers: Record<string, string> = {}): Promise<{ bytes: Uint8Array; mime?: string }> {
-  const res = await f(url, { headers, signal: AbortSignal.timeout(60_000) })
-  if (!res.ok) throw new Error(`下载失败 ${res.status}`)
-  const mime = res.headers.get('content-type')?.split(';')[0]
-  return { bytes: new Uint8Array(await res.arrayBuffer()), ...(mime ? { mime } : {}) }
-}
-
 export function telegramKind(deps: { fetch?: typeof fetch } = {}) {
   const sessions = new WeakMap<object, { api: TelegramApi; me: TgUser }>()
   const session = async (io: IO) => {
@@ -120,6 +113,7 @@ export function telegramKind(deps: { fetch?: typeof fetch } = {}) {
     id: 'telegram',
     title: 'Telegram',
     icon: 'send',
+    firstRun: true,
     description: '用 Telegram 机器人在手机上指挥家里的电脑：私聊直接对话，群里 @它。到 @BotFather 创建机器人拿到 token，再把你的 Telegram ID 或用户名加入允许列表（给机器人发 /start 可以看到 ID）。',
     // Bots may download files up to 20 MB.
     capabilities: { inbound: 'longpoll', threads: 'topic', format: 'plain', maxLength: 4000, edit: true, buttons: true, typing: true, files: { in: true, out: false, maxBytes: 20 * 1024 * 1024 }, proactive: true },
@@ -156,7 +150,7 @@ export function telegramKind(deps: { fetch?: typeof fetch } = {}) {
       const { api } = await session(io)
       const info = await api.call<{ file_path?: string }>('getFile', { file_id: String(file.ref) })
       if (!info.file_path) return undefined
-      const got = await grab(deps.fetch ?? fetch, `${io.config.apiUrl.replace(/\/$/, '')}/file/bot${io.config.token}/${info.file_path}`)
+      const got = await fetchFile(`${io.config.apiUrl.replace(/\/$/, '')}/file/bot${io.config.token}/${info.file_path}`, { maxBytes: 20 * 1024 * 1024, ...(deps.fetch ? { fetch: deps.fetch } : {}) })
       return { ...got, name: file.name ?? info.file_path.split('/').pop() ?? 'file' }
     },
   })

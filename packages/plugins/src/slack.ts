@@ -4,7 +4,7 @@
  * out through the Web API with the bot token. Threads are kept: a message in a thread is answered in that thread.
  * Everything chat apps share comes from the channel layer.
  */
-import { ChannelError, defineChannel, definePlugin, z, type ChannelIO, type SocketLike } from '@nuonuo/plugin-sdk'
+import { ChannelError, fetchFile, defineChannel, definePlugin, z, type ChannelIO, type SocketLike } from '@nuonuo/plugin-sdk'
 import pkg from '../package.json' with { type: 'json' }
 
 export const SlackConfig = z.object({
@@ -32,13 +32,6 @@ export class SlackApi {
 
 
 /** Downloads a received file (Uint8Array), refusing anything over the channel's limit. */
-async function grab(f: typeof fetch, url: string, headers: Record<string, string> = {}): Promise<{ bytes: Uint8Array; mime?: string }> {
-  const res = await f(url, { headers, signal: AbortSignal.timeout(60_000) })
-  if (!res.ok) throw new Error(`下载失败 ${res.status}`)
-  const mime = res.headers.get('content-type')?.split(';')[0]
-  return { bytes: new Uint8Array(await res.arrayBuffer()), ...(mime ? { mime } : {}) }
-}
-
 export function slackKind(deps: { fetch?: typeof fetch; socket?: (url: string) => SocketLike } = {}) {
   const apis = new WeakMap<object, SlackApi>()
   const api = (io: IO) => {
@@ -113,7 +106,7 @@ export function slackKind(deps: { fetch?: typeof fetch; socket?: (url: string) =
       const url = String(file.ref)
       // Only Slack's own file host gets the bot token.
       if (!/^https:\/\/files\.slack\.com\//.test(url)) return undefined
-      return { ...await grab(deps.fetch ?? fetch, url, { authorization: `Bearer ${io.config.botToken}` }), ...(file.name ? { name: file.name } : {}) }
+      return { ...await fetchFile(url, { headers: { authorization: `Bearer ${io.config.botToken}` }, ...(deps.fetch ? { fetch: deps.fetch } : {}) }), ...(file.name ? { name: file.name } : {}) }
     },
     async edit(io, target, messageId, out) {
       await api(io).call('chat.update', io.config.botToken, { channel: target.chat, ts: messageId, text: out.text, blocks: [{ type: 'section', text: { type: 'plain_text', text: out.text.slice(0, 3000) } }] })

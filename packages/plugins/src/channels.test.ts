@@ -292,6 +292,38 @@ describe('channel layer', () => {
     expect(theirs!.text).toBe('[图片]')
   })
 
+  it('keeps pictures from DingTalk (downloadCode) and WeCom (encrypted link) as attachments', async () => {
+    const saves = () => {
+      const saved: { name: string; bytes: number[] }[] = []
+      registry.files = { save: f => { saved.push({ name: f.name, bytes: [...f.bytes] }); return { id: `upl_${saved.length}`, name: f.name, mime: 'image/png', size: f.bytes.byteLength, path: `/up/${f.name}` } } }
+      return saved
+    }
+    setup()
+    const dt = new FakeDingTalk()
+    let saved = saves()
+    registry.register(dingtalkKind({ fetch: dt.fetch, socket: dt.socket }))
+    await registry.save('dingtalk', { enabled: true, config: { clientId: dt.clientId, clientSecret: dt.clientSecret, apiUrl: 'https://fake-dingtalk.local', allowed: ['staff42'] } })
+    await vi.waitFor(() => expect(registry.list().find(s => s.id === 'dingtalk')!.health.status).toBe('ok'))
+    dt.picture('staff42', new Uint8Array([1, 2, 3]))
+    await vi.waitFor(() => expect(triggers()).toHaveLength(1))
+    expect(saved).toEqual([{ name: 'image.jpg', bytes: [1, 2, 3] }])
+    expect(triggers()[0]!.meta).toMatchObject({ attachments: ['upl_1'] })
+    await registry.stopAll()
+    store.close()
+
+    setup()
+    const wc = new FakeWeCom()
+    saved = saves()
+    registry.register(wecomKind({ socket: wc.socket, fetch: wc.fetch }))
+    await registry.save('wecom', { enabled: true, config: { botId: wc.botId, secret: wc.secret, allowed: ['zhangsan'] } })
+    await vi.waitFor(() => expect(registry.list().find(s => s.id === 'wecom')!.health.status).toBe('ok'))
+    const picture = new Uint8Array(Array.from({ length: 45 }, (_, i) => i))
+    wc.image('zhangsan', picture)
+    await vi.waitFor(() => expect(triggers()).toHaveLength(1))
+    expect(saved).toEqual([{ name: 'image.jpg', bytes: [...picture] }])
+    await registry.stopAll()
+  })
+
   it('sends notices to the private chat an allowed account last wrote from, only once the owner turns that on', async () => {
     setup()
     const tg = new FakeTelegram()

@@ -83,7 +83,7 @@ export class SourceRegistry implements SourcePort {
       const ctx = kind.authorized && (this.instances.get(kind.id)?.ctx ?? this.makeInstance(kind).ctx)
       const authorized = ctx ? kind.authorized!(ctx) : undefined
       const actions = (kind.actions ?? []).filter(a => !a.show || authorized === undefined || (a.show === 'authorized') === authorized)
-      return { id: kind.id, title: kind.title, ...(kind.icon ? { icon: kind.icon } : {}), description: kind.description, fields: kind.fields, actions, authorized, enabled: saved.enabled, config,
+      return { id: kind.id, title: kind.title, ...(kind.icon ? { icon: kind.icon } : {}), ...(kind.firstRun && !this.outsiders.has(kind.id) ? { firstRun: true } : {}), description: kind.description, fields: kind.fields, actions, authorized, enabled: saved.enabled, config,
         health: this.healths.get(kind.id) ?? { status: 'off', at: Date.now() }, facts: this.factsBy.get(kind.id) ?? {} }
     })
   }

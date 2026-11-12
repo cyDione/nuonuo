@@ -6,8 +6,8 @@
  *
  * Frames are JSON: `{ cmd, headers: { req_id }, body }`; the server answers a request with `{ headers: { req_id }, errcode }`.
  */
-import { ChannelError, defineChannel, definePlugin, z, type ChannelIO, type ChannelMessage, type SocketLike } from '@nuonuo/plugin-sdk'
-import { randomBytes } from 'node:crypto'
+import { ChannelError, defineChannel, definePlugin, fetchFile, z, type ChannelIO, type ChannelMessage, type SocketLike } from '@nuonuo/plugin-sdk'
+import { createDecipheriv, randomBytes } from 'node:crypto'
 import pkg from '../package.json' with { type: 'json' }
 
 export const WeComConfig = z.object({
@@ -24,17 +24,38 @@ interface Live { ws: SocketLike; pending: Map<string, { resolve(f: WcFrame): voi
 const reqId = (prefix: string) => `${prefix}_${Date.now()}_${randomBytes(4).toString('hex')}`
 
 /** The text of a message: text, mixed (图文), or a note for media. Group messages start with the @mention, which is dropped. */
+/** A media item's download link (valid five minutes) and its own key: `ref` for `download()`. */
+const media = (o: any) => (typeof o?.url === 'string' ? { ref: { url: o.url, ...(o.aeskey ? { aeskey: String(o.aeskey) } : {}) } } : {})
+
 function contentOf(m: any): { text: string; files: ChannelMessage['files'] } {
   const strip = (t: string) => (m.chattype === 'group' ? t.replace(/^@\S+\s*/, '') : t).trim()
   if (m.msgtype === 'text') return { text: strip(String(m.text?.content ?? '')), files: [] }
-  if (m.msgtype === 'mixed') return { text: strip((m.mixed?.msg_item ?? []).map((i: any) => i.text?.content ?? '').filter(Boolean).join('\n')), files: (m.mixed?.msg_item ?? []).some((i: any) => i.image) ? [{ kind: 'image' }] : [] }
-  if (m.msgtype === 'image') return { text: '', files: [{ kind: 'image' }] }
+  if (m.msgtype === 'mixed') {
+    const items: any[] = m.mixed?.msg_item ?? []
+    return { text: strip(items.map(i => i.text?.content ?? '').filter(Boolean).join('\n')), files: items.filter(i => i.image).map(i => ({ kind: 'image' as const, ...media(i.image) })) }
+  }
+  if (m.msgtype === 'image') return { text: '', files: [{ kind: 'image', ...media(m.image) }] }
+  // WeCom transcribes voice itself and sends only the text.
   if (m.msgtype === 'voice') return { text: String(m.voice?.content ?? ''), files: m.voice?.content ? [] : [{ kind: 'voice' }] }
-  if (m.msgtype === 'file') return { text: '', files: [{ kind: 'file', ...(m.file?.filename ? { name: m.file.filename } : {}) }] }
+  if (m.msgtype === 'file') return { text: '', files: [{ kind: 'file', ...(m.file?.filename ? { name: m.file.filename } : {}), ...media(m.file) }] }
   return { text: `[${m.msgtype}]`, files: [] }
 }
 
-export function wecomKind(deps: { socket?: (url: string) => SocketLike } = {}) {
+/**
+ * Media from the long connection is encrypted per file: AES-256-CBC with the base64 `aeskey`, the IV its first 16
+ * bytes, PKCS#7 padded to 32-byte blocks (so Node's own 16-byte unpadding is turned off).
+ */
+export function decryptMedia(data: Uint8Array, aeskey: string): Uint8Array {
+  const key = Buffer.from(aeskey, 'base64')
+  const decipher = createDecipheriv('aes-256-cbc', key, key.subarray(0, 16))
+  decipher.setAutoPadding(false)
+  const out = Buffer.concat([decipher.update(data), decipher.final()])
+  const pad = out[out.length - 1] ?? 0
+  if (pad < 1 || pad > 32 || pad > out.length) throw new Error('企业微信文件解密失败')
+  return new Uint8Array(out.subarray(0, out.length - pad))
+}
+
+export function wecomKind(deps: { socket?: (url: string) => SocketLike; fetch?: typeof fetch } = {}) {
   const lives = new WeakMap<object, Live>()
 
   const request = (live: Live, cmd: string, body: unknown, prefix = cmd, timeoutMs = 15_000) => new Promise<WcFrame>((resolve, reject) => {
@@ -48,7 +69,7 @@ export function wecomKind(deps: { socket?: (url: string) => SocketLike } = {}) {
     id: 'wecom',
     title: '企业微信',
     description: '在企业微信里和糯糯对话：单聊直接说，群里 @它。在企业微信管理后台创建「智能机器人」，API 模式选「长连接」，拿到 Bot ID 和 Secret 填在这里。不需要公网地址。',
-    capabilities: { inbound: 'websocket', threads: 'none', format: 'markdown', maxLength: 2000, groups: { mention: true, replyToBot: false }, proactive: true },
+    capabilities: { inbound: 'websocket', threads: 'none', format: 'markdown', maxLength: 2000, groups: { mention: true, replyToBot: false }, files: { in: true, out: false, maxBytes: 100 * 1024 * 1024 }, proactive: true },
     config: WeComConfig,
     fields: [
       { key: 'botId', type: 'text', label: 'Bot ID' },
@@ -116,6 +137,13 @@ export function wecomKind(deps: { socket?: (url: string) => SocketLike } = {}) {
       if (!live) throw new ChannelError('还没有连上企业微信，稍后重发')
       await request(live, 'aibot_send_msg', { chatid: target.chat, msgtype: 'markdown', markdown: { content: out.text } })
       return {}
+    },
+    async download(_io, file) {
+      const ref = file.ref as { url: string; aeskey?: string }
+      // The link came from WeCom's own frame on the bot's authenticated connection, not from what a user typed.
+      if (!ref.url.startsWith('https://')) return undefined
+      const got = await fetchFile(ref.url, { maxBytes: 100 * 1024 * 1024, ...(deps.fetch ? { fetch: deps.fetch } : {}) })
+      return { bytes: ref.aeskey ? decryptMedia(got.bytes, ref.aeskey) : got.bytes, ...(file.name ? { name: file.name } : {}) }
     },
   })
 }

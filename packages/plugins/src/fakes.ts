@@ -1,4 +1,5 @@
 /** In-memory stand-ins for the Telegram Bot API and the Gmail API (tests and local end-to-end runs). */
+import { createCipheriv, randomBytes } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -78,6 +79,10 @@ export class FakeGmail {
   issuedCode = 'auth-code-1'
   refreshToken = 'refresh-1'
   revoked: string[] = []
+  events: { id: string; summary: string; start: { dateTime?: string; date?: string }; end: { dateTime?: string; date?: string }; location?: string }[] = [
+    { id: 'e1', summary: '周会', start: { dateTime: '2026-11-12T02:00:00Z' }, end: { dateTime: '2026-11-12T03:00:00Z' } },
+    { id: 'e2', summary: '年假', start: { date: '2026-11-13' }, end: { date: '2026-11-14' } },
+  ]
 
   /** A mail arrives. */
   receive(from: string, subject: string, body: string, opts: { threadId?: string; labels?: string[] } = {}): FakeMail {
@@ -112,6 +117,14 @@ export class FakeGmail {
       return form.get('refresh_token') === this.refreshToken ? json({ access_token: 'access-2', expires_in: 3600 }) : json({ error: 'invalid_grant' }, 400)
     }
     if (!(req.headers.get('authorization') ?? '').startsWith('Bearer access-')) return json({ error: { code: 401 } }, 401)
+    const cal = /\/calendar\/v3\/calendars\/primary\/events$/.exec(url.pathname)
+    if (cal && req.method === 'GET') return json({ items: this.events.filter(e => (e.start.dateTime ?? e.start.date!) < url.searchParams.get('timeMax')! && (e.end.dateTime ?? e.end.date!) > url.searchParams.get('timeMin')!.slice(0, 10)) })
+    if (cal && req.method === 'POST') {
+      const body = await req.json() as (typeof this.events)[number]
+      const event = { ...body, id: `e${this.events.length + 1}` }
+      this.events.push(event)
+      return json({ id: event.id, htmlLink: `https://calendar.google.com/event?eid=${event.id}` })
+    }
     const p = url.pathname.replace(/^\/gmail\/v1\/users\/me/, '')
     if (p === '/profile') return json({ emailAddress: this.email, historyId: String(this.historyId) })
     if (p === '/labels') return json({ labels: this.labels })
@@ -259,6 +272,22 @@ export class FakeWeCom {
     this.sockets.at(-1)!.deliver(JSON.stringify({ cmd: 'aibot_msg_callback', headers: { req_id: `cb${this.n}` }, body: {
       msgid: `msg${this.n++}`, aibotid: this.botId, chattype: group ? 'group' : 'single', ...(group ? { chatid: group } : {}), from: { userid: user }, msgtype: 'text', text: { content: group ? `@糯糯 ${text}` : text }, create_time: Math.floor(Date.now() / 1000) } }))
   }
+  /** A user sends a picture: WeCom hosts it encrypted with a key of its own, sent along in the frame. */
+  image(user: string, bytes: Uint8Array) {
+    const key = randomBytes(32)
+    const pad = 32 - (bytes.byteLength % 32)
+    const cipher = createCipheriv('aes-256-cbc', key, key.subarray(0, 16))
+    cipher.setAutoPadding(false)
+    const url = `https://fake-wecom.local/img/${this.n}`
+    this.files.set(url, Buffer.concat([cipher.update(Buffer.concat([Buffer.from(bytes), Buffer.alloc(pad, pad)])), cipher.final()]))
+    this.sockets.at(-1)!.deliver(JSON.stringify({ cmd: 'aibot_msg_callback', headers: { req_id: `cb${this.n}` }, body: {
+      msgid: `msg${this.n++}`, aibotid: this.botId, chattype: 'single', from: { userid: user }, msgtype: 'image', image: { url, aeskey: key.toString('base64') }, create_time: Math.floor(Date.now() / 1000) } }))
+  }
+  private files = new Map<string, Buffer>()
+  fetch: typeof fetch = async input => {
+    const file = this.files.get(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+    return file ? new Response(new Uint8Array(file)) : new Response('', { status: 404 })
+  }
 }
 
 /** DingTalk: the Stream gateway, the access token and the robot send APIs. */
@@ -283,14 +312,25 @@ export class FakeDingTalk {
       conversationId: opts.group ?? `cid_dm_${staffId}`, conversationType: opts.group ? '2' : '1', senderStaffId: staffId, senderNick: `nick${staffId}`, isInAtList: opts.group ? Boolean(opts.mention) : undefined,
       msgtype: 'text', text: { content: ` ${text}` }, msgId: `msg${id}`, robotCode: this.clientId, createAt: Date.now(), ...(opts.group ? { conversationTitle: '家' } : {}) }) }))
   }
+  /** A user sends a picture privately; it is fetched with its downloadCode. */
+  picture(staffId: string, bytes: Uint8Array) {
+    const id = this.n++
+    this.files.set(`dc${id}`, bytes)
+    this.sockets.at(-1)!.deliver(JSON.stringify({ specVersion: '1.0', type: 'CALLBACK', headers: { topic: '/v1.0/im/bot/messages/get', messageId: `m${id}` }, data: JSON.stringify({
+      conversationId: `cid_dm_${staffId}`, conversationType: '1', senderStaffId: staffId, msgtype: 'picture', content: { downloadCode: `dc${id}` }, msgId: `msg${id}`, robotCode: this.clientId, createAt: Date.now() }) }))
+  }
+  private files = new Map<string, Uint8Array>()
 
   private async handle(req: Request): Promise<Response> {
     const path = new URL(req.url).pathname
     const body = await req.json().catch(() => ({})) as Record<string, any>
+    const file = /^\/files\/(\w+)$/.exec(path)
+    if (file) return this.files.has(file[1]!) ? new Response(this.files.get(file[1]!)!.slice(), { headers: { 'content-type': 'image/png' } }) : new Response('', { status: 404 })
     if (path === '/v1.0/oauth2/accessToken') return body.appSecret === this.clientSecret ? json({ accessToken: 'dt-token', expireIn: 7200 }) : json({ code: 'invalidClientIdOrSecret', message: 'bad secret' }, 400)
     if (path === '/v1.0/gateway/connections/open') return json({ endpoint: 'wss://fake-dingtalk.local/connect', ticket: 't1' })
     if (req.headers.get('x-acs-dingtalk-access-token') !== 'dt-token') return json({ code: 'InvalidAuthentication', message: 'no token' }, 401)
     if (path === '/v1.0/robot/oToMessages/batchSend') { this.sent.push({ to: `@${body.userIds[0]}`, text: JSON.parse(body.msgParam).text }); return json({ processQueryKey: `q${this.n++}` }) }
+    if (path === '/v1.0/robot/messageFiles/download') return body.robotCode === this.clientId && this.files.has(body.downloadCode) ? json({ downloadUrl: `https://fake-dingtalk.local/files/${body.downloadCode}` }) : json({ code: 'invalidDownloadCode', message: 'bad code' }, 400)
     if (path === '/v1.0/robot/groupMessages/send') { this.sent.push({ to: body.openConversationId, text: JSON.parse(body.msgParam).text }); return json({ processQueryKey: `q${this.n++}` }) }
     return json({ code: 'NotFound', message: path }, 404)
   }

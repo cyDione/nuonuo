@@ -81,6 +81,8 @@ export interface SourceKind<C = any> {
    * `github` is the GitHub mark. The UI falls back to a speech bubble for a name it does not ship.
    */
   icon?: string
+  /** Offered on the first-run page (接上一个来源). Honoured for the app's own sources only. */
+  firstRun?: boolean
   schema: z.ZodType<C>
   fields: FieldSpec[]
   /** What a chat app can do (sources made with `defineChannel`); see channel.d.mts. */
@@ -117,7 +119,7 @@ export interface SourceKind<C = any> {
   /** Worker tools that act in the account (write a draft, add an event): left out while the owner set it to 只能看 in 权限. */
   writes?: string[]
   /**
-   * Tools that reach one of the owner's apps, by tool name (`gcal_add: 'calendar'`: Google Calendar is 日历 too). They
+   * Tools that reach one of the owner's apps, by tool name (`shop_add_reminder: 'reminders'`). They
    * follow that app's level in 权限 (直接做 / 先问你 / 只能看 / 不允许) like the app's own tools.
    */
   apps?: Record<string, LocalApp>
