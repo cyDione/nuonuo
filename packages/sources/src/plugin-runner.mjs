@@ -173,6 +173,7 @@ const handlers = {
     if (!res) return null
     return { status: res.status, headers: [...res.headers.entries()], body: Buffer.from(await res.arrayBuffer()).toString('base64') }
   },
+  async inlineContext({ input }) { return typeof plugin.inlineContext === 'function' ? await plugin.inlineContext(pluginCtx, input) : undefined },
   async engine({ view }) { engineView = view },
 }
 
@@ -208,7 +209,7 @@ try {
   tell('hello', {
     plugin: {
       id: plugin.id, name: plugin.name, version: plugin.version, description: plugin.description,
-      writes: plugin.writes ?? [], skills: plugin.skills ?? [], mcpServers: plugin.mcpServers ?? [],
+      writes: plugin.writes ?? [], skills: plugin.skills ?? [], mcpServers: plugin.mcpServers ?? [], hasInlineContext: typeof plugin.inlineContext === 'function',
       sources: (plugin.sources ?? []).map(k => ({
         id: k.id, title: k.title, icon: k.icon, description: k.description, fields: k.fields, defaultEnabled: k.defaultEnabled, actions: k.actions, writes: k.writes,
         capabilities: k.capabilities,

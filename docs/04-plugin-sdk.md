@@ -83,6 +83,7 @@ export default ({ definePlugin, tool, z }) => definePlugin({
 
 - 工具名必须以 `<插件 id>_` 开头，否则会被忽略。
 - `ctx` 有 `id`、`dir`（插件文件夹）、`state.get/set`（插件自己的小状态）和 `log`。
+- `inlineContext(ctx, { text, scope })`：主 Agent 每次回答你的新消息前调用，返回的文字附在这批输入的后面（在召回的记忆之后），而不是放进系统提示词，所以每轮都变也不会打破提示词缓存。`text` 是这批新消息的原文，`scope` 是所属项目。要在 1.5 秒内返回，超时或出错就跳过这一轮；最多 2,000 字。示例见 [`examples/plugins/mood`](../examples/plugins/mood/index.mjs)。
 - 插件带来的会做的事出现在「它是谁 → 会做的事」里，**默认关着**，你打开后才生效；插件停用时它们也不生效，卸载插件时一起删掉。
 
 ## 授权
