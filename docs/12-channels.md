@@ -93,7 +93,7 @@ export default ({ definePlugin, defineChannel, ChannelError, z }) => definePlugi
 | `maxLength` | 数字 | 一条消息最多多少字，超过就切开 |
 | `edit` | 布尔 | 能不能改已发的消息（需要 `edit()`） |
 | `buttons` | 布尔 | 确认用按钮还是回复文字 |
-| `files` | `{ in, out, maxBytes }` | `in`：允许的账号发来的图片、语音、文件经 `download()` 存进附件，agent 能直接打开 |
+| `files` | `{ in, out, maxBytes }` | `in`：允许的账号发来的图片、语音、文件经 `download()` 存进附件，agent 能直接打开；设置了「听写」模型时，语音会先转成文字一起交给 agent |
 | `proactive` | 布尔 | 能不能不等对方先说话就发消息；为真时多一个「把通知也发到这里」开关 |
 | `typing` | | 先声明，后面的版本会用上 |
 

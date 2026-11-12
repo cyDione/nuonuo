@@ -52,7 +52,8 @@ export interface SourceContext<C> {
 }
 
 /** A file kept by `saveFile`: the same shape as a file the owner attached in the web. */
-export interface SavedFile { id: string; name: string; mime: string; size: number; path: string }
+/** `transcript`: what a voice message says, when the owner set a model for the 听写 layer. */
+export interface SavedFile { id: string; name: string; mime: string; size: number; path: string; transcript?: string }
 
 export interface SourceAction { id: string; label: string; path: string; show?: 'authorized' | 'unauthorized'; confirm?: string; primary?: true }
 

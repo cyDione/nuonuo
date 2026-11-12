@@ -904,7 +904,7 @@ export type TicketRow = Row
 
 /** How attachments appear in the text the agent reads: it opens them by path (the file tools reach the uploads folder). */
 export function listAttachments(files: Attachment[]): string {
-  return files.length ? `\n\n[附件]\n${files.map(f => `- ${f.name}（${f.mime}，${formatSize(f.size)}）：${f.path}`).join('\n')}` : ''
+  return files.length ? `\n\n[附件]\n${files.map(f => `- ${f.name}（${f.mime}，${formatSize(f.size)}）：${f.path}${f.transcript ? `\n  语音内容：${f.transcript}` : ''}`).join('\n')}` : ''
 }
 
 export function formatSize(bytes: number): string {

@@ -4,7 +4,7 @@ import { createDeepSeek } from '@ai-sdk/deepseek'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import type { EmbeddingModelV4, LanguageModelV4 } from '@ai-sdk/provider'
+import type { EmbeddingModelV4, LanguageModelV4, SpeechModelV4, TranscriptionModelV4 } from '@ai-sdk/provider'
 import { DECISION_MODEL_SUGGESTIONS, KINDS, type ProviderKind } from './catalog'
 import { mergeCatalogs, jevIdsIn, parseModelCatalog, type ModelInfo, type ModelType } from './discovery'
 import { decisionEndpoints, systemOneClient, type SystemOneClient } from './systemone'
@@ -30,6 +30,9 @@ export interface ProviderOptions {
 export type ModelFactory = {
   language(provider: ProviderRecord, apiKey: string | undefined, model: string): LanguageModelV4
   embedding(provider: ProviderRecord, apiKey: string | undefined, model: string): EmbeddingModelV4
+  /** Speech to text and text to speech; providers without them throw. */
+  transcription?(provider: ProviderRecord, apiKey: string | undefined, model: string): TranscriptionModelV4
+  speech?(provider: ProviderRecord, apiKey: string | undefined, model: string): SpeechModelV4
   /** Decision models (TypeSafe Jev). Defaults to the HTTP client. */
   systemOne?(provider: ProviderRecord, apiKey: string | undefined): SystemOneClient
   /** Live models, as ids or tagged by type (an id alone is typed from its name). Defaults to the provider's list endpoints. */
@@ -59,7 +62,18 @@ export const defaultFactory: ModelFactory = {
     if (!make) throw new Error(`${p.kind} has no embedding models`)
     return make.call(provider, model) as EmbeddingModelV4
   },
+  transcription: (p, key, model) => audioModel(p, key, model, 'transcriptionModel', '语音识别'),
+  speech: (p, key, model) => audioModel(p, key, model, 'speechModel', '语音合成'),
   systemOne: (p, key) => systemOneClient(decisionEndpoints(p.baseUrl, p.kind, p.options.decisionsUrl), key, p.options.headers),
+}
+
+/** A provider's transcription or speech model; OpenAI-compatible gateways speak OpenAI's audio endpoints. */
+function audioModel(p: ProviderRecord, key: string | undefined, model: string, method: 'transcriptionModel' | 'speechModel', what: string) {
+  const provider = (p.kind === 'openai-compatible'
+    ? createOpenAI({ apiKey: key || 'none', baseURL: p.baseUrl ?? undefined, headers: p.options.headers, name: p.id })
+    : sdkProvider(p, key)) as any
+  if (typeof provider[method] !== 'function') throw new Error(`${p.name} 没有${what}模型`)
+  return provider[method](model)
 }
 
 /** The headers a provider's list endpoints take, from its kind's spec. */

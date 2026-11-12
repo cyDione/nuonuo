@@ -31,7 +31,7 @@ export class SourceRegistry implements SourcePort {
   onApprovalAnswer?: (source: string, approvalId: string, approve: boolean, by: string) => void | Promise<void>
 
   /** Where `ctx.saveFile` keeps incoming files (the daemon's uploads folder). */
-  files?: { save(input: { name: string; mime?: string; bytes: Uint8Array }): SavedFile }
+  files?: { save(input: { name: string; mime?: string; bytes: Uint8Array }): SavedFile | Promise<SavedFile> }
 
   /** Where secrets live, for the plugin sandbox (which keeps a sandboxed source's runtime secrets on its behalf). */
   get secretStore(): SecretPort | undefined { return this.secrets }

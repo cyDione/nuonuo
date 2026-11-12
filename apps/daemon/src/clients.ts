@@ -34,7 +34,8 @@ export type Scope = (typeof SCOPES)[number]
 export const DEFAULT_SCOPES: Scope[] = ['chat', 'notices']
 
 /** Features a client can check in `hello` before using them. */
-export const FEATURES = ['messages', 'events.sse', 'reply.delta', 'uploads', 'notices', 'approvals', 'idempotency'] as const
+/** `speech` / `transcribe`: offered only while the owner set a model for the 朗读 / 听写 layer. */
+export const FEATURES = ['messages', 'events.sse', 'reply.delta', 'uploads', 'notices', 'approvals', 'idempotency', 'speech', 'transcribe'] as const
 
 export interface Device {
   id: string
@@ -287,7 +288,8 @@ export function clientApi(rt: Runtime, devices: Devices, conversations: Conversa
       assistant: { name: p.name, avatar: p.avatar, color: p.color, language: p.language },
       device: Devices.view(device),
       mainConversationId: rt.engine.mainConversation(),
-      features: FEATURES.filter(f => (f === 'notices' ? device.scopes.includes('notices') : f === 'approvals' ? device.scopes.includes('approvals') : true)),
+      features: FEATURES.filter(f => (f === 'notices' ? device.scopes.includes('notices') : f === 'approvals' ? device.scopes.includes('approvals')
+        : f === 'speech' || f === 'transcribe' ? Boolean(rt.hub.resolve(f)) : true)),
       limits: { maxUpload: MAX_UPLOAD, maxText: 100_000 },
     })
   })
@@ -365,6 +367,27 @@ export function clientApi(rt: Runtime, devices: Devices, conversations: Conversa
     if (!row || !existsSync(row.path)) throw new ClientError(404, 'missing', '附件已不存在')
     return new Response(Readable.toWeb(createReadStream(row.path)) as ReadableStream, { headers: { 'content-type': row.mime || 'application/octet-stream',
       'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(row.name)}`, 'x-content-type-options': 'nosniff', 'access-control-allow-origin': '*' } })
+  })
+
+  // ── Voice ────────────────────────────────────────────────────────────────
+  /** Reads text aloud with the 朗读 layer's model (a speaker plays the reply). */
+  api.post('/speech', async c => {
+    need(c, 'chat')
+    const input = await body(c, z.object({ text: z.string().trim().min(1).max(4000), voice: z.string().max(64).optional(), format: z.enum(['mp3', 'wav', 'opus', 'aac', 'flac']).optional() }))
+    const audio = await rt.hub.speak(input.text, { ...(input.voice ? { voice: input.voice } : {}), ...(input.format ? { format: input.format } : {}) }, { ref: c.get('device').id })
+    if (!audio) throw new ClientError(409, 'unavailable', '还没有设置朗读模型（设置 → 模型 → 朗读）')
+    return new Response(Buffer.from(audio.bytes), { headers: { 'content-type': audio.mime, 'cache-control': 'no-store' } })
+  })
+  /** Turns a recording into text with the 听写 layer's model (a speaker sends what it heard). */
+  api.post('/transcribe', async c => {
+    need(c, 'chat')
+    const form = await c.req.parseBody()
+    const file = form.file
+    if (!(file instanceof File)) throw new ClientError(400, 'invalid', '缺少录音（multipart 字段 file）')
+    if (file.size > 25 * 1024 * 1024) throw new ClientError(400, 'too_large', '录音超过 25MB')
+    const heard = await rt.hub.transcribe(new Uint8Array(await file.arrayBuffer()), { ref: c.get('device').id })
+    if (!heard) throw new ClientError(409, 'unavailable', '还没有设置听写模型（设置 → 模型 → 听写）')
+    return c.json(heard)
   })
 
   // ── Approvals ────────────────────────────────────────────────────────────

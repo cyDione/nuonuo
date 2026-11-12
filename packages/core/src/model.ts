@@ -58,7 +58,8 @@ export const sourceOfThread = (threadId: string) => threadId.split(':')[0] ?? 'w
 
 /** An event from an external source, already translated by its Source kind. */
 /** A file kept in the attachments folder (an uploads row): attached by the owner in the web, or sent in a chat app. */
-export interface Attachment { id: string; name: string; mime: string; size: number; path: string }
+/** `transcript`: what a voice message says (the 听写 layer), so the agent need not open the audio. */
+export interface Attachment { id: string; name: string; mime: string; size: number; path: string; transcript?: string }
 
 export interface IncomingTrigger {
   /** Stable and derived from the source's own id, so re-reading the source never duplicates. */

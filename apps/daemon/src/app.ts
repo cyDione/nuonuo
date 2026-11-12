@@ -158,7 +158,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json(await rt.hub.modelOptions(c.req.param('id'), role))
   })
   api.post('/models/test', async c => {
-    const { kind, ...ref } = await body(c, z.object({ providerId: z.string(), model: z.string().trim().min(1), kind: z.enum(['language', 'embedding']).optional() }))
+    const { kind, ...ref } = await body(c, z.object({ providerId: z.string(), model: z.string().trim().min(1), kind: z.enum(['language', 'embedding', 'transcription', 'speech']).optional() }))
     return c.json(await rt.hub.testModel(ref, kind))
   })
 
