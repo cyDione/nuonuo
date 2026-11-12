@@ -94,6 +94,7 @@ Nuonuo 是一个**主动的个人助理**。它不是写代码的 Agent，也不
 - **权限你说了算**：右侧栏「权限」里设置哪些文件夹只能看、能改、永远不碰（.ssh、钥匙串这类凭据目录默认不碰），本机 App 和账号也按等级管理。
 - **该问的时候问你**：有后果的动作要经过审核，高风险的先问你。审批卡上点「以后这类直接做」，同类操作就不再问，随时能撤销；花钱和删除每次都问。遇到需要登录的网页，由你接管浏览器。
 - **自带模型（BYOK）**：主 Agent、Worker、过滤、审核等各层可以分别选模型，并设置用量预算。API key 不会进模型上下文。
+- **有自己的云电脑**：装上云电脑插件（第一家接入的是 [Instabox](plugins/instabox)），糯糯就有一台自己的云端 Linux 机器，命令默认在那边跑：能上网、跑 docker，同时开好几个浏览器，每个浏览器各自保留登录状态。它在机器上有自己的账户，不能 sudo，碰不到你的文件和桌面。机器休眠了会先叫醒再用。想换回本机，在「设置 · 安全和执行」里改。见 [云电脑](docs/13-computers.md)。
 - **可扩展**：插件可以给它加来源、工具、技能、MCP 服务和每轮的上下文，也可以带自己的设置和控制台页面，在插件页点「打开」就能用。第三方插件跑在各自的沙箱进程里，不能冒充内置工具。写法见 [插件 SDK](docs/04-plugin-sdk.md)。
 
 **一直在线**
@@ -147,6 +148,7 @@ nuonuo start -d
 - 「这个仓库有新 Issue 先帮我看一下，值得处理再告诉我」
 - 把一份 PDF 拖进主聊：「帮我挑出里面要我做决定的地方」
 - 「以后周五下午提醒我写周报」
+- 「开两个浏览器，分别在京东和苹果官网查一下 AirPods Pro 的价格」（有云电脑时在那边开）
 
 找东西都在这几个地方：
 
@@ -256,11 +258,12 @@ apps/web                前端：React 19 + Vite + Tailwind 4，中英文界面�
 apps/desktop            Electron 桌面端：托盘、通知、快速问
 packages/core           领域层：Trigger / Thread / Ticket / 订阅 / 汇报，主 Agent 与 Worker，审核、记忆、Watchdog
 packages/agent-runtime  Agent 运行时：事件日志、步间注入、后台命令、文件 / Shell / 网页工具、recall
-packages/sources        来源插件协议、GitHub 来源、定时任务
+packages/sources        来源插件协议、GitHub 来源、定时任务、插件沙箱、云电脑共用层
 packages/plugins        内置插件：Telegram、飞书、Discord、企业微信、钉钉、Slack、Gmail、个性与心境
 packages/plugin-sdk     插件 SDK
 packages/models         供应商、密钥存储、分层模型、用量账本
 packages/db             SQLite + Drizzle、迁移、持久化副作用队列
+plugins/instabox        第三方插件示例：Instabox 云电脑
 ```
 
 开发：`pnpm install && pnpm dev` 同时启动服务和 Vite，`pnpm check` 跑类型检查、测试和构建。界面上新加的文字要经过 `tx()`，并在 `i18n.en.ts` 里补上英文。

@@ -40,7 +40,7 @@ const GROUPS: { title: string; tabs: Tab[] }[] = [
     { id: 'mcp', label: tx('MCP 工具'), icon: <Server size={17} />, words: tx('MCP 工具 服务 notion filesystem') },
   ] },
   { title: tx('安全'), tabs: [
-    { id: 'execution', label: tx('安全和执行'), icon: <ShieldCheck size={17} />, words: tx('审核 放行 拦截 正则 并发 超时 命令 Docker 沙箱 镜像 网络 禁止') },
+    { id: 'execution', label: tx('安全和执行'), icon: <ShieldCheck size={17} />, words: tx('审核 放行 拦截 正则 并发 超时 命令 Docker 沙箱 镜像 网络 禁止 云电脑 执行环境 本机 浏览器 Instabox 唤醒') },
   ] },
   { title: tx('模型'), tabs: [
     { id: 'providers', label: tx('模型供应商'), icon: <KeyRound size={17} />, words: tx('API key 密钥 Base URL 网关 价格 连通 OpenAI Anthropic') },

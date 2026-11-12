@@ -93,6 +93,9 @@ export type TranscriptItem =
 export interface TicketDetail { ticket: Ticket; reports: (Report & { id: number; humanAction: Report['humanAction'] | null })[]; transcript: TranscriptItem[]; running: boolean; jobs: { jobId: string; command: string; startedAt: number }[]; browser: boolean; project: string | null; usage: { tokens: number; costUsd: number | null }; files?: { id: string; name: string; size: number }[] }
 export interface SandboxSettings { mode: 'off' | 'external' | 'all'; image: string; network: 'bridge' | 'none' }
 export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: number; timeoutMinutes: number; blockedCommands: string[]; workspaceRoots: string[]; sandbox: SandboxSettings; environment?: 'auto' | 'local' }
+export type ComputerState = 'ready' | 'asleep' | 'waking' | 'off' | 'unconfigured' | 'error'
+export interface ComputerView { id: string; title: string; pluginId: string; workspace: string; state: ComputerState; name?: string; detail?: string; retryAfterSeconds?: number }
+export interface ComputerBrowser { name: string; tabs: { name: string; url: string; title: string }[]; idleSeconds: number }
 export type Level = 'allow' | 'review' | 'ask' | 'deny'
 export interface ReviewSettings { external: Level; destructive: Exclude<Level, 'allow'>; mode: 'model' | 'ask'; rules: string[]; allow: string[]; deny: string[] }
 export interface AuditEntry { id: number; at: number; ticketId: string | null; actor: string; action: string; tool: string | null; input: string | null; risk: string | null; decision: string; reason: string | null }
