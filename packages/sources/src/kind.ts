@@ -67,6 +67,11 @@ export interface SourceKind<C = any> {
   id: string
   title: string
   description: string
+  /**
+   * A Lucide icon name (kebab-case: `mail`, `send`, `calendar`…) shown next to the source's conversations and activity;
+   * `github` is the GitHub mark. The UI falls back to a speech bubble for a name it does not ship.
+   */
+  icon?: string
   schema: z.ZodType<C>
   fields: FieldSpec[]
   /** What a chat app can do (sources made with `defineChannel`); see channel.d.mts. */

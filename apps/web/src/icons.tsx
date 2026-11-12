@@ -1,4 +1,7 @@
-import { AlarmClock, Mail, MessageSquare, Rss, Send, Shield } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { AlarmClock, Bell, BookOpen, CalendarDays, Cloud, Code, FileText, Globe, Hash, HardDrive, Inbox, Mail, MessageCircle, MessageSquare, Newspaper, Rss, Send, Shield,
+  ShoppingCart, SquareCheck, Users, Video, type LucideIcon } from 'lucide-react'
+import { api, type SourceInfo } from './api'
 import { tx } from './i18n'
 
 /** The GitHub mark (lucide no longer ships brand icons). */
@@ -8,14 +11,42 @@ export function GithubIcon({ size = 14, className }: { size?: number; className?
   </svg>
 }
 
-export function SourceIcon({ source, size = 14, className }: { source: string; size?: number; className?: string }) {
-  if (source === 'github') return <GithubIcon size={size} {...(className ? { className } : {})} />
-  if (source === 'cron') return <AlarmClock size={size} {...(className ? { className } : {})} />
-  if (source === 'telegram') return <Send size={size} {...(className ? { className } : {})} />
-  if (source === 'gmail') return <Mail size={size} {...(className ? { className } : {})} />
-  if (source === 'rss') return <Rss size={size} {...(className ? { className } : {})} />
-  if (source === 'watchdog') return <Shield size={size} {...(className ? { className } : {})} />
-  return <MessageSquare size={size} {...(className ? { className } : {})} />
+/**
+ * Icons a source can name in its `icon` (SourceKind.icon). A plugin naming one not listed here gets the speech bubble:
+ * shipping every Lucide icon would multiply the bundle.
+ */
+const ICONS: Record<string, LucideIcon> = {
+  'alarm-clock': AlarmClock, bell: Bell, 'book-open': BookOpen, calendar: CalendarDays, 'calendar-days': CalendarDays, cloud: Cloud,
+  code: Code, 'file-text': FileText, globe: Globe, hash: Hash, 'hard-drive': HardDrive, inbox: Inbox, mail: Mail,
+  'message-circle': MessageCircle, 'message-square': MessageSquare, newspaper: Newspaper, rss: Rss, send: Send, shield: Shield,
+  'shopping-cart': ShoppingCart, 'square-check': SquareCheck, users: Users, video: Video,
 }
 
-export const SOURCE_LABEL: Record<string, string> = { github: 'GitHub', cron: tx('定时任务'), webchat: tx('对话'), watchdog: 'Watchdog', telegram: 'Telegram', feishu: tx('飞书'), discord: 'Discord', wecom: tx('企业微信'), dingtalk: tx('钉钉'), slack: 'Slack', gmail: 'Gmail', rss: 'RSS' }
+/** Conversations that are not from a source kind. */
+const CORE: Record<string, { title: string; icon: string }> = {
+  webchat: { title: '对话', icon: 'message-square' },
+  watchdog: { title: 'Watchdog', icon: 'shield' },
+}
+
+/** Every source's title and icon, as the sources themselves declare them (built-in and plugins alike). */
+export function useSourceMeta(): (id: string) => { title: string; icon?: string } {
+  const sources = useQuery({ queryKey: ['sources'], queryFn: () => api.get<{ sources: SourceInfo[] }>('/sources'), staleTime: 60_000 }).data?.sources
+  return id => {
+    const core = CORE[id]
+    if (core) return { title: tx(core.title), icon: core.icon }
+    const s = sources?.find(x => x.id === id)
+    return s ? { title: tx(s.title), ...(s.icon ? { icon: s.icon } : {}) } : { title: id }
+  }
+}
+
+export function SourceIcon({ source, size = 14, className }: { source: string; size?: number; className?: string }) {
+  const icon = useSourceMeta()(source).icon
+  if (icon === 'github') return <GithubIcon size={size} {...(className ? { className } : {})} />
+  const Icon = (icon && ICONS[icon]) || MessageSquare
+  return <Icon size={size} {...(className ? { className } : {})} />
+}
+
+/** A source's name, as it declares it. */
+export function SourceName({ source }: { source: string }) {
+  return <>{useSourceMeta()(source).title}</>
+}

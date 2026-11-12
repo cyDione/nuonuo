@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react'
 import { api, type ActivityEvent, type FeedIcon, type FeedItem } from './api'
 import { openTask } from './live'
 import { Avatar, usePersona } from './persona'
-import { SourceIcon, SOURCE_LABEL } from './icons'
+import { SourceIcon, SourceName } from './icons'
 import { cx } from './ui'
 import { go } from './route'
 import { locale, tx } from './i18n'
@@ -205,7 +205,7 @@ function Noticed({ e }: { e: ActivityEvent }) {
     <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-panel"><SourceIcon source={e.source} size={16} /></span>
     <div className="min-w-0 flex-1">
       <div className="truncate text-[15px] font-medium">{e.proactive?.title ?? e.text.slice(0, 60)}</div>
-      <div className="mt-0.5 truncate text-[13px] text-muted">{e.proactive?.reason || `${SOURCE_LABEL[e.source] ?? e.source} · ${e.actor}`}</div>
+      <div className="mt-0.5 truncate text-[13px] text-muted">{e.proactive?.reason || <><SourceName source={e.source} /> · {e.actor}</>}</div>
     </div>
     <button onClick={() => ignore.mutate()} disabled={ignore.isPending} title={tx('以后不管这类')} aria-label={tx('以后不管这类')}
       className="press flex size-7 shrink-0 items-center justify-center rounded-full text-faint opacity-0 group-hover:opacity-100 hover:bg-panel hover:text-fg focus-visible:opacity-100 max-md:opacity-100"><X size={14} /></button>
