@@ -17,6 +17,7 @@ import { dispositionText, reportsOf, ticketView, transcript } from './views'
 import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@nuonuo/core'
 import { kvGet, kvSet, newId, schema } from '@nuonuo/db'
 import { fireRoutine } from '@nuonuo/sources'
+import { MOOD_PLUGIN_ID, moodView, resetMood, setMoodEnabled } from '@nuonuo/plugins'
 import { runDoctor } from './doctor'
 import { MAX_UPLOAD, Uploads } from './uploads'
 import { search } from './search'
@@ -206,6 +207,15 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     rt.bus.emit({ type: 'persona.updated' })
     return c.json({ persona: next })
   })
+  // 心境 (Figma section 29): the switch and what 它是谁 shows. The switch lives only there.
+  const mood = () => rt.plugins.stateOf(MOOD_PLUGIN_ID)
+  api.get('/mood', c => c.json({ mood: moodView(mood()) }))
+  api.put('/mood', async c => {
+    const { enabled } = await body(c, z.object({ enabled: z.boolean() }))
+    setMoodEnabled(mood(), enabled)
+    return c.json({ mood: moodView(mood()) })
+  })
+  api.post('/mood/reset', c => { resetMood(mood()); return c.json({ mood: moodView(mood()) }) })
   api.delete('/conversations/:id', c => {
     const id = c.req.param('id')
     if (id === rt.engine.mainConversation()) throw new HttpError(409, 'conflict', '主对话不能删除')

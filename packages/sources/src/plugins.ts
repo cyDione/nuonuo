@@ -164,9 +164,20 @@ export class PluginManager {
     return out
   }
 
-  /** The loaded plugins' own tools and prompt text, for the agents. */
+  /** A built-in plugin as the agents see it: always loaded, with no folder of its own. */
+  private builtInEntry(plugin: NuonuoPlugin): { plugin: NuonuoPlugin; manifest: PluginManifest } {
+    return { plugin, manifest: { id: plugin.id, name: plugin.name ?? plugin.id, version: plugin.version ?? '', description: plugin.description ?? '', dir: '', entry: '', apiVersion: PLUGIN_API_VERSION } }
+  }
+
+  /** A plugin's small persistent state, for the service's own pages (e.g. 心境 in 它是谁). */
+  stateOf(id: string): PluginContext['state'] {
+    const key = (k: string) => `plugin:${id}:state:${k}`
+    return { get: <T>(k: string) => kvGet<T>(this.store, key(k)), set: (k, v) => kvSet(this.store, key(k), v) }
+  }
+
+  /** The built-in and loaded plugins' own tools and prompt text, for the agents. */
   agentExtensions(): AgentExtensions {
-    const all = () => [...this.loaded.values()]
+    const all = () => [...[...this.builtIns.values()].map(p => this.builtInEntry(p)), ...this.loaded.values()]
     const text = (v: PluginModuleText, m: PluginManifest) => { try { return typeof v === 'function' ? v(this.context(m)) : v } catch { return undefined } }
     return {
       routerTools: () => Object.assign({}, ...all().map(({ plugin, manifest }) => this.ownTools(manifest.id, () => plugin.routerTools?.(this.context(manifest))))) as ToolSet,
@@ -189,7 +200,7 @@ export class PluginManager {
 
   /** Acting tools of loaded plugins (their `writes`): asked about before every call. */
   askFirstTools(): Set<string> {
-    return new Set([...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.writes ?? []).filter(n => n.startsWith(`${manifest.id}_`))))
+    return new Set([...[...this.builtIns.values()].map(p => this.builtInEntry(p)), ...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.writes ?? []).filter(n => n.startsWith(`${manifest.id}_`))))
   }
 
   /** First-party plugins ship with the app and are always loaded; their sources start disabled like any other. */
