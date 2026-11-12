@@ -129,7 +129,7 @@ export interface SourceAction { id: string; label: string; path: string; show?: 
 export interface SourceInfo { id: string; title: string; description: string; fields: FieldSpec[]; actions: SourceAction[]; authorized?: boolean; enabled: boolean; config: Record<string, any>
   health: { status: 'off' | 'starting' | 'ok' | 'error'; detail?: string; at: number }; facts: Record<string, string> }
 export interface Routine { id: string; name: string; schedule: string; prompt: string; enabled: boolean; conversationId: string | null; lastFiredAt: number | null; next: number | null }
-export interface PluginInfo { id: string; name: string; version: string; description: string; dir: string; enabled: boolean; loaded: boolean; builtIn: boolean; sources: string[]; error?: string }
+export interface PluginInfo { id: string; name: string; version: string; description: string; dir: string; enabled: boolean; loaded: boolean; builtIn: boolean; sources: string[]; mcpServers: string[]; origin?: string; error?: string }
 export interface McpServer { name: string; enabled: boolean; transport: 'stdio' | 'http'; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string>; roles: ('worker' | 'router')[]; review: boolean }
 export interface McpStatus { name: string; state: 'off' | 'connecting' | 'connected' | 'error'; tools: { name: string; description: string }[]; error?: string }
 export type GoalIcon = 'target' | 'moon' | 'wallet' | 'book' | 'run' | 'dumbbell' | 'heart' | 'music' | 'code' | 'leaf' | 'globe' | 'pen'

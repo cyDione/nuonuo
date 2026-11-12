@@ -82,10 +82,10 @@ export function Btn({ tone = 'plain', className, ...p }: ButtonHTMLAttributes<HT
 }
 
 /** A status: 运行中 / 已连接 (green), 出错 / 加载失败 (red), or neutral. */
-export function Pill({ tone = 'neutral', children }: { tone?: 'ok' | 'danger' | 'neutral' | 'warn'; children: ReactNode }) {
+export function Pill({ tone = 'neutral', children }: { tone?: 'ok' | 'danger' | 'neutral' | 'warn' | 'accent'; children: ReactNode }) {
   return <span className="inline-flex h-[22px] shrink-0 items-center gap-1.5 rounded-full border border-line bg-card px-2 text-xs whitespace-nowrap">
-    {tone !== 'neutral' && <span className={cx('size-1.5 rounded-full', tone === 'ok' ? 'bg-ok' : tone === 'warn' ? 'bg-warn' : 'bg-danger')} />}
-    <span className={cx(tone === 'danger' ? 'text-danger' : tone === 'neutral' ? 'text-muted' : 'text-fg')}>{children}</span>
+    {tone !== 'neutral' && <span className={cx('size-1.5 rounded-full', tone === 'ok' ? 'bg-ok' : tone === 'warn' ? 'bg-warn' : tone === 'accent' ? 'bg-accent' : 'bg-danger')} />}
+    <span className={cx(tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : tone === 'neutral' ? 'text-muted' : 'text-fg')}>{children}</span>
   </span>
 }
 
