@@ -42,6 +42,13 @@ export interface NuonuoPlugin {
   /** Text added to the main agent's or the workers' prompt while the plugin is on. */
   routerPrompt?: string | ((ctx: PluginContext) => string | undefined)
   workerPrompt?: string | ((ctx: PluginContext) => string | undefined)
+  /**
+   * Context for the main agent's next turn, worked out from the owner's new message(s) in the batch. It is appended to
+   * that input (after the recalled memories), not to the system prompt, so it can change every turn without breaking the
+   * prompt cache. Called only for batches that carry a request; it must answer fast (a slow or failing answer is skipped)
+   * and is clipped to 2,000 characters.
+   */
+  inlineContext?(ctx: PluginContext, input: PluginTurnInput): string | undefined | Promise<string | undefined>
   /** Procedures (会做的事) the plugin brings. They arrive switched off, for the owner to turn on in 它是谁. */
   skills?: SkillInput[]
 }
@@ -55,6 +62,18 @@ export interface PluginContext {
   state: { get<T>(key: string): T | undefined; set(key: string, value: unknown): void }
   log(...args: unknown[]): void
 }
+
+/** What `inlineContext` sees of the turn. */
+export interface PluginTurnInput {
+  /** The text of the new message(s) the main agent is about to answer. */
+  text: string
+  /** The project they belong to (a side chat, a repository), when there is one. */
+  scope?: string
+}
+
+/** How long the main agent waits for a plugin's turn context before going on without it. */
+export const INLINE_CONTEXT_TIMEOUT = 1_500
+const INLINE_CONTEXT_LIMIT = 2_000
 
 export interface PluginMcpServer {
   name: string
@@ -154,6 +173,13 @@ export class PluginManager {
       workerTools: () => Object.assign({}, ...all().map(({ plugin, manifest }) => this.ownTools(manifest.id, () => plugin.workerTools?.(this.context(manifest))))) as ToolSet,
       routerPrompt: () => all().map(({ plugin, manifest }) => text(plugin.routerPrompt, manifest)).filter(Boolean).map(t => String(t).slice(0, 4_000)).join('\n\n'),
       workerPrompt: () => all().map(({ plugin, manifest }) => text(plugin.workerPrompt, manifest)).filter(Boolean).map(t => String(t).slice(0, 4_000)).join('\n\n') || undefined,
+      inlineContext: async (input, scope) => {
+        const parts = await Promise.all(all().filter(({ plugin }) => typeof plugin.inlineContext === 'function').map(({ plugin, manifest }) =>
+          withTimeout(Promise.resolve().then(() => plugin.inlineContext!(this.context(manifest), { text: input, ...(scope ? { scope } : {}) })), INLINE_CONTEXT_TIMEOUT)
+            .then(t => typeof t === 'string' && t.trim() ? t.trim().slice(0, INLINE_CONTEXT_LIMIT) : '')
+            .catch(error => { console.warn(`[plugin ${manifest.id}] inlineContext 出错：${(error as Error).message}`); return '' })))
+        return parts.filter(Boolean).join('\n\n')
+      },
     }
   }
 
@@ -357,6 +383,12 @@ export class PluginManager {
     this.loaded.delete(id)
     await box?.stop()
   }
+}
+
+/** Resolves with undefined when `p` takes longer than `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined
+  return Promise.race([p, new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), ms) })]).finally(() => clearTimeout(timer))
 }
 
 const mcpName = (pluginId: string, name: string) => `${pluginId}_${name}`

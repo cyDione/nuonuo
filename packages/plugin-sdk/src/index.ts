@@ -8,7 +8,7 @@
  */
 export { appToken, ChannelError, channelThread, oauth, defineChannel, definePlugin, parseChannelThread, plainText, PLUGIN_API_VERSION, sdk, splitText } from '@nuonuo/sources'
 export type { AppToken, CodeFlow, DeviceFlow, OAuth } from '@nuonuo/sources'
-export type { ChannelAction, ChannelCapabilities, ChannelIO, ChannelMessage, ChannelOut, ChannelSpec, ChannelTarget, ChannelUser, SocketHandlers, SocketLike, DeviceCode, FieldSpec, Health, OutgoingMessage, PluginMcpServer, PluginSdk, SourceAction, SourceContext, SourceKind, NuonuoPlugin } from '@nuonuo/sources'
+export type { ChannelAction, ChannelCapabilities, ChannelIO, ChannelMessage, ChannelOut, ChannelSpec, ChannelTarget, ChannelUser, SocketHandlers, SocketLike, DeviceCode, FieldSpec, Health, OutgoingMessage, PluginContext, PluginMcpServer, PluginSdk, PluginTurnInput, SourceAction, SourceContext, SourceKind, NuonuoPlugin } from '@nuonuo/sources'
 export type { IncomingTrigger, Ticket } from '@nuonuo/core'
 export { jsonSchema, tool } from 'ai'
 export { z } from 'zod'
