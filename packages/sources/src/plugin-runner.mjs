@@ -4,6 +4,7 @@
 //
 // argv: <zod entry path> <plugin entry path> <plugin id> <plugin dir>
 import { pathToFileURL } from 'node:url'
+import { ChannelError, makeDefineChannel } from './channel.mjs'
 
 const [zodPath, entry, pluginId, pluginDir] = process.argv.slice(2)
 const zodModule = await import(pathToFileURL(zodPath).href)
@@ -22,6 +23,8 @@ const JSON_SCHEMA = Symbol.for('nuonuo.jsonSchema')
 const sdk = {
   apiVersion: 1,
   definePlugin: p => p,
+  defineChannel: makeDefineChannel(z),
+  ChannelError,
   tool: t => t,
   jsonSchema: schema => ({ [JSON_SCHEMA]: true, jsonSchema: schema }),
   z,
@@ -88,6 +91,7 @@ function sourceCtx(kind, config, state, secrets) {
       delete: name => { delete entry.secrets[name]; tell('secret', { source: id, name, value: null }) },
     },
     notify: (text, opts) => tell('notify', { source: id, text: String(text), title: opts?.title }),
+    approvals: { answer: (approvalId, approve, by) => ask('approval', { source: id, approvalId: String(approvalId), approve: Boolean(approve), by: String(by ?? '') }) },
   }
   return entry
 }
@@ -202,6 +206,7 @@ try {
       writes: plugin.writes ?? [], skills: plugin.skills ?? [], mcpServers: plugin.mcpServers ?? [],
       sources: (plugin.sources ?? []).map(k => ({
         id: k.id, title: k.title, description: k.description, fields: k.fields, defaultEnabled: k.defaultEnabled, actions: k.actions, writes: k.writes,
+        capabilities: k.capabilities,
         configSchema: safe(() => { const s = z.toJSONSchema(k.schema, { io: 'input', unrepresentable: 'any' }); delete s.$schema; return s }, null),
         has: Object.fromEntries(['authorized', 'poll', 'allowed', 'send', 'threadInfo', 'routerPrompt', 'routerTools', 'workerPrompt', 'workerTools', 'workerEnv', 'http'].map(m => [m, typeof k[m] === 'function'])),
         validStart: typeof k.start === 'function',

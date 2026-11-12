@@ -21,7 +21,7 @@ import type { SecretPort } from './registry'
 interface ToolDef { description: string; inputSchema: Record<string, unknown> }
 interface SourceSnapshot { authorized?: boolean; routerPrompt?: string; workerPrompt?: string; workerEnv?: Record<string, string>; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef>; threadInfo: Record<string, string> }
 interface Snapshot { plugin: { routerPrompt?: string; workerPrompt?: string; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef> }; sources: Record<string, SourceSnapshot> }
-interface HelloSource { id: string; title: string; description: string; fields: SourceKind['fields']; defaultEnabled?: boolean; actions?: SourceKind['actions']; writes?: string[]; configSchema: Record<string, unknown> | null; has: Record<string, boolean>; validStart: boolean }
+interface HelloSource { id: string; title: string; description: string; fields: SourceKind['fields']; defaultEnabled?: boolean; actions?: SourceKind['actions']; writes?: string[]; configSchema: Record<string, unknown> | null; capabilities?: SourceKind['capabilities']; has: Record<string, boolean>; validStart: boolean }
 interface Hello { plugin: { id: string; name?: string; version?: string; description?: string; writes: string[]; skills: NuonuoPlugin['skills']; mcpServers: PluginMcpServer[]; sources: HelloSource[] }; snapshot: Snapshot }
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -73,7 +73,7 @@ export class PluginSandbox {
     const zodEntry = createRequire(import.meta.url).resolve('zod')
     const zodDir = realpathSync(packageRoot(zodEntry))
     const child = fork(runner, [realpathSync(zodEntry), realpathSync(this.manifest.entry), this.manifest.id, dir], {
-      execArgv: [permissionFlag(), `--allow-fs-read=${realpathSync(runner)}`, `--allow-fs-read=${zodDir}`, `--allow-fs-read=${dir}`, `--allow-fs-write=${dir}`],
+      execArgv: [permissionFlag(), `--allow-fs-read=${realpathSync(runner)}`, `--allow-fs-read=${realpathSync(join(dirname(runner), 'channel.mjs'))}`, `--allow-fs-read=${zodDir}`, `--allow-fs-read=${dir}`, `--allow-fs-write=${dir}`],
       cwd: dir, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env: pluginEnv(), serialization: 'json',
     })
     this.child = child
@@ -157,6 +157,14 @@ export class PluginSandbox {
       return
     }
     if (msg?.kind === 'ask' && msg.type === 'init') { this.answer(msg.id, { pluginState: this.readState(`plugin:${this.manifest.id}:state:`) }); return }
+    if (msg?.kind === 'ask' && msg.type === 'approval') {
+      const ctx = typeof msg.source === 'string' ? this.ctxs.get(msg.source) : undefined
+      Promise.resolve().then(() => {
+        if (!ctx?.approvals) throw new Error('还不能在这里回答确认')
+        return ctx.approvals.answer(String(msg.approvalId), Boolean(msg.approve), String(msg.by ?? ''))
+      }).then(() => this.answer(msg.id, null), error => this.answer(msg.id, null, (error as Error).message ?? String(error)))
+      return
+    }
     if (msg?.kind !== 'tell') return
     try { this.onTell(msg) } catch (error) { console.warn(`[plugin ${this.manifest.id}]`, (error as Error).message) }
   }
@@ -252,6 +260,7 @@ export class PluginSandbox {
       const sync = (ctx: SourceContext<any>) => { void sandbox.prepare(ctx).catch(() => {}) }
       const kind: SourceKind = {
         id: s.id, title: s.title, description: s.description, fields: s.fields ?? [], schema: configSchema,
+        ...(s.capabilities ? { capabilities: s.capabilities } : {}),
         ...(s.defaultEnabled ? { defaultEnabled: true } : {}), ...(s.actions ? { actions: s.actions } : {}), ...(s.writes ? { writes: s.writes } : {}),
         start(ctx) {
           void sandbox.prepare(ctx).then(() => sandbox.call('start', { source: s.id })).catch(error => ctx.health('error', (error as Error).message))

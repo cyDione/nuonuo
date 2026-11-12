@@ -143,14 +143,19 @@ export class Engine {
 
   /**
    * Whether a trigger is the owner talking to the assistant in a chat channel (the web, a routine, the owner's own
-   * Telegram): only those words may write memory directly. A comment on GitHub or an email — even the owner's — is
+   * account in a chat app such as Telegram): only those words may write memory directly. A comment on GitHub or an email — even the owner's — is
    * about work in a shared space; what it suggests remembering goes to the review queue.
    */
   isOwnerChat(triggerId: string): boolean {
     const t = this.store.db.select().from(schema.triggers).where(eq(schema.triggers.id, triggerId)).get()
     if (!t || !t.human) return false
     if (t.source === 'webchat' || t.source === 'cron') return t.actor === 'owner'
-    return t.source === 'telegram' && this.allowed(t.source, t.actor)
+    return (t.source === 'telegram' || Boolean(this.opts.sources?.isChannel?.(t.source))) && this.allowed(t.source, t.actor)
+  }
+
+  /** The web, routines, the watchdog and chat apps (Telegram, Feishu, Discord…): short replies, the owner's own words. */
+  isChatSource(source: string): boolean {
+    return ['webchat', 'watchdog', 'cron', 'telegram'].includes(source) || Boolean(this.opts.sources?.isChannel?.(source))
   }
 
   /** A session that has read other people's words is tainted: what it remembers goes to the owner's review queue. */

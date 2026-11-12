@@ -24,6 +24,11 @@ export class SourceRegistry implements SourcePort {
   private healths = new Map<string, Health>()
   private factsBy = new Map<string, Record<string, string>>()
   engine!: Engine
+  /**
+   * How an approval answered in a chat channel reaches the reviewer (wired by the daemon). The registry has already
+   * checked that the source is a channel whose owner allowed approvals there; the hook checks the approval's task.
+   */
+  onApprovalAnswer?: (source: string, approvalId: string, approve: boolean, by: string) => void | Promise<void>
 
   /** Where secrets live, for the plugin sandbox (which keeps a sandboxed source's runtime secrets on its behalf). */
   get secretStore(): SecretPort | undefined { return this.secrets }
@@ -139,12 +144,22 @@ export class SourceRegistry implements SourcePort {
     return instance?.kind.allowed?.(instance.ctx, actor) ?? false
   }
 
+  isChannel(source: string): boolean {
+    return Boolean(this.kinds.get(source)?.capabilities)
+  }
+
   hasChannel(source: string): boolean {
     return Boolean(this.kinds.get(source)?.send)
   }
 
   send(message: OutgoingMessage & { source: string }): void {
     this.effects.enqueue('reply', message.messageId, message)
+  }
+
+  /** Whether approvals for this source's tasks may be asked and answered in its chats (a channel, with the owner's switch on). */
+  approvalsIn(source: string): boolean {
+    const kind = this.kinds.get(source)
+    return Boolean(kind?.capabilities && kind.send && this.settings(source).enabled && (this.settings(source).config as { approvals?: boolean })?.approvals === true)
   }
 
   // ── Extensions for the agents ──────────────────────────────────────────────
@@ -234,6 +249,13 @@ export class SourceRegistry implements SourcePort {
         get: name => registry.secrets?.get(`source:${kind.id}:runtime:${name}`),
         set: (name, value) => { if (!registry.secrets) throw new Error('没有可用的密钥存储'); registry.secrets.set(`source:${kind.id}:runtime:${name}`, value) },
         delete: name => registry.secrets?.delete(`source:${kind.id}:runtime:${name}`),
+      },
+      approvals: {
+        answer: async (id, approve, by) => {
+          if (!registry.approvalsIn(kind.id)) throw new Error('这里没有开启回答确认')
+          if (!registry.onApprovalAnswer) throw new Error('还不能在这里回答确认')
+          await registry.onApprovalAnswer(kind.id, String(id), Boolean(approve), String(by).slice(0, 120))
+        },
       },
       notify: (text, opts) => {
         const conversationId = registry.engine.mirrorConversation(`${kind.id}:notices`, { title: opts?.title ?? `🔔 ${kind.title}` })
