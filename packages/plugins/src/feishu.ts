@@ -7,7 +7,7 @@
  * protobuf (`pbbp2.Frame`); control frames carry ping/pong, data frames carry event JSON and are acknowledged by
  * sending the frame back with a `{code: 200}` payload. Only one client of an app receives each event.
  */
-import { ChannelError, defineChannel, definePlugin, z, type ChannelIO, type ChannelMessage, type SocketLike } from '@nuonuo/plugin-sdk'
+import { appToken, ChannelError, defineChannel, definePlugin, z, type ChannelIO, type ChannelMessage, type SocketLike } from '@nuonuo/plugin-sdk'
 import pkg from '../package.json' with { type: 'json' }
 
 export const FeishuConfig = z.object({
@@ -124,7 +124,11 @@ interface FeishuEvent {
 }
 
 export class FeishuApi {
-  private token: { value: string; until: number } | undefined
+  /** The tenant token, cached until five minutes before it expires (shared `appToken`). */
+  readonly tenantToken = appToken(async () => {
+    const data = await this.json<{ tenant_access_token: string; expire: number }>('/open-apis/auth/v3/tenant_access_token/internal', { auth: false, body: { app_id: this.appId, app_secret: this.appSecret } })
+    return { token: data.tenant_access_token, expiresIn: data.expire }
+  })
   constructor(private base: string, private appId: string, private appSecret: string, private fetchImpl: typeof fetch = fetch) {}
 
   private async json<T>(path: string, init: { method?: string; body?: unknown; auth?: boolean } = {}): Promise<T> {
@@ -134,13 +138,6 @@ export class FeishuApi {
     const data = await res.json().catch(() => ({ code: res.status, msg: `HTTP ${res.status}` })) as { code: number; msg?: string } & T
     if (data.code !== 0) throw new ChannelError(`飞书 ${path.split('?')[0]}: ${data.msg ?? data.code}`, { status: res.status >= 400 ? res.status : data.code, gone: [230002, 230006, 230011].includes(data.code), fatal: [10003, 10014, 99991663].includes(data.code) })
     return data
-  }
-
-  async tenantToken(): Promise<string> {
-    if (this.token && this.token.until > Date.now()) return this.token.value
-    const data = await this.json<{ tenant_access_token: string; expire: number }>('/open-apis/auth/v3/tenant_access_token/internal', { auth: false, body: { app_id: this.appId, app_secret: this.appSecret } })
-    this.token = { value: data.tenant_access_token, until: Date.now() + Math.max(60, data.expire - 300) * 1000 }
-    return data.tenant_access_token
   }
 
   bot() { return this.json<{ bot: { open_id: string; app_name?: string } }>('/open-apis/bot/v3/info', { method: 'GET' }).then(d => d.bot) }

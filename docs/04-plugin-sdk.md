@@ -85,6 +85,31 @@ export default ({ definePlugin, tool, z }) => definePlugin({
 - `ctx` 有 `id`、`dir`（插件文件夹）、`state.get/set`（插件自己的小状态）和 `log`。
 - 插件带来的会做的事出现在「它是谁 → 会做的事」里，**默认关着**，你打开后才生效；插件停用时它们也不生效，卸载插件时一起删掉。
 
+## 授权
+
+要登录第三方账号的来源，不要自己写 OAuth。用 SDK 里的 `oauth` 声明一下，授权按钮、回调、刷新令牌、断开授权（以及到对方那里撤销）都由共用实现处理：
+
+```js
+export default sdk => {
+  const auth = sdk.oauth({
+    flow: 'code',                       // 'code'：跳到对方页面登录后回到 /plugin/<id>/oauth/callback（带 PKCE）
+                                        // 'device'：显示一个验证码让你去对方页面输入，不需要回调地址
+    label: 'Notion',                    // 按钮上显示「授权 Notion」
+    clientId: config => config.clientId,
+    clientSecret: config => config.clientSecret,
+    authorizeUrl: 'https://api.notion.com/v1/oauth/authorize',
+    tokenUrl: 'https://api.notion.com/v1/oauth/token',
+    scopes: [],
+    onGrant: async (ctx, token) => ({ 账号: (await whoami(token)).name }),  // 返回的内容显示在设置卡片上
+  })
+  return sdk.definePlugin({ id: 'notion', name: 'Notion', version: '0.1.0', sources: [auth.source({ id: 'notion', /* … */ })] })
+}
+```
+
+调用接口时用 `await auth.accessToken(ctx)` 拿令牌，过期了会自动刷新；没授权时会抛出 `status: 401` 的错误。对方给了 refresh token 时只存 refresh token，access token 只放在内存里；没给时存 access token 本身。
+
+飞书、钉钉这类「应用凭证换 token」的接口用 `sdk.appToken(async () => ({ token, expiresIn }))`：拿到的令牌会缓存到过期前五分钟，同时发起的请求共用一次获取；遇到 401 时调用 `.reset()`。
+
 ## MCP 服务器
 
 插件也可以带上 MCP 服务器，启用插件后它们和「设置 → MCP」里你自己的服务器一起连接：

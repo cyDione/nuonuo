@@ -4,6 +4,7 @@
 //
 // argv: <zod entry path> <plugin entry path> <plugin id> <plugin dir>
 import { pathToFileURL } from 'node:url'
+import { appToken, oauth } from './auth.mjs'
 import { ChannelError, makeDefineChannel } from './channel.mjs'
 
 const [zodPath, entry, pluginId, pluginDir] = process.argv.slice(2)
@@ -25,6 +26,8 @@ const sdk = {
   definePlugin: p => p,
   defineChannel: makeDefineChannel(z),
   ChannelError,
+  oauth,
+  appToken,
   tool: t => t,
   jsonSchema: schema => ({ [JSON_SCHEMA]: true, jsonSchema: schema }),
   z,

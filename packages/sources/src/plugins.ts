@@ -13,6 +13,7 @@ import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:
 import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
+import { appToken, oauth } from './auth.mjs'
 import { ChannelError, makeDefineChannel } from './channel.mjs'
 import type { SourceKind } from './kind'
 import { installDependencies } from './plugin-deps'
@@ -74,7 +75,7 @@ export const definePlugin = <T extends NuonuoPlugin>(plugin: T): T => plugin
 
 /** Everything a plugin may use from the host, passed to its factory. */
 export const defineChannel = makeDefineChannel(z)
-export const sdk = { apiVersion: PLUGIN_API_VERSION, definePlugin, defineChannel, ChannelError, tool, jsonSchema, z }
+export const sdk = { apiVersion: PLUGIN_API_VERSION, definePlugin, defineChannel, ChannelError, oauth, appToken, tool, jsonSchema, z }
 export type PluginSdk = typeof sdk
 export type PluginModule = NuonuoPlugin | ((sdk: PluginSdk) => NuonuoPlugin | Promise<NuonuoPlugin>)
 

@@ -4,7 +4,7 @@
  * /v1.0/im/bot/messages/get and are acknowledged at once; replies go out through the robot OpenAPI, one-to-one to a
  * user or into a group. Groups only deliver messages that @ the robot. Everything chat apps share comes from the channel layer.
  */
-import { ChannelError, defineChannel, definePlugin, z, type ChannelIO, type ChannelMessage, type SocketLike } from '@nuonuo/plugin-sdk'
+import { appToken, ChannelError, defineChannel, definePlugin, z, type ChannelIO, type ChannelMessage, type SocketLike } from '@nuonuo/plugin-sdk'
 import pkg from '../package.json' with { type: 'json' }
 
 export const DingTalkConfig = z.object({
@@ -20,7 +20,11 @@ export const DINGTALK_ROBOT_TOPIC = '/v1.0/im/bot/messages/get'
 interface DtFrame { specVersion?: string; type: 'SYSTEM' | 'EVENT' | 'CALLBACK'; headers: { topic?: string; messageId?: string; [k: string]: unknown }; data?: string }
 
 export class DingTalkApi {
-  private token: { value: string; until: number } | undefined
+  /** The app token, cached until five minutes before it expires (shared `appToken`). */
+  readonly accessToken = appToken(async () => {
+    const data = await this.call<{ accessToken: string; expireIn: number }>('/v1.0/oauth2/accessToken', { appKey: this.clientId, appSecret: this.clientSecret }, false)
+    return { token: data.accessToken, expiresIn: data.expireIn }
+  })
   constructor(private base: string, private clientId: string, private clientSecret: string, private fetchImpl: typeof fetch = fetch) {}
 
   async call<T>(path: string, body: unknown, auth = true): Promise<T> {
@@ -33,13 +37,6 @@ export class DingTalkApi {
       throw new ChannelError(`钉钉 ${path}: ${data.message ?? code}`, { status: res.status, fatal: res.status === 401 || code === 'invalidClientIdOrSecret', gone: /resource\.not\.found|robot\.not\.in\.group|chatbot.*not.*exist/i.test(code) })
     }
     return data
-  }
-
-  async accessToken(): Promise<string> {
-    if (this.token && this.token.until > Date.now()) return this.token.value
-    const data = await this.call<{ accessToken: string; expireIn: number }>('/v1.0/oauth2/accessToken', { appKey: this.clientId, appSecret: this.clientSecret }, false)
-    this.token = { value: data.accessToken, until: Date.now() + Math.max(60, data.expireIn - 300) * 1000 }
-    return data.accessToken
   }
 
   endpoint() {

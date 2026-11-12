@@ -114,7 +114,7 @@ describe('GitHub authorization', () => {
     expect((await status()).status).toBe('pending')
     gh.approve()
     await expect.poll(async () => (await status()).status).toBe('done')
-    expect(await status()).toMatchObject({ login: 'me' })
+    expect(await status()).toEqual({ status: 'done' })
     expect(secrets.get('source:github:runtime:token')).toBe('oauth-token-1')
     expect(info()).toMatchObject({ authorized: true, facts: { 账号: 'me', 授权: 'OAuth 授权' } })
     expect(info().actions.map(a => a.id)).toEqual(['reauthorize', 'disconnect'])
