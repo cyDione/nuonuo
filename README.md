@@ -232,3 +232,6 @@ packages/db             SQLite + Drizzle、迁移、持久化副作用队列
 ## 许可
 
 [MIT](LICENSE)
+
+## 友情链接
+[LINUX DO](https://linux.do/) —— 真诚分享、友好讨论的技术社区，本项目的交流与反馈也发布于此
