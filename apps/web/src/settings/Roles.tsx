@@ -1,9 +1,9 @@
 /**
- * 分层模型 (Figma 21 · 09): which model each layer runs on, at a glance; a layer without its own follows the one above.
+ * 分层模型 (Figma 21 · 09, folded in §28): the main agent's model up front; every other layer follows it unless set under 高级选项.
  * Opening a layer sets its backup models, reasoning, temperature, output and daily token and cost limits.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, ChevronLeft, Loader2, Plus, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, Plus, Settings2, Trash2, Undo2, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type ModelRef, type Provider, type RoleConfig, type RoleSpec, type RolesResponse } from '../api'
 import { fmtNum, fmtUsd } from '../ui'
@@ -29,20 +29,124 @@ export function Roles({ item }: { item?: string }) {
     <a href="#/settings/roles" className="inline-flex items-center gap-0.5 text-[13px] text-muted hover:text-fg"><ChevronLeft size={15} />{tx('分层模型')}</a>
     <RoleDetail key={spec.id} spec={spec} labelOf={labelOf} levels={catalog.data.reasoningLevels} config={roles.data.configs[spec.id] ?? EMPTY} resolved={roles.data.resolved[spec.id]} providers={usable(spec)} />
   </div>
+  return <RoleList specs={specs} labelOf={labelOf} roles={roles.data} providers={usable(specs.find(s => s.id === 'router')!)} />
+}
+
+const ADVANCED_KEY = 'nuonuo.roles.advanced'
+const readAdvanced = () => { try { return localStorage.getItem(ADVANCED_KEY) === '1' } catch { return false } }
+const short = (label: string) => label.replace(/[（(].*[）)]$/, '').trim()
+
+/**
+ * Figma §28: only the main agent's model is shown; every other layer follows it unless set under 高级选项, which opens
+ * in place (no motion on settings pages) and is remembered. Closed, it still names the layers that have their own model.
+ */
+function RoleList({ specs, labelOf, roles, providers }: { specs: RoleSpec[]; labelOf(id: string): string; roles: RolesResponse; providers: Provider[] }) {
+  const qc = useQueryClient()
+  const [advanced, setAdvanced] = useState(readAdvanced)
+  const toggle = () => { const next = !advanced; setAdvanced(next); try { localStorage.setItem(ADVANCED_KEY, next ? '1' : '0') } catch { /* private mode */ } }
+  const rest = specs.filter(s => s.id !== 'router')
+  const language = rest.filter(s => s.kind === 'language')
+  const special = rest.filter(s => s.kind !== 'language')
+  const configOf = (id: string) => roles.configs[id as keyof RolesResponse['configs']] ?? EMPTY
+  const own = (s: RoleSpec) => configOf(s.id).chain.length > 0 && configOf(s.id).enabled
+  const overridden = rest.filter(own)
+  const reset = useMutation({
+    mutationFn: () => Promise.all(language.filter(own).map(s => api.put(`/roles/${s.id}`, clean({ ...configOf(s.id), chain: [] })))),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['roles'] }),
+  })
+  const routerConfig = configOf('router')
+  const extras = [
+    routerConfig.chain.length > 1 && tx('备用 {0} 个', routerConfig.chain.length - 1),
+    routerConfig.reasoning && tx('推理 {0}', routerConfig.reasoning),
+    (routerConfig.dailyTokenLimit || routerConfig.dailyCostLimitUsd) && tx('有上限'),
+  ].filter(Boolean).join(' · ')
+
+  const valueOf = (s: RoleSpec) => {
+    const config = configOf(s.id)
+    const resolved = roles.resolved[s.id]
+    const model = config.chain[0]?.model
+    if (s.optional && !config.enabled) return <span className="text-[13px] text-faint">{tx('已关闭')}</span>
+    if (model) return <span className="font-mono text-[13px] font-medium">{model}{config.chain.length > 1 ? <span className="font-sans font-normal text-faint"> +{config.chain.length - 1}</span> : null}</span>
+    if (resolved) return <span className="text-[13px] text-faint">{resolved.source === 'router' ? tx('跟主 Agent') : tx('跟{0}', short(labelOf(resolved.source)))}</span>
+    if (s.optional && s.kind === 'language') return <span className="text-[13px] text-faint">{tx('主 Agent 兼做')}</span>
+    return <span className="text-[13px] text-faint">{s.optional ? tx('没开') : tx('还没选')}</span>
+  }
+  const layerRow = (s: RoleSpec) => <Row key={s.id} href={`#/settings/roles/${s.id}`} label={s.label} sub={<span className="line-clamp-1">{s.duty}{s.advice ? ` · ${s.advice}` : ''}</span>}>{valueOf(s)}</Row>
+
   return <Page title={tx('分层模型')}>
-    <Section foot={tx('没配的层沿用上一层。点进一层可以设：备用模型、推理强度、温度、单次最大输出、每天的 token 和费用上限。')}>
-      {specs.map(s => {
-        const config = roles.data!.configs[s.id] ?? EMPTY
-        const resolved = roles.data!.resolved[s.id]
-        const own = config.chain[0]?.model
-        const value = s.optional && !config.enabled ? <span className="text-[13px] text-faint">{tx('已关闭')}</span>
-          : own ? <span className="font-mono text-[13px] font-medium">{own}{config.chain.length > 1 ? <span className="font-sans font-normal text-faint"> +{config.chain.length - 1}</span> : null}</span>
-          : resolved ? <span className="text-[13px] text-faint">{tx('跟{0}一样', labelOf(resolved.source))}</span>
-          : <span className="text-[13px] text-faint">{s.optional ? tx('已关闭') : tx('还没选')}</span>
-        return <Row key={s.id} href={`#/settings/roles/${s.id}`} label={s.label} sub={<span className="line-clamp-1">{s.duty}{s.advice ? ` · ${s.advice}` : ''}</span>}>{value}</Row>
-      })}
+    <Section title={tx('主 Agent')} foot={tx('所有层默认都用这个模型。')}>
+      <MainModel config={routerConfig} providers={providers} />
+      <Row href="#/settings/roles/router" label={tx('备用模型、推理强度、每天上限')} sub={tx('主模型出错时换备用的；不设就不限')}>
+        <span className="text-[13px] text-faint">{extras || tx('没设')}</span>
+      </Row>
     </Section>
+    <section>
+      <div className="rounded-2xl bg-sunken px-4">
+        <button type="button" onClick={toggle} aria-expanded={advanced} className="flex min-h-[52px] w-full items-center gap-3 py-2.5 text-left hover:opacity-80">
+          <span className="flex size-5 shrink-0 items-center justify-center text-fg"><Settings2 size={16} /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm">{tx('高级选项')}</span>
+            <span className="mt-0.5 block text-xs text-muted">
+              {advanced ? tx('收起后，单独设置的层照样生效')
+                : overridden.length ? tx('{0}单独设置了，其余跟主 Agent', overridden.map(s => short(s.label)).join('、'))
+                : tx('给执行、审核、摘要等层单独选模型；开启向量、听写、朗读')}
+            </span>
+          </span>
+          {!advanced && (overridden.length
+            ? <span className="shrink-0 rounded-full border border-line bg-panel px-2 py-0.5 text-[11px] text-muted">{tx('{0} 层单独设置', overridden.length)}</span>
+            : <span className="shrink-0 text-[13px] text-faint">{tx('都跟主 Agent')}</span>)}
+          {advanced ? <ChevronDown size={16} className="shrink-0 text-faint" /> : <ChevronRight size={16} className="shrink-0 text-faint" />}
+        </button>
+      </div>
+    </section>
+    {advanced && <>
+      <section>
+        <div className="mb-2 flex items-center gap-3">
+          <h2 className="min-w-0 flex-1 text-[13px] text-muted">{tx('语言模型层')}</h2>
+          {language.some(own) && <button type="button" disabled={reset.isPending} onClick={() => reset.mutate()} className="inline-flex items-center gap-1 text-[13px] text-muted hover:text-fg disabled:opacity-50">
+            <Undo2 size={13} />{tx('全部改回跟随主 Agent')}</button>}
+        </div>
+        <div className="rounded-2xl bg-sunken px-4 [&>*+*]:border-t [&>*+*]:border-line">{language.map(layerRow)}</div>
+        <Foot>{tx('点进一层可以单独选模型，也能设备用模型、推理强度、温度、每天上限。')}</Foot>
+      </section>
+      {special.length > 0 && <Section title={tx('要专门模型的层')} foot={tx('主 Agent 的聊天模型做不了这几件事，选上对应的模型才会开启。')}>{special.map(layerRow)}</Section>}
+    </>}
   </Page>
+}
+
+/** The main agent's primary model, set in place; its backups, reasoning and limits stay on its own page. Saves once a model is named. */
+function MainModel({ config, providers }: { config: RoleConfig; providers: Provider[] }) {
+  const qc = useQueryClient()
+  const first = config.chain[0] ?? { providerId: providers[0]?.id ?? '', model: '' }
+  const [ref, setRef] = useState<ModelRef>(first)
+  useEffect(() => setRef(first), [first.providerId, first.model])
+  const provider = providers.find(p => p.id === ref.providerId)
+  const options = useModelOptions(provider, 'router')
+  const save = useMutation({
+    mutationFn: (next: ModelRef) => api.put('/roles/router', clean({ ...config, chain: [next, ...config.chain.slice(1)] })),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['roles'] }),
+  })
+  const test = useMutation({ mutationFn: () => api.post<{ ok: boolean; latencyMs: number; error?: string }>('/models/test', { ...ref, kind: 'language' }) })
+  const model = ref.model.trim()
+  const dirty = Boolean(model) && (ref.providerId !== first.providerId || model !== first.model)
+  // A model picked from the provider's list saves at once; one typed by hand waits for 保存 so a half-typed id never runs.
+  useEffect(() => { if (dirty && options.models.includes(model)) save.mutate({ providerId: ref.providerId, model }) }, [ref.providerId, model])
+  const change = (next: ModelRef) => { setRef(next); test.reset() }
+  return <Block>
+    <div className="flex flex-wrap items-center gap-2">
+      <SelectInput value={ref.providerId} onChange={e => change({ providerId: e.target.value, model: '' })} className="w-[150px]" aria-label={tx('供应商')}>
+        {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </SelectInput>
+      <ModelPicker className="min-w-48 flex-1" value={ref.model} onChange={model => change({ ...ref, model })} models={options.models} loading={options.loading}
+        error={options.error} onRefresh={options.refresh} tag={m => modelTag(options.types[m])} />
+      <Btn disabled={!ref.model || test.isPending} onClick={() => test.mutate()}>
+        {test.isPending ? <Loader2 size={13} className="animate-spin" /> : test.data ? (test.data.ok ? <><CheckCircle2 size={13} className="text-ok" />{test.data.latencyMs}ms</> : <XCircle size={13} className="text-danger" />) : tx('试一下')}
+      </Btn>
+      {dirty && !save.isPending && <Btn onClick={() => save.mutate({ providerId: ref.providerId, model })}>{tx('保存')}</Btn>}
+    </div>
+    {test.data && !test.data.ok && <div className="mt-1.5 text-xs whitespace-pre-line text-danger">{test.data.error?.slice(0, 400)}</div>}
+    {save.error && <div className="mt-1.5 text-xs text-danger">{(save.error as Error).message}</div>}
+  </Block>
 }
 
 function RoleDetail({ spec, labelOf, levels, config, resolved, providers }: { spec: RoleSpec; labelOf(id: string): string; levels: string[]; config: RoleConfig; resolved: Resolved; providers: Provider[] }) {
