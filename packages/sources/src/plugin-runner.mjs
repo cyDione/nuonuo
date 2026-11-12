@@ -94,6 +94,7 @@ function sourceCtx(kind, config, state, secrets) {
       delete: name => { delete entry.secrets[name]; tell('secret', { source: id, name, value: null }) },
     },
     notify: (text, opts) => tell('notify', { source: id, text: String(text), title: opts?.title }),
+    saveFile: file => ask('saveFile', { source: id, name: String(file?.name ?? 'file'), mime: file?.mime ? String(file.mime) : undefined, data: Buffer.from(file.bytes).toString('base64') }),
     approvals: { answer: (approvalId, approve, by) => ask('approval', { source: id, approvalId: String(approvalId), approve: Boolean(approve), by: String(by ?? '') }) },
   }
   return entry

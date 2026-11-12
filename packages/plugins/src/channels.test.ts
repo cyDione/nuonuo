@@ -271,6 +271,27 @@ describe('channel layer', () => {
     expect(parseChannelThread('telegram', 'discord:1:0')).toBeUndefined()
   })
 
+  it('keeps a photo an allowed account sends as an attachment the agent can open, and only notes a stranger\'s', async () => {
+    setup()
+    const tg = new FakeTelegram()
+    const saved: { name: string; mime?: string; size: number }[] = []
+    registry.files = { save: f => { saved.push({ name: f.name, ...(f.mime ? { mime: f.mime } : {}), size: f.bytes.byteLength }); return { id: `upl_${saved.length}`, name: f.name, mime: f.mime ?? 'image/jpeg', size: f.bytes.byteLength, path: `/up/${f.name}` } } }
+    registry.register(telegramKind({ fetch: tg.fetch }))
+    await registry.save('telegram', { enabled: true, config: { token: tg.token, apiUrl: 'http://fake-telegram.local', allowed: ['42'] } })
+    tg.photo({ id: 42 }, new Uint8Array([1, 2, 3]), '看看这个')
+    tg.photo({ id: 7 }, new Uint8Array([9]))
+    await registry.pollNow('telegram')
+    // The source's own long poll may have claimed the updates first; wait for it to finish them.
+    await vi.waitFor(() => expect(triggers()).toHaveLength(2))
+    expect(saved).toEqual([{ name: 'ph1.jpg', mime: 'image/jpeg', size: 3 }])
+    const mine = triggers().find(t => t.actor === '42')
+    const theirs = triggers().find(t => t.actor === '7')
+    expect(mine!.text).toContain('看看这个')
+    expect(mine!.text).toContain('/up/ph1.jpg')
+    expect(mine!.meta).toMatchObject({ attachments: ['upl_1'] })
+    expect(theirs!.text).toBe('[图片]')
+  })
+
   it('adds the shared settings fields and reports a chat it can no longer reach as gone', async () => {
     setup()
     const dc = new FakeDiscord()

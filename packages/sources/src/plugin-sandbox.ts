@@ -165,6 +165,14 @@ export class PluginSandbox {
       }).then(() => this.answer(msg.id, null), error => this.answer(msg.id, null, (error as Error).message ?? String(error)))
       return
     }
+    if (msg?.kind === 'ask' && msg.type === 'saveFile') {
+      const ctx = typeof msg.source === 'string' ? this.ctxs.get(msg.source) : undefined
+      Promise.resolve().then(() => {
+        if (!ctx?.saveFile) throw new Error('没有附件文件夹')
+        return ctx.saveFile({ name: String(msg.name ?? 'file'), ...(msg.mime ? { mime: String(msg.mime) } : {}), bytes: new Uint8Array(Buffer.from(String(msg.data ?? ''), 'base64')) })
+      }).then(saved => this.answer(msg.id, saved), error => this.answer(msg.id, null, (error as Error).message ?? String(error)))
+      return
+    }
     if (msg?.kind !== 'tell') return
     try { this.onTell(msg) } catch (error) { console.warn(`[plugin ${this.manifest.id}]`, (error as Error).message) }
   }

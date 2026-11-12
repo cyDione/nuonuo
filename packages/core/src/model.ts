@@ -57,6 +57,9 @@ export const conversationOf = (threadId: string) => (threadId.startsWith('webcha
 export const sourceOfThread = (threadId: string) => threadId.split(':')[0] ?? 'webchat'
 
 /** An event from an external source, already translated by its Source kind. */
+/** A file kept in the attachments folder (an uploads row): attached by the owner in the web, or sent in a chat app. */
+export interface Attachment { id: string; name: string; mime: string; size: number; path: string }
+
 export interface IncomingTrigger {
   /** Stable and derived from the source's own id, so re-reading the source never duplicates. */
   id: string
@@ -70,6 +73,8 @@ export interface IncomingTrigger {
   at: number
   url?: string
   meta?: Record<string, unknown>
+  /** Files that came with it, already kept in the attachments folder (SourceContext.saveFile). */
+  attachments?: Attachment[]
   /** How the thread's mirror conversation is titled and linked. */
   thread: { title: string; url?: string; meta?: Record<string, unknown> }
 }

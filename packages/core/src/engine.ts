@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fastPath, proactiveSettings, saveProactiveSettings, type FilterVerdict, type ProactiveMode } from './proactive'
 import { DEFAULT_SANDBOX, type SandboxSettings } from './sandbox'
-import { sourceOfThread, webchatThread, type Attention, type Ended, type HumanAction, type IncomingTrigger, type Mandate, type Report, type ReportStatus, type SourcePort, type Ticket, type TicketStage } from './model'
+import { sourceOfThread, webchatThread, type Attachment, type Attention, type Ended, type HumanAction, type IncomingTrigger, type Mandate, type Report, type ReportStatus, type SourcePort, type Ticket, type TicketStage } from './model'
 
 export const ROUTER_SESSION = 'ses_router'
 
@@ -265,8 +265,10 @@ export class Engine {
         return { status: 'duplicate' as const, deliveredTo: [], routed: false }
       }
       this.store.db.insert(schema.threads).values({ id: t.threadId, source: t.source, ref: t.threadId, meta: { ...(t.thread.meta ?? {}), title: t.thread.title, ...(t.thread.url ? { url: t.thread.url } : {}) }, createdAt: this.now() }).onConflictDoNothing().run()
-      this.store.db.insert(schema.triggers).values({ id: t.id, threadId: t.threadId, source: t.source, actor: t.actor, human: t.human, text: t.text,
-        meta: { ...(t.meta ?? {}), ...(t.url ? { url: t.url } : {}), addressed: t.addressed }, at: t.at }).run()
+      const files = t.attachments ?? []
+      const text = `${t.text || (files.length ? '（发来了附件）' : '')}${listAttachments(files)}`
+      this.store.db.insert(schema.triggers).values({ id: t.id, threadId: t.threadId, source: t.source, actor: t.actor, human: t.human, text,
+        meta: { ...(t.meta ?? {}), ...(t.url ? { url: t.url } : {}), addressed: t.addressed, ...(files.length ? { attachments: files.map(f => f.id) } : {}) }, at: t.at }).run()
       const allowed = t.human && this.allowed(t.source, t.actor)
       // A web chat thread (a routine speaking in the main conversation) has no fan-out: the router decides.
       const targets = t.threadId.startsWith('webchat:') ? [] : this.subscribers(t.threadId).filter(ticket => ticket.ended?.by !== 'person' && (!ticket.ended || allowed))
@@ -281,7 +283,9 @@ export class Engine {
       const conversationId = this.mirrorConversation(t.threadId, t.thread)
       const messageId = newId('msg')
       this.store.db.insert(schema.messages).values({ id: messageId, conversationId, role: 'user', content: t.text, triggerId: t.id,
-        meta: { source: t.source, actor: t.actor, human: t.human, ...(t.url ? { url: t.url } : {}) }, createdAt: this.stamp() }).run()
+        meta: { source: t.source, actor: t.actor, human: t.human, ...(t.url ? { url: t.url } : {}),
+          ...(files.length ? { attachments: files.map(({ id, name, mime, size }) => ({ id, name, mime, size })) } : {}) }, createdAt: this.stamp() }).run()
+      if (files.length) this.store.db.update(schema.uploads).set({ messageId, conversationId }).where(inArray(schema.uploads.id, files.map(f => f.id))).run()
       this.store.db.update(schema.conversations).set({ updatedAt: this.now() }).where(eq(schema.conversations.id, conversationId)).run()
       this.store.afterCommit(() => this.bus.emit({ type: 'message.created', conversationId, messageId }))
       if (targets.length) {
@@ -356,7 +360,7 @@ export class Engine {
       const files = opts.attachments ?? []
       // The agent reads the attachments by path (the file tools reach the uploads folder); the chat shows them as chips.
       const quoted = opts.quote ? `> ${clip(opts.quote.text, 400).replace(/\n/g, '\n> ')}\n\n` : ''
-      const listed = files.length ? `\n\n[附件]\n${files.map(f => `- ${f.name}（${f.mime}，${formatSize(f.size)}）：${f.path}`).join('\n')}` : ''
+      const listed = listAttachments(files)
       const triggerText = `${quoted}${text || (files.length ? '（发来了附件）' : '')}${listed}`
         + (opts.device ? deviceNote(opts.device) : '')
       this.store.db.insert(schema.triggers).values({ id: triggerId, threadId, source: 'webchat', actor: 'owner', human: true, text: triggerText, at,
@@ -897,8 +901,11 @@ export const clip = (text: string, n: number) => (text.length > n ? `${text.slic
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every(x => b.includes(x))
 export type TicketRow = Row
 
-/** A file the owner attached to a message (an uploads row). */
-export interface Attachment { id: string; name: string; mime: string; size: number; path: string }
+
+/** How attachments appear in the text the agent reads: it opens them by path (the file tools reach the uploads folder). */
+export function listAttachments(files: Attachment[]): string {
+  return files.length ? `\n\n[附件]\n${files.map(f => `- ${f.name}（${f.mime}，${formatSize(f.size)}）：${f.path}`).join('\n')}` : ''
+}
 
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`

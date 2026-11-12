@@ -37,6 +37,11 @@ export interface SourceContext<C> {
   log(...args: unknown[]): void
   /** Secrets owned by this source (tokens obtained at runtime, e.g. an OAuth refresh token), kept in the secret store. */
   secret: { get(name: string): string | undefined; set(name: string, value: string): void; delete(name: string): void }
+  /**
+   * Keeps a file that came in (a photo sent in a chat app) in the attachments folder; pass the result as the trigger's
+   * `attachments` so the agent can open it. Absent when the service has no attachments folder (tests).
+   */
+  saveFile?(file: { name: string; mime?: string; bytes: Uint8Array }): Promise<SavedFile>
   /** Posts a notice to the owner in this source's own conversation (no model involved). */
   notify(text: string, opts?: { title?: string }): void
   /**
@@ -45,6 +50,9 @@ export interface SourceContext<C> {
    */
   approvals?: { answer(id: string, approve: boolean, by: string): void | Promise<void> }
 }
+
+/** A file kept by `saveFile`: the same shape as a file the owner attached in the web. */
+export interface SavedFile { id: string; name: string; mime: string; size: number; path: string }
 
 export interface SourceAction { id: string; label: string; path: string; show?: 'authorized' | 'unauthorized'; confirm?: string; primary?: true }
 
