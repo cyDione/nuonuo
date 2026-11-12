@@ -6,6 +6,7 @@ import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, local
 import { Effects, kvGet, kvSet, openStore, type Store } from '@nuonuo/db'
 import { gmailPlugin, telegramPlugin } from '@nuonuo/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@nuonuo/sources'
+import { Devices } from './clients'
 import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@nuonuo/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
@@ -44,6 +45,8 @@ export interface Runtime {
   browserPath?: string
   plugins: PluginManager
   mcp: McpManager
+  /** Paired client devices (client protocol). */
+  devices: Devices
   /** Starts agent turns: recovery of interrupted sessions and anything queued. */
   startAgents(): void
   startedAt: number
@@ -189,7 +192,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, access, uploadsDir, skills, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, mcp, startedAt: Date.now(),
+      config, store, secrets, access, uploadsDir, skills, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, mcp, devices: new Devices(store), startedAt: Date.now(),
       startAgents() {
         engine.mainConversation()
         agents.recover(session => engine.recoveryNote(session.id, session.role))

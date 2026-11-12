@@ -9,7 +9,8 @@ import { extname, relative } from 'node:path'
 import { Readable } from 'node:stream'
 import { z } from 'zod'
 import { COOKIE, hostGuard, requireToken, webGate } from './auth'
-import { connectHost, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, resolveConfig, validHost, VERSION, writeSavedConfig } from './config'
+import { CLIENT_BASE, ClientError, clientApi, Devices, DISPLAYS, SCOPES } from './clients'
+import { connectHost, isLoopback, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, resolveConfig, validHost, VERSION, writeSavedConfig } from './config'
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
@@ -55,11 +56,13 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   const app = new Hono()
   const conversations = new Conversations(rt.store, rt.hub)
   const uploads = new Uploads(rt.store, rt.uploadsDir)
+  const devices = rt.devices
 
   app.use('*', hostGuard(rt.config))
   app.use('*', webGate(rt.config))
 
   app.onError((error, c) => {
+    if (error instanceof ClientError) return c.json({ error: { code: error.code, message: error.message } }, error.status)
     if (error instanceof HttpError) return c.json({ error: { code: error.code, message: error.message } }, error.status)
     if (error instanceof DomainError) {
       return c.json({ error: { code: error.code, message: error.message } }, error.code === 'missing' ? 404 : error.code === 'conflict' ? 409 : 400)
@@ -684,6 +687,23 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json({ settings: rt.engine.execution() })
   })
 
+  // Paired devices (client protocol, docs/11-client-protocol.md): the owner makes a pairing code and manages devices here.
+  api.get('/devices', c => c.json({ devices: devices.list() }))
+  api.post('/devices/pair', async c => {
+    const input = await body(c, z.object({ scopes: z.array(z.enum(SCOPES)).optional(), name: z.string().trim().min(1).max(60).optional() }).optional().default({}))
+    const port = control.port?.() ?? rt.config.port
+    const urls = rt.config.web || rt.config.desktop ? networkUrls(rt.config.host, port) : []
+    return c.json({ ...devices.createCode(input), urls: [`http://${connectHost(rt.config.host)}:${port}`, ...urls], base: CLIENT_BASE,
+      reachable: !isLoopback(rt.config.host) }, 201)
+  })
+  api.patch('/devices/:id', async c => c.json({ device: devices.update(c.req.param('id'),
+    await body(c, z.object({ name: z.string().trim().min(1).max(60).optional(), scopes: z.array(z.enum(SCOPES)).optional(), display: z.enum(DISPLAYS).optional() }).strict())) }))
+  api.delete('/devices/:id', c => {
+    if (!devices.revoke(c.req.param('id'))) throw new HttpError(404, 'missing', '没有这个设备')
+    rt.bus.emit({ type: 'activity.updated' })
+    return c.body(null, 204)
+  })
+
   /** One SSE stream per browser tab: messages, streaming replies, task and session state. */
   api.get('/events', c => streamSSE(c, async sse => {
     const mapper = new EventMapper()
@@ -712,6 +732,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   }))
 
   app.route('/api', api)
+  app.route(CLIENT_BASE, clientApi(rt, devices, conversations, uploads, closing))
 
   /** Public endpoints of sources (OAuth callbacks): no owner token, so each source checks its own state parameter. */
   app.all('/plugin/:id/*', async c => {

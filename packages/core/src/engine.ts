@@ -14,6 +14,16 @@ import { sourceOfThread, webchatThread, type Attention, type Ended, type HumanAc
 
 export const ROUTER_SESSION = 'ses_router'
 
+/** A paired client device (client protocol) the owner wrote from: a phone, a watch, a speaker, a car… */
+export interface SendingDevice { id: string; name: string; kind: string; display: 'full' | 'small' | 'none' }
+
+/** What the assistant is told about a device that cannot show a normal chat, so its answer fits. */
+export function deviceNote(device: SendingDevice): string {
+  if (device.display === 'none') return `\n\n（这条是从「${device.name}」发来的。它没有屏幕，只会把回答念出来：请用简短、口语化的话回答，不要用表格、代码、链接或 Markdown。）`
+  if (device.display === 'small') return `\n\n（这条是从「${device.name}」发来的，屏幕很小：请尽量一两句话回答，不要用表格或长列表。）`
+  return ''
+}
+
 export class DomainError extends Error {
   constructor(readonly code: 'missing' | 'invalid' | 'conflict', message: string) { super(message) }
 }
@@ -333,7 +343,7 @@ export class Engine {
    * The owner wrote in a conversation. Fast path: a message aimed at one task (`replyTo`, or the conversation's only open
    * task) goes straight to that task's worker, and the router only gets a follow-up notice. Everything else goes to the router.
    */
-  receiveMessage(conversationId: string, text: string, opts: { replyTo?: string; attachments?: Attachment[]; quote?: { messageId: string; text: string } } = {}) {
+  receiveMessage(conversationId: string, text: string, opts: { replyTo?: string; attachments?: Attachment[]; quote?: { messageId: string; text: string }; device?: SendingDevice } = {}) {
     return this.store.atomic(() => {
       const threadId = this.ensureThread(conversationId)
       const at = this.now()
@@ -343,13 +353,16 @@ export class Engine {
       const quoted = opts.quote ? `> ${clip(opts.quote.text, 400).replace(/\n/g, '\n> ')}\n\n` : ''
       const listed = files.length ? `\n\n[附件]\n${files.map(f => `- ${f.name}（${f.mime}，${formatSize(f.size)}）：${f.path}`).join('\n')}` : ''
       const triggerText = `${quoted}${text || (files.length ? '（发来了附件）' : '')}${listed}`
+        + (opts.device ? deviceNote(opts.device) : '')
       this.store.db.insert(schema.triggers).values({ id: triggerId, threadId, source: 'webchat', actor: 'owner', human: true, text: triggerText, at,
-        meta: files.length || opts.quote ? { ...(files.length ? { attachments: files.map(f => f.id) } : {}), ...(opts.quote ? { quote: opts.quote.messageId } : {}) } : {} }).run()
+        meta: files.length || opts.quote || opts.device ? { ...(files.length ? { attachments: files.map(f => f.id) } : {}), ...(opts.quote ? { quote: opts.quote.messageId } : {}),
+          ...(opts.device ? { device: opts.device } : {}) } : {} }).run()
       const messageAt = this.stamp()
       const messageId = newId('msg')
       const meta: Record<string, unknown> = { source: 'webchat' }
       if (files.length) meta.attachments = files.map(({ id, name, mime, size }) => ({ id, name, mime, size }))
       if (opts.quote) meta.quote = opts.quote
+      if (opts.device) meta.device = opts.device
       this.store.db.insert(schema.messages).values({ id: messageId, conversationId, role: 'user', content: text, triggerId, meta, createdAt: messageAt }).run()
       if (files.length) this.store.db.update(schema.uploads).set({ messageId, conversationId }).where(inArray(schema.uploads.id, files.map(f => f.id))).run()
       this.store.db.update(schema.conversations).set({ updatedAt: at }).where(eq(schema.conversations.id, conversationId)).run()
