@@ -3,7 +3,8 @@ import { Feed, type Ideas, type Reviewer } from '@nuonuo/core'
 import { newId, openStore, schema, type Store } from '@nuonuo/db'
 import { afterEach, describe, expect, it } from 'vitest'
 import { clearChats, exportAll, privacySettings, pruneChats, pruneRuntime, savePrivacySettings } from './data'
-import { allowed, DEFAULT_NOTIFY, isQuiet, type Notice, Notices, saveNotifySettings } from './notices'
+import type { SourceRegistry } from '@nuonuo/sources'
+import { allowed, channelSink, DEFAULT_NOTIFY, isQuiet, type Notice, Notices, saveNotifySettings } from './notices'
 
 let store: Store
 afterEach(() => store?.close())
@@ -45,6 +46,36 @@ describe('notification settings', () => {
     expect(sent).toHaveLength(1)
     bus.emit({ type: 'feed.updated' })
     expect(sent).toHaveLength(1)
+  })
+})
+
+describe('notice sinks', () => {
+  it('sends notices to every sink, and to a chat app only what did not already reach that chat', () => {
+    const out: { source: string; threadId: string; text: string }[] = []
+    const sources = {
+      noticeTargets: () => [{ source: 'telegram', threadId: 'telegram:42:0' }],
+      approvalsIn: (s: string) => s === 'telegram',
+      send: (m: { source: string; threadId: string; text: string }) => out.push({ source: m.source, threadId: m.threadId, text: m.text }),
+    } as unknown as SourceRegistry
+    const sink = channelSink(sources)
+    const n = (kind: Notice['kind'], origin?: string): Notice => ({ type: 'notice', id: `${kind}:1`, kind, title: '糯糯', body: '好了', hash: '/', silent: true, chime: false, ...(origin ? { origin } : {}) })
+    sink.deliver(n('message', 'webchat'))
+    sink.deliver(n('message', 'telegram'))
+    sink.deliver(n('approval', 'telegram'))
+    sink.deliver(n('approval', 'github'))
+    expect(out).toEqual([
+      { source: 'telegram', threadId: 'telegram:42:0', text: '糯糯\n好了' },
+      { source: 'telegram', threadId: 'telegram:42:0', text: '糯糯：好了\n（在糯糯里确认）' },
+    ])
+
+    store = openStore(':memory:')
+    const bus = new Bus()
+    const got: string[] = []
+    const failing = { id: 'broken', deliver: () => { throw new Error('down') } }
+    const notices = new Notices(store, bus, { feed: new Feed(store), ideas: { batch: () => null } as unknown as Ideas, reviewer: { pending: () => [] } as unknown as Reviewer,
+      ticketConversation: () => null, sinks: [failing, { id: 'a', deliver: x => got.push(x.kind) }] })
+    notices.test()
+    expect(got).toEqual(['test'])
   })
 })
 

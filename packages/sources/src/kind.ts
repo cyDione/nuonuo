@@ -104,6 +104,11 @@ export interface SourceKind<C = any> {
   /** Sends a message; `gone` when the conversation can never receive it. Throws to retry later. */
   send?(ctx: SourceContext<C>, message: OutgoingMessage): Promise<{ url?: string } | 'gone'>
   threadInfo?(ctx: SourceContext<C>, threadId: string): string | undefined
+  /**
+   * Where the owner's notices go in this source, when the owner turned that on (a channel's 「把通知也发到这里」):
+   * a thread `send` can start a message in. Undefined: no notices here.
+   */
+  homeThread?(ctx: SourceContext<C>): string | undefined
   routerPrompt?(ctx: SourceContext<C>): string | undefined
   routerTools?(ctx: SourceContext<C>): ToolSet
   workerPrompt?(ctx: SourceContext<C>, ticket: Ticket): string | undefined

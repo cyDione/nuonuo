@@ -67,7 +67,7 @@ export interface ChannelOut { text: string; buttons?: { id: string; label: strin
 
 export interface ChannelIO<C> {
   readonly source: string
-  readonly config: C & { allowed: string[]; approvals: boolean }
+  readonly config: C & { allowed: string[]; approvals: boolean; notices: boolean }
   readonly signal: AbortSignal
   state: SourceContext<C>['state']
   secret: SourceContext<C>['secret']
@@ -121,7 +121,7 @@ export declare class ChannelError extends Error {
   fatal: boolean
 }
 
-export type DefineChannel = <C>(spec: ChannelSpec<C>) => SourceKind<C & { allowed: string[]; approvals: boolean }> & { capabilities: ChannelCapabilities }
+export type DefineChannel = <C>(spec: ChannelSpec<C>) => SourceKind<C & { allowed: string[]; approvals: boolean; notices: boolean }> & { capabilities: ChannelCapabilities }
 export declare function makeDefineChannel(z: typeof import('zod').z): DefineChannel
 export declare function channelThread(source: string, chat: string | number, topic?: string | number, epoch?: number): string
 export declare function parseChannelThread(source: string, threadId: string): ChannelTarget | undefined

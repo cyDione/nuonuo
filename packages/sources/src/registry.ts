@@ -159,6 +159,17 @@ export class SourceRegistry implements SourcePort {
     this.effects.enqueue('reply', message.messageId, message)
   }
 
+  /** Running sources the owner asked to get notices in, with the thread each one starts them in. */
+  noticeTargets(): { source: string; threadId: string }[] {
+    return [...this.instances.values()].flatMap(i => {
+      if (!i.kind.send || !i.kind.homeThread) return []
+      try {
+        const threadId = i.kind.homeThread(i.ctx)
+        return threadId ? [{ source: i.kind.id, threadId }] : []
+      } catch { return [] }
+    })
+  }
+
   /** Whether approvals for this source's tasks may be asked and answered in its chats (a channel, with the owner's switch on). */
   approvalsIn(source: string): boolean {
     const kind = this.kinds.get(source)

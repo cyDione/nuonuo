@@ -155,7 +155,7 @@ describe('chat channels in the sandbox', () => {
   async send(io, target, out) { io.state.set('out', { target, out }); return { id: 'x' } },
 })] })`)
     await plugins.setEnabled('echo', true)
-    expect(registry.list().find(s => s.id === 'echo')!.fields.map(f => f.key)).toEqual(['room', 'allowed', 'approvals'])
+    expect(registry.list().find(s => s.id === 'echo')!.fields.map(f => f.key)).toEqual(['room', 'allowed', 'approvals', 'notices'])
     await registry.save('echo', { enabled: true, config: { room: 'c1', allowed: ['u1'], approvals: true } })
     await vi.waitFor(() => expect(store.db.select().from(schema.triggers).all().map(t => [t.id, t.threadId, (t.disposition as any)?.ignored ?? 'routed'])).toEqual([['echo:c1:m1', 'echo:c1:0', 'routed']]))
     expect(registry.approvalsIn('echo')).toBe(true)
@@ -185,7 +185,7 @@ describe('nuonuo channel new', () => {
       await plugins.setEnabled(`x-${preset}`, true)
       const kind = registry.list().find(s => s.id === `x-${preset}`)
       expect(kind, preset).toBeTruthy()
-      expect(kind!.fields.map(f => f.key)).toEqual(['token', ...(p.capabilities.inbound === 'webhook' ? ['signingSecret'] : []), 'apiUrl', 'allowed', 'approvals'])
+      expect(kind!.fields.map(f => f.key)).toEqual(['token', ...(p.capabilities.inbound === 'webhook' ? ['signingSecret'] : []), 'apiUrl', 'allowed', 'approvals', ...(p.capabilities.proactive === false ? [] : ['notices'])])
     }
     expect(() => scaffoldChannel({ name: 'Bad Name' })).toThrow('小写字母')
     expect(() => scaffoldChannel({ name: 'ok', preset: 'nope' })).toThrow('没有这个预设')
