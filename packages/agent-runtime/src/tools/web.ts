@@ -1,5 +1,6 @@
 import { tool } from 'ai'
 import { z } from 'zod'
+import pkg from '../../package.json' with { type: 'json' }
 import type { Blobs } from '../blobs'
 
 /** Crude HTML → text: enough for docs and articles; scripts, styles and tags are dropped. */
@@ -20,7 +21,7 @@ export function webTools(blobs: Blobs) {
       inputSchema: z.object({ url: z.string().url() }),
       execute: async ({ url }) => {
         if (!/^https?:\/\//.test(url)) throw new Error('只支持 http/https')
-        const res = await fetch(url, { headers: { 'user-agent': 'nuonuo/0.1 (+local personal agent)' }, signal: AbortSignal.timeout(30_000), redirect: 'follow' })
+        const res = await fetch(url, { headers: { 'user-agent': `nuonuo/${pkg.version} (+local personal agent)` }, signal: AbortSignal.timeout(30_000), redirect: 'follow' })
         const type = res.headers.get('content-type') ?? ''
         const body = await res.text()
         const text = type.includes('html') ? htmlToText(body) : body

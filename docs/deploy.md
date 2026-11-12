@@ -104,6 +104,8 @@ nuonuo update           # 下载并安装最新版本；systemd 服务会自动�
 
 仓库是公开的，检查和下载不需要登录 GitHub（`env` 里有 `GITHUB_TOKEN` 时会带上，只为提高 API 频率上限）。不想后台检查，在 `env` 里写 `NUONUO_UPDATE_CHECK=0`。
 
+安装插件和插件的 npm 依赖时，默认从 npm 官方源下载。国内网络慢的话，在 `env` 里写 `NUONUO_NPM_REGISTRY=https://registry.npmmirror.com`；也会沿用 npm 自己的 `npm_config_registry`。
+
 v0.1.0 还没有自动更新功能：从 v0.1.0 升级，需要手动再运行一次上面的 `install.sh` 安装命令，之后的版本就可以用「立即更新」或 `nuonuo update` 了。
 
 从源码运行的：

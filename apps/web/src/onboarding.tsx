@@ -107,7 +107,7 @@ function ModelStep({ onDone }: { onDone(): void }) {
   </form>
 }
 
-const PICKS = ['github', 'gmail', 'rss', 'telegram']
+const PICKS = ['github', 'gmail', 'telegram', 'feishu']
 
 function SourceStep({ onDone }: { onDone(): void }) {
   const sources = (useQuery({ queryKey: ['sources'], queryFn: () => api.get<{ sources: SourceInfo[] }>('/sources') }).data?.sources ?? [])

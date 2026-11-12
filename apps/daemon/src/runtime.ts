@@ -5,7 +5,7 @@ import { Notices } from './notices'
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@nuonuo/agent-runtime'
 import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@nuonuo/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@nuonuo/db'
-import { dingtalkPlugin, discordPlugin, feishuPlugin, gmailPlugin, slackPlugin, telegramPlugin, wecomPlugin } from '@nuonuo/plugins'
+import { BUILT_IN_PLUGINS } from '@nuonuo/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@nuonuo/sources'
 import { Devices } from './clients'
 import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@nuonuo/models'
@@ -91,13 +91,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     sources.register(githubKind())
     sources.register(routinesKind(routines))
     const plugins = new PluginManager(join(config.home, 'plugins'), sources, store)
-    plugins.registerBuiltIn(telegramPlugin)
-    plugins.registerBuiltIn(gmailPlugin)
-    plugins.registerBuiltIn(feishuPlugin)
-    plugins.registerBuiltIn(discordPlugin)
-    plugins.registerBuiltIn(wecomPlugin)
-    plugins.registerBuiltIn(dingtalkPlugin)
-    plugins.registerBuiltIn(slackPlugin)
+    for (const plugin of BUILT_IN_PLUGINS) plugins.registerBuiltIn(plugin)
     const ownMcp = () => kvGet<McpServerConfig[]>(store, 'settings:mcp') ?? []
     // Plugins' servers join the owner's; a name the owner already uses stays the owner's.
     const mcp = new McpManager(() => { const own = ownMcp(); const names = new Set(own.map(s => s.name)); return [...own, ...plugins.mcpServers().filter(s => !names.has(s.name))] }, agents.blobs)

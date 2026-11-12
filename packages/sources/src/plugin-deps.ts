@@ -6,10 +6,9 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import semver from 'semver'
-import { extractTarball } from './plugin-install'
+import { extractTarball, npmRegistry } from './plugin-install'
 
 const MAX_PACKAGES = 400
-const REGISTRY = 'https://registry.npmjs.org'
 
 interface Packument { 'dist-tags'?: Record<string, string>; versions?: Record<string, PackageMeta> }
 interface PackageMeta {
@@ -41,7 +40,7 @@ export async function installDependencies(dir: string, fetchImpl: typeof fetch =
     let p = packuments.get(name)
     if (!p) {
       p = (async () => {
-        const res = await fetchImpl(`${REGISTRY}/${name.replace('/', '%2F')}`, { signal: AbortSignal.timeout(30_000), headers: { accept: 'application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8' } })
+        const res = await fetchImpl(`${npmRegistry()}/${name.replace('/', '%2F')}`, { signal: AbortSignal.timeout(30_000), headers: { accept: 'application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8' } })
         if (!res.ok) throw new Error(res.status === 404 ? `npm 上没有 ${name}` : `npm 返回 ${res.status}（${name}）`)
         return await res.json() as Packument
       })()

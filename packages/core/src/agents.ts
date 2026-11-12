@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { clip, DomainError, Engine, ROUTER_SESSION } from './engine'
 import { sourceOfThread, STAGE_LABEL, type Mandate, type Ticket } from './model'
 import { PROACTIVE_WORKER_PROMPT, ROUTER_PROMPT, SUBAGENT_PROMPT, WORKER_PROMPT } from './prompts'
-import type { LocalAccess } from './access'
+import { LOCAL_APPS, type LocalAccess } from './access'
 import { gateSourceTools, type LocalApps } from './localapps'
 import type { Instructions } from './instructions'
 import { proactiveSettings, saveProactiveSettings } from './proactive'
@@ -46,7 +46,7 @@ export const ChatCard = z.discriminatedUnion('type', [
   z.object({ type: z.literal('schedule'), date: z.string().describe('YYYY-MM-DD'), events: z.array(z.object({ start: z.string().describe('HH:mm'), end: z.string().optional(), title: z.string().max(40), location: z.string().max(40).optional() })).max(8) }),
   z.object({ type: z.literal('reminder'), title: z.string().max(40), at: z.string().describe('ISO date-time'), note: z.string().max(60).optional() }),
   z.object({ type: z.literal('place'), name: z.string().max(40), address: z.string().max(80).optional(), note: z.string().max(60).optional(), url: z.string().url().optional() }),
-  z.object({ type: z.literal('mac_permission'), app: z.enum(['calendar', 'reminders', 'notes', 'contacts', 'photos']).describe('When a task hit "macOS 还没允许访问": a card that opens System Settings at that app') }),
+  z.object({ type: z.literal('mac_permission'), app: z.enum(LOCAL_APPS).describe('When a task hit "macOS 还没允许访问": a card that opens System Settings at that app') }),
 ])
 
 /** What source plugins and routines add to the agents. */
