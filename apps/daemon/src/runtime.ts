@@ -223,6 +223,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         clearInterval(memoryTimer)
         clearInterval(ideasTimer)
         await mcp.close()
+        await plugins.close()
         await browser.close()
         await sources.stopAll()
         await agents.shutdown()

@@ -25,6 +25,9 @@ export class SourceRegistry implements SourcePort {
   private factsBy = new Map<string, Record<string, string>>()
   engine!: Engine
 
+  /** Where secrets live, for the plugin sandbox (which keeps a sandboxed source's runtime secrets on its behalf). */
+  get secretStore(): SecretPort | undefined { return this.secrets }
+
   constructor(private store: Store, private effects: Effects, private secrets?: SecretPort) {
     effects.handle<OutgoingMessage & { source: string }>('reply', async payload => this.deliver(payload), { concurrency: 2, baseDelayMs: 5_000, maxDelayMs: 300_000 })
   }
@@ -46,8 +49,9 @@ export class SourceRegistry implements SourcePort {
   }
 
   /** Deletes a source's saved settings, state and secret fields (its plugin is being uninstalled). */
-  forget(id: string): void {
-    for (const key of this.secretKeys(this.kinds.get(id))) this.secrets?.delete(`source:${id}:${key}`)
+  forget(id: string, kind: SourceKind | undefined = this.kinds.get(id)): void {
+    for (const key of this.secretKeys(kind)) this.secrets?.delete(`source:${id}:${key}`)
+    for (const name of kvGet<string[]>(this.store, `source:${id}:__secrets`) ?? []) this.secrets?.delete(`source:${id}:runtime:${name}`)
     for (const { key } of this.store.db.select({ key: schema.kv.key }).from(schema.kv).all())
       if (key === `source:${id}` || key.startsWith(`source:${id}:`)) kvSet(this.store, key, null)
   }
