@@ -30,6 +30,15 @@ export class SlackApi {
   }
 }
 
+
+/** Downloads a received file (Uint8Array), refusing anything over the channel's limit. */
+async function grab(f: typeof fetch, url: string, headers: Record<string, string> = {}): Promise<{ bytes: Uint8Array; mime?: string }> {
+  const res = await f(url, { headers, signal: AbortSignal.timeout(60_000) })
+  if (!res.ok) throw new Error(`下载失败 ${res.status}`)
+  const mime = res.headers.get('content-type')?.split(';')[0]
+  return { bytes: new Uint8Array(await res.arrayBuffer()), ...(mime ? { mime } : {}) }
+}
+
 export function slackKind(deps: { fetch?: typeof fetch; socket?: (url: string) => SocketLike } = {}) {
   const apis = new WeakMap<object, SlackApi>()
   const api = (io: IO) => {
@@ -42,7 +51,8 @@ export function slackKind(deps: { fetch?: typeof fetch; socket?: (url: string) =
     id: 'slack',
     title: 'Slack',
     description: '在 Slack 里和糯糯对话：私信直接说，频道里 @它。在 api.slack.com 创建应用，打开 Socket Mode（得到 xapp- 开头的 App token），订阅 message.im、app_mention 事件，装到工作区后拿到 xoxb- 开头的 Bot token。不需要公网地址。',
-    capabilities: { inbound: 'websocket', threads: 'reply', format: 'plain', maxLength: 3500, edit: true, buttons: true, proactive: true },
+    // Files need the files:read scope; without it the download fails and the agent sees a note instead.
+    capabilities: { inbound: 'websocket', threads: 'reply', format: 'plain', maxLength: 3500, edit: true, buttons: true, files: { in: true, out: false }, proactive: true },
     config: SlackConfig,
     fields: [
       { key: 'botToken', type: 'secret', label: 'Bot token', placeholder: 'xoxb-…', links: [{ label: 'Slack 应用', href: 'https://api.slack.com/apps' }] },
@@ -73,7 +83,8 @@ export function slackKind(deps: { fetch?: typeof fetch; socket?: (url: string) =
               from: { id: String(ev.user ?? ev.bot_id ?? ''), bot: Boolean(ev.bot_id), self: ev.user === me.user_id },
               text: text.split(mention).join('').trim(),
               mentioned: ev.type === 'app_mention' || text.includes(mention),
-              files: (ev.files ?? []).map((f: any) => (String(f.mimetype).startsWith('image/') ? { kind: 'image' as const } : { kind: 'file' as const, ...(f.name ? { name: f.name } : {}) })),
+              files: (ev.files ?? []).map((f: any) => ({ kind: String(f.mimetype).startsWith('image/') ? 'image' as const : String(f.mimetype).startsWith('audio/') ? 'voice' as const : 'file' as const,
+                ...(f.name ? { name: String(f.name) } : {}), ...(f.mimetype ? { mime: String(f.mimetype) } : {}), ...(f.size ? { size: Number(f.size) } : {}), ...(f.url_private_download || f.url_private ? { ref: String(f.url_private_download ?? f.url_private) } : {}) })),
               at: Math.round(Number(ev.ts) * 1000) || Date.now(),
             })
             return
@@ -97,6 +108,12 @@ export function slackKind(deps: { fetch?: typeof fetch; socket?: (url: string) =
         ] } : {}),
       })
       return { id: sent.ts }
+    },
+    async download(io, file) {
+      const url = String(file.ref)
+      // Only Slack's own file host gets the bot token.
+      if (!/^https:\/\/files\.slack\.com\//.test(url)) return undefined
+      return { ...await grab(deps.fetch ?? fetch, url, { authorization: `Bearer ${io.config.botToken}` }), ...(file.name ? { name: file.name } : {}) }
     },
     async edit(io, target, messageId, out) {
       await api(io).call('chat.update', io.config.botToken, { channel: target.chat, ts: messageId, text: out.text, blocks: [{ type: 'section', text: { type: 'plain_text', text: out.text.slice(0, 3000) } }] })

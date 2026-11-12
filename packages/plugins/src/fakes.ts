@@ -32,10 +32,21 @@ export class FakeTelegram {
     this.updates.push({ update_id: this.seq++, message: { message_id: this.msg++, date: Math.floor(Date.now() / 1000), text, from: { is_bot: false, first_name: from.username ?? 'u', ...from }, chat } })
   }
 
+  /** A user sends a photo (with an optional caption). */
+  photo(from: { id: number; username?: string }, bytes: Uint8Array, caption = '') {
+    const id = `ph${this.msg}`
+    this.files.set(id, bytes)
+    this.updates.push({ update_id: this.seq++, message: { message_id: this.msg++, date: Math.floor(Date.now() / 1000), ...(caption ? { caption } : {}), photo: [{ file_id: 'small', file_size: 10 }, { file_id: id, file_size: bytes.byteLength }],
+      from: { is_bot: false, first_name: from.username ?? 'u', ...from }, chat: { id: from.id, type: 'private' } } })
+  }
+  private files = new Map<string, Uint8Array>()
+
   fetch: typeof fetch = async (input, init) => this.handle(new Request(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, init))
   listen(port: number) { return serve(r => this.handle(r), port) }
 
   private async handle(req: Request): Promise<Response> {
+    const file = /\/file\/bot([^/]+)\/photos\/(\w+)\.jpg$/.exec(new URL(req.url).pathname)
+    if (file) return file[1] === this.token && this.files.has(file[2]!) ? new Response(this.files.get(file[2]!)!.slice(), { headers: { 'content-type': 'image/jpeg' } }) : new Response('', { status: 404 })
     const m = /\/bot([^/]+)\/(\w+)$/.exec(new URL(req.url).pathname)
     if (!m || m[1] !== this.token) return json({ ok: false, error_code: 401, description: 'Unauthorized' }, 401)
     const body = await req.json().catch(() => ({})) as Record<string, any>
@@ -49,6 +60,7 @@ export class FakeTelegram {
       case 'sendMessage': { const message_id = this.msg++; this.sent.push({ ...body, message_id } as any); return json({ ok: true, result: { message_id } }) }
       case 'editMessageText': this.edits.push(body as any); return json({ ok: true, result: true })
       case 'answerCallbackQuery': this.answered.push(body as any); return json({ ok: true, result: true })
+      case 'getFile': return this.files.has(body.file_id) ? json({ ok: true, result: { file_id: body.file_id, file_path: `photos/${body.file_id}.jpg` } }) : json({ ok: false, error_code: 400, description: 'file not found' }, 400)
       default: return json({ ok: false, error_code: 404, description: 'Not Found' }, 404)
     }
   }

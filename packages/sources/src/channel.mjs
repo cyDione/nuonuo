@@ -211,14 +211,40 @@ export function makeDefineChannel(z) {
         return
       }
       const addressed = m.chat.type === 'private' || (caps.groups.mention && Boolean(m.mentioned)) || (caps.groups.replyToBot && Boolean(m.replyToBot))
-      const files = (m.files ?? []).map(f => (f.kind === 'image' ? '[图片]' : f.kind === 'voice' ? '[语音]' : `[文件 ${f.name ?? ''}]`.replace(' ]', ']'))).join(' ')
+      const { attachments, missed } = await fetchFiles(ctx, ioOf(ctx), m.files ?? [], ok)
+      const files = missed.map(f => (f.kind === 'image' ? '[图片]' : f.kind === 'voice' ? '[语音]' : `[文件 ${f.name ?? ''}]`.replace(' ]', ']'))).join(' ')
       const chatName = m.chat.type === 'private' ? `私聊 ${label(from)}` : m.chat.title ?? chat
       ctx.engine.receive({
         id: `${id}:${enc(chat)}:${m.id}`, source: id, threadId, actor, human: !from.bot, addressed,
-        text: [text, files].filter(Boolean).join(' ') || '（空消息）', at: m.at ?? Date.now(), ...(m.url ? { url: m.url } : {}),
+        text: [text, files].filter(Boolean).join(' ') || (attachments.length ? '' : '（空消息）'), at: m.at ?? Date.now(), ...(m.url ? { url: m.url } : {}),
+        ...(attachments.length ? { attachments } : {}),
         meta: { chatId: m.chat.id, messageId: m.id, from: label(from) },
         thread: { title: `${title} · ${chatName}`, meta: { chatId: m.chat.id } },
       })
+    }
+
+    /**
+     * Downloads what an allowed account sent (images, voice, files) into the attachments folder, so the agent can open
+     * them like a file the owner attached in the web. Needs `capabilities.files.in`, the adapter's `download`, and a file
+     * the adapter gave a `ref`; anything not fetched (too big, a stranger's, a failed download) stays a [图片]-style note.
+     */
+    async function fetchFiles(ctx, io, files, ok) {
+      const attachments = []
+      const missed = []
+      const limit = caps.files.maxBytes ?? 20 * 1024 * 1024
+      for (const f of files) {
+        if (!ok || !caps.files.in || typeof spec.download !== 'function' || typeof ctx.saveFile !== 'function' || f.ref === undefined || (f.size !== undefined && f.size > limit)) { missed.push(f); continue }
+        try {
+          const got = await spec.download(io, f)
+          if (!got || got.bytes.byteLength > limit) { missed.push(f); continue }
+          const ext = f.kind === 'image' ? '.jpg' : f.kind === 'voice' ? '.ogg' : ''
+          attachments.push(await ctx.saveFile({ name: got.name ?? f.name ?? `${f.kind}${ext}`, ...(got.mime ?? f.mime ? { mime: got.mime ?? f.mime } : {}), bytes: got.bytes }))
+        } catch (error) {
+          ctx.log(`下载附件失败：${error?.message ?? error}`)
+          missed.push(f)
+        }
+      }
+      return { attachments, missed }
     }
 
     async function handleAction(ctx, a) {

@@ -17,9 +17,10 @@ interface TgUser { id: number; is_bot: boolean; username?: string; first_name?: 
 interface TgMessage {
   message_id: number; date: number; text?: string; caption?: string; from?: TgUser
   chat: { id: number; type: 'private' | 'group' | 'supergroup' | 'channel'; title?: string; username?: string; first_name?: string }
-  message_thread_id?: number; reply_to_message?: { from?: TgUser }; photo?: unknown[]; document?: { file_name?: string }; voice?: unknown
+  message_thread_id?: number; reply_to_message?: { from?: TgUser }; photo?: { file_id: string; file_size?: number }[]; document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number }; voice?: { file_id: string; mime_type?: string; file_size?: number }
 }
 interface TgCallback { id: string; from: TgUser; data?: string; message?: TgMessage }
+interface Update { update_id: number; message?: TgMessage; callback_query?: TgCallback }
 
 export class TelegramApi {
   constructor(private base: string, private token: string, private fetchImpl: typeof fetch = fetch) {}
@@ -34,6 +35,23 @@ export class TelegramApi {
     }
     return data.result as T
   }
+}
+
+/** A message's file, with the file_id `download` needs (the largest size of a photo). */
+function filesOf(msg: TgMessage): NonNullable<ChannelMessage['files']> {
+  const size = (n?: number) => (n ? { size: n } : {})
+  if (msg.photo?.length) { const p = msg.photo.at(-1)!; return [{ kind: 'image', ref: p.file_id, ...size(p.file_size) }] }
+  if (msg.document) return [{ kind: 'file', ref: msg.document.file_id, ...(msg.document.file_name ? { name: msg.document.file_name } : {}), ...(msg.document.mime_type ? { mime: msg.document.mime_type } : {}), ...size(msg.document.file_size) }]
+  if (msg.voice) return [{ kind: 'voice', ref: msg.voice.file_id, ...(msg.voice.mime_type ? { mime: msg.voice.mime_type } : {}), ...size(msg.voice.file_size) }]
+  return []
+}
+
+/** Downloads a received file (Uint8Array), refusing anything over the channel's limit. */
+async function grab(f: typeof fetch, url: string, headers: Record<string, string> = {}): Promise<{ bytes: Uint8Array; mime?: string }> {
+  const res = await f(url, { headers, signal: AbortSignal.timeout(60_000) })
+  if (!res.ok) throw new Error(`下载失败 ${res.status}`)
+  const mime = res.headers.get('content-type')?.split(';')[0]
+  return { bytes: new Uint8Array(await res.arrayBuffer()), ...(mime ? { mime } : {}) }
 }
 
 export function telegramKind(deps: { fetch?: typeof fetch } = {}) {
@@ -63,7 +81,7 @@ export function telegramKind(deps: { fetch?: typeof fetch } = {}) {
       text,
       mentioned: Boolean(me.username && text.toLowerCase().includes(`@${me.username.toLowerCase()}`)),
       replyToBot: msg.reply_to_message?.from?.id === me.id,
-      files: msg.photo ? [{ kind: 'image' }] : msg.document ? [{ kind: 'file', ...(msg.document.file_name ? { name: msg.document.file_name } : {}) }] : msg.voice ? [{ kind: 'voice' }] : [],
+      files: filesOf(msg),
       at: msg.date * 1000,
     }
   }
@@ -71,18 +89,28 @@ export function telegramKind(deps: { fetch?: typeof fetch } = {}) {
   async function pollOnce(io: IO, signal?: AbortSignal, timeout = 0): Promise<void> {
     const { api, me } = await session(io)
     const offset = io.state.get<number>('offset')
-    const updates = await api.call<{ update_id: number; message?: TgMessage; callback_query?: TgCallback }[]>('getUpdates',
+    const updates = await api.call<Update[]>('getUpdates',
       { timeout, allowed_updates: ['message', 'callback_query'], ...(offset !== undefined ? { offset } : {}) }, signal)
     for (const u of updates) {
+      // A manual check can overlap the long poll: whichever claims an update handles it, and the other waits for it.
+      if ((io.state.get<number>('offset') ?? 0) > u.update_id) { await handling; continue }
       io.state.set('offset', u.update_id + 1)
-      const m = u.message && toMessage(me, u.message)
-      if (m) await io.message(m)
-      const cb = u.callback_query
-      if (cb?.data) {
-        const toast = await io.action({ data: cb.data, from: { id: cb.from.id, ...(cb.from.username ? { username: cb.from.username } : {}) },
-          ...(cb.message ? { chat: { id: cb.message.chat.id } } : {}), ...(cb.message?.message_thread_id ? { topic: cb.message.message_thread_id } : {}) })
-        await api.call('answerCallbackQuery', { callback_query_id: cb.id, ...(toast ? { text: toast } : {}) }).catch(() => {})
-      }
+      const run = handling.then(() => handle(io, api, me, u))
+      handling = run.catch(() => undefined)
+      await run
+    }
+  }
+
+  /** Updates are handled one at a time, in order, even when two polls overlap. */
+  let handling: Promise<unknown> = Promise.resolve()
+  async function handle(io: IO, api: TelegramApi, me: TgUser, u: Update): Promise<void> {
+    const m = u.message && toMessage(me, u.message)
+    if (m) await io.message(m)
+    const cb = u.callback_query
+    if (cb?.data) {
+      const toast = await io.action({ data: cb.data, from: { id: cb.from.id, ...(cb.from.username ? { username: cb.from.username } : {}) },
+        ...(cb.message ? { chat: { id: cb.message.chat.id } } : {}), ...(cb.message?.message_thread_id ? { topic: cb.message.message_thread_id } : {}) })
+      await api.call('answerCallbackQuery', { callback_query_id: cb.id, ...(toast ? { text: toast } : {}) }).catch(() => {})
     }
   }
 
@@ -93,7 +121,8 @@ export function telegramKind(deps: { fetch?: typeof fetch } = {}) {
     title: 'Telegram',
     icon: 'send',
     description: '用 Telegram 机器人在手机上指挥家里的电脑：私聊直接对话，群里 @它。到 @BotFather 创建机器人拿到 token，再把你的 Telegram ID 或用户名加入允许列表（给机器人发 /start 可以看到 ID）。',
-    capabilities: { inbound: 'longpoll', threads: 'topic', format: 'plain', maxLength: 4000, edit: true, buttons: true, typing: true, proactive: true },
+    // Bots may download files up to 20 MB.
+    capabilities: { inbound: 'longpoll', threads: 'topic', format: 'plain', maxLength: 4000, edit: true, buttons: true, typing: true, files: { in: true, out: false, maxBytes: 20 * 1024 * 1024 }, proactive: true },
     config: TelegramConfig,
     fields: [
       { key: 'token', type: 'secret', label: 'Bot token', placeholder: '123456:ABC-…' },
@@ -122,6 +151,13 @@ export function telegramKind(deps: { fetch?: typeof fetch } = {}) {
     async edit(io, target, messageId, out) {
       const { api } = await session(io)
       await api.call('editMessageText', { chat_id: Number(target.chat), message_id: Number(messageId), text: out.text })
+    },
+    async download(io, file) {
+      const { api } = await session(io)
+      const info = await api.call<{ file_path?: string }>('getFile', { file_id: String(file.ref) })
+      if (!info.file_path) return undefined
+      const got = await grab(deps.fetch ?? fetch, `${io.config.apiUrl.replace(/\/$/, '')}/file/bot${io.config.token}/${info.file_path}`)
+      return { ...got, name: file.name ?? info.file_path.split('/').pop() ?? 'file' }
     },
   })
 }

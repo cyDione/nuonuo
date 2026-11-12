@@ -177,10 +177,20 @@ function contentOf(type: string, raw: string, mentions: NonNullable<NonNullable<
     const lines = (post.content ?? []).map((line: any[]) => line.map(n => (n.tag === 'text' || n.tag === 'a' ? n.text : n.tag === 'at' ? `@${n.user_name ?? ''}` : '')).join(''))
     return { text: named([post.title, ...lines].filter(Boolean).join('\n')), files: [] }
   }
-  if (type === 'image') return { text: '', files: [{ kind: 'image' }] }
-  if (type === 'audio') return { text: '', files: [{ kind: 'voice' }] }
-  if (type === 'file' || type === 'media') return { text: '', files: [{ kind: 'file', ...(content.file_name ? { name: content.file_name } : {}) }] }
+  // `ref` carries the resource key; the message id is added by the caller (resources are fetched per message).
+  if (type === 'image') return { text: '', files: [{ kind: 'image', ref: { key: content.image_key, type: 'image' } }] }
+  if (type === 'audio') return { text: '', files: [{ kind: 'voice', ref: { key: content.file_key, type: 'file' } }] }
+  if (type === 'file' || type === 'media') return { text: '', files: [{ kind: 'file', ref: { key: content.file_key, type: 'file' }, ...(content.file_name ? { name: content.file_name } : {}) }] }
   return { text: `[${type}]`, files: [] }
+}
+
+
+/** Downloads a received file (Uint8Array), refusing anything over the channel's limit. */
+async function grab(f: typeof fetch, url: string, headers: Record<string, string> = {}): Promise<{ bytes: Uint8Array; mime?: string }> {
+  const res = await f(url, { headers, signal: AbortSignal.timeout(60_000) })
+  if (!res.ok) throw new Error(`下载失败 ${res.status}`)
+  const mime = res.headers.get('content-type')?.split(';')[0]
+  return { bytes: new Uint8Array(await res.arrayBuffer()), ...(mime ? { mime } : {}) }
 }
 
 export function feishuKind(deps: { fetch?: typeof fetch; socket?: (url: string) => SocketLike } = {}) {
@@ -204,7 +214,8 @@ export function feishuKind(deps: { fetch?: typeof fetch; socket?: (url: string) 
       const m = e.message
       const sender = e.sender?.sender_id?.open_id ?? ''
       if (m.thread_id) io.state.set(`last:${m.chat_id}:${m.thread_id}`, m.message_id)
-      const { text, files } = contentOf(m.message_type, m.content, m.mentions)
+      const { text, files: found } = contentOf(m.message_type, m.content, m.mentions)
+      const files = found?.map(f => (f.ref && (f.ref as { key?: string }).key ? { ...f, ref: { ...(f.ref as object), message: m.message_id } } : { kind: f.kind, ...(f.name ? { name: f.name } : {}) }))
       await io.message({
         id: m.message_id,
         chat: { id: m.chat_id, type: m.chat_type === 'p2p' ? 'private' : 'group' },
@@ -231,7 +242,7 @@ export function feishuKind(deps: { fetch?: typeof fetch; socket?: (url: string) 
     id: 'feishu',
     title: '飞书',
     description: '在飞书里和糯糯对话：私聊直接说，群里 @它。到飞书开放平台创建企业自建应用，开启机器人能力，事件订阅选「长连接」并订阅「接收消息」（im.message.receive_v1）；要用按钮回答确认，卡片回调也选长连接。不需要公网地址。',
-    capabilities: { inbound: 'websocket', threads: 'reply', format: 'plain', maxLength: 4000, edit: true, buttons: true, files: { in: false, out: false }, proactive: true },
+    capabilities: { inbound: 'websocket', threads: 'reply', format: 'plain', maxLength: 4000, edit: true, buttons: true, files: { in: true, out: false, maxBytes: 100 * 1024 * 1024 }, proactive: true },
     config: FeishuConfig,
     fields: [
       { key: 'appId', type: 'text', label: 'App ID', placeholder: 'cli_…', links: [{ label: '飞书开放平台', href: 'https://open.feishu.cn/app' }] },
@@ -288,6 +299,13 @@ export function feishuKind(deps: { fetch?: typeof fetch; socket?: (url: string) 
     async edit(io, _target, messageId, out) {
       const { api } = await session(io)
       await api.updateCard(messageId, feishuCard(out.text))
+    },
+    async download(io, file) {
+      const ref = file.ref as { key: string; type: string; message: string }
+      const { api } = await session(io)
+      const got = await grab(deps.fetch ?? fetch, `${io.config.domain.replace(/\/$/, '')}/open-apis/im/v1/messages/${encodeURIComponent(ref.message)}/resources/${encodeURIComponent(ref.key)}?type=${ref.type}`,
+        { authorization: `Bearer ${await api.tenantToken()}` })
+      return { ...got, ...(file.name ? { name: file.name } : {}) }
     },
   })
 }

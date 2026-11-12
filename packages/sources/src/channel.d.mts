@@ -35,10 +35,16 @@ export interface ChannelMessage {
   /** The bot was @-mentioned / the message replies to the bot. */
   mentioned?: boolean
   replyToBot?: boolean
-  files?: { kind: 'image' | 'file' | 'voice'; name?: string }[]
+  /**
+   * What came with the message. `ref` is whatever the adapter's `download` needs to fetch it (a file id, a URL); without
+   * a ref, or without `download`, the agent only sees a note such as [图片].
+   */
+  files?: ChannelFile[]
   at?: number
   url?: string
 }
+
+export interface ChannelFile { kind: 'image' | 'file' | 'voice'; name?: string; mime?: string; size?: number; ref?: unknown }
 
 /** A button press, with the button's id as `data`. */
 export interface ChannelAction { data: string; from: ChannelUser; chat?: { id: string | number }; topic?: string | number }
@@ -104,6 +110,8 @@ export interface ChannelSpec<C> extends Partial<Pick<SourceKind<C>, 'icon' | 'ac
   /** Sends one message (already split and formatted). Throw ChannelError with `gone` when the chat is gone. */
   send(io: ChannelIO<C>, target: ChannelTarget, out: ChannelOut): Promise<{ id?: string; url?: string } | void>
   edit?(io: ChannelIO<C>, target: ChannelTarget, messageId: string, out: ChannelOut): Promise<void>
+  /** Fetches a received file (with `capabilities.files.in`); the layer saves it as an attachment. */
+  download?(io: ChannelIO<C>, file: ChannelFile): Promise<{ bytes: Uint8Array; name?: string; mime?: string } | undefined>
 }
 
 export declare class ChannelError extends Error {

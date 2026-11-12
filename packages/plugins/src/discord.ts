@@ -20,7 +20,7 @@ type IO = ChannelIO<Config>
 export const DISCORD_INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15)
 
 interface DcUser { id: string; username?: string; global_name?: string; bot?: boolean }
-interface DcMessage { id: string; channel_id: string; guild_id?: string; author: DcUser; content: string; mentions?: DcUser[]; referenced_message?: { author?: DcUser } | null; attachments?: { filename?: string; content_type?: string }[]; timestamp?: string }
+interface DcMessage { id: string; channel_id: string; guild_id?: string; author: DcUser; content: string; mentions?: DcUser[]; referenced_message?: { author?: DcUser } | null; attachments?: { filename?: string; content_type?: string; url?: string; size?: number }[]; timestamp?: string }
 interface DcInteraction { id: string; token: string; type: number; channel_id?: string; data?: { custom_id?: string }; member?: { user?: DcUser }; user?: DcUser }
 
 export class DiscordApi {
@@ -37,6 +37,15 @@ export class DiscordApi {
     }
     return data
   }
+}
+
+
+/** Downloads a received file (Uint8Array), refusing anything over the channel's limit. */
+async function grab(f: typeof fetch, url: string, headers: Record<string, string> = {}): Promise<{ bytes: Uint8Array; mime?: string }> {
+  const res = await f(url, { headers, signal: AbortSignal.timeout(60_000) })
+  if (!res.ok) throw new Error(`下载失败 ${res.status}`)
+  const mime = res.headers.get('content-type')?.split(';')[0]
+  return { bytes: new Uint8Array(await res.arrayBuffer()), ...(mime ? { mime } : {}) }
 }
 
 export function discordKind(deps: { fetch?: typeof fetch; socket?: (url: string) => SocketLike } = {}) {
@@ -56,7 +65,7 @@ export function discordKind(deps: { fetch?: typeof fetch; socket?: (url: string)
     id: 'discord',
     title: 'Discord',
     description: '在 Discord 里和糯糯对话：私信直接说，服务器里 @它。到 Discord Developer Portal 创建应用和机器人，拿到 token，打开 MESSAGE CONTENT 权限，再把机器人邀请进你的服务器。不需要公网地址。',
-    capabilities: { inbound: 'websocket', threads: 'topic', format: 'markdown', maxLength: 2000, edit: true, buttons: true, typing: true, files: { in: false, out: false }, proactive: true },
+    capabilities: { inbound: 'websocket', threads: 'topic', format: 'markdown', maxLength: 2000, edit: true, buttons: true, typing: true, files: { in: true, out: false }, proactive: true },
     config: DiscordConfig,
     fields: [
       { key: 'token', type: 'secret', label: 'Bot token', links: [{ label: 'Developer Portal', href: 'https://discord.com/developers/applications' }] },
@@ -97,7 +106,8 @@ export function discordKind(deps: { fetch?: typeof fetch; socket?: (url: string)
               io.online()
             } else if (msg.t === 'MESSAGE_CREATE') {
               const m = msg.d as DcMessage
-              const files = (m.attachments ?? []).map(a => (a.content_type?.startsWith('image/') ? { kind: 'image' as const } : a.content_type?.startsWith('audio/') ? { kind: 'voice' as const } : { kind: 'file' as const, ...(a.filename ? { name: a.filename } : {}) }))
+              const files = (m.attachments ?? []).map(a => ({ kind: a.content_type?.startsWith('image/') ? 'image' as const : a.content_type?.startsWith('audio/') ? 'voice' as const : 'file' as const,
+                ...(a.filename ? { name: a.filename } : {}), ...(a.content_type ? { mime: a.content_type } : {}), ...(a.size ? { size: a.size } : {}), ...(a.url ? { ref: a.url } : {}) }))
               await io.message({
                 id: m.id,
                 chat: { id: m.channel_id, type: m.guild_id ? 'group' : 'private' },
@@ -126,6 +136,12 @@ export function discordKind(deps: { fetch?: typeof fetch; socket?: (url: string)
         ...(out.buttons?.length ? { components: [{ type: 1, components: out.buttons.map(b => ({ type: 2, style: b.style === 'danger' ? 4 : 1, label: b.label, custom_id: b.id })) }] } : {}),
       })
       return { id: sent.id }
+    },
+    async download(_io, file) {
+      const url = String(file.ref)
+      // Attachments live on Discord's CDN and need no token.
+      if (!/^https:\/\/(cdn|media)\.discord(app)?\.(com|net)\//.test(url)) return undefined
+      return { ...await grab(deps.fetch ?? fetch, url), ...(file.name ? { name: file.name } : {}) }
     },
     async edit(io, target, messageId, out) {
       await api(io).call('PATCH', `/channels/${target.chat}/messages/${messageId}`, { content: out.text, components: [] })

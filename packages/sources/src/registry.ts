@@ -5,7 +5,7 @@
 import type { AgentExtensions, Engine, SourcePort, Ticket } from '@nuonuo/core'
 import { kvGet, kvSet, schema, type Effects, type Store } from '@nuonuo/db'
 import type { ToolSet } from 'ai'
-import type { Health, OutgoingMessage, SourceContext, SourceKind } from './kind'
+import type { Health, OutgoingMessage, SavedFile, SourceContext, SourceKind } from './kind'
 
 export interface SourceSettings { enabled: boolean; config: unknown }
 
@@ -29,6 +29,9 @@ export class SourceRegistry implements SourcePort {
    * checked that the source is a channel whose owner allowed approvals there; the hook checks the approval's task.
    */
   onApprovalAnswer?: (source: string, approvalId: string, approve: boolean, by: string) => void | Promise<void>
+
+  /** Where `ctx.saveFile` keeps incoming files (the daemon's uploads folder). */
+  files?: { save(input: { name: string; mime?: string; bytes: Uint8Array }): SavedFile }
 
   /** Where secrets live, for the plugin sandbox (which keeps a sandboxed source's runtime secrets on its behalf). */
   get secretStore(): SecretPort | undefined { return this.secrets }
@@ -256,6 +259,11 @@ export class SourceRegistry implements SourcePort {
           if (!registry.onApprovalAnswer) throw new Error('还不能在这里回答确认')
           await registry.onApprovalAnswer(kind.id, String(id), Boolean(approve), String(by).slice(0, 120))
         },
+      },
+      saveFile: async file => {
+        if (!registry.files) throw new Error('没有附件文件夹')
+        const bytes = file.bytes instanceof Uint8Array ? file.bytes : new Uint8Array(file.bytes as ArrayBufferLike)
+        return registry.files.save({ name: String(file.name), ...(file.mime ? { mime: String(file.mime) } : {}), bytes })
       },
       notify: (text, opts) => {
         const conversationId = registry.engine.mirrorConversation(`${kind.id}:notices`, { title: opts?.title ?? `🔔 ${kind.title}` })

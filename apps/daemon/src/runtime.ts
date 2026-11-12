@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join, sep } from 'node:path'
 import type { ToolSet } from 'ai'
 import type { DaemonConfig } from './config'
+import { Uploads } from './uploads'
 
 export interface Runtime {
   config: DaemonConfig
@@ -122,6 +123,8 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     reviewer.access = access
     reviewer.sandboxed = ticket => sandboxApplies(engine.execution().sandbox, ticket)
     const uploadsDir = join(config.home, 'uploads')
+    // Files sent in chat apps land next to the ones the owner attaches in the web.
+    sources.files = new Uploads(store, uploadsDir)
     /** What the sandbox mounts: the folders allowed in 权限 and the attachments (read-only); never-touch ones inside them are covered. */
     const sandboxFolders = () => {
       const s = access.settings()
