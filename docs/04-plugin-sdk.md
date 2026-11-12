@@ -82,9 +82,32 @@ export default ({ definePlugin, tool, z }) => definePlugin({
 ```
 
 - 工具名必须以 `<插件 id>_` 开头，否则会被忽略。
-- `ctx` 有 `id`、`dir`（插件文件夹）、`state.get/set`（插件自己的小状态）和 `log`。
+- `ctx` 有 `id`、`dir`（插件文件夹）、`state.get/set`（插件自己的小状态）、`settings.get`（你在插件设置里填的值，含密钥）和 `log`。
 - `inlineContext(ctx, { text, scope })`：主 Agent 每次回答你的新消息前调用，返回的文字附在这批输入的后面（在召回的记忆之后），而不是放进系统提示词，所以每轮都变也不会打破提示词缓存。`text` 是这批新消息的原文，`scope` 是所属项目。要在 1.5 秒内返回，超时或出错就跳过这一轮；最多 2,000 字。内置的「心境」就是这样写的，见 [`packages/plugins/src/mood.ts`](../packages/plugins/src/mood.ts)。
 - 插件带来的会做的事出现在「它是谁 → 会做的事」里，**默认关着**，你打开后才生效；插件停用时它们也不生效，卸载插件时一起删掉。
+
+## 设置和窗口
+
+插件可以在 package.json 里声明自己的**设置**和**窗口**。它们写在清单里而不是代码里，所以插件还没打开时，插件页就能显示设置、打开窗口。
+
+```json
+"nuonuo": {
+  "plugin": "./index.mjs",
+  "settings": [
+    { "key": "shareWithAgent", "label": "让糯糯看到便签", "type": "switch" },
+    { "key": "limit", "label": "最多几条", "type": "number", "min": 1, "max": 50 },
+    { "key": "token", "label": "令牌", "type": "secret" }
+  ],
+  "window": { "page": "ui/index.html", "title": "便签", "width": 420, "height": 520 }
+}
+```
+
+- `settings` 的字段和来源的设置表单一样：`switch`、`number`、`text`、`list`、`select`（`options`）、`secret`。`secret` 存进钥匙串，界面上只显示“已设置”。可以写 `default` 作为默认值。代码里用 `ctx.settings.get('limit')` 读。
+- `window.page` 是插件文件夹里的一个 html 文件。它和同一文件夹（及子文件夹）里的文件一起，在一个**隔离的框**里打开：没有同源权限，不能联网，也碰不到糯糯的接口。
+- 页面里引入 `<script src="__nuonuo.js"></script>`，就能用 `await nuonuo.call(name, input)` 找插件，由插件的 `windowCalls[name](ctx, input)` 回答（返回普通 JSON；抛出的错误会变成 reject）。`nuonuo.close()` 关窗口，`nuonuo.theme` 是 `light` 或 `dark`，`<html data-theme>` 会跟着变。
+- 插件没打开时窗口也能看，但 `nuonuo.call` 会报「插件没开」。
+
+完整例子见 [`examples/plugins/notes`](../examples/plugins/notes)。
 
 ## 授权
 

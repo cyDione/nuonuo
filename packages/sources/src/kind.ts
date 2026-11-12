@@ -11,7 +11,7 @@ import type { z } from 'zod'
 import type { ChannelCapabilities } from './channel.mjs'
 
 /** `links`: shortcuts shown under the field (e.g. where to create the OAuth client whose ID goes here). */
-interface FieldBase { key: string; label: string; hint?: string; advanced?: true; links?: { label: string; href: string }[] }
+interface FieldBase { key: string; label: string; hint?: string; advanced?: true; links?: { label: string; href: string }[]; /** Plugin settings: the value before the owner sets one. */ default?: unknown }
 export type FieldSpec =
   | FieldBase & { type: 'switch' }
   | FieldBase & { type: 'number'; min: number; max: number }

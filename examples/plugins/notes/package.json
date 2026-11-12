@@ -1,0 +1,16 @@
+{
+  "name": "notes",
+  "version": "0.1.0",
+  "description": "便签：在自己的窗口里记几条便签，糯糯也能读到",
+  "type": "module",
+  "nuonuo": {
+    "plugin": "./index.mjs",
+    "name": "便签",
+    "apiVersion": 1,
+    "settings": [
+      { "key": "shareWithAgent", "label": "让糯糯看到便签", "type": "switch", "hint": "打开后糯糯回复时能读到这些便签" },
+      { "key": "limit", "label": "最多几条", "type": "number", "min": 1, "max": 50, "default": 20 }
+    ],
+    "window": { "page": "ui/index.html", "title": "便签", "width": 420, "height": 520 }
+  }
+}

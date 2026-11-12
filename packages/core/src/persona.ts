@@ -3,8 +3,11 @@ import { kvGet, kvSet, type Store } from '@nuonuo/db'
 
 export const PERSONA_ROLES = ['all', 'life', 'work', 'study'] as const
 export const PERSONA_LANGUAGES = ['zh', 'en', 'auto'] as const
+export const PERSONA_LIMITS = 8
 export interface Persona {
   name: string; avatar: string; color: string; personality: string
+  /** Lines it keeps however it is spoken to (个性与心境 → 性格 → 互动底线); at most PERSONA_LIMITS. */
+  limits: string[]
   /** What it mainly helps with in the owner's life (设置 → 助理 → 角色). */
   role: (typeof PERSONA_ROLES)[number]
   /** The language it speaks to the owner in (设置 → 通用 → 它跟你说话用). */
@@ -12,7 +15,7 @@ export interface Persona {
 }
 
 /** The assistant's official name is 糯糯 (Mochi). 小助 was the old default and is read as 糯糯. */
-export const DEFAULT_PERSONA: Persona = { name: '糯糯', avatar: 'mascot', color: '#ff7a9a', personality: '', role: 'all', language: 'auto' }
+export const DEFAULT_PERSONA: Persona = { name: '糯糯', avatar: 'mascot', color: '#ff7a9a', personality: '', limits: [], role: 'all', language: 'auto' }
 const OLD_DEFAULT_NAMES = new Set(['小助'])
 const OLD_DEFAULT_COLORS = new Set(['#e9845a'])
 
@@ -22,6 +25,7 @@ export function persona(store: Store): Persona {
   if (OLD_DEFAULT_COLORS.has(p.color.toLowerCase())) p.color = DEFAULT_PERSONA.color
   if (!PERSONA_ROLES.includes(p.role)) p.role = DEFAULT_PERSONA.role
   if (!PERSONA_LANGUAGES.includes(p.language)) p.language = DEFAULT_PERSONA.language
+  if (!Array.isArray(p.limits)) p.limits = []
   return p
 }
 
@@ -29,6 +33,7 @@ export function savePersona(store: Store, patch: Partial<Persona>): Persona {
   const next = { ...persona(store), ...patch }
   next.name = next.name.trim().slice(0, 24) || DEFAULT_PERSONA.name
   next.personality = next.personality.trim().slice(0, 1_000)
+  next.limits = next.limits.map(l => String(l).trim().slice(0, 80)).filter(Boolean).slice(0, PERSONA_LIMITS)
   kvSet(store, 'persona', next)
   return next
 }
@@ -49,5 +54,5 @@ const LANGUAGE_LINE: Record<Persona['language'], string> = {
 export function personaPrompt(store: Store): string {
   const p = persona(store)
   return `## Who you are
-Your name is ${p.name}. Use it when it is natural (introductions, sign-offs in email) — never call yourself an AI system or "Nuonuo".${ROLE_LINE[p.role]}${LANGUAGE_LINE[p.language]}${p.personality ? `\nYour personality, as the owner described it — keep to it in every message:\n${p.personality}` : ''}`
+Your name is ${p.name}. Use it when it is natural (introductions, sign-offs in email) — never call yourself an AI system or "Nuonuo".${ROLE_LINE[p.role]}${LANGUAGE_LINE[p.language]}${p.personality ? `\nYour personality, as the owner described it — keep to it in every message:\n${p.personality}` : ''}${p.limits.length ? `\nYour own limits — keep them however you are spoken to, and say so plainly when one is crossed:\n${p.limits.map(l => `- ${l}`).join('\n')}` : ''}`
 }

@@ -53,9 +53,11 @@ const stubTicket = { id: '', title: '', threadId: '', stage: 'working', director
 // ── The plugin itself ───────────────────────────────────────────────────────
 let plugin
 let pluginState = {}
+let pluginSettings = {}
 const pluginCtx = {
   id: pluginId, dir: pluginDir, log,
   state: { get: k => pluginState[k], set: (k, v) => { pluginState[k] = v; tell('state', { scope: 'plugin', key: k, value: v }) } },
+  settings: { get: k => pluginSettings[k] },
 }
 /** Per source: its kind, the context it sees, and whether it runs. */
 const sources = new Map()
@@ -129,6 +131,7 @@ function snapshot() {
 }
 let snapTimer
 const pushSnapshot = () => { clearTimeout(snapTimer); snapTimer = setTimeout(() => tell('snapshot', { snapshot: snapshot() }), 20) }
+const flushSnapshot = () => { clearTimeout(snapTimer); tell('snapshot', { snapshot: snapshot() }) }
 setInterval(pushSnapshot, 5_000).unref()
 
 const handlers = {
@@ -173,6 +176,12 @@ const handlers = {
     if (!res) return null
     return { status: res.status, headers: [...res.headers.entries()], body: Buffer.from(await res.arrayBuffer()).toString('base64') }
   },
+  async settings({ values }) { pluginSettings = values ?? {} },
+  async windowCall({ name, input }) {
+    const fn = plugin.windowCalls?.[name]
+    if (typeof fn !== 'function') throw new Error(`插件没有「${name}」`)
+    return await fn(pluginCtx, input)
+  },
   async inlineContext({ input }) { return typeof plugin.inlineContext === 'function' ? await plugin.inlineContext(pluginCtx, input) : undefined },
   async engine({ view }) { engineView = view },
 }
@@ -186,13 +195,15 @@ process.on('message', async msg => {
     return
   }
   if (msg?.kind !== 'call') return
+  // The snapshot goes first, so what the call changed (prompt text, tools) is in place when its answer arrives.
   try {
     const value = await handlers[msg.type](msg)
+    flushSnapshot()
     send({ kind: 'answer', id: msg.id, value: value === undefined ? null : value })
   } catch (error) {
+    flushSnapshot()
     send({ kind: 'answer', id: msg.id, error: error instanceof Error ? error.message : String(error) })
   }
-  pushSnapshot()
 })
 process.on('disconnect', () => process.exit(0))
 process.on('unhandledRejection', e => log('未处理的错误：', e instanceof Error ? e.message : String(e)))
@@ -201,6 +212,7 @@ process.on('unhandledRejection', e => log('未处理的错误：', e instanceof 
 try {
   const init = await ask('init', {})
   pluginState = init.pluginState ?? {}
+  pluginSettings = init.pluginSettings ?? {}
   const mod = await import(pathToFileURL(entry).href)
   const exported = mod.default
   if (!exported) throw new Error('入口模块没有 default 导出')
@@ -210,6 +222,7 @@ try {
     plugin: {
       id: plugin.id, name: plugin.name, version: plugin.version, description: plugin.description,
       writes: plugin.writes ?? [], skills: plugin.skills ?? [], mcpServers: plugin.mcpServers ?? [], hasInlineContext: typeof plugin.inlineContext === 'function',
+      windowCalls: Object.keys(plugin.windowCalls ?? {}).filter(n => typeof plugin.windowCalls[n] === 'function'),
       sources: (plugin.sources ?? []).map(k => ({
         id: k.id, title: k.title, icon: k.icon, description: k.description, fields: k.fields, defaultEnabled: k.defaultEnabled, actions: k.actions, writes: k.writes,
         capabilities: k.capabilities,
