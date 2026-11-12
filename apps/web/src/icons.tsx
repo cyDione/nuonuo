@@ -18,4 +18,4 @@ export function SourceIcon({ source, size = 14, className }: { source: string; s
   return <MessageSquare size={size} {...(className ? { className } : {})} />
 }
 
-export const SOURCE_LABEL: Record<string, string> = { github: 'GitHub', cron: tx('定时任务'), webchat: tx('对话'), watchdog: 'Watchdog', telegram: 'Telegram', feishu: tx('飞书'), discord: 'Discord', gmail: 'Gmail', rss: 'RSS' }
+export const SOURCE_LABEL: Record<string, string> = { github: 'GitHub', cron: tx('定时任务'), webchat: tx('对话'), watchdog: 'Watchdog', telegram: 'Telegram', feishu: tx('飞书'), discord: 'Discord', wecom: tx('企业微信'), dingtalk: tx('钉钉'), slack: 'Slack', gmail: 'Gmail', rss: 'RSS' }

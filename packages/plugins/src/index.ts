@@ -1,4 +1,7 @@
+export * from './dingtalk'
 export * from './discord'
 export * from './feishu'
 export * from './gmail'
+export * from './slack'
 export * from './telegram'
+export * from './wecom'

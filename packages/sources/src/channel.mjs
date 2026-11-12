@@ -87,6 +87,8 @@ export function runSocket(socket, handlers, signal) {
       try { handlers.open?.() } catch (error) { reject(error); stop() }
     })
     socket.addEventListener('message', event => {
+      // Answers to our own requests skip the queue: a handler may be waiting for one (sending a reply over the socket).
+      try { if (handlers.immediate?.(event.data)) return } catch (error) { handlers.error?.(error); return }
       chain = chain.then(() => handlers.message(event.data)).catch(error => handlers.error?.(error))
     })
     socket.addEventListener('error', event => { if (!opened) reject(new ChannelError(`连接失败：${event?.message ?? 'WebSocket error'}`)) })
@@ -108,7 +110,8 @@ const DEFAULT_CAPABILITIES = { inbound: 'longpoll', threads: 'none', groups: { m
 /** Builds `defineChannel` with the host's zod (the sandbox hands plugins the same one). */
 export function makeDefineChannel(z) {
   return function defineChannel(spec) {
-    if (!spec || typeof spec.id !== 'string' || typeof spec.connect !== 'function' || typeof spec.send !== 'function') throw new Error('defineChannel 需要 id、connect 和 send')
+    if (!spec || typeof spec.id !== 'string' || typeof spec.send !== 'function') throw new Error('defineChannel 需要 id 和 send')
+    if (typeof spec.connect !== 'function' && typeof spec.webhook !== 'function') throw new Error('defineChannel 需要 connect（主动连上去）或 webhook（软件回调）')
     const id = spec.id
     const title = spec.title ?? id
     const caps = { ...DEFAULT_CAPABILITIES, ...(spec.capabilities ?? {}), groups: { ...DEFAULT_CAPABILITIES.groups, ...(spec.capabilities?.groups ?? {}) }, files: { ...DEFAULT_CAPABILITIES.files, ...(spec.capabilities?.files ?? {}) } }
@@ -146,7 +149,7 @@ export function makeDefineChannel(z) {
           ws.binaryType = 'arraybuffer'
           return ws
         },
-        runSocket: (socket, handlers) => runSocket(socket, handlers, ctx.signal),
+        runSocket: (socket, handlers) => runSocket(socket, { error: error => ctx.log(`处理消息出错：${error?.message ?? error}`), ...handlers }, ctx.signal),
         message: m => handle(ctx, m),
         action: a => handleAction(ctx, a),
       }
@@ -267,6 +270,8 @@ export function makeDefineChannel(z) {
 
     function start(ctx) {
       const io = ioOf(ctx)
+      // A webhook-only app has nothing to connect to: messages arrive through webhook().
+      if (typeof spec.connect !== 'function') { ctx.health('ok', '等待回调'); return () => {} }
       let stopped = false
       void (async () => {
         let failures = 0
@@ -296,6 +301,10 @@ export function makeDefineChannel(z) {
       schema, fields,
       capabilities: caps,
       start,
+      // webhook(): the app calls the public URL /plugin/<id>/<path>; the owner-only URL still reaches http().
+      ...(typeof spec.webhook === 'function' ? {
+        http: (ctx, request, path, info) => info.public ? spec.webhook(ioOf(ctx), request, path, info) : (spec.http ? spec.http(ctx, request, path, info) : Promise.resolve(undefined)),
+      } : {}),
       ...(typeof spec.poll === 'function' ? { poll: ctx => spec.poll(ioOf(ctx)) } : {}),
       allowed,
       send,

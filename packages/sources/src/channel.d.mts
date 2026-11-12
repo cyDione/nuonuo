@@ -50,7 +50,11 @@ export interface SocketLike {
   close(code?: number): void
   addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: any) => void): void
 }
-export interface SocketHandlers { open?(): void; message(data: string | ArrayBuffer): void | Promise<void>; close?(event: { code?: number }): void; error?(error: unknown): void }
+export interface SocketHandlers {
+  open?(): void
+  /** Called at once for every frame; return true to consume it (an answer someone is waiting for) instead of queueing it. */
+  immediate?(data: string | ArrayBuffer): boolean
+  message(data: string | ArrayBuffer): void | Promise<void>; close?(event: { code?: number }): void; error?(error: unknown): void }
 
 export interface ChannelTarget { chat: string; topic?: string }
 export interface ChannelOut { text: string; buttons?: { id: string; label: string; style?: 'primary' | 'danger' }[] }
@@ -88,8 +92,13 @@ export interface ChannelSpec<C> extends Partial<Pick<SourceKind<C>, 'actions' | 
   /** Placeholder of the allow-list field, e.g. 「你的 Telegram ID 或 @用户名」. */
   idHint?: string
   welcome?: string
-  /** Connects and reads until the connection ends (resolve) or fails (throw); the layer reconnects with backoff. */
-  connect(io: ChannelIO<C>): Promise<void>
+  /** Connects and reads until the connection ends (resolve) or fails (throw); the layer reconnects with backoff. Optional for `inbound: 'webhook'`. */
+  connect?(io: ChannelIO<C>): Promise<void>
+  /**
+   * For `inbound: 'webhook'`: the app calls the public URL `/plugin/<id>/<path>` (no owner token). Check the app's signature,
+   * hand messages to `io.message` and answer the app; return undefined for a path that is not yours.
+   */
+  webhook?(io: ChannelIO<C>, request: Request, path: string, info: { public: boolean; origin: string }): Promise<Response | undefined>
   /** Reads once now (the settings page's 立即同步, tests). */
   poll?(io: ChannelIO<C>): Promise<void>
   /** Sends one message (already split and formatted). Throw ChannelError with `gone` when the chat is gone. */

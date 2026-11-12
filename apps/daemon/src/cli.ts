@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { Command, Option } from 'commander'
 import { execFile, spawn } from 'node:child_process'
-import { closeSync, mkdirSync, openSync } from 'node:fs'
-import { join } from 'node:path'
+import { CHANNEL_PRESETS, scaffoldChannel } from '@nuonuo/sources'
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadToken, rotateToken } from './auth'
 import { connectHost, homeDir, isLoopback, loadEnvFile, networkUrls, readSavedConfig, resolveConfig, VERSION, writeSavedConfig, type SavedConfig } from './config'
@@ -291,6 +292,25 @@ devicesCmd.command('list', { isDefault: true }).description('列出已配对的�
 })
 devicesCmd.command('revoke <id>').description('移除一个设备（它的令牌立刻失效）').action(async (id: string) => {
   try { await ownerApi(`/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }); console.log('已移除') } catch (error) { console.error((error as Error).message); process.exitCode = 1 }
+})
+
+const channelCmd = program.command('channel').description('写新的聊天软件接入（Channel 适配器）')
+channelCmd.command('new <name>').description('按软件 API 的能力生成适配器骨架（一个插件文件夹）')
+  .option('--preset <preset>', `能力预设：${Object.keys(CHANNEL_PRESETS).join(' / ')}`, 'websocket')
+  .option('--title <title>', '显示名（默认取预设的名字）')
+  .option('--dir <dir>', '写到哪个文件夹（默认 ./<name>）')
+  .action((name: string, opts: { preset: string; title?: string; dir?: string }) => {
+    const files = scaffoldChannel({ name, preset: opts.preset, ...(opts.title ? { title: opts.title } : {}) })
+    const dir = resolve(opts.dir ?? name)
+    if (existsSync(dir) && readdirSync(dir).length) throw new Error(`${dir} 已经有文件了，换个名字或用 --dir 指定空文件夹`)
+    mkdirSync(dir, { recursive: true })
+    for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text)
+    console.log(`已生成 ${dir}`)
+    for (const path of Object.keys(files)) console.log(`  ${path}`)
+    console.log('下一步：把 index.mjs 里带 TODO 的地方换成这个软件的接口，然后在「设置 → 插件」里从本机文件夹安装它。')
+  })
+channelCmd.command('presets').description('列出能力预设').action(() => {
+  for (const [id, p] of Object.entries(CHANNEL_PRESETS)) console.log(`  ${id.padEnd(12)} ${p.summary}`)
 })
 
 program.command('update').description('检查并安装新版本（Linux 安装包）')
