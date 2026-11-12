@@ -1,0 +1,16 @@
+{
+  "name": "instabox",
+  "version": "0.1.0",
+  "description": "把 Instabox 的云端 Linux 机器接成糯糯自己的云电脑：命令行、docker 和多个浏览器",
+  "type": "module",
+  "license": "MIT",
+  "nuonuo": {
+    "plugin": "./index.mjs",
+    "name": "Instabox 云电脑",
+    "apiVersion": 1,
+    "settings": [
+      { "key": "apiKey", "label": "API key", "type": "secret", "hint": "在 dashboard.instabox.sh 的 API keys 里新建（ibk_ 开头），需要 machines:read 和 machines:write" },
+      { "key": "machine", "label": "用哪台机器", "type": "text", "placeholder": "机器 ID 或名字，留空用第一台" }
+    ]
+  }
+}

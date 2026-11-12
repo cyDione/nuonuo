@@ -25,6 +25,7 @@ const sdk = {
   apiVersion: 1,
   definePlugin: p => p,
   defineChannel: makeDefineChannel(z),
+  defineComputer: c => c,
   ChannelError,
   oauth,
   appToken,
@@ -182,6 +183,11 @@ const handlers = {
     if (typeof fn !== 'function') throw new Error(`插件没有「${name}」`)
     return await fn(pluginCtx, input)
   },
+  async computer({ computer, method, args }) {
+    const k = (plugin.computers ?? []).find(c => c.id === computer)
+    if (!k || !['status', 'wake', 'exec', 'keepAwake'].includes(method) || typeof k[method] !== 'function') throw new Error(`云电脑 ${computer} 没有 ${method}`)
+    return await k[method](pluginCtx, args)
+  },
   async inlineContext({ input }) { return typeof plugin.inlineContext === 'function' ? await plugin.inlineContext(pluginCtx, input) : undefined },
   async engine({ view }) { engineView = view },
 }
@@ -223,6 +229,8 @@ try {
       id: plugin.id, name: plugin.name, version: plugin.version, description: plugin.description,
       writes: plugin.writes ?? [], skills: plugin.skills ?? [], mcpServers: plugin.mcpServers ?? [], hasInlineContext: typeof plugin.inlineContext === 'function',
       windowCalls: Object.keys(plugin.windowCalls ?? {}).filter(n => typeof plugin.windowCalls[n] === 'function'),
+      computers: (plugin.computers ?? []).map(k => ({ id: k?.id, title: k?.title, description: k?.description, capabilities: k?.capabilities,
+        has: Object.fromEntries(['status', 'wake', 'exec', 'keepAwake'].map(m => [m, typeof k?.[m] === 'function'])) })),
       sources: (plugin.sources ?? []).map(k => ({
         id: k.id, title: k.title, icon: k.icon, description: k.description, fields: k.fields, defaultEnabled: k.defaultEnabled, actions: k.actions, writes: k.writes,
         capabilities: k.capabilities,

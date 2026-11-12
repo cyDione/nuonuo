@@ -6,7 +6,7 @@ import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, 
 import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@nuonuo/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@nuonuo/db'
 import { BUILT_IN_PLUGINS } from '@nuonuo/plugins'
-import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@nuonuo/sources'
+import { computerExtension, Computers, githubKind, PluginManager, Routines, routinesKind, runApproved, SourceRegistry } from '@nuonuo/sources'
 import { Devices } from './clients'
 import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@nuonuo/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -46,6 +46,7 @@ export interface Runtime {
   browser: BrowserManager
   browserPath?: string
   plugins: PluginManager
+  computers: Computers
   mcp: McpManager
   /** Paired client devices (client protocol). */
   devices: Devices
@@ -174,6 +175,8 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         engine.reply({ conversationId: watchdog.conversation(), text: `我刚改了${what}。不同意的话告诉我，或者在${where}里恢复到上一版。` })
       }),
     })
+    const computers = new Computers(() => plugins.computers())
+    reviewer.registerExecutor('computer', input => runApproved(computers, input))
     registerAgents(store, agents, engine, combineExtensions(
       gatedSourceExtension(combineExtensions(sources.agentExtensions(id => access.settings().sources[id] === 'read'), plugins.agentExtensions()), access, reviewer,
         () => new Set([...sources.askFirstTools(), ...plugins.askFirstTools()])),
@@ -189,6 +192,11 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       skillsExtension(skills),
       localAppsExtension(new LocalApps(access, reviewer)),
       mcpExtension(mcp, engine, reviewer),
+      computerExtension(computers, {
+        blobs: agents.blobs, mode: () => engine.execution().environment, push: (sessionId, payload) => store.atomic(() => agents.push(sessionId, payload)),
+        limits: () => engine.execution(),
+        gate: (ticket, sessionId, command, input) => reviewer.gateShell(ticket, sessionId, command, String(input.cwd ?? ''), { tool: 'computer', input }),
+      }),
       { gateShell: (ticket, sessionId, command, cwd) => reviewer.gateShell(ticket, sessionId, command, cwd) },
     ))
     watchdog.register()
@@ -211,7 +219,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, access, uploadsDir, skills, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, mcp, devices: new Devices(store), startedAt: Date.now(),
+      config, store, secrets, access, uploadsDir, skills, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, computers, mcp, devices: new Devices(store), startedAt: Date.now(),
       startAgents() {
         engine.mainConversation()
         agents.recover(session => engine.recoveryNote(session.id, session.role))

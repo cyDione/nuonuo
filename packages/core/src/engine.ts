@@ -36,11 +36,16 @@ export interface ExecutionSettings {
   /** Existing directories a task may be given as its working directory (in addition to a fresh one under work/). */
   workspaceRoots: string[]
   sandbox: SandboxSettings
+  /**
+   * 执行环境: 'auto' runs a worker's shell on the cloud computer when a plugin connects one (this machine's shell stays as
+   * `local_shell`); 'local' keeps it here and offers the cloud computer as `computer_shell`.
+   */
+  environment: 'auto' | 'local'
 }
 
 export const DEFAULT_EXECUTION: ExecutionSettings = {
   maxWorkers: 3, foregroundSeconds: 5, timeoutMinutes: 30, blockedCommands: ['sudo', 'su', 'shutdown', 'reboot', 'mkfs'], workspaceRoots: [],
-  sandbox: DEFAULT_SANDBOX,
+  sandbox: DEFAULT_SANDBOX, environment: 'auto',
 }
 
 export interface EngineOptions {
