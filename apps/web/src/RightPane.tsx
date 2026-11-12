@@ -11,6 +11,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { api, type AccessSettings, type AppLevel, type AuditEntry, type ExecutionSettings, type InstructionsState, type Level, type LocalApp, type Persona, type ReviewSettings, type Routine, type SourceInfo, type Ticket } from './api'
 import { BrowserWatch } from './watch'
 import { SkillsSection } from './skills'
+import { MoodSection } from './mood'
 import { openActivity, openTask, useActivityOpen, useLive } from './live'
 import { Avatar, isMascot, Mascot, MASCOT, statusLine, usePersona } from './persona'
 import { go } from './route'
@@ -205,6 +206,7 @@ function WhoTab() {
       </div>
       <p className="mt-2.5 text-[11px] text-faint">{tx('点开看全文，可以直接改。')}</p>
     </section>
+    <MoodSection Head={Head} />
     <SkillsSection Head={Head} LinkBtn={LinkBtn} />
     {pending.length > 0 && <section className="rounded-2xl bg-sunken px-3.5 py-3">
       <Head title={tx('新学到的，等你确认')} count={pending.length} />
