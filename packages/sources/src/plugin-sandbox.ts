@@ -19,7 +19,7 @@ import type { NuonuoPlugin, PluginManifest, PluginMcpServer } from './plugins'
 import type { SecretPort } from './registry'
 
 interface ToolDef { description: string; inputSchema: Record<string, unknown> }
-interface SourceSnapshot { authorized?: boolean; routerPrompt?: string; workerPrompt?: string; workerEnv?: Record<string, string>; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef>; threadInfo: Record<string, string> }
+interface SourceSnapshot { authorized?: boolean; routerPrompt?: string; workerPrompt?: string; workerEnv?: Record<string, string>; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef>; threadInfo: Record<string, string>; homeThread?: string }
 interface Snapshot { plugin: { routerPrompt?: string; workerPrompt?: string; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef> }; sources: Record<string, SourceSnapshot> }
 interface HelloSource { id: string; title: string; icon?: string; description: string; fields: SourceKind['fields']; defaultEnabled?: boolean; actions?: SourceKind['actions']; writes?: string[]; configSchema: Record<string, unknown> | null; capabilities?: SourceKind['capabilities']; has: Record<string, boolean>; validStart: boolean }
 interface Hello { plugin: { id: string; name?: string; version?: string; description?: string; writes: string[]; skills: NuonuoPlugin['skills']; mcpServers: PluginMcpServer[]; sources: HelloSource[] }; snapshot: Snapshot }
@@ -279,6 +279,7 @@ export class PluginSandbox {
         ...(has('allowed') ? { allowed: (_ctx, actor) => sandbox.allowedActors.get(s.id)?.get(actor) ?? false } : {}),
         ...(has('send') ? { send: async (ctx, message) => { await sandbox.prepare(ctx); return await sandbox.call('send', { source: s.id, message }) as { url?: string } | 'gone' } } : {}),
         ...(has('threadInfo') ? { threadInfo: (_ctx, threadId) => snap()?.threadInfo?.[threadId] } : {}),
+        ...(has('homeThread') ? { homeThread: () => snap()?.homeThread } : {}),
         ...(has('routerPrompt') ? { routerPrompt: () => snap()?.routerPrompt } : {}),
         ...(has('workerPrompt') ? { workerPrompt: () => snap()?.workerPrompt } : {}),
         ...(has('workerEnv') ? { workerEnv: () => snap()?.workerEnv ?? {} } : {}),

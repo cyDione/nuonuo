@@ -292,12 +292,30 @@ describe('channel layer', () => {
     expect(theirs!.text).toBe('[图片]')
   })
 
+  it('sends notices to the private chat an allowed account last wrote from, only once the owner turns that on', async () => {
+    setup()
+    const tg = new FakeTelegram()
+    registry.register(telegramKind({ fetch: tg.fetch }))
+    const config = { token: tg.token, apiUrl: 'http://fake-telegram.local', allowed: ['42'] }
+    await registry.save('telegram', { enabled: true, config })
+    tg.say({ id: 7 }, 'hi')
+    await registry.pollNow('telegram')
+    await vi.waitFor(() => expect(triggers()).toHaveLength(1))
+    expect(registry.noticeTargets()).toEqual([])
+    await registry.save('telegram', { enabled: true, config: { ...config, notices: true } })
+    expect(registry.noticeTargets()).toEqual([])
+    tg.say({ id: 42 }, '在吗')
+    await registry.pollNow('telegram')
+    await vi.waitFor(() => expect(triggers()).toHaveLength(2))
+    expect(registry.noticeTargets()).toEqual([{ source: 'telegram', threadId: expect.stringMatching(/^telegram:42:/) }])
+  })
+
   it('adds the shared settings fields and reports a chat it can no longer reach as gone', async () => {
     setup()
     const dc = new FakeDiscord()
     const kind = discordKind({ fetch: dc.fetch, socket: dc.socket })
     registry.register(kind)
-    expect(registry.list().find(s => s.id === 'discord')!.fields.map(f => f.key)).toEqual(['token', 'apiUrl', 'gatewayUrl', 'allowed', 'approvals'])
+    expect(registry.list().find(s => s.id === 'discord')!.fields.map(f => f.key)).toEqual(['token', 'apiUrl', 'gatewayUrl', 'allowed', 'approvals', 'notices'])
     const ctx = { config: { token: dc.token, apiUrl: 'http://fake-discord.local/api/v10', allowed: [], approvals: false }, state: { get: () => undefined, set: () => {} }, log: () => {}, signal: new AbortController().signal } as any
     expect(await kind.send!(ctx, { messageId: 'm', threadId: 'discord:404:0', text: 'hi' })).toBe('gone')
     expect(await kind.send!(ctx, { messageId: 'm', threadId: 'telegram:1:0', text: 'hi' })).toBe('gone')

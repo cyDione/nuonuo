@@ -93,7 +93,9 @@ export default ({ definePlugin, defineChannel, ChannelError, z }) => definePlugi
 | `maxLength` | 数字 | 一条消息最多多少字，超过就切开 |
 | `edit` | 布尔 | 能不能改已发的消息（需要 `edit()`） |
 | `buttons` | 布尔 | 确认用按钮还是回复文字 |
-| `typing`、`files`、`proactive` | | 先声明，后面的版本会用上 |
+| `files` | `{ in, out, maxBytes }` | `in`：允许的账号发来的图片、语音、文件经 `download()` 存进附件，agent 能直接打开 |
+| `proactive` | 布尔 | 能不能不等对方先说话就发消息；为真时多一个「把通知也发到这里」开关 |
+| `typing` | | 先声明，后面的版本会用上 |
 
 ## 在聊天软件里回答确认
 
@@ -105,6 +107,14 @@ export default ({ definePlugin, defineChannel, ChannelError, z }) => definePlugi
 - 在网页或其他设备上回答了，聊天里的卡片会标上「已同意 / 已拒绝」，按钮去掉。
 
 这个开关默认关着：打开后，谁拿到你的聊天账号，谁就能批准命令。
+
+## 在聊天软件里收通知
+
+打开「设置 → 来源 → 这个软件」里的**把通知也发到这里**后，「设置 → 通知」放行的通知（安静时间、各类开关照旧生效）也会发到你最近一次私聊机器人的那个对话。先给机器人发一条消息，它才知道往哪发。
+
+已经到过这个聊天的不会重复：这里派的活的回复本来就发在这里；允许在这里回答确认时，确认也已经发过来了。
+
+通知的出口是一组 sink（`apps/daemon/src/notices.ts`）：应用（桌面、浏览器、配对设备）和聊天软件各是一个，加新出口就是再加一个 sink。渠道只需要声明 `proactive`，Channel 层会记下主人的私聊并提供 `homeThread()`。
 
 ## 内置渠道
 

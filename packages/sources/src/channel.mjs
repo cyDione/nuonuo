@@ -120,12 +120,15 @@ export function makeDefineChannel(z) {
     const schema = base.extend({
       allowed: z.array(z.string().trim().min(1)).default([]),
       approvals: z.boolean().default(false),
+      notices: z.boolean().default(false),
     })
     const idHint = spec.idHint ?? `你的 ${title} ID`
     const fields = [
       ...(spec.fields ?? []),
       { key: 'allowed', type: 'list', label: '允许派活的账号', placeholder: idHint, hint: `每行一个。其他人发来的消息会被忽略。不知道自己的 ID？给机器人发 /start。` },
       { key: 'approvals', type: 'switch', label: '允许在这里回答「要不要做」', hint: caps.buttons ? `需要确认时发来「同意 / 拒绝」按钮，只有上面的账号能点。` : `需要确认时发来一条消息，允许的账号回复「同意」或「拒绝」。` },
+      // Notices need a chat to start a message in: the last private chat an allowed account wrote from.
+      ...(caps.proactive ? [{ key: 'notices', type: 'switch', label: '把通知也发到这里', hint: `按 设置 → 通知 的规则，发到你最近一次私聊机器人的那个对话。先给机器人发一条消息。` }] : []),
     ]
 
     // One io per source context: adapters may cache their session on it (a WeakMap keyed by io).
@@ -205,6 +208,7 @@ export function makeDefineChannel(z) {
         return
       }
       const threadId = threadOf(ctx, chat, target.topic)
+      if (ok && m.chat.type === 'private' && ctx.state.get('home') !== chat) ctx.state.set('home', chat)
       const pending = ctx.state.get(`apv:${threadId}`)
       if (pending && ok && ctx.config.approvals && (YES.test(text) || NO.test(text))) {
         await answer(ctx, threadId, pending, YES.test(text), from, target)
@@ -334,6 +338,10 @@ export function makeDefineChannel(z) {
       ...(typeof spec.poll === 'function' ? { poll: ctx => spec.poll(ioOf(ctx)) } : {}),
       allowed,
       send,
+      homeThread(ctx) {
+        const chat = ctx.state.get('home')
+        return caps.proactive && ctx.config.notices && chat != null ? threadOf(ctx, String(chat)) : undefined
+      },
       threadInfo(_ctx, threadId) {
         const t = parseChannelThread(id, threadId)
         if (!t) return undefined

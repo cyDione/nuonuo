@@ -120,6 +120,7 @@ function snapshot() {
       workerEnv: e.running ? safe(() => k.workerEnv?.(e.ctx, stubTicket), undefined) : undefined,
       routerTools: e.running ? toolDefs(safe(() => k.routerTools?.(e.ctx), {})) : {},
       workerTools: e.running ? toolDefs(safe(() => k.workerTools?.(e.ctx, stubTicket, {}), {})) : {},
+      homeThread: e.running ? safe(() => k.homeThread?.(e.ctx), undefined) : undefined,
       threadInfo: Object.fromEntries(engineView.followed.filter(f => f.threadId.startsWith(`${id}:`))
         .map(f => [f.threadId, safe(() => k.threadInfo?.(e.ctx, f.threadId), undefined)]).filter(([, v]) => v)),
     }
@@ -212,7 +213,7 @@ try {
         id: k.id, title: k.title, icon: k.icon, description: k.description, fields: k.fields, defaultEnabled: k.defaultEnabled, actions: k.actions, writes: k.writes,
         capabilities: k.capabilities,
         configSchema: safe(() => { const s = z.toJSONSchema(k.schema, { io: 'input', unrepresentable: 'any' }); delete s.$schema; return s }, null),
-        has: Object.fromEntries(['authorized', 'poll', 'allowed', 'send', 'threadInfo', 'routerPrompt', 'routerTools', 'workerPrompt', 'workerTools', 'workerEnv', 'http'].map(m => [m, typeof k[m] === 'function'])),
+        has: Object.fromEntries(['authorized', 'poll', 'allowed', 'send', 'threadInfo', 'homeThread', 'routerPrompt', 'routerTools', 'workerPrompt', 'workerTools', 'workerEnv', 'http'].map(m => [m, typeof k[m] === 'function'])),
         validStart: typeof k.start === 'function',
       })),
     },
