@@ -18,6 +18,7 @@ export default defineConfig({
       // The plugin sandbox starts this file in its own process (packages/sources/src/plugin-sandbox.ts).
       cpSync('../../packages/sources/src/plugin-runner.mjs', 'dist/plugin-runner.mjs')
       cpSync('../../packages/sources/src/channel.mjs', 'dist/channel.mjs')
+      cpSync('../../packages/sources/src/auth.mjs', 'dist/auth.mjs')
     },
   },
 })

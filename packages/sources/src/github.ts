@@ -15,7 +15,8 @@ import { tool } from 'ai'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import type { DeviceCode, SourceContext, SourceKind } from './kind'
+import { oauth } from './auth.mjs'
+import type { SourceContext, SourceKind } from './kind'
 
 export const MARKER = '<!-- nuonuo -->'
 
@@ -100,49 +101,23 @@ export function githubKind(deps: { fetch?: typeof fetch; token?: () => Promise<s
     return value
   }
 
-  // ── OAuth device flow ──────────────────────────────────────────────────────
-  type Pending = { deviceCode: string; interval: number; expires: number; status: 'pending' | 'done' | 'error'; error?: string; login?: string }
-  let pending: Pending | undefined
-
-  async function oauthPost(ctx: SourceContext<GithubConfig>, path: string, params: Record<string, string>): Promise<Record<string, any>> {
-    const res = await f(`${ctx.config.oauthUrl.replace(/\/$/, '')}${path}`, {
-      method: 'POST', signal: AbortSignal.timeout(30_000),
-      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'nuonuo' },
-      body: new URLSearchParams(params),
-    })
-    const data = await res.json().catch(() => ({})) as Record<string, any>
-    if (!res.ok && !data.error) data.error = `HTTP ${res.status}`
-    return data
-  }
-
-  /** Polls GitHub until the owner entered the code (or it expired), then stores the token. */
-  async function waitForGrant(ctx: SourceContext<GithubConfig>, p: Pending): Promise<void> {
-    while (pending === p && p.status === 'pending') {
-      await new Promise(r => setTimeout(r, p.interval * 1000))
-      if (pending !== p) return
-      if (Date.now() > p.expires) { Object.assign(p, { status: 'error', error: '验证码已过期，请重新点「授权 GitHub」' }); return }
-      let data: Record<string, any>
-      try {
-        data = await oauthPost(ctx, '/login/oauth/access_token', { client_id: clientId(ctx), device_code: p.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' })
-      } catch { continue } // a network blip: try again at the next interval
-      if (data.access_token) {
-        try {
-          const me = await new GithubApi(ctx.config.apiUrl, data.access_token, f).get<{ login: string }>('/user')
-          ctx.secret.set('token', data.access_token)
-          ctx.state.set('login', me.login)
-          ctx.facts({ 账号: me.login, 授权: 'OAuth 授权' })
-          Object.assign(p, { status: 'done', login: me.login })
-        } catch (error) {
-          Object.assign(p, { status: 'error', error: `拿到令牌但读取账号失败：${error instanceof Error ? error.message : String(error)}` })
-        }
-        return
-      }
-      if (data.error === 'authorization_pending') continue
-      if (data.error === 'slow_down') { p.interval = Number(data.interval) || p.interval + 5; continue }
-      Object.assign(p, { status: 'error', error: data.error === 'access_denied' ? '你在 GitHub 上取消了授权' : data.error === 'expired_token' ? '验证码已过期，请重新点「授权 GitHub」' : `授权失败：${data.error_description ?? data.error}` })
-      return
-    }
-  }
+  // OAuth device flow (shared, auth.mjs): no callback URL, so it works on a headless box reached over `ssh -L`.
+  const auth = oauth<GithubConfig>({
+    flow: 'device', label: 'GitHub', fetch: f,
+    clientId: config => config.clientId || DEFAULT_GITHUB_CLIENT_ID,
+    deviceUrl: config => `${config.oauthUrl.replace(/\/$/, '')}/login/device/code`,
+    tokenUrl: config => `${config.oauthUrl.replace(/\/$/, '')}/login/oauth/access_token`,
+    scopes: GITHUB_SCOPES.split(' '),
+    missingClient: '先在下面填写 OAuth App 的 Client ID 并保存（GitHub → Settings → Developer settings → OAuth Apps，勾选 Enable Device Flow）',
+    deviceErrorHint: error => error === 'device_flow_disabled' ? '：这个 OAuth App 没有勾选 Enable Device Flow' : error === 'unauthorized_client' || error === 'Not Found' ? '：Client ID 不对' : undefined,
+    disconnectConfirm: '断开后智能体将不能再读写你的 GitHub（除非本机还有 GITHUB_TOKEN 或 gh 登录）。确定断开？',
+    onGrant: async (ctx, token) => {
+      const me = await new GithubApi(ctx.config.apiUrl, token, f).get<{ login: string }>('/user')
+      ctx.state.set('login', me.login)
+      return { 账号: me.login, 授权: 'OAuth 授权' }
+    },
+    onDisconnect: ctx => ctx.facts({ 授权: '未授权' }),
+  })
 
   const addressed = (ctx: SourceContext<GithubConfig>, text: string) => text.toLowerCase().includes(ctx.config.mention.toLowerCase())
   // Comments posted before the rename carry the old marker; they are ours too, so never answer them.
@@ -247,17 +222,11 @@ export function githubKind(deps: { fetch?: typeof fetch; token?: () => Promise<s
     await pollFollowed(ctx, api)
   }
 
-  return {
+  return auth.source({
     id: 'github',
     title: 'GitHub',
     description: '在 Issue / PR 里 @ 智能体即可派活；它会在原处回复、开 PR，并跟进评审与 CI。点「授权 GitHub」用你的 GitHub 账号登录授权即可接入。',
     schema: GithubConfigSchema,
-    actions: [
-      { id: 'authorize', label: '授权 GitHub', path: 'oauth/device', show: 'unauthorized', primary: true },
-      { id: 'reauthorize', label: '重新授权', path: 'oauth/device', show: 'authorized' },
-      { id: 'disconnect', label: '断开授权', path: 'oauth/disconnect', show: 'authorized', confirm: '断开后智能体将不能再读写你的 GitHub（除非本机还有 GITHUB_TOKEN 或 gh 登录）。确定断开？' },
-    ],
-    authorized: ctx => Boolean(oauthToken(ctx)),
     fields: [
       { key: 'repos', type: 'list', label: '监听的仓库', placeholder: 'owner/repo', hint: '每行一个' },
       { key: 'mention', type: 'text', label: '唤起词', hint: '评论中包含它才算在叫智能体（智能体以你的账号发言，所以不能用 @你自己）' },
@@ -351,32 +320,5 @@ ${ref ? `This task came from GitHub ${ref.repo} #${ref.number}. Read it first: \
       }
       return env
     },
-    async http(ctx, _request, path, info) {
-      if (info.public) return undefined
-      if (path === 'oauth/device') {
-        if (!clientId(ctx)) return Response.json({ error: '先在下面填写 OAuth App 的 Client ID 并保存（GitHub → Settings → Developer settings → OAuth Apps，勾选 Enable Device Flow）' }, { status: 400 })
-        const data = await oauthPost(ctx, '/login/device/code', { client_id: clientId(ctx), scope: GITHUB_SCOPES })
-        if (!data.device_code) {
-          const hint = data.error === 'device_flow_disabled' ? '：这个 OAuth App 没有勾选 Enable Device Flow' : data.error === 'unauthorized_client' || data.error === 'Not Found' ? '：Client ID 不对' : ''
-          return Response.json({ error: `GitHub 拒绝了授权请求（${data.error_description ?? data.error}）${hint}` }, { status: 400 })
-        }
-        const p: Pending = { deviceCode: data.device_code, interval: data.interval != null ? Number(data.interval) : 5, expires: Date.now() + (Number(data.expires_in) || 900) * 1000, status: 'pending' }
-        pending = p
-        void waitForGrant(ctx, p)
-        const device: DeviceCode = { userCode: data.user_code, verificationUri: data.verification_uri, expiresIn: Number(data.expires_in) || 900, poll: 'oauth/status' }
-        return Response.json({ device })
-      }
-      if (path === 'oauth/status') {
-        if (!pending) return Response.json({ status: 'error', error: '没有进行中的授权' })
-        return Response.json({ status: pending.status, ...(pending.error ? { error: pending.error } : {}), ...(pending.login ? { login: pending.login } : {}) })
-      }
-      if (path === 'oauth/disconnect') {
-        pending = undefined
-        ctx.secret.delete('token')
-        ctx.facts({ 授权: '未授权' })
-        return Response.json({ ok: true })
-      }
-      return undefined
-    },
-  }
+  })
 }

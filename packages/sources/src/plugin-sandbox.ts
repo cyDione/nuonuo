@@ -73,7 +73,7 @@ export class PluginSandbox {
     const zodEntry = createRequire(import.meta.url).resolve('zod')
     const zodDir = realpathSync(packageRoot(zodEntry))
     const child = fork(runner, [realpathSync(zodEntry), realpathSync(this.manifest.entry), this.manifest.id, dir], {
-      execArgv: [permissionFlag(), `--allow-fs-read=${realpathSync(runner)}`, `--allow-fs-read=${realpathSync(join(dirname(runner), 'channel.mjs'))}`, `--allow-fs-read=${zodDir}`, `--allow-fs-read=${dir}`, `--allow-fs-write=${dir}`],
+      execArgv: [permissionFlag(), `--allow-fs-read=${realpathSync(runner)}`, `--allow-fs-read=${realpathSync(join(dirname(runner), 'channel.mjs'))}`, `--allow-fs-read=${realpathSync(join(dirname(runner), 'auth.mjs'))}`, `--allow-fs-read=${zodDir}`, `--allow-fs-read=${dir}`, `--allow-fs-write=${dir}`],
       cwd: dir, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env: pluginEnv(), serialization: 'json',
     })
     this.child = child
