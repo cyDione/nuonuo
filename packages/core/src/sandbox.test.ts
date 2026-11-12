@@ -9,7 +9,7 @@ import { sandboxApplies, sandboxCommand, type SandboxSettings } from './sandbox'
 const ticket = (threadId: string, directory = '/tmp/x'): Ticket => ({ id: 'tkt_t', name: 'n', title: 't', note: null, threadId, origin: { triggerIds: [] },
   mandate: { by: 'owner', strength: 'explicit', triggerIds: [], at: 0 }, directory, sessionId: 's', latestReport: null, attention: null, ended: null, createdAt: 0, updatedAt: 0 })
 
-const IMAGE = 'mirror.gcr.io/library/node:22-bookworm-slim'
+const IMAGE = 'mirror.gcr.io/library/node:lts-bookworm-slim'
 const dockerReady = spawnSync('docker', ['image', 'inspect', IMAGE], { stdio: 'ignore' }).status === 0
 
 describe('sandbox', () => {

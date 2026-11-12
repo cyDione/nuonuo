@@ -21,6 +21,12 @@ export interface ChannelPreset {
   apiUrl: string
 }
 
+/**
+ * Meta keeps a Graph API version for about two years (v26.0: July 2026 → mid 2028). The generated plugin keeps it in its
+ * apiUrl field, so an owner can move to a newer version without regenerating; bump this when Meta retires it.
+ */
+const GRAPH_VERSION = 'v26.0'
+
 const generic = (inbound: Inbound, summary: string): ChannelPreset => ({
   title: 'MyChat', summary, capabilities: { inbound, threads: 'none', format: 'markdown', maxLength: 4000, buttons: false, edit: false, proactive: true },
   idHint: '你的用户 ID', setup: ['在软件的开发者后台创建机器人，拿到 token。'], apiUrl: 'https://chat.example.com/api',
@@ -61,7 +67,7 @@ export const CHANNEL_PRESETS: Record<string, ChannelPreset> = {
   whatsapp: {
     title: 'WhatsApp', summary: 'WhatsApp Cloud API（webhook 回调，24 小时内才能回复）',
     capabilities: { inbound: 'webhook', threads: 'none', format: 'plain', maxLength: 4096, edit: false, buttons: true, groups: { mention: false, replyToBot: false }, proactive: false },
-    idHint: '你的手机号（国家码开头，不带 +）', apiUrl: 'https://graph.facebook.com/v21.0',
+    idHint: '你的手机号（国家码开头，不带 +）', apiUrl: `https://graph.facebook.com/${GRAPH_VERSION}`,
     setup: ['在 Meta for Developers 创建应用并添加 WhatsApp，拿到 access token 和 phone number id。', 'Webhook 回调地址填 https://<你的公网地址>/plugin/<插件 id>/events，校验 x-hub-signature-256。'],
   },
   'wechat-mp': {

@@ -14,7 +14,7 @@ export interface SandboxSettings {
   network: 'bridge' | 'none'
 }
 
-export const DEFAULT_SANDBOX: SandboxSettings = { mode: 'off', image: 'node:22-bookworm-slim', network: 'bridge' }
+export const DEFAULT_SANDBOX: SandboxSettings = { mode: 'off', image: 'node:lts-bookworm-slim', network: 'bridge' }
 
 const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 
