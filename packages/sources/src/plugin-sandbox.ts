@@ -22,7 +22,7 @@ interface ToolDef { description: string; inputSchema: Record<string, unknown> }
 interface SourceSnapshot { authorized?: boolean; routerPrompt?: string; workerPrompt?: string; workerEnv?: Record<string, string>; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef>; threadInfo: Record<string, string>; homeThread?: string }
 interface Snapshot { plugin: { routerPrompt?: string; workerPrompt?: string; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef> }; sources: Record<string, SourceSnapshot> }
 interface HelloSource { id: string; title: string; icon?: string; description: string; fields: SourceKind['fields']; defaultEnabled?: boolean; actions?: SourceKind['actions']; writes?: string[]; configSchema: Record<string, unknown> | null; capabilities?: SourceKind['capabilities']; has: Record<string, boolean>; validStart: boolean }
-interface Hello { plugin: { id: string; name?: string; version?: string; description?: string; writes: string[]; skills: NuonuoPlugin['skills']; mcpServers: PluginMcpServer[]; sources: HelloSource[]; hasInlineContext?: boolean }; snapshot: Snapshot }
+interface Hello { plugin: { id: string; name?: string; version?: string; description?: string; writes: string[]; skills: NuonuoPlugin['skills']; mcpServers: PluginMcpServer[]; sources: HelloSource[]; hasInlineContext?: boolean; windowCalls?: string[] }; snapshot: Snapshot }
 
 const here = dirname(fileURLToPath(import.meta.url))
 /** The runner sits next to this module in the repository and next to cli.mjs in the built service. */
@@ -45,6 +45,8 @@ export const sandboxWanted = () => process.env.NUONUO_PLUGIN_SANDBOX !== 'off'
 export interface SandboxHost {
   store: Store
   secrets?: SecretPort
+  /** The plugin's own settings (secrets included), handed to the process at start. */
+  settings?(): Record<string, unknown>
   /** Called when the process ends on its own (crash, exit), with why. */
   onExit(reason: string): void
 }
@@ -156,7 +158,7 @@ export class PluginSandbox {
       msg.error ? w.reject(new Error(msg.error)) : w.resolve(msg.value)
       return
     }
-    if (msg?.kind === 'ask' && msg.type === 'init') { this.answer(msg.id, { pluginState: this.readState(`plugin:${this.manifest.id}:state:`) }); return }
+    if (msg?.kind === 'ask' && msg.type === 'init') { this.answer(msg.id, { pluginState: this.readState(`plugin:${this.manifest.id}:state:`), pluginSettings: this.host.settings?.() ?? {} }); return }
     if (msg?.kind === 'ask' && msg.type === 'approval') {
       const ctx = typeof msg.source === 'string' ? this.ctxs.get(msg.source) : undefined
       Promise.resolve().then(() => {
@@ -234,6 +236,9 @@ export class PluginSandbox {
     } catch {}
   }
 
+  /** Hands the process the plugin's settings after the owner changed them. */
+  updateSettings(values: Record<string, unknown>): Promise<unknown> { return this.call('settings', { values }) }
+
   /** Hands the process the context of one of its sources (settings, state, runtime secrets) when it changes. */
   private prepare(ctx: SourceContext<any>): Promise<unknown> {
     this.ctxs.set(ctx.id, ctx)
@@ -305,6 +310,7 @@ export class PluginSandbox {
       routerPrompt: () => this.snap.plugin.routerPrompt,
       workerPrompt: () => this.snap.plugin.workerPrompt,
       ...(p.hasInlineContext ? { inlineContext: (_ctx, input) => this.call<string | null>('inlineContext', { input }).then(t => t ?? undefined) } : {}),
+      ...(p.windowCalls?.length ? { windowCalls: Object.fromEntries(p.windowCalls.map(name => [name, (_ctx: unknown, input: unknown) => this.call('windowCall', { name, input })])) } : {}),
       sandbox: this,
     }
     return plugin

@@ -15,11 +15,12 @@ import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
 import { appToken, oauth } from './auth.mjs'
 import { ChannelError, makeDefineChannel } from './channel.mjs'
-import type { SourceKind } from './kind'
+import type { FieldSpec, SourceKind } from './kind'
 import { installDependencies } from './plugin-deps'
 import { fetchPlugin, parseOrigin } from './plugin-install'
 import { PluginSandbox, sandboxWanted } from './plugin-sandbox'
-import type { SourceRegistry } from './registry'
+import { coerce, defaultValue, readSettings, readWindow, windowFile, type PluginWindow } from './plugin-window'
+import { SECRET_SET, type SourceRegistry } from './registry'
 
 export interface NuonuoPlugin {
   id: string
@@ -51,6 +52,11 @@ export interface NuonuoPlugin {
   inlineContext?(ctx: PluginContext, input: PluginTurnInput): string | undefined | Promise<string | undefined>
   /** Procedures (会做的事) the plugin brings. They arrive switched off, for the owner to turn on in 它是谁. */
   skills?: SkillInput[]
+  /**
+   * What the plugin's window (package.json `nuonuo.window`) may ask for: its page calls `nuonuo.call(name, input)` and
+   * gets back what the function returns (plain JSON). Nothing else of the plugin is reachable from the page.
+   */
+  windowCalls?: Record<string, (ctx: PluginContext, input: unknown) => unknown>
 }
 
 /** What a plugin's own tools and prompts receive. */
@@ -60,6 +66,8 @@ export interface PluginContext {
   dir: string
   /** The plugin's small persistent state. */
   state: { get<T>(key: string): T | undefined; set(key: string, value: unknown): void }
+  /** What the owner set in the plugin's settings (package.json `nuonuo.settings`), secrets included. */
+  settings: { get<T = unknown>(key: string): T | undefined }
   log(...args: unknown[]): void
 }
 
@@ -98,7 +106,13 @@ export const sdk = { apiVersion: PLUGIN_API_VERSION, definePlugin, defineChannel
 export type PluginSdk = typeof sdk
 export type PluginModule = NuonuoPlugin | ((sdk: PluginSdk) => NuonuoPlugin | Promise<NuonuoPlugin>)
 
-export interface PluginManifest { id: string; name: string; version: string; description: string; dir: string; entry: string; apiVersion: number }
+export interface PluginManifest {
+  id: string; name: string; version: string; description: string; dir: string; entry: string; apiVersion: number
+  /** The settings form (package.json `nuonuo.settings`). */
+  settings?: FieldSpec[]
+  /** The plugin's own window (package.json `nuonuo.window`). */
+  window?: PluginWindow
+}
 
 export interface PluginInfo extends PluginManifest {
   enabled: boolean
@@ -149,7 +163,70 @@ export class PluginManager {
   private context(manifest: PluginManifest): PluginContext {
     const key = (k: string) => `plugin:${manifest.id}:state:${k}`
     return { id: manifest.id, dir: manifest.dir, log: (...args) => console.log(`[plugin ${manifest.id}]`, ...args),
-      state: { get: <T>(k: string) => kvGet<T>(this.store, key(k)), set: (k, v) => kvSet(this.store, key(k), v) } }
+      state: { get: <T>(k: string) => kvGet<T>(this.store, key(k)), set: (k, v) => kvSet(this.store, key(k), v) },
+      settings: { get: <T>(k: string) => this.settingValues(manifest)[k] as T | undefined } }
+  }
+
+  private manifestOf(id: string): PluginManifest {
+    const manifest = this.scan().find(m => m.id === id)
+    if (!manifest) throw new Error(`没有插件 ${id}`)
+    return manifest
+  }
+
+  private secretRef = (id: string, key: string) => `plugin:${id}:setting:${key}`
+
+  /** The plugin's settings with secrets filled in, as its code sees them. */
+  private settingValues(manifest: PluginManifest): Record<string, unknown> {
+    const saved = kvGet<Record<string, unknown>>(this.store, `plugin:${manifest.id}:settings`) ?? {}
+    return Object.fromEntries((manifest.settings ?? []).map(f => [f.key, f.type === 'secret'
+      ? this.registry.secretStore?.get(this.secretRef(manifest.id, f.key)) ?? ''
+      : (() => { try { return f.key in saved ? coerce(f, saved[f.key]) : defaultValue(f) } catch { return defaultValue(f) } })()]))
+  }
+
+  /** The settings form of a plugin and what is set, secrets shown only as set or not. */
+  settingsOf(id: string): { fields: FieldSpec[]; values: Record<string, unknown> } {
+    const manifest = this.manifestOf(id)
+    const values = this.settingValues(manifest)
+    for (const f of manifest.settings ?? []) if (f.type === 'secret') values[f.key] = values[f.key] ? SECRET_SET : ''
+    return { fields: manifest.settings ?? [], values }
+  }
+
+  /** Saves a plugin's settings (unknown keys are dropped; a masked secret keeps the stored one, empty clears it). */
+  async saveSettings(id: string, input: Record<string, unknown>): Promise<{ fields: FieldSpec[]; values: Record<string, unknown> }> {
+    const manifest = this.manifestOf(id)
+    const stored: Record<string, unknown> = {}
+    for (const f of manifest.settings ?? []) {
+      const v = input[f.key]
+      if (f.type === 'secret') {
+        const ref = this.secretRef(id, f.key)
+        if (typeof v === 'string' && v && v !== SECRET_SET) {
+          if (!this.registry.secretStore) throw new Error('没有可用的钥匙串，存不了密钥')
+          this.registry.secretStore.set(ref, v.slice(0, 4_000))
+        } else if (v === '' || v === null) this.registry.secretStore?.delete(ref)
+      } else stored[f.key] = v === undefined ? this.settingValues(manifest)[f.key] : coerce(f, v)
+    }
+    kvSet(this.store, `plugin:${id}:settings`, stored)
+    await this.sandboxes.get(id)?.updateSettings(this.settingValues(manifest)).catch(() => {})
+    return this.settingsOf(id)
+  }
+
+  /** The plugin's window, when it declares one. */
+  windowOf(id: string): PluginWindow | undefined { return this.manifestOf(id).window }
+
+  /** A file of the plugin's window, for the service to serve. */
+  windowFile(id: string, path: string): { body: Buffer; type: string } | undefined {
+    const manifest = this.scan().find(m => m.id === id)
+    return manifest?.window ? windowFile(manifest.dir, manifest.window, path) : undefined
+  }
+
+  /** Answers a call from the plugin's window page. */
+  async windowCall(id: string, name: string, input: unknown): Promise<unknown> {
+    const entry = this.loaded.get(id)
+    if (!entry) throw new Error('插件没开，打开开关后再试')
+    const fn = entry.plugin.windowCalls?.[name]
+    if (typeof fn !== 'function') throw new Error(`插件没有「${name}」`)
+    const value = await fn(this.context(entry.manifest), input)
+    return value === undefined ? null : JSON.parse(JSON.stringify(value))
   }
 
   /** A plugin's tools named `<id>_…`; others are dropped so they cannot pass for the app's own. */
@@ -320,6 +397,7 @@ export class PluginManager {
     await this.unload(id)
     for (const source of sources) this.registry.forget(source, kinds.get(source))
     rmSync(manifest.dir, { recursive: true, force: true })
+    for (const f of manifest.settings ?? []) if (f.type === 'secret') this.registry.secretStore?.delete(this.secretRef(id, f.key))
     for (const { key } of this.store.db.select({ key: schema.kv.key }).from(schema.kv).all()) if (key.startsWith(`plugin:${id}:`)) kvSet(this.store, key, null)
     this.skills?.removePlugin(id)
     this.errors.delete(id)
@@ -375,7 +453,7 @@ export class PluginManager {
 
   private async startSandbox(manifest: PluginManifest): Promise<NuonuoPlugin> {
     const box = new PluginSandbox(manifest, {
-      store: this.store, ...(this.registry.secretStore ? { secrets: this.registry.secretStore } : {}),
+      store: this.store, ...(this.registry.secretStore ? { secrets: this.registry.secretStore } : {}), settings: () => this.settingValues(manifest),
       onExit: reason => {
         if (this.sandboxes.get(manifest.id) !== box) return
         this.errors.set(manifest.id, reason)
@@ -417,8 +495,10 @@ function readManifest(dir: string): PluginManifest | undefined {
   const entry = resolve(dir, meta.plugin)
   if (!ID.test(id)) throw new Error(`插件 id "${id}" 不合法`)
   if (!entry.startsWith(dir + sep)) throw new Error('入口文件必须在插件目录内')
+  const settings = readSettings(meta.settings)
+  const window = readWindow(meta.window, dir)
   return { id, name: meta.name ?? pkg.name ?? id, version: pkg.version ?? '0.0.0', description: meta.description ?? pkg.description ?? '', dir, entry,
-    apiVersion: Number(meta.apiVersion ?? 1) }
+    apiVersion: Number(meta.apiVersion ?? 1), ...(settings.length ? { settings } : {}), ...(window ? { window } : {}) }
 }
 
 /** Runs a plugin inside the service (sandbox off). A query string busts Node's module cache so a re-enabled plugin picks up edits. */

@@ -4,6 +4,7 @@ import { describeError, KINDS, ModelError, PROVIDER_KINDS, PROVIDER_PRESETS, REA
 import { Hono, type Context } from 'hono'
 import { setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
+import { randomBytes } from 'node:crypto'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, relative } from 'node:path'
 import { Readable } from 'node:stream'
@@ -16,7 +17,7 @@ import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
 import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@nuonuo/core'
 import { kvGet, kvSet, newId, schema } from '@nuonuo/db'
-import { fireRoutine } from '@nuonuo/sources'
+import { BRIDGE_JS, fireRoutine, WINDOW_HEADERS } from '@nuonuo/sources'
 import { MOOD_PLUGIN_ID, moodView, resetMood, setMoodEnabled } from '@nuonuo/plugins'
 import { runDoctor } from './doctor'
 import { MAX_UPLOAD, Uploads } from './uploads'
@@ -53,6 +54,7 @@ export interface AppControl {
 
 /** `closing` aborts on shutdown so long-lived event streams end instead of holding the HTTP server open. */
 export function createApp(rt: Runtime, token: string, webRoot?: string, updater?: Updater, closing?: AbortSignal, control: AppControl = {}): Hono {
+  const windowNonce = randomBytes(12).toString('hex')
   const app = new Hono()
   const conversations = new Conversations(rt.store, rt.hub)
   const uploads = new Uploads(rt.store, rt.uploadsDir)
@@ -658,6 +660,23 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const { enabled } = await body(c, z.object({ enabled: z.boolean() }))
     try { return c.json({ plugin: await rt.plugins.setEnabled(c.req.param('id'), enabled) }) } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) }
   })
+  /** A plugin's settings form (package.json `nuonuo.settings`) and what is set; secrets show only as set. */
+  api.get('/plugins/:id/settings', async c => c.json(await pluginCall(async () => rt.plugins.settingsOf(c.req.param('id')))))
+  api.put('/plugins/:id/settings', async c => {
+    const { values } = await body(c, z.object({ values: z.record(z.string(), z.unknown()) }))
+    return c.json(await pluginCall(() => rt.plugins.saveSettings(c.req.param('id'), values)))
+  })
+  /** Where the plugin's window page is served (a sandboxed frame; see plugin-window.ts). */
+  api.get('/plugins/:id/window', async c => {
+    const win = await pluginCall(async () => rt.plugins.windowOf(c.req.param('id')))
+    if (!win) throw new HttpError(404, 'missing', '这个插件没有窗口')
+    return c.json({ window: { ...win, url: `/plugin-window/${c.req.param('id')}/${windowNonce}/${win.page.split('/').pop()}` } })
+  })
+  /** A call from the plugin's window page, relayed by the web UI's bridge. */
+  api.post('/plugins/:id/call', async c => {
+    const { name, input } = await body(c, z.object({ name: z.string().min(1).max(80), input: z.unknown().optional() }))
+    return c.json({ value: await pluginCall(() => rt.plugins.windowCall(c.req.param('id'), name, input ?? null)) })
+  })
   /** A source's own endpoints (owner only). */
   api.all('/sources/:id/http/*', async c => {
     const path = c.req.path.split('/http/').slice(1).join('/http/')
@@ -742,6 +761,19 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
 
   app.route('/api', api)
   app.route(CLIENT_BASE, clientApi(rt, devices, conversations, uploads, closing))
+
+  /**
+   * Plugin window files. The page runs in a sandboxed frame with an opaque origin, which carries no login cookie, so these
+   * are served without one, under a random part that changes every start; they are the plugin's own static files.
+   */
+  app.get('/plugin-window/:id/:nonce/*', c => {
+    if (c.req.param('nonce') !== windowNonce) return c.text('not found', 404)
+    const path = decodeURIComponent(c.req.path.split('/').slice(4).join('/'))
+    if (path === '__nuonuo.js') return c.body(BRIDGE_JS, 200, { ...WINDOW_HEADERS, 'content-type': 'text/javascript; charset=utf-8' })
+    let file: { body: Buffer; type: string } | undefined
+    try { file = rt.plugins.windowFile(c.req.param('id'), path) } catch { file = undefined }
+    return file ? c.body(new Uint8Array(file.body), 200, { ...WINDOW_HEADERS, 'content-type': file.type }) : c.text('not found', 404)
+  })
 
   /** Public endpoints of sources (OAuth callbacks): no owner token, so each source checks its own state parameter. */
   app.all('/plugin/:id/*', async c => {
