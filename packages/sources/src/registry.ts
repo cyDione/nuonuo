@@ -2,7 +2,7 @@
  * SourceRegistry: owns the installed source kinds and their saved settings, starts and stops them, and serves the engine
  * (who may ask for work, outgoing messages through the `reply` effect) and the agents (tools, prompt text, environment).
  */
-import type { AgentExtensions, Engine, SourcePort, Ticket } from '@nuonuo/core'
+import type { AgentExtensions, Engine, SourcePort, Ticket, ToolPolicy } from '@nuonuo/core'
 import { kvGet, kvSet, schema, type Effects, type Store } from '@nuonuo/db'
 import type { ToolSet } from 'ai'
 import type { Health, OutgoingMessage, SavedFile, SourceContext, SourceKind } from './kind'
@@ -178,19 +178,16 @@ export class SourceRegistry implements SourcePort {
 
   // ── Extensions for the agents ──────────────────────────────────────────────
 
-  /** `readOnly`: sources the owner set to 只能看 in 权限; their acting tools are left out. */
-  agentExtensions(readOnly: (sourceId: string) => boolean = () => false): AgentExtensions {
+  /** The sources' prompts and tools for the agents; `toolPolicy` tells the permission gate what each tool does. */
+  agentExtensions(): AgentExtensions {
     const running = () => [...this.instances.values()]
     const touches = (ticket: Ticket, kind: SourceKind) => this.engine.subscribersOfTicket(ticket.id).some(threadId => threadId.startsWith(`${kind.id}:`))
     return {
       routerPrompt: () => running().map(i => i.kind.routerPrompt?.(i.ctx)).filter(Boolean).join('\n\n'),
       routerTools: () => Object.assign({}, ...running().map(i => this.ownTools(i.kind, i.kind.routerTools?.(i.ctx) ?? {}))) as ToolSet,
       workerPrompt: ticket => running().filter(i => touches(ticket, i.kind)).map(i => i.kind.workerPrompt?.(i.ctx, ticket)).filter(Boolean).join('\n\n'),
-      workerTools: (ticket, turn) => Object.assign({}, ...running().map(i => {
-        const tools = this.ownTools(i.kind, i.kind.workerTools?.(i.ctx, ticket, turn) ?? {})
-        if (!readOnly(i.kind.id) || !i.kind.writes?.length) return tools
-        return Object.fromEntries(Object.entries(tools).filter(([name]) => !i.kind.writes!.includes(name)))
-      })) as ToolSet,
+      workerTools: (ticket, turn) => Object.assign({}, ...running().map(i => this.ownTools(i.kind, i.kind.workerTools?.(i.ctx, ticket, turn) ?? {}))) as ToolSet,
+      toolPolicy: name => this.toolPolicy(name),
       workerEnv: ticket => Object.assign({}, ...running().filter(i => touches(ticket, i.kind)).map(i => i.kind.workerEnv?.(i.ctx, ticket) ?? {})),
       threadInfo: threadId => {
         const instance = this.instances.get(threadId.split(':')[0] ?? '')
@@ -200,11 +197,19 @@ export class SourceRegistry implements SourcePort {
   }
 
   /**
-   * Acting tools of third-party sources (their `writes`): the owner is asked before each call, whatever 权限 says,
-   * since the app cannot know what they change.
+   * What a source tool does, from its kind's declarations: `writes` act in the account (hidden at 只能看), `apps` reach
+   * one of the owner's apps. A third-party source's writes are asked before each call, since the app cannot know what
+   * they change.
    */
-  askFirstTools(): Set<string> {
-    return new Set([...this.instances.values()].filter(i => this.outsiders.has(i.kind.id)).flatMap(i => i.kind.writes ?? []))
+  toolPolicy(name: string): ToolPolicy | undefined {
+    for (const kind of this.kinds.values()) {
+      const write = kind.writes?.includes(name) ?? false
+      const app = kind.apps?.[name]
+      if (!write && !app) continue
+      if (this.outsiders.has(kind.id) && !name.startsWith(`${kind.id}_`)) continue
+      return { effect: write ? 'write' : 'read', source: kind.id, ...(app ? { app } : {}), ...(this.outsiders.has(kind.id) ? { thirdParty: true } : {}) }
+    }
+    return undefined
   }
 
   /** A third-party source's tools must be named `<id>_…`; others are dropped so they cannot pass for the app's own. */

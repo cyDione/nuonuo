@@ -8,7 +8,8 @@ import { clip, DomainError, Engine, ROUTER_SESSION } from './engine'
 import { sourceOfThread, STAGE_LABEL, type Mandate, type Ticket } from './model'
 import { PROACTIVE_WORKER_PROMPT, ROUTER_PROMPT, SUBAGENT_PROMPT, WORKER_PROMPT } from './prompts'
 import { LOCAL_APPS, type LocalAccess } from './access'
-import { gateSourceTools, type LocalApps } from './localapps'
+import type { LocalApps } from './localapps'
+import type { ToolGate, ToolPolicy } from './gate'
 import type { Instructions } from './instructions'
 import { proactiveSettings, saveProactiveSettings } from './proactive'
 import type { Memory, MemoryTrust } from './memory'
@@ -62,6 +63,11 @@ export interface AgentExtensions {
   threadInfo?(threadId: string): string | undefined
   /** Review of a worker's shell command (the Reviewer). */
   gateShell?(ticket: Ticket, sessionId: string, command: string, cwd: string): Promise<{ action: 'allow' } | { action: 'block'; reason: string } | { action: 'escalate'; approvalId: string; reason: string }>
+  /**
+   * What one of this extension's tools does and reaches, for the permission gate (`gatedToolsExtension`). Tools
+   * without a policy are not gated: reading, or work inside the task's own directory.
+   */
+  toolPolicy?(name: string): ToolPolicy | undefined
   /** Wraps worker shell commands for the execution tier (Docker sandbox). */
   wrapShell?(ticket: Ticket): ((command: string) => string) | undefined
   /** Text added to every agent's system prompt (memory). */
@@ -637,15 +643,21 @@ export function combineExtensions(...exts: AgentExtensions[]): AgentExtensions {
     threadInfo: id => exts.map(e => e.threadInfo?.(id)).find(Boolean),
     sharedPrompt: (role, t) => join(exts.map(e => e.sharedPrompt?.(role, t))),
     inlineContext: async (text, scope) => join(await Promise.all(exts.map(e => e.inlineContext?.(text, scope) ?? Promise.resolve('')))),
+    toolPolicy: name => exts.map(e => e.toolPolicy?.(name)).find(Boolean),
     ...(gate ? { gateShell: gate } : {}),
     ...(wrap ? { wrapShell: wrap } : {}),
     ...(fsAccess ? { fsAccess } : {}),
   }
 }
 
-/** Puts source tools that reach the owner's apps (Google Calendar) under the same 权限 levels as the local ones; `askFirst` names are always asked. */
-export function gatedSourceExtension(ext: AgentExtensions, access: LocalAccess, reviewer: Reviewer | undefined, askFirst: () => ReadonlySet<string> = () => new Set()): AgentExtensions {
-  return { ...ext, workerTools: (ticket, ctx) => gateSourceTools(ext.workerTools?.(ticket, ctx) ?? {}, ticket, ctx.session.id, access, reviewer, askFirst()) }
+/** Puts the worker tools of these extensions (sources, plugins) through the permission gate, by the policies they declare. */
+export function gatedToolsExtension(ext: AgentExtensions, gate: ToolGate): AgentExtensions {
+  return { ...ext, workerTools: (ticket, ctx) => gate.wrap(ext.workerTools?.(ticket, ctx) ?? {}, name => ext.toolPolicy?.(name), ticket, ctx.session.id) }
+}
+
+/** Shell commands through the same gate (the reviewer's command classifier). */
+export function shellGateExtension(gate: ToolGate): AgentExtensions {
+  return { gateShell: (ticket, sessionId, command, cwd) => gate.shell(ticket, sessionId, command, cwd) }
 }
 
 /** The owner's apps on this Mac (日历, 提醒事项, 备忘录, 通讯录, 照片), at their levels in 权限. */
@@ -722,8 +734,11 @@ You have a real browser (browser_open / browser_snapshot / browser_click / brows
   }
 }
 
-/** MCP tools for both agents; worker calls to servers marked for review pass the review layer. */
-export function mcpExtension(mcp: McpManager, engine: Engine, reviewer?: Reviewer): AgentExtensions {
+/** A call to an MCP server the owner marked for review. */
+const MCP_REVIEWED: ToolPolicy = { effect: 'write', review: true }
+
+/** MCP tools for both agents; worker calls to servers marked for review pass the permission gate's review step. */
+export function mcpExtension(mcp: McpManager, engine: Engine, reviewer?: Reviewer, gate?: ToolGate): AgentExtensions {
   reviewer?.registerExecutor('mcp', input => mcp.call(String(input.server), String(input.tool), (input.args ?? {}) as Record<string, unknown>))
   return {
     // The router must know what workers can reach, or it answers "no such tool" instead of starting a task.
@@ -733,7 +748,10 @@ export function mcpExtension(mcp: McpManager, engine: Engine, reviewer?: Reviewe
     },
     routerTools: () => mcp.tools('router'),
     workerTools: (ticket, ctx) => mcp.tools('worker', reviewer
-      ? (server, tool, args) => reviewer.gateTool(ticket, ctx.session.id, 'mcp', `${server.name}.${tool} ${JSON.stringify(args)}`, { server: server.name, tool, args })
+      ? (server, tool, args) => {
+        const call = { toolId: 'mcp', display: `${server.name}.${tool} ${JSON.stringify(args)}`, input: { server: server.name, tool, args } }
+        return gate ? gate.check(ticket, ctx.session.id, call, MCP_REVIEWED) : reviewer.gateTool(ticket, ctx.session.id, call.toolId, call.display, call.input)
+      }
       : undefined),
   }
 }

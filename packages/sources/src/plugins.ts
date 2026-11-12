@@ -5,7 +5,7 @@
  * receives the SDK, so a plugin needs no dependencies of its own.
  */
 import type { McpServerConfig } from '@nuonuo/agent-runtime'
-import type { AgentExtensions, SkillInput, Skills } from '@nuonuo/core'
+import type { AgentExtensions, SkillInput, Skills, ToolPolicy } from '@nuonuo/core'
 import { kvGet, kvSet, schema, type Store } from '@nuonuo/db'
 import { jsonSchema, tool, type ToolSet } from 'ai'
 import { randomBytes } from 'node:crypto'
@@ -154,6 +154,7 @@ export class PluginManager {
       workerTools: () => Object.assign({}, ...all().map(({ plugin, manifest }) => this.ownTools(manifest.id, () => plugin.workerTools?.(this.context(manifest))))) as ToolSet,
       routerPrompt: () => all().map(({ plugin, manifest }) => text(plugin.routerPrompt, manifest)).filter(Boolean).map(t => String(t).slice(0, 4_000)).join('\n\n'),
       workerPrompt: () => all().map(({ plugin, manifest }) => text(plugin.workerPrompt, manifest)).filter(Boolean).map(t => String(t).slice(0, 4_000)).join('\n\n') || undefined,
+      toolPolicy: name => this.toolPolicy(name),
     }
   }
 
@@ -161,9 +162,12 @@ export class PluginManager {
     return [...new Set([...Object.keys(this.ownTools(m.id, () => plugin.routerTools?.(this.context(m)))), ...Object.keys(this.ownTools(m.id, () => plugin.workerTools?.(this.context(m))))])]
   }
 
-  /** Acting tools of loaded plugins (their `writes`): asked about before every call. */
-  askFirstTools(): Set<string> {
-    return new Set([...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.writes ?? []).filter(n => n.startsWith(`${manifest.id}_`))))
+  /** Acting tools of installed plugins (their `writes`): third-party code, so the owner is asked before every call. */
+  toolPolicy(name: string): ToolPolicy | undefined {
+    for (const { plugin, manifest } of this.loaded.values()) {
+      if (name.startsWith(`${manifest.id}_`) && plugin.writes?.includes(name)) return { effect: 'write', thirdParty: true }
+    }
+    return undefined
   }
 
   /** First-party plugins ship with the app and are always loaded; their sources start disabled like any other. */

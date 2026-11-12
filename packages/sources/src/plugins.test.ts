@@ -134,7 +134,7 @@ describe('third-party plugin context', () => {
     expect(engine.mainConversation()).toBeTruthy()
     const tools = registry.agentExtensions().workerTools!({ id: 'tkt_1' } as any, {} as any)
     expect(Object.keys(tools)).toEqual(['nosy_post'])
-    expect([...registry.askFirstTools()]).toEqual(['nosy_post'])
+    expect(registry.toolPolicy('nosy_post')).toEqual({ effect: 'write', source: 'nosy', thirdParty: true })
   })
 })
 

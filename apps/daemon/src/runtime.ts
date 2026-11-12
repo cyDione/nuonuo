@@ -3,7 +3,7 @@ import { ChannelApprovals } from './channel-approvals'
 import { pruneChats, pruneRuntime } from './data'
 import { appSink, channelSink, Notices } from './notices'
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@nuonuo/agent-runtime'
-import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedSourceExtension, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@nuonuo/core'
+import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, gatedToolsExtension, shellGateExtension, ToolGate, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@nuonuo/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@nuonuo/db'
 import { BUILT_IN_PLUGINS } from '@nuonuo/plugins'
 import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@nuonuo/sources'
@@ -174,9 +174,10 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         engine.reply({ conversationId: watchdog.conversation(), text: `我刚改了${what}。不同意的话告诉我，或者在${where}里恢复到上一版。` })
       }),
     })
+    // One gate for every way an agent acts: source and plugin tools by their declared policies, MCP review, shell commands.
+    const gate = new ToolGate(access, reviewer)
     registerAgents(store, agents, engine, combineExtensions(
-      gatedSourceExtension(combineExtensions(sources.agentExtensions(id => access.settings().sources[id] === 'read'), plugins.agentExtensions()), access, reviewer,
-        () => new Set([...sources.askFirstTools(), ...plugins.askFirstTools()])),
+      gatedToolsExtension(combineExtensions(sources.agentExtensions(), plugins.agentExtensions()), gate),
       memoryExtension(memory, engine),
       { routerPrompt: () => personaPrompt(store) },
       instructionsExtension(instructions),
@@ -188,8 +189,8 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       accessExtension(access, uploadsDir),
       skillsExtension(skills),
       localAppsExtension(new LocalApps(access, reviewer)),
-      mcpExtension(mcp, engine, reviewer),
-      { gateShell: (ticket, sessionId, command, cwd) => reviewer.gateShell(ticket, sessionId, command, cwd) },
+      mcpExtension(mcp, engine, reviewer, gate),
+      shellGateExtension(gate),
     ))
     watchdog.register()
     // A task that ended gives its browser tab back.
