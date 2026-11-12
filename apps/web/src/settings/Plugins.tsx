@@ -95,7 +95,7 @@ function MoreMenu({ plugin, onError }: { plugin: PluginInfo; onError(message: st
 
 export function Plugins() {
   const qc = useQueryClient()
-  const plugins = useQuery({ queryKey: ['plugins'], queryFn: () => api.get<{ plugins: PluginInfo[]; dir: string }>('/plugins') })
+  const plugins = useQuery({ queryKey: ['plugins'], queryFn: () => api.get<{ plugins: PluginInfo[]; dir: string; sandbox?: boolean }>('/plugins') })
   const toggle = useMutation({
     mutationFn: (p: PluginInfo) => api.post(`/plugins/${p.id}`, { enabled: !p.enabled }),
     onSettled: () => { qc.invalidateQueries({ queryKey: ['plugins'] }); qc.invalidateQueries({ queryKey: ['sources'] }); qc.invalidateQueries({ queryKey: ['mcp'] }) },
@@ -105,6 +105,9 @@ export function Plugins() {
   const [copied, setCopied] = useState(false)
   const external = (plugins.data?.plugins ?? []).filter(p => !p.builtIn)
   const dir = plugins.data?.dir ?? ''
+  const warning = (name: string) => plugins.data?.sandbox === false
+    ? tx('启用「{0}」？\n\n插件沙箱已关闭，插件代码会以本机服务的权限运行，只启用你信任的插件。', name)
+    : tx('启用「{0}」？\n\n插件会在单独的受限进程里运行，只能读写自己的文件夹，也拿不到你的密钥。仍然只建议启用你信任的插件。', name)
   const openFolder = async () => {
     if (desktop?.reveal) { await desktop.reveal(dir); return }
     await navigator.clipboard?.writeText(dir).catch(() => {})
@@ -120,7 +123,7 @@ export function Plugins() {
         return <Row key={p.id} icon={<Puzzle size={18} />} label={p.name} sub={<span className="line-clamp-2">{sub}</span>}>
           {failed ? <Pill tone="danger">{tx('加载失败')}</Pill> : fresh === p.id && !p.enabled && <Pill tone="accent">{tx('刚装好')}</Pill>}
           <Toggle label={tx('启用 {0}', p.name)} checked={p.enabled} disabled={toggle.isPending}
-            onChange={() => { if (p.enabled || confirm(tx('启用「{0}」？\n\n插件代码会以本机服务的权限运行，只启用你信任的插件。', p.name))) { setFresh(undefined); toggle.mutate(p) } }} />
+            onChange={() => { if (p.enabled || confirm(warning(p.name))) { setFresh(undefined); toggle.mutate(p) } }} />
           <MoreMenu plugin={p} onError={setActionError} />
         </Row> })}
       {plugins.isSuccess && !external.length && <Row label={tx('还没有第三方插件')} sub={tx('写法见仓库里的 docs/04-plugin-sdk.md 和 examples/plugins/rss-watch。')} />}

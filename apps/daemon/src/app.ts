@@ -629,7 +629,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   })
 
   // Plugins
-  api.get('/plugins', c => c.json({ plugins: rt.plugins.list(), dir: `${rt.config.home}/plugins` }))
+  api.get('/plugins', c => c.json({ plugins: rt.plugins.list(), dir: `${rt.config.home}/plugins`, sandbox: rt.plugins.sandboxed }))
   const pluginCall = async <T>(f: () => Promise<T>) => { try { return await f() } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) } }
   /** Installs from a folder path, GitHub (`owner/repo`, `github:owner/repo#ref`, a github.com URL), an npm name or a .tgz URL; it arrives switched off. */
   api.post('/plugins/install', async c => {
