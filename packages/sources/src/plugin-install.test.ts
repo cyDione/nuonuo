@@ -202,3 +202,43 @@ describe('plugin tools, prompts and skills', () => {
     expect(kvGet(store, 'plugin:calc:state:last')).toBeUndefined()
   })
 })
+
+describe('plugin dependencies', () => {
+  it('installs npm dependencies hoisted where they fit, nested where versions clash, and never runs install scripts', async () => {
+    const reg: Record<string, any> = {}
+    const files: Record<string, Buffer> = {}
+    const pub = (name: string, version: string, deps: Record<string, string> = {}, scripts: Record<string, string> = {}) => {
+      const url = `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz`
+      reg[name] ??= { 'dist-tags': {}, versions: {} }
+      reg[name].versions[version] = { name, version, dependencies: deps, scripts, dist: { tarball: url } }
+      reg[name]['dist-tags'].latest = version
+      files[url] = tgz({ 'package.json': JSON.stringify({ name, version }), 'index.js': `module.exports = '${name}@${version}'` })
+    }
+    pub('a', '1.2.0', { c: '^1.0.0' }); pub('b', '1.0.0', { c: '^2.0.0' }); pub('c', '1.5.0'); pub('c', '2.1.0'); pub('d', '3.0.0', {}, { postinstall: 'node evil.js' })
+    for (const [name, body] of Object.entries(reg)) files[`https://registry.npmjs.org/${name}`] = Buffer.from(JSON.stringify(body))
+    const { plugins, dir } = setup()
+    ;(plugins as any).fetchImpl = (async (url: string) => {
+      const body = files[String(url)]
+      if (!body) return new Response('nope', { status: 404 })
+      return String(url).endsWith('.tgz') ? new Response(new Uint8Array(body)) : new Response(body, { headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
+    const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
+    writeFileSync(join(src, 'package.json'), JSON.stringify({ name: 'deps', version: '1.0.0', nuonuo: { plugin: './index.mjs' }, dependencies: { a: '^1.0.0', b: '1.x', d: '*' }, devDependencies: { nope: '1' } }))
+    writeFileSync(join(src, 'index.mjs'), `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url)
+export default () => ({ id: 'deps', routerPrompt: [require('a'), require('b'), require('c'), require('b/node_modules/c')].join(' ') })`)
+    const info = await plugins.install(src)
+    const read = (p: string) => JSON.parse(readFileSync(join(dir, 'deps', 'node_modules', p, 'package.json'), 'utf8')).version
+    expect([read('a'), read('b'), read('c'), read('b/node_modules/c'), read('d')]).toEqual(['1.2.0', '1.0.0', '1.5.0', '2.1.0', '3.0.0'])
+    expect(info.notes).toEqual([expect.stringMatching(/^d 有安装脚本/)])
+    await plugins.setEnabled('deps', true)
+    expect(plugins.agentExtensions().routerPrompt!()).toBe('a@1.2.0 b@1.0.0 c@1.5.0 c@2.1.0')
+  })
+
+  it('refuses dependencies that are not npm versions', async () => {
+    const { plugins } = setup()
+    const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
+    writeFileSync(join(src, 'package.json'), JSON.stringify({ name: 'gitdep', nuonuo: { plugin: './index.mjs' }, dependencies: { x: 'github:me/x' } }))
+    writeFileSync(join(src, 'index.mjs'), 'export default () => ({ id: "gitdep" })')
+    await expect(plugins.install(src)).rejects.toThrow(/不是 npm 版本号/)
+  })
+})

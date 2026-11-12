@@ -115,7 +115,8 @@ export function Plugins() {
     <Section title={tx('第三方插件')} foot={<>{tx('打开开关才会运行插件代码。内置的 Telegram 和 Gmail 在「来源」里。')}{error && <span className="block text-danger">{error}</span>}</>}>
       {external.map(p => { const failed = p.enabled && !p.loaded
         const sub = [p.version && `v${p.version}`, failed ? tx('加载失败：{0}', p.error ?? tx('原因不明')) : originLabel(p.origin) ?? p.description,
-          p.sources.length ? tx('提供来源：{0}', p.sources.join('、')) : '', p.mcpServers.length ? tx('MCP：{0}', p.mcpServers.join('、')) : ''].filter(Boolean).join(' · ')
+          p.sources.length ? tx('提供来源：{0}', p.sources.join('、')) : '', p.mcpServers.length ? tx('MCP：{0}', p.mcpServers.join('、')) : '',
+          p.tools.length ? tx('{0} 个工具', p.tools.length) : '', p.skills.length ? tx('{0} 件会做的事', p.skills.length) : '', ...(p.notes ?? [])].filter(Boolean).join(' · ')
         return <Row key={p.id} icon={<Puzzle size={18} />} label={p.name} sub={<span className="line-clamp-2">{sub}</span>}>
           {failed ? <Pill tone="danger">{tx('加载失败')}</Pill> : fresh === p.id && !p.enabled && <Pill tone="accent">{tx('刚装好')}</Pill>}
           <Toggle label={tx('启用 {0}', p.name)} checked={p.enabled} disabled={toggle.isPending}

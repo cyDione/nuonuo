@@ -89,6 +89,9 @@ importers:
       playwright-core:
         specifier: 1.63.0
         version: 1.63.0
+      semver:
+        specifier: ^7.8.6
+        version: 7.8.6
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -324,6 +327,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+      semver:
+        specifier: ^7.8.6
+        version: 7.8.6
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -334,6 +340,9 @@ importers:
       '@nuonuo/models':
         specifier: workspace:*
         version: link:../models
+      '@types/semver':
+        specifier: ^7.8.0
+        version: 7.8.0
 
 packages:
 
@@ -1731,6 +1740,9 @@ packages:
 
   '@types/responselike@1.0.3':
     resolution: {integrity: sha512-H/+L+UkTV33uf49PH5pCAUBVPNj2nDBXTN+qS1dOwyyg24l3CcicicCA7ca+HMvJBZcFgl5r8e+RR6elsb4Lyw==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@types/unist@2.0.11':
     resolution: {integrity: sha512-CmBKiL6NNo/OqgmMn95Fk9Whlp2mtvIv+KNpQKN2F4SjvrEesubTRWGYSg+BnWZOnlCaSTU1sMpsBOzgbYhnsA==}
@@ -5202,6 +5214,8 @@ snapshots:
     dependencies:
       '@types/node': 22.20.5
 
+  '@types/semver@7.8.0': {}
+
   '@types/unist@2.0.11': {}
 
   '@types/unist@3.0.3': {}
@@ -5962,7 +5976,7 @@ snapshots:
       es6-error: 4.1.1
       matcher: 3.0.0
       roarr: 2.15.4
-      semver: 7.7.4
+      semver: 7.8.6
       serialize-error: 7.0.1
     optional: true
 
@@ -6669,13 +6683,13 @@ snapshots:
 
   node-abi@4.40.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.6
 
   node-addon-api@8.9.2: {}
 
   node-api-version@0.2.1:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.6
 
   node-gyp@12.4.0:
     dependencies:
@@ -6684,7 +6698,7 @@ snapshots:
       graceful-fs: 4.2.11
       nopt: 9.0.0
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.6
       tar: 7.5.22
       tinyglobby: 0.2.17
       undici: 6.29.1

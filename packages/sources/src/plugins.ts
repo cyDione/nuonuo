@@ -14,6 +14,7 @@ import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
 import type { SourceKind } from './kind'
+import { installDependencies } from './plugin-deps'
 import { fetchPlugin, parseOrigin } from './plugin-install'
 import type { SourceRegistry } from './registry'
 
@@ -86,6 +87,8 @@ export interface PluginInfo extends PluginManifest {
   /** Names of its own tools and skills. */
   tools: string[]
   skills: string[]
+  /** What installing its dependencies left to say (install scripts not run, optional ones skipped). */
+  notes?: string[]
   /** Where it was installed from, when it was installed through the app (so it can be updated). */
   origin?: string
   error?: string
@@ -183,9 +186,10 @@ export class PluginManager {
       const loaded = this.loaded.get(m.id)
       const error = this.errors.get(m.id)
       const origin = kvGet<string>(this.store, `plugin:${m.id}:origin`)
+      const notes = kvGet<string[]>(this.store, `plugin:${m.id}:notes`)
       return { ...m, enabled: this.enabled(m.id), loaded: Boolean(loaded), builtIn: false, sources: (loaded?.plugin.sources ?? []).map(k => k.id),
         mcpServers: (loaded?.plugin.mcpServers ?? []).map(sv => mcpName(m.id, sv.name)), tools: loaded ? this.toolNames(loaded.plugin, m) : [],
-        skills: (loaded?.plugin.skills ?? []).map(sk => String(sk.name)), ...(origin ? { origin } : {}), ...(error ? { error } : {}) }
+        skills: (loaded?.plugin.skills ?? []).map(sk => String(sk.name)), ...(origin ? { origin } : {}), ...(notes?.length ? { notes } : {}), ...(error ? { error } : {}) }
     })
     return [...builtIn, ...external]
   }
@@ -224,12 +228,14 @@ export class PluginManager {
       if (opts.replace && manifest.id !== opts.replace) throw new Error(`新版本的 id 是「${manifest.id}」，和「${opts.replace}」对不上`)
       const existing = this.scan().find(m => m.id === manifest.id)
       if (existing && !opts.replace) throw new Error(`已经装了「${existing.name}」，要换新版本请用「更新」`)
+      const deps = await installDependencies(root, this.fetchImpl)
       const wasOn = Boolean(existing) && this.enabled(manifest.id)
       if (existing) { await this.unload(manifest.id); rmSync(existing.dir, { recursive: true, force: true }) }
       const target = existing?.dir ?? join(this.dir, manifest.id)
       if (existsSync(target)) throw new Error(`插件文件夹里已经有 ${manifest.id}/，但它不是插件；请先移走它`)
       renameSync(root, target)
       kvSet(this.store, `plugin:${manifest.id}:origin`, input.trim())
+      kvSet(this.store, `plugin:${manifest.id}:notes`, deps.notes.length ? deps.notes : null)
       this.errors.delete(manifest.id)
       if (wasOn) await this.load(readManifest(target)!).catch(() => {})
       this.onChange?.()
