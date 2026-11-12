@@ -9,7 +9,7 @@
     "apiVersion": 1,
     "settings": [
       { "key": "shareWithAgent", "label": "让糯糯看到便签", "type": "switch", "hint": "打开后糯糯回复时能读到这些便签" },
-      { "key": "limit", "label": "最多几条", "type": "number", "min": 1, "max": 50 }
+      { "key": "limit", "label": "最多几条", "type": "number", "min": 1, "max": 50, "default": 20 }
     ],
     "window": { "page": "ui/index.html", "title": "便签", "width": 420, "height": 520 }
   }

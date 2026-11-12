@@ -102,7 +102,7 @@ export default ({ definePlugin, tool, z }) => definePlugin({
 }
 ```
 
-- `settings` 的字段和来源的设置表单一样：`switch`、`number`、`text`、`list`、`select`（`options`）、`secret`。`secret` 存进钥匙串，界面上只显示“已设置”。代码里用 `ctx.settings.get('limit')` 读。
+- `settings` 的字段和来源的设置表单一样：`switch`、`number`、`text`、`list`、`select`（`options`）、`secret`。`secret` 存进钥匙串，界面上只显示“已设置”。可以写 `default` 作为默认值。代码里用 `ctx.settings.get('limit')` 读。
 - `window.page` 是插件文件夹里的一个 html 文件。它和同一文件夹（及子文件夹）里的文件一起，在一个**隔离的框**里打开：没有同源权限，不能联网，也碰不到糯糯的接口。
 - 页面里引入 `<script src="__nuonuo.js"></script>`，就能用 `await nuonuo.call(name, input)` 找插件，由插件的 `windowCalls[name](ctx, input)` 回答（返回普通 JSON；抛出的错误会变成 reject）。`nuonuo.close()` 关窗口，`nuonuo.theme` 是 `light` 或 `dark`，`<html data-theme>` 会跟着变。
 - 插件没打开时窗口也能看，但 `nuonuo.call` 会报「插件没开」。

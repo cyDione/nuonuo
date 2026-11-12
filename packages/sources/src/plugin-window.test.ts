@@ -28,7 +28,7 @@ describe('plugin settings and window', () => {
     const info = plugins.list().find(p => p.id === 'notes')!
     expect(info).toMatchObject({ loaded: false, window: { page: 'ui/index.html', title: '便签', width: 420, height: 520 } })
     expect(info.settings!.map(f => f.key)).toEqual(['shareWithAgent', 'limit'])
-    expect(plugins.settingsOf('notes').values).toEqual({ shareWithAgent: false, limit: 1 })
+    expect(plugins.settingsOf('notes').values).toEqual({ shareWithAgent: false, limit: 20 })
   })
 
   for (const sandbox of [false, true]) {
@@ -44,7 +44,7 @@ describe('plugin settings and window', () => {
       expect(third.notes.map(n => n.text)).toEqual(['订机票', '回邮件'])
       await expect(plugins.windowCall('notes', 'add', { text: ' ' })).rejects.toThrow('便签是空的')
       await expect(plugins.windowCall('notes', 'nope', null)).rejects.toThrow('没有「nope」')
-      expect(plugins.agentExtensions().routerPrompt()).toContain('- 订机票')
+      expect(plugins.agentExtensions().routerPrompt!()).toContain('- 订机票')
 
       expect(plugins.windowFile('notes', '')!.type).toContain('text/html')
       expect(plugins.windowFile('notes', 'app.js')!.body.toString()).toContain('nuonuo.call')

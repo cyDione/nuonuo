@@ -1140,4 +1140,9 @@ export const EN: Record<string, string> = {
   "快": "Fast",
   "按下新的组合键…": "Press the new combination…",
   "未设置": "Not set",
+  "窗口里的页": "Window pages",
+  "插件没开，页面能看，但里面的操作要打开后才能用": "The plugin is off. You can look at the page, but its actions work only once it is on",
+  "打开插件": "Turn on",
+  "这些设置由插件声明，存在本机；密钥类的放进钥匙串。": "The plugin declares these settings. They stay on this computer; secrets go to the keychain.",
+  "改了 {0} 项": "{0} changed",
 }

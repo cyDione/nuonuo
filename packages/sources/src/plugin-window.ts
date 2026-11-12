@@ -45,12 +45,15 @@ export function readSettings(raw: unknown): FieldSpec[] {
       out.push({ ...base, type, options })
     } else if (type === 'switch') out.push({ ...base, type })
     else out.push({ ...base, type: type as 'text' | 'list' | 'secret', ...(placeholder ? { placeholder } : {}) })
+    const field = out[out.length - 1]!
+    if (f.default !== undefined && type !== 'secret') { try { field.default = coerce(field, f.default) } catch { throw new Error(`设置项「${key}」的默认值不合法`) } }
   }
   return out
 }
 
 /** Default value of a field when the owner has set nothing. */
 export function defaultValue(f: FieldSpec): unknown {
+  if (f.default !== undefined) return f.default
   switch (f.type) {
     case 'switch': return false
     case 'number': return f.min

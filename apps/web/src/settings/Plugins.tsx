@@ -3,12 +3,13 @@
  * folder; each plugin's ⋯ holds 更新 / 重新加载 / 卸载. A plugin arrives switched off and runs only once switched on.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Ellipsis, FolderOpen, LoaderCircle, Plus, Puzzle, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
+import { AppWindow, Ellipsis, FolderOpen, LoaderCircle, Plus, Puzzle, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, type PluginInfo } from '../api'
 import { desktop } from '../shell'
 import { cx } from '../ui'
 import { Btn, Page, Pill, Row, Section, TextInput, Toggle } from './kit'
+import { PluginWindow } from './PluginWindow'
 import { tx } from '../i18n'
 
 /** Where a plugin came from, in a word: the same reading of the address as the service's. */
@@ -103,6 +104,7 @@ export function Plugins() {
   const [fresh, setFresh] = useState<string>()
   const [actionError, setActionError] = useState<string>()
   const [copied, setCopied] = useState(false)
+  const [opened, setOpened] = useState<string>()
   const external = (plugins.data?.plugins ?? []).filter(p => !p.builtIn)
   const dir = plugins.data?.dir ?? ''
   const warning = (name: string) => plugins.data?.sandbox === false
@@ -122,6 +124,7 @@ export function Plugins() {
           p.tools.length ? tx('{0} 个工具', p.tools.length) : '', p.skills.length ? tx('{0} 件会做的事', p.skills.length) : '', ...(p.notes ?? [])].filter(Boolean).join(' · ')
         return <Row key={p.id} icon={<Puzzle size={18} />} label={p.name} sub={<span className="line-clamp-2">{sub}</span>}>
           {failed ? <Pill tone="danger">{tx('加载失败')}</Pill> : fresh === p.id && !p.enabled && <Pill tone="accent">{tx('刚装好')}</Pill>}
+          {(p.window || p.settings?.length) && <Btn onClick={() => setOpened(p.id)} aria-label={tx('打开 {0}', p.name)}><AppWindow size={14} />{tx('打开')}</Btn>}
           <Toggle label={tx('启用 {0}', p.name)} checked={p.enabled} disabled={toggle.isPending}
             onChange={() => { if (p.enabled || confirm(warning(p.name))) { setFresh(undefined); toggle.mutate(p) } }} />
           <MoreMenu plugin={p} onError={setActionError} />
@@ -131,5 +134,7 @@ export function Plugins() {
         <FolderOpen size={18} />{desktop?.reveal ? tx('打开插件文件夹') : copied ? tx('已复制路径：{0}', dir) : tx('复制插件文件夹的路径')}
       </button>}
     </Section>
+    {(() => { const p = external.find(x => x.id === opened)
+      return p && <PluginWindow plugin={p} onClose={() => setOpened(undefined)} onEnable={() => { if (confirm(warning(p.name))) { setFresh(undefined); toggle.mutate(p) } }} /> })()}
   </Page>
 }
