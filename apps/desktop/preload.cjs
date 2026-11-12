@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('nuonuoDesktop', {
   prefs: { get: () => ipcRenderer.invoke('prefs:get'), set: patch => ipcRenderer.invoke('prefs:set', patch) },
   // 在访达中显示 a folder.
   reveal: target => ipcRenderer.invoke('reveal', target),
+  // 设置 → 插件: pick a folder to install a plugin from.
+  pickFolder: () => ipcRenderer.invoke('pick-folder'),
   // 系统和更新 → 重启并更新: installs the version the service downloaded; resolves 'ok' (the app quits) or why not.
   update: { install: () => ipcRenderer.invoke('update:install') },
 })

@@ -146,6 +146,12 @@ ipcMain.handle('prefs:set', (_e, patch) => {
 })
 // 在访达中显示: opens a folder the page names (the data directory, plugins/), if it exists.
 ipcMain.handle('reveal', (_e, target) => (typeof target === 'string' && path.isAbsolute(target) && existsSync(target) ? shell.openPath(target) : 'missing'))
+// 设置 → 插件 → 选择文件夹…: the folder the owner picks, or undefined when they cancel.
+ipcMain.handle('pick-folder', async () => {
+  const { dialog } = require('electron')
+  const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
+  return result.canceled ? undefined : result.filePaths[0]
+})
 
 function refreshTray() {
   app.setBadgeCount(badgeOn ? attention : 0)
