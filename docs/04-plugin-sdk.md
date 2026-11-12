@@ -4,9 +4,27 @@
 
 ## 安装与启用
 
-1. 把插件文件夹放进 `~/.nuonuo/plugins/<名字>/`。
-2. 到「设置 → 插件」里启用它。在启用之前，只会读取它的 `package.json`，**不会执行插件代码**。插件以本机服务的权限运行，所以启用前要确认你信任它。
+1. 安装：调用 `POST /api/plugins/install`，`source` 可以是
+   - 本机文件夹：`/path/to/plugin`、`~/dev/plugin`
+   - GitHub 仓库：`owner/repo`、`github:owner/repo#v1.0`、`https://github.com/owner/repo/tree/main/plugins/rss`（仓库里的子目录）
+   - npm 包：`nuonuo-rss`、`@me/nuonuo-rss@1.2.0`
+   - `.tgz` 的 https 网址
+
+   也可以直接把插件文件夹放进 `~/.nuonuo/plugins/<名字>/`。两种方式装进来的插件都**默认关着，不会执行插件代码**，只读取 `package.json`。
+2. 到「设置 → 插件」里启用它。插件以本机服务的权限运行，所以启用前要确认你信任它。
 3. 到「设置 → 来源」里配置并打开它提供的来源。
+
+不会替插件安装 npm 依赖：发布前请把依赖打包进入口文件（例如用 esbuild 打成一个 `.mjs`），或者只用 SDK 里的东西。
+
+其他接口：
+
+| 接口 | 作用 |
+|---|---|
+| `GET /api/plugins` | 列出插件，带 `origin`（从哪里装的）、`sources`、`mcpServers` |
+| `POST /api/plugins/:id` `{enabled}` | 启用 / 停用 |
+| `POST /api/plugins/:id/update` | 从原来的地址装最新版；启用中的插件会自动重新加载。手动放进文件夹的插件没有地址，不能自动更新 |
+| `POST /api/plugins/:id/reload` | 改了插件文件后重新执行它的代码 |
+| `DELETE /api/plugins/:id` | 卸载：停掉、删除文件夹，并清掉它的来源设置、状态和密钥字段 |
 
 `package.json`：
 
@@ -42,6 +60,21 @@ export default function plugin({ definePlugin, z, tool }) {
 ```
 
 完整的示例见 [`examples/plugins/rss-watch`](../examples/plugins/rss-watch/index.mjs)。用 TypeScript 写插件时，从 `@nuonuo/plugin-sdk` 导入类型即可。
+
+## MCP 服务器
+
+插件也可以带上 MCP 服务器，启用插件后它们和「设置 → MCP」里你自己的服务器一起连接：
+
+```js
+definePlugin({
+  id: 'notes',
+  mcpServers: [{ name: 'files', transport: 'stdio', command: 'node', args: ['server.mjs'], roles: ['worker'] }],
+})
+```
+
+- 服务名会变成 `<插件 id>_<name>`（上例是 `notes_files`）；和你自己的服务器重名时，用你自己的。
+- stdio 服务在插件自己的文件夹里启动，所以 `args` 可以写相对路径。
+- `roles` 默认只给 Worker。Worker 调用插件的 MCP 工具时，**总会经过审核层**。
 
 ## SourceKind 接口
 

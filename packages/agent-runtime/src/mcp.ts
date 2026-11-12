@@ -21,6 +21,8 @@ export interface McpServerConfig {
   env?: Record<string, string>
   url?: string
   headers?: Record<string, string>
+  /** Working folder of a stdio server (a plugin's own folder). */
+  cwd?: string
   /** Which agents get the tools. */
   roles: ('worker' | 'router')[]
   /** Worker calls go through the review layer. */
@@ -104,7 +106,7 @@ export class McpManager {
       if (config.transport === 'stdio') {
         if (!config.command) throw new Error('stdio 服务需要 command')
         const env = { ...getDefaultEnvironment(), ...Object.fromEntries(Object.entries(config.env ?? {}).map(([k, v]) => [k, resolveEnv(v, this.env)])) }
-        await client.connect(new StdioClientTransport({ command: config.command, args: config.args ?? [], env, stderr: 'ignore' }), { timeout: 30_000 })
+        await client.connect(new StdioClientTransport({ command: config.command, args: config.args ?? [], env, stderr: 'ignore', ...(config.cwd ? { cwd: config.cwd } : {}) }), { timeout: 30_000 })
       } else {
         if (!config.url) throw new Error('HTTP 服务需要 url')
         const headers = Object.fromEntries(Object.entries(config.headers ?? {}).map(([k, v]) => [k, resolveEnv(v, this.env)]))

@@ -6,7 +6,7 @@
  * dependencies; this package exists for type checking and for first-party plugins in this repository.
  */
 export { definePlugin, PLUGIN_API_VERSION, sdk } from '@nuonuo/sources'
-export type { DeviceCode, FieldSpec, Health, OutgoingMessage, PluginSdk, SourceAction, SourceContext, SourceKind, NuonuoPlugin } from '@nuonuo/sources'
+export type { DeviceCode, FieldSpec, Health, OutgoingMessage, PluginMcpServer, PluginSdk, SourceAction, SourceContext, SourceKind, NuonuoPlugin } from '@nuonuo/sources'
 export type { IncomingTrigger, Ticket } from '@nuonuo/core'
 export { jsonSchema, tool } from 'ai'
 export { z } from 'zod'

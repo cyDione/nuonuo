@@ -3,7 +3,7 @@
  * (who may ask for work, outgoing messages through the `reply` effect) and the agents (tools, prompt text, environment).
  */
 import type { AgentExtensions, Engine, SourcePort, Ticket } from '@nuonuo/core'
-import { kvGet, kvSet, type Effects, type Store } from '@nuonuo/db'
+import { kvGet, kvSet, schema, type Effects, type Store } from '@nuonuo/db'
 import type { ToolSet } from 'ai'
 import type { Health, OutgoingMessage, SourceContext, SourceKind } from './kind'
 
@@ -43,6 +43,13 @@ export class SourceRegistry implements SourcePort {
     await this.stop(id)
     this.kinds.delete(id)
     this.outsiders.delete(id)
+  }
+
+  /** Deletes a source's saved settings, state and secret fields (its plugin is being uninstalled). */
+  forget(id: string): void {
+    for (const key of this.secretKeys(this.kinds.get(id))) this.secrets?.delete(`source:${id}:${key}`)
+    for (const { key } of this.store.db.select({ key: schema.kv.key }).from(schema.kv).all())
+      if (key === `source:${id}` || key.startsWith(`source:${id}:`)) kvSet(this.store, key, null)
   }
 
   private secretKeys(kind: SourceKind | undefined): string[] {

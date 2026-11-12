@@ -89,7 +89,10 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const plugins = new PluginManager(join(config.home, 'plugins'), sources, store)
     plugins.registerBuiltIn(telegramPlugin)
     plugins.registerBuiltIn(gmailPlugin)
-    const mcp = new McpManager(() => kvGet<McpServerConfig[]>(store, 'settings:mcp') ?? [], agents.blobs)
+    const ownMcp = () => kvGet<McpServerConfig[]>(store, 'settings:mcp') ?? []
+    // Plugins' servers join the owner's; a name the owner already uses stays the owner's.
+    const mcp = new McpManager(() => { const own = ownMcp(); const names = new Set(own.map(s => s.name)); return [...own, ...plugins.mcpServers().filter(s => !names.has(s.name))] }, agents.blobs)
+    plugins.onChange = () => { void mcp.sync() }
     const engine = new Engine(store, agents, bus, { home: config.home, sources, screen: triggerId => effects.enqueue('proactive.screen', triggerId, { triggerId }) })
     const screener = new Screener(store, hub, engine)
     effects.handle<{ triggerId: string }>('proactive.screen', async ({ triggerId }) => {

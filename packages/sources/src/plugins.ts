@@ -4,13 +4,16 @@
  * own rights, so enabling one is a decision of trust). The module's default export is a plugin object or a function that
  * receives the SDK, so a plugin needs no dependencies of its own.
  */
+import type { McpServerConfig } from '@nuonuo/agent-runtime'
 import { kvGet, kvSet, type Store } from '@nuonuo/db'
 import { jsonSchema, tool } from 'ai'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
 import type { SourceKind } from './kind'
+import { fetchPlugin, parseOrigin } from './plugin-install'
 import type { SourceRegistry } from './registry'
 
 export interface NuonuoPlugin {
@@ -19,6 +22,23 @@ export interface NuonuoPlugin {
   version?: string
   description?: string
   sources?: SourceKind[]
+  /**
+   * MCP servers the plugin brings. They join the owner's own servers under the name `<plugin id>_<name>`; a stdio server
+   * starts in the plugin's folder, and worker calls always pass the review layer.
+   */
+  mcpServers?: PluginMcpServer[]
+}
+
+export interface PluginMcpServer {
+  name: string
+  transport: 'stdio' | 'http'
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  url?: string
+  headers?: Record<string, string>
+  /** Which agents get the tools; defaults to the workers only. */
+  roles?: ('worker' | 'router')[]
 }
 
 export const PLUGIN_API_VERSION = 1
@@ -36,6 +56,10 @@ export interface PluginInfo extends PluginManifest {
   loaded: boolean
   builtIn: boolean
   sources: string[]
+  /** Names of the MCP servers it adds (as they appear in the MCP list). */
+  mcpServers: string[]
+  /** Where it was installed from, when it was installed through the app (so it can be updated). */
+  origin?: string
   error?: string
 }
 
@@ -46,7 +70,10 @@ export class PluginManager {
   private errors = new Map<string, string>()
   private builtIns = new Map<string, NuonuoPlugin>()
 
-  constructor(private dir: string, private registry: SourceRegistry, private store: Store) {}
+  /** Called after plugins load or unload, so the MCP list can pick up their servers. */
+  onChange?: () => void
+
+  constructor(private dir: string, private registry: SourceRegistry, private store: Store, private fetchImpl: typeof fetch = fetch) {}
 
   /** First-party plugins ship with the app and are always loaded; their sources start disabled like any other. */
   registerBuiltIn(plugin: NuonuoPlugin): void {
@@ -58,23 +85,12 @@ export class PluginManager {
     if (!existsSync(this.dir)) return []
     const out: PluginManifest[] = []
     for (const name of readdirSync(this.dir, { withFileTypes: true })) {
-      if (!name.isDirectory()) continue
-      const dir = join(this.dir, name.name)
-      const pkgFile = join(dir, 'package.json')
-      if (!existsSync(pkgFile)) continue
+      if (!name.isDirectory() || name.name.startsWith('.')) continue
       try {
-        const pkg = JSON.parse(readFileSync(pkgFile, 'utf8'))
-        // `super-assistant` is the manifest key from before the project was renamed.
-        const meta = pkg['nuonuo'] ?? pkg['super-assistant'] ?? {}
-        if (!meta.plugin) continue
-        const id = String(meta.id ?? pkg.name ?? name.name).replace(/^@[^/]+\//, '').toLowerCase()
-        const entry = resolve(dir, meta.plugin)
-        if (!ID.test(id)) { this.errors.set(name.name, `插件 id "${id}" 不合法`); continue }
-        if (!entry.startsWith(dir + sep)) { this.errors.set(id, '入口文件必须在插件目录内'); continue }
-        out.push({ id, name: meta.name ?? pkg.name ?? id, version: pkg.version ?? '0.0.0', description: meta.description ?? pkg.description ?? '', dir, entry,
-          apiVersion: Number(meta.apiVersion ?? 1) })
+        const manifest = readManifest(join(this.dir, name.name))
+        if (manifest) out.push(manifest)
       } catch (error) {
-        this.errors.set(name.name, `无法读取 package.json：${(error as Error).message}`)
+        this.errors.set(name.name, (error as Error).message)
       }
     }
     return out
@@ -82,11 +98,13 @@ export class PluginManager {
 
   list(): PluginInfo[] {
     const builtIn: PluginInfo[] = [...this.builtIns.values()].map(p => ({ id: p.id, name: p.name ?? p.id, version: p.version ?? '', description: p.description ?? '',
-      dir: '', entry: '', apiVersion: PLUGIN_API_VERSION, enabled: true, loaded: true, builtIn: true, sources: (p.sources ?? []).map(k => k.id) }))
+      dir: '', entry: '', apiVersion: PLUGIN_API_VERSION, enabled: true, loaded: true, builtIn: true, sources: (p.sources ?? []).map(k => k.id), mcpServers: [] }))
     const external = this.scan().map(m => {
       const loaded = this.loaded.get(m.id)
       const error = this.errors.get(m.id)
-      return { ...m, enabled: this.enabled(m.id), loaded: Boolean(loaded), builtIn: false, sources: (loaded?.plugin.sources ?? []).map(k => k.id), ...(error ? { error } : {}) }
+      const origin = kvGet<string>(this.store, `plugin:${m.id}:origin`)
+      return { ...m, enabled: this.enabled(m.id), loaded: Boolean(loaded), builtIn: false, sources: (loaded?.plugin.sources ?? []).map(k => k.id),
+        mcpServers: (loaded?.plugin.mcpServers ?? []).map(sv => mcpName(m.id, sv.name)), ...(origin ? { origin } : {}), ...(error ? { error } : {}) }
     })
     return [...builtIn, ...external]
   }
@@ -96,14 +114,88 @@ export class PluginManager {
   /** Loads every enabled plugin (at startup). Failures are kept per plugin and never stop the daemon. */
   async loadEnabled(): Promise<void> {
     for (const m of this.scan()) if (this.enabled(m.id)) await this.load(m).catch(() => {})
+    this.onChange?.()
+  }
+
+  /** MCP servers of the loaded plugins, ready for the MCP manager. */
+  mcpServers(): McpServerConfig[] {
+    return [...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.mcpServers ?? []).map(sv => ({
+      name: mcpName(manifest.id, sv.name), enabled: true, transport: sv.transport,
+      ...(sv.command ? { command: sv.command } : {}), ...(sv.args ? { args: sv.args } : {}), ...(sv.env ? { env: sv.env } : {}),
+      ...(sv.url ? { url: sv.url } : {}), ...(sv.headers ? { headers: sv.headers } : {}),
+      cwd: manifest.dir, roles: sv.roles?.length ? sv.roles : ['worker' as const], review: true,
+    })))
+  }
+
+  /**
+   * Installs a plugin from a folder, GitHub, npm or a .tgz URL (see `parseOrigin`). Its code is not run: it arrives
+   * switched off like a plugin copied in by hand. With `replace`, the plugin of that id is updated in place and loaded
+   * again if it was on.
+   */
+  async install(input: string, opts: { replace?: string } = {}): Promise<PluginInfo> {
+    const origin = parseOrigin(input)
+    const staging = join(this.dir, `.staging-${randomBytes(4).toString('hex')}`)
+    try {
+      const root = await fetchPlugin(origin, staging, this.fetchImpl)
+      const manifest = readManifest(root)
+      if (!manifest) throw new Error('package.json 里没有 nuonuo.plugin 字段，这不是 Nuonuo 插件')
+      if (this.builtIns.has(manifest.id)) throw new Error(`「${manifest.id}」是内置插件的名字`)
+      if (opts.replace && manifest.id !== opts.replace) throw new Error(`新版本的 id 是「${manifest.id}」，和「${opts.replace}」对不上`)
+      const existing = this.scan().find(m => m.id === manifest.id)
+      if (existing && !opts.replace) throw new Error(`已经装了「${existing.name}」，要换新版本请用「更新」`)
+      const wasOn = Boolean(existing) && this.enabled(manifest.id)
+      if (existing) { await this.unload(manifest.id); rmSync(existing.dir, { recursive: true, force: true }) }
+      const target = existing?.dir ?? join(this.dir, manifest.id)
+      if (existsSync(target)) throw new Error(`插件文件夹里已经有 ${manifest.id}/，但它不是插件；请先移走它`)
+      renameSync(root, target)
+      kvSet(this.store, `plugin:${manifest.id}:origin`, input.trim())
+      this.errors.delete(manifest.id)
+      if (wasOn) await this.load(readManifest(target)!).catch(() => {})
+      this.onChange?.()
+      return this.list().find(p => p.id === manifest.id)!
+    } finally {
+      rmSync(staging, { recursive: true, force: true })
+    }
+  }
+
+  /** Installs the newest version from where the plugin came from. */
+  async update(id: string): Promise<PluginInfo> {
+    const origin = kvGet<string>(this.store, `plugin:${id}:origin`)
+    if (!origin) throw new Error('这个插件是手动放进文件夹的，没法自动更新；请重新安装或手动替换文件')
+    return this.install(origin, { replace: id })
+  }
+
+  /** Runs the plugin's code again (after its files were edited). */
+  async reload(id: string): Promise<PluginInfo> {
+    const manifest = this.scan().find(m => m.id === id)
+    if (!manifest) throw new Error(`没有插件 ${id}`)
+    await this.unload(id)
+    if (this.enabled(id)) await this.load(manifest).finally(() => this.onChange?.())
+    return this.list().find(p => p.id === id)!
+  }
+
+  /** Stops the plugin, deletes its folder and forgets its settings, including the settings and secrets of its sources. */
+  async uninstall(id: string): Promise<void> {
+    if (this.builtIns.has(id)) throw new Error('内置插件不能卸载')
+    const manifest = this.scan().find(m => m.id === id)
+    if (!manifest) throw new Error(`没有插件 ${id}`)
+    const sources = [...new Set([...(this.loaded.get(id)?.plugin.sources ?? []).map(k => k.id), ...(kvGet<string[]>(this.store, `plugin:${id}:sources`) ?? [])])]
+    for (const source of sources) this.registry.forget(source)
+    await this.unload(id)
+    rmSync(manifest.dir, { recursive: true, force: true })
+    for (const key of ['enabled', 'origin', 'sources']) kvSet(this.store, `plugin:${id}:${key}`, null)
+    this.errors.delete(id)
+    this.onChange?.()
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<PluginInfo> {
     const manifest = this.scan().find(m => m.id === id)
     if (!manifest) throw new Error(`没有插件 ${id}`)
     kvSet(this.store, `plugin:${id}:enabled`, enabled)
-    if (enabled) await this.load(manifest)
-    else await this.unload(id)
+    try {
+      if (enabled) await this.load(manifest)
+      else await this.unload(id)
+    } finally { this.onChange?.() }
     return this.list().find(p => p.id === id)!
   }
 
@@ -124,7 +216,12 @@ export class PluginManager {
         if (!kind.schema || typeof kind.start !== 'function') throw new Error(`来源 ${kind.id} 缺少 schema 或 start`)
       }
       for (const kind of plugin.sources ?? []) this.registry.register(kind, { thirdParty: true })
+      for (const sv of plugin.mcpServers ?? []) {
+        if (!sv || typeof sv.name !== 'string' || !/^[a-z0-9_-]{1,24}$/.test(sv.name)) throw new Error(`MCP 服务名「${String(sv?.name)}」不合法`)
+        if (sv.transport === 'stdio' ? !sv.command : sv.transport === 'http' ? !sv.url : true) throw new Error(`MCP 服务 ${sv.name} 缺少 command 或 url`)
+      }
       this.loaded.set(manifest.id, { plugin, manifest })
+      kvSet(this.store, `plugin:${manifest.id}:sources`, (plugin.sources ?? []).map(k => k.id))
       for (const kind of plugin.sources ?? []) if (this.registry.settings(kind.id).enabled) await this.registry.save(kind.id, this.registry.settings(kind.id))
     } catch (error) {
       this.errors.set(manifest.id, error instanceof Error ? error.message : String(error))
@@ -138,4 +235,23 @@ export class PluginManager {
     for (const kind of entry.plugin.sources ?? []) await this.registry.unregister(kind.id)
     this.loaded.delete(id)
   }
+}
+
+const mcpName = (pluginId: string, name: string) => `${pluginId}_${name}`
+
+/** The plugin described by `<dir>/package.json`, or undefined when that package is not a Nuonuo plugin. */
+function readManifest(dir: string): PluginManifest | undefined {
+  const pkgFile = join(dir, 'package.json')
+  if (!existsSync(pkgFile)) return undefined
+  let pkg: Record<string, any>
+  try { pkg = JSON.parse(readFileSync(pkgFile, 'utf8')) } catch (error) { throw new Error(`无法读取 package.json：${(error as Error).message}`) }
+  // `super-assistant` is the manifest key from before the project was renamed.
+  const meta = pkg['nuonuo'] ?? pkg['super-assistant'] ?? {}
+  if (!meta.plugin) return undefined
+  const id = String(meta.id ?? pkg.name ?? dir.split(sep).pop()).replace(/^@[^/]+\//, '').toLowerCase()
+  const entry = resolve(dir, meta.plugin)
+  if (!ID.test(id)) throw new Error(`插件 id "${id}" 不合法`)
+  if (!entry.startsWith(dir + sep)) throw new Error('入口文件必须在插件目录内')
+  return { id, name: meta.name ?? pkg.name ?? id, version: pkg.version ?? '0.0.0', description: meta.description ?? pkg.description ?? '', dir, entry,
+    apiVersion: Number(meta.apiVersion ?? 1) }
 }
