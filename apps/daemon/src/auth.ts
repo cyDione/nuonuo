@@ -45,6 +45,8 @@ export function hostGuard(config: DaemonConfig): MiddlewareHandler {
     const host = c.req.header('host') ?? ''
     if (!open && !hosts.has(host)) return c.text('forbidden host', 403)
     const origin = c.req.header('origin')
+    // The client protocol takes a device token in a header (never a cookie), so a page elsewhere cannot ride on it.
+    if (c.req.path.startsWith('/client/')) return next()
     if (origin && !origins.has(origin) && !(open && (origin === `http://${host}` || origin === `https://${host}`))) return c.text('forbidden origin', 403)
     await next()
   }
@@ -59,7 +61,7 @@ export const DESKTOP_HEADER = 'x-nuonuo-client'
  */
 export function webGate(config: DaemonConfig): MiddlewareHandler {
   return async (c, next) => {
-    if (config.web || c.req.header(DESKTOP_HEADER) === 'desktop' || c.req.header('authorization') || c.req.path.startsWith('/plugin/')) return next()
+    if (config.web || c.req.header(DESKTOP_HEADER) === 'desktop' || c.req.header('authorization') || c.req.path.startsWith('/plugin/') || c.req.path.startsWith('/client/')) return next()
     return c.html('<!doctype html><meta charset="utf-8"><title>Nuonuo</title><body style="font:15px system-ui;margin:3rem auto;max-width:32rem;line-height:1.6"><h2>网页访问未开启</h2><p>Nuonuo 桌面版默认只在应用窗口里使用。要在浏览器（或局域网里的其他设备）打开，请在桌面应用的「设置 → 系统 → 网页访问」中开启。</p></body>', 403)
   }
 }

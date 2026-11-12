@@ -249,6 +249,50 @@ program.command('token').description('打印登录链接').option('--rotate', '�
   if (opts.rotate) console.log('已轮换令牌；运行中的服务需重启后生效')
 })
 
+/** Calls the running service's owner API (the service must be running: pairing codes live in its memory). */
+async function ownerApi<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const config = resolveConfig()
+  const lock = readLock(config.home)
+  if (!lock) throw new Error('服务没有在运行：先运行 nuonuo start -d')
+  const res = await fetch(`http://${connectHost(lock.host ?? '127.0.0.1')}:${lock.port}/api${path}`, {
+    ...init, headers: { authorization: `Bearer ${loadToken(config.home)}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
+  })
+  if (res.status === 204) return undefined as T
+  const data = await res.json() as T & { error?: { message: string } }
+  if (!res.ok) throw new Error(data.error?.message ?? `HTTP ${res.status}`)
+  return data
+}
+
+const KIND_NAMES: Record<string, string> = { phone: '手机', tablet: '平板', watch: '手表', speaker: '音箱', car: '车机', tv: '电视', glasses: '眼镜', desktop: '电脑', bot: '机器人', other: '设备' }
+
+program.command('pair').description('生成一个配对码，让手机、手表、音箱等设备接入（客户端协议）')
+  .option('--name <name>', '给设备起名（默认用设备自己报的名字）')
+  .option('--approvals', '允许这个设备回答「要不要做」的确认')
+  .option('--no-notices', '不给这个设备推送通知')
+  .action(async (opts: { name?: string; approvals?: boolean; notices: boolean }) => {
+    try {
+      const scopes = ['chat', ...(opts.notices ? ['notices'] : []), ...(opts.approvals ? ['approvals'] : [])]
+      const r = await ownerApi<{ code: string; expiresAt: number; scopes: string[]; urls: string[]; base: string; reachable: boolean }>('/devices/pair', { method: 'POST', body: JSON.stringify({ scopes, ...(opts.name ? { name: opts.name } : {}) }) })
+      console.log(`  配对码    ${r.code}   （10 分钟内有效，只能用一次）`)
+      console.log(`  权限      ${r.scopes.join(', ')}`)
+      for (const url of r.urls) console.log(`  地址      ${url}${r.base}`)
+      if (!r.reachable) console.log('  注意      服务只监听本机，其他设备连不上：在「设置 → 系统 → 网页访问」开启局域网访问，或运行 nuonuo config --host 0.0.0.0 后重启')
+      console.log('  协议文档  https://github.com/cyDione/nuonuo/blob/main/docs/11-client-protocol.md')
+    } catch (error) { console.error((error as Error).message); process.exitCode = 1 }
+  })
+
+const devicesCmd = program.command('devices').description('查看或移除已配对的设备')
+devicesCmd.command('list', { isDefault: true }).description('列出已配对的设备').action(async () => {
+  try {
+    const { devices } = await ownerApi<{ devices: { id: string; name: string; kind: string; scopes: string[]; lastSeenAt: number | null }[] }>('/devices')
+    if (!devices.length) { console.log('还没有配对的设备。运行 nuonuo pair 生成配对码。'); return }
+    for (const d of devices) console.log(`  ${d.id}  ${d.name}（${KIND_NAMES[d.kind] ?? d.kind}）  ${d.scopes.join(',')}  ${d.lastSeenAt ? `上次在线 ${new Date(d.lastSeenAt).toLocaleString()}` : ''}`)
+  } catch (error) { console.error((error as Error).message); process.exitCode = 1 }
+})
+devicesCmd.command('revoke <id>').description('移除一个设备（它的令牌立刻失效）').action(async (id: string) => {
+  try { await ownerApi(`/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }); console.log('已移除') } catch (error) { console.error((error as Error).message); process.exitCode = 1 }
+})
+
 program.command('update').description('检查并安装新版本（Linux 安装包）')
   .option('--check', '只检查，不安装')
   .action(async (opts: { check?: boolean }) => {

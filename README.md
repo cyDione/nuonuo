@@ -160,8 +160,13 @@ nuonuo start -d
 | `nuonuo service install` | 开机自启（macOS 用 launchd，Linux 用 systemd） |
 | `nuonuo update [--check]` | 检查并安装新版本 |
 | `nuonuo doctor` | 检查运行环境 |
+| `nuonuo pair` / `nuonuo devices` | 让手机、手表、音箱、车机等设备接入，或者查看、移除已接入的设备 |
 
 完整的命令说明见 [部署与运维](docs/deploy.md#命令行)。
+
+### 接入其他设备
+
+任何智能设备都能当糯糯的客户端：在电脑上运行 `nuonuo pair` 得到一次性配对码，设备用它换一个自己的令牌，之后通过 `/client/v1` 收发消息、接收实时事件。协议见 [客户端接入协议](docs/11-client-protocol.md)；TypeScript 用 [`@nuonuo/client`](packages/client)，Python、curl 的示例在 [examples/clients](examples/clients)。
 
 ## 设计理念
 
