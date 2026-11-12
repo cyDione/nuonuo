@@ -7,7 +7,8 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api, type Provider, type ProactiveSettings, type RolesResponse, type SourceInfo } from './api'
+import { api, type Preset, type Provider, type ProactiveSettings, type RolesResponse, type SourceInfo } from './api'
+import { useCatalog } from './settings/hooks'
 import { SourceIcon } from './icons'
 import { usePersona } from './persona'
 import { go } from './route'
@@ -59,24 +60,24 @@ export function Onboarding({ step, next }: { step: Exclude<Step, 'done'>; next()
   </div>
 }
 
-const PROVIDERS = [
-  { id: 'openai', label: 'OpenAI', kind: 'openai', placeholder: 'sk-…' },
-  { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', placeholder: 'sk-ant-…' },
-  { id: 'gateway', label: tx('自己的网关'), kind: 'openai-compatible', placeholder: tx('没有可以留空') },
-] as const
 
 function ModelStep({ onDone }: { onDone(): void }) {
   const qc = useQueryClient()
-  const [pick, setPick] = useState<(typeof PROVIDERS)[number]>(PROVIDERS[1])
+  // The providers first-run offers come from the server's catalog (`firstRun`), the one place providers are named.
+  const choices = useCatalog().data?.presets.filter(p => p.firstRun) ?? []
+  const [picked, setPick] = useState<Preset | undefined>()
+  const pick = picked ?? choices[0]
+  const needsUrl = pick?.kind === 'openai-compatible' && !pick.baseUrl
   const [key, setKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [made, setMade] = useState<{ id: string; kind: string } | null>(null)
   const connect = useMutation({
     mutationFn: async () => {
-      const body = { apiKey: key.trim() || null, baseUrl: pick.id === 'gateway' ? baseUrl.trim() : null }
+      if (!pick) return
+      const body = { apiKey: key.trim() || null, baseUrl: needsUrl ? baseUrl.trim() : pick.baseUrl ?? null }
       // Trying again after a wrong key changes the provider made the first time instead of adding another.
       const id = made?.kind === pick.kind ? (await api.patch(`/providers/${made.id}`, body), made.id)
-        : (await api.post<{ provider: Provider }>('/providers', { kind: pick.kind, name: pick.label, ...body })).provider.id
+        : (await api.post<{ provider: Provider }>('/providers', { kind: pick.kind, name: pick.name ?? pick.label, ...body })).provider.id
       setMade({ id, kind: pick.kind })
       const { models, error } = await api.get<{ models: string[]; error?: string }>(`/providers/${id}/models?role=router`)
       const model = models[0]
@@ -87,18 +88,18 @@ function ModelStep({ onDone }: { onDone(): void }) {
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['roles'] }); qc.invalidateQueries({ queryKey: ['providers'] }); onDone() },
   })
-  const ready = (pick.id !== 'gateway' ? key.trim() : baseUrl.trim()) && !connect.isPending
+  const ready = pick && (needsUrl ? baseUrl.trim() : key.trim()) && !connect.isPending
   const input = 'h-9 w-full rounded-[10px] border border-line bg-panel px-3 text-sm outline-none placeholder:text-faint focus:border-faint'
   return <form onSubmit={e => { e.preventDefault(); if (ready) connect.mutate() }}>
     <div className="text-xs text-muted">{tx('我用哪家的模型想事情')}</div>
     <div role="radiogroup" aria-label={tx('模型供应商')} className="mt-2 flex flex-wrap gap-1.5">
-      {PROVIDERS.map(p => <button key={p.id} type="button" role="radio" aria-checked={pick.id === p.id} onClick={() => setPick(p)}
-        className={cx('press h-8 rounded-full px-3.5 text-[13px]', pick.id === p.id ? 'bg-ink font-medium text-ink-fg' : 'border border-line hover:border-faint')}>{p.label}</button>)}
+      {choices.map(p => <button key={p.id} type="button" role="radio" aria-checked={pick?.id === p.id} onClick={() => setPick(p)}
+        className={cx('press h-8 rounded-full px-3.5 text-[13px]', pick?.id === p.id ? 'bg-ink font-medium text-ink-fg' : 'border border-line hover:border-faint')}>{tx(p.name ?? p.label)}</button>)}
     </div>
-    {pick.id === 'gateway' && <label className="mt-3 block"><span className="text-xs text-muted">{tx('地址（OpenAI 兼容）')}</span>
+    {needsUrl && <label className="mt-3 block"><span className="text-xs text-muted">{tx('地址（OpenAI 兼容）')}</span>
       <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://gateway.example.com/v1" className={cx(input, 'mt-1.5 font-mono text-[13px]')} /></label>}
     <label className="mt-3 block"><span className="text-xs text-muted">API Key</span>
-      <input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={pick.placeholder} className={cx(input, 'mt-1.5 font-mono text-[13px]')} /></label>
+      <input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={pick?.keyHint ? tx(pick.keyHint) : undefined} className={cx(input, 'mt-1.5 font-mono text-[13px]')} /></label>
     <p className="mt-1.5 text-[11px] text-faint">{tx('只存在这台电脑上的数据目录里。')}</p>
     <div className="mt-3 flex items-center gap-3">
       <button type="submit" disabled={!ready} className="press h-8 shrink-0 rounded-full bg-ink px-4 text-[13px] font-medium text-ink-fg disabled:opacity-50">{connect.isPending ? tx('在接…') : tx('接上')}</button>

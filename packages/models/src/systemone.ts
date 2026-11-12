@@ -4,8 +4,7 @@
  * called directly here and only serves layers that need a decision (the reviewer). https://docs.typesafe.ai/api/system-one
  */
 import { APICallError } from '@ai-sdk/provider'
-
-export const SYSTEM_ONE_BASE = 'https://api.typesafe.ai/v1'
+import { SYSTEM_ONE_BASE } from './catalog'
 
 export type SystemOneQuestion =
   | { type: 'choice'; instructions?: unknown; criteria: Record<string, unknown> }

@@ -5,9 +5,9 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { EmbeddingModelV4, LanguageModelV4 } from '@ai-sdk/provider'
-import { DECISION_MODEL_SUGGESTIONS, type ProviderKind } from './catalog'
+import { DECISION_MODEL_SUGGESTIONS, KINDS, type ProviderKind } from './catalog'
 import { mergeCatalogs, jevIdsIn, parseModelCatalog, type ModelInfo, type ModelType } from './discovery'
-import { decisionEndpoints, SYSTEM_ONE_BASE, systemOneClient, type SystemOneClient } from './systemone'
+import { decisionEndpoints, systemOneClient, type SystemOneClient } from './systemone'
 
 export interface ProviderRecord {
   id: string
@@ -62,20 +62,14 @@ export const defaultFactory: ModelFactory = {
   systemOne: (p, key) => systemOneClient(decisionEndpoints(p.baseUrl, p.kind, p.options.decisionsUrl), key, p.options.headers),
 }
 
-const DEFAULT_BASE: Partial<Record<ProviderKind, string>> = {
-  anthropic: 'https://api.anthropic.com/v1',
-  openai: 'https://api.openai.com/v1',
-  google: 'https://generativelanguage.googleapis.com/v1beta',
-  deepseek: 'https://api.deepseek.com',
-  typesafe: SYSTEM_ONE_BASE,
-}
-
-/** The headers a provider's list endpoints take. */
+/** The headers a provider's list endpoints take, from its kind's spec. */
 function listHeaders(p: ProviderRecord, apiKey: string | undefined): Record<string, string> {
-  const headers: Record<string, string> = { ...p.options.headers }
-  if (p.kind === 'anthropic') { if (apiKey) headers['x-api-key'] = apiKey; headers['anthropic-version'] = '2023-06-01' }
-  else if (p.kind === 'google') { if (apiKey) headers['x-goog-api-key'] = apiKey }
-  else if (apiKey) headers.authorization = `Bearer ${apiKey}`
+  const spec = KINDS[p.kind]
+  const headers: Record<string, string> = { ...spec.headers, ...p.options.headers }
+  if (apiKey) {
+    if (spec.auth === 'bearer') headers.authorization = `Bearer ${apiKey}`
+    else headers[spec.auth] = apiKey
+  }
   return headers
 }
 
@@ -85,7 +79,8 @@ function listHeaders(p: ProviderRecord, apiKey: string | undefined): Record<stri
  * extra sources are best effort; only a failed `/models` fails the call, since that is the sign the provider is unreachable.
  */
 export async function listProviderModels(p: ProviderRecord, apiKey: string | undefined, fetchImpl: typeof fetch = fetch): Promise<ModelInfo[]> {
-  const base = (p.baseUrl ?? DEFAULT_BASE[p.kind] ?? '').replace(/\/+$/, '')
+  const spec = KINDS[p.kind]
+  const base = (p.baseUrl ?? spec.baseUrl ?? '').replace(/\/+$/, '')
   if (!base) throw new Error('no base URL')
   const headers = listHeaders(p, apiKey)
   const get = async (url: string, fallback?: ModelType, timeout = 15_000) => {
@@ -93,12 +88,11 @@ export async function listProviderModels(p: ProviderRecord, apiKey: string | und
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
     return parseModelCatalog(await response.json(), p.kind, fallback)
   }
-  const mainUrl = `${base}/models${p.kind === 'anthropic' ? '?limit=1000' : p.kind === 'google' ? '?pageSize=1000' : ''}`
-  const openaiStyle = p.kind !== 'anthropic' && p.kind !== 'google' && p.kind !== 'typesafe'
+  const mainUrl = `${base}/models${spec.listQuery ? `?${spec.listQuery}` : ''}`
   const [main, embeddings, decisions] = await Promise.allSettled([
     get(mainUrl),
-    openaiStyle ? get(`${base}/embeddings/models`, 'embedding', 8_000) : Promise.resolve([]),
-    p.kind === 'openai-compatible' ? probeDecisionModels(p, apiKey, fetchImpl) : Promise.resolve([]),
+    spec.embeddingsList ? get(`${base}/embeddings/models`, 'embedding', 8_000) : Promise.resolve([]),
+    spec.probeDecisions ? probeDecisionModels(p, apiKey, fetchImpl) : Promise.resolve([]),
   ])
   if (main.status === 'rejected') throw main.reason
   const extra = embeddings.status === 'fulfilled' ? embeddings.value : []

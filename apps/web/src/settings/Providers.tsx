@@ -11,7 +11,6 @@ import { Block, Btn, NumberInput, Page, Pill, Row, Section, TextInput } from './
 import { modelTag, useCatalog, useModelOptions, useProviders, type ModelType } from './hooks'
 import { tx } from '../i18n'
 
-const KIND_LABEL: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Gemini', deepseek: 'DeepSeek', 'openai-compatible': tx('OpenAI 兼容'), typesafe: tx('决策接口') }
 const host = (url: string | null) => (url ?? '').replace(/^https?:\/\//, '').replace(/\/$/, '')
 const keyWhere = (p: Provider) => p.keyEnv ? tx('环境变量 {0}', p.keyEnv) : p.hasKey ? tx('密钥在钥匙串里') : tx('没有密钥')
 
@@ -40,10 +39,11 @@ export function Providers({ item }: { item?: string }) {
 }
 
 function ProviderRow({ p }: { p: Provider }) {
+  const kinds = useCatalog().data?.kinds
   const live = useModelOptions(p)
   const state = p.kind === 'typesafe' ? null : live.loading ? <Pill>{tx('在试')}</Pill> : live.error ? <Pill tone="danger">{tx('连不上')}</Pill> : live.models.length ? <Pill tone="ok">{tx('连得上')}</Pill> : null
   return <Row href={`#/settings/providers/${p.id}`} icon={<KeyRound size={18} />} label={p.name}
-    sub={<span className="line-clamp-1">{[KIND_LABEL[p.kind], host(p.baseUrl), p.kind === 'typesafe' ? tx('只给审核用') : keyWhere(p)].filter(Boolean).join(' · ')}</span>}>
+    sub={<span className="line-clamp-1">{[kinds?.[p.kind] && tx(kinds[p.kind].label), host(p.baseUrl), p.kind === 'typesafe' ? tx('只给审核用') : keyWhere(p)].filter(Boolean).join(' · ')}</span>}>
     {p.keyEnv && !p.hasKey ? <span className="text-[13px] text-faint">{tx('没设置')}</span> : state}
   </Row>
 }
@@ -145,7 +145,7 @@ function AddProvider({ onDone }: { onDone(id?: string): void }) {
     <Block className="grid grid-cols-2 gap-2 sm:grid-cols-3">
       {catalog.data?.presets.map(p => <button key={p.id} type="button" onClick={() => { setPreset(p); setName(p.label); setBaseUrl(p.baseUrl ?? '') }}
         className="rounded-[10px] border border-line bg-card px-3 py-2.5 text-left hover:border-faint">
-        <div className="text-sm font-medium">{p.label}</div><div className="text-xs text-faint">{KIND_LABEL[p.kind]}</div>
+        <div className="text-sm font-medium">{p.label}</div><div className="text-xs text-faint">{catalog.data && tx(catalog.data.kinds[p.kind].label)}</div>
       </button>)}
     </Block>
   </Section>
