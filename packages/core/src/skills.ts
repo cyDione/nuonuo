@@ -8,13 +8,18 @@ import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 import type { AgentExtensions } from './agents'
 
-export interface Skill { id: string; name: string; when: string; steps: string; enabled: boolean; by: 'owner' | 'assistant'; createdAt: number; updatedAt: number }
+export interface Skill { id: string; name: string; when: string; steps: string; enabled: boolean; by: 'owner' | 'assistant' | 'plugin'; createdAt: number; updatedAt: number
+  /** The plugin a `by: 'plugin'` skill came with; it applies only while that plugin is on. */
+  plugin?: string }
 export type SkillInput = Pick<Skill, 'name' | 'when' | 'steps'> & { enabled?: boolean }
 
 const KEY = 'skills'
 const MAX = 50
 
 export class Skills {
+  /** Whether a plugin is on; a plugin's skills apply only while it is. Set by the plugin manager. */
+  pluginActive?: (pluginId: string) => boolean
+
   constructor(private store: Store, private now: () => number = Date.now, private changed: () => void = () => {}) {}
 
   list(): Skill[] { return kvGet<Skill[]>(this.store, KEY) ?? [] }
@@ -46,7 +51,38 @@ export class Skills {
 
   remove(id: string): void { this.write(this.list().filter(s => s.id !== id)) }
 
-  enabled(): Skill[] { return this.list().filter(s => s.enabled) }
+  enabled(): Skill[] { return this.list().filter(s => s.enabled && (!s.plugin || this.pluginActive?.(s.plugin) !== false)) }
+
+  /**
+   * A plugin's skills, as its current version lists them: new ones arrive switched off (the owner turns them on, as with
+   * the assistant's proposals), changed ones keep the owner's switch, and ones the plugin dropped go. Names the owner
+   * already uses are skipped.
+   */
+  syncPlugin(pluginId: string, input: SkillInput[]): void {
+    const at = this.now()
+    const list = this.list()
+    const mine = new Map(list.filter(s => s.plugin === pluginId).map(s => [s.name, s]))
+    const taken = new Set(list.filter(s => s.plugin !== pluginId).map(s => s.name))
+    const next: Skill[] = []
+    for (const raw of input.slice(0, 20)) {
+      const name = String(raw.name ?? '').trim().slice(0, 20)
+      if (!name || taken.has(name) || next.some(s => s.name === name)) continue
+      const when = String(raw.when ?? '').trim().slice(0, 120)
+      const steps = String(raw.steps ?? '').trim().slice(0, 4_000)
+      const old = mine.get(name)
+      next.push(old ? { ...old, when, steps, updatedAt: old.when === when && old.steps === steps ? old.updatedAt : at }
+        : { id: newId('skl'), name, when, steps, enabled: false, by: 'plugin', plugin: pluginId, createdAt: at, updatedAt: at })
+    }
+    const others = list.filter(s => s.plugin !== pluginId)
+    if (others.length + next.length > MAX) next.splice(Math.max(0, MAX - others.length))
+    const changed = JSON.stringify(list.filter(s => s.plugin === pluginId)) !== JSON.stringify(next)
+    if (changed) this.write([...others, ...next])
+  }
+
+  /** Forgets a plugin's skills (it was uninstalled). */
+  removePlugin(pluginId: string): void {
+    if (this.list().some(s => s.plugin === pluginId)) this.write(this.list().filter(s => s.plugin !== pluginId))
+  }
 }
 
 export function skillsExtension(skills: Skills): AgentExtensions {

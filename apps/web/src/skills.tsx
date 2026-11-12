@@ -42,7 +42,7 @@ export function SkillsSection({ Head, LinkBtn }: { Head: React.ComponentType<{ t
       <span className={cx('flex size-8 shrink-0 items-center justify-center rounded-lg bg-sunken', s.enabled ? 'text-fg' : 'text-faint')}><Sparkle size={15} /></span>
       <button onClick={() => all && setForm({ id: s.id, name: s.name, when: s.when, steps: s.steps })} className={cx('min-w-0 flex-1 text-left', !all && 'cursor-default')}>
         <span className={cx('block truncate text-sm font-medium', !s.enabled && 'text-faint')}>{s.name}</span>
-        <span className="block truncate text-[11px] text-faint">{s.when}{!s.enabled && s.by === 'assistant' ? tx(' · 它记下的，等你打开') : !s.enabled ? tx(' · 停用了') : ''}</span>
+        <span className="block truncate text-[11px] text-faint">{s.when}{!s.enabled && s.by === 'assistant' ? tx(' · 它记下的，等你打开') : !s.enabled && s.by === 'plugin' ? tx(' · 插件带来的，等你打开') : !s.enabled ? tx(' · 停用了') : ''}</span>
       </button>
       {all && <button onClick={() => { if (confirm(tx('删掉「{0}」？', s.name))) remove.mutate(s.id) }} aria-label={tx('删掉 {0}', s.name)} className="press flex size-7 shrink-0 items-center justify-center rounded-full text-faint hover:bg-sunken hover:text-fg"><Trash2 size={13} /></button>}
       <Switch on={s.enabled} label={s.name} onChange={enabled => patch.mutate({ id: s.id, enabled })} />

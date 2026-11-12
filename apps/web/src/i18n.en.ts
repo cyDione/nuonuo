@@ -767,6 +767,7 @@ export const EN: Record<string, string> = {
   "卸载「{0}」？\n\n会删除插件文件，以及它提供的来源的设置。": "Uninstall “{0}”?\n\nThis deletes the plugin's files and the settings of the sources it provides.",
   "打开开关才会运行插件代码。内置的 Telegram 和 Gmail 在「来源」里。": "Plugin code runs only once switched on. The built-in Telegram and Gmail are under “Sources”.",
   "刚装好": "Just installed",
+  " · 插件带来的，等你打开": " · from a plugin, waiting for you to turn it on",
   "MCP：{0}": "MCP: {0}",
   "第三方插件": "Third-party plugins",
   "第三方插件放进数据目录的 plugins/ 文件夹，打开开关才会运行。内置的 Telegram 和 Gmail 在「来源」里。": "Put third-party plugins in the plugins/ folder of the data folder; they only run once switched on. The built-in Telegram and Gmail are under “Sources”.",

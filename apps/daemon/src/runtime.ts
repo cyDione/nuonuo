@@ -114,6 +114,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     reviewer.envFor = ticket => workerEnv({ NUONUO_TICKET: ticket.id, NUONUO_DIR: ticket.directory })
     const access = new LocalAccess(store)
     const skills = new Skills(store, Date.now, () => bus.emit({ type: 'skills.updated' }))
+    plugins.useSkills(skills)
     reviewer.access = access
     reviewer.sandboxed = ticket => sandboxApplies(engine.execution().sandbox, ticket)
     const uploadsDir = join(config.home, 'uploads')
@@ -158,7 +159,8 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       }),
     })
     registerAgents(store, agents, engine, combineExtensions(
-      gatedSourceExtension(sources.agentExtensions(id => access.settings().sources[id] === 'read'), access, reviewer, () => sources.askFirstTools()),
+      gatedSourceExtension(combineExtensions(sources.agentExtensions(id => access.settings().sources[id] === 'read'), plugins.agentExtensions()), access, reviewer,
+        () => new Set([...sources.askFirstTools(), ...plugins.askFirstTools()])),
       memoryExtension(memory, engine),
       { routerPrompt: () => personaPrompt(store) },
       instructionsExtension(instructions),

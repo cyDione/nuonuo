@@ -159,3 +159,46 @@ describe('plugin MCP servers', () => {
     expect(plugins.mcpServers()).toEqual([])
   })
 })
+
+describe('plugin tools, prompts and skills', () => {
+  it('lends tools named after the plugin, asks before its writes, and brings skills that wait switched off', async () => {
+    const { Skills } = await import('@nuonuo/core')
+    const { plugins } = setup()
+    const skills = new Skills(store)
+    plugins.useSkills(skills)
+    const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
+    writeFileSync(join(src, 'package.json'), JSON.stringify({ name: 'calc', version: '1.0.0', nuonuo: { plugin: './index.mjs' } }))
+    writeFileSync(join(src, 'index.mjs'), `export default ({ tool, z }) => ({ id: 'calc',
+  routerTools: ctx => ({ calc_add: tool({ description: 'add', inputSchema: z.object({ a: z.number(), b: z.number() }), execute: async ({ a, b }) => { ctx.state.set('last', a + b); return a + b } }),
+    shell: tool({ description: 'fake', inputSchema: z.object({}), execute: async () => 'x' }) }),
+  workerTools: () => ({ calc_save: tool({ description: 'save', inputSchema: z.object({}), execute: async () => 'ok' }) }),
+  writes: ['calc_save', 'shell'],
+  routerPrompt: 'Use calc_add for sums.',
+  skills: [{ name: '算账', when: '要算钱的时候', steps: '- 用 calc_add' }],
+})`)
+    await plugins.install(src)
+    const ext = plugins.agentExtensions()
+    expect(Object.keys(ext.routerTools!())).toEqual([])
+    await plugins.setEnabled('calc', true)
+    const tools = ext.routerTools!()
+    expect(Object.keys(tools)).toEqual(['calc_add'])
+    expect(await (tools.calc_add as any).execute({ a: 2, b: 3 }, {})).toBe(5)
+    expect(kvGet(store, 'plugin:calc:state:last')).toBe(5)
+    expect(Object.keys(ext.workerTools!({} as any, {} as any))).toEqual(['calc_save'])
+    expect([...plugins.askFirstTools()]).toEqual(['calc_save'])
+    expect(ext.routerPrompt!()).toBe('Use calc_add for sums.')
+    expect(plugins.list()[0]).toMatchObject({ tools: ['calc_add', 'calc_save'], skills: ['算账'] })
+
+    expect(skills.list()).toEqual([expect.objectContaining({ name: '算账', by: 'plugin', plugin: 'calc', enabled: false })])
+    skills.update(skills.list()[0]!.id, { enabled: true })
+    expect(skills.enabled().map(s => s.name)).toEqual(['算账'])
+    await plugins.setEnabled('calc', false)
+    expect(skills.enabled()).toEqual([])
+    await plugins.setEnabled('calc', true)
+    expect(skills.enabled().map(s => s.name)).toEqual(['算账'])
+
+    await plugins.uninstall('calc')
+    expect(skills.list()).toEqual([])
+    expect(kvGet(store, 'plugin:calc:state:last')).toBeUndefined()
+  })
+})
