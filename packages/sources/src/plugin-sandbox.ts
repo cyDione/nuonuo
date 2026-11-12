@@ -6,7 +6,7 @@
  * snapshot the process keeps sending; everything else is a message round trip.
  */
 import type { McpServerConfig } from '@nuonuo/agent-runtime'
-import { LOCAL_APPS } from '@nuonuo/core'
+import { LOCAL_APPS, type CalendarEvent } from '@nuonuo/core'
 import { kvGet, kvSet, schema, type Store } from '@nuonuo/db'
 import { jsonSchema, tool, type ToolSet } from 'ai'
 import { fork, type ChildProcess } from 'node:child_process'
@@ -282,6 +282,14 @@ export class PluginSandbox {
         ...(has('send') ? { send: async (ctx, message) => { await sandbox.prepare(ctx); return await sandbox.call('send', { source: s.id, message }) as { url?: string } | 'gone' } } : {}),
         ...(has('threadInfo') ? { threadInfo: (_ctx, threadId) => snap()?.threadInfo?.[threadId] } : {}),
         ...(has('homeThread') ? { homeThread: () => snap()?.homeThread } : {}),
+        // A third-party calendar: reads and adds go to the plugin process; the gate still applies the 日历 level here.
+        ...(has('calendar') ? {
+          calendar: (ctx: SourceContext<unknown>) => ({
+            label: s.title,
+            list: async range => { await sandbox.prepare(ctx); return await sandbox.call('calendar', { source: s.id, op: 'list', args: range }) as CalendarEvent[] },
+            add: async event => { await sandbox.prepare(ctx); return await sandbox.call('calendar', { source: s.id, op: 'add', args: event }) as { id: string } },
+          }),
+        } : {}),
         ...(has('routerPrompt') ? { routerPrompt: () => snap()?.routerPrompt } : {}),
         ...(has('workerPrompt') ? { workerPrompt: () => snap()?.workerPrompt } : {}),
         ...(has('workerEnv') ? { workerEnv: () => snap()?.workerEnv ?? {} } : {}),

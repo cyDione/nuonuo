@@ -323,7 +323,7 @@ export function makeDefineChannel(z) {
     }
 
     const formatNote = caps.format === 'plain' ? 'shown as plain text, no Markdown' : caps.format === 'html' ? 'basic formatting works' : 'Markdown works'
-    const passThrough = ['icon', 'actions', 'authorized', 'http', 'routerPrompt', 'routerTools', 'workerPrompt', 'workerTools', 'workerEnv', 'writes', 'apps', 'defaultEnabled']
+    const passThrough = ['icon', 'actions', 'authorized', 'http', 'routerPrompt', 'routerTools', 'workerPrompt', 'workerTools', 'workerEnv', 'writes', 'apps', 'calendar', 'defaultEnabled']
     return {
       ...Object.fromEntries(passThrough.filter(k => spec[k] !== undefined).map(k => [k, spec[k]])),
       id, title,

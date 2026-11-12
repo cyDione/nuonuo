@@ -87,7 +87,7 @@ export interface ChannelIO<C> {
   action(a: ChannelAction): Promise<string | undefined>
 }
 
-export interface ChannelSpec<C> extends Partial<Pick<SourceKind<C>, 'icon' | 'actions' | 'authorized' | 'http' | 'routerPrompt' | 'routerTools' | 'workerPrompt' | 'workerTools' | 'workerEnv' | 'writes' | 'apps' | 'defaultEnabled'>> {
+export interface ChannelSpec<C> extends Partial<Pick<SourceKind<C>, 'icon' | 'actions' | 'authorized' | 'http' | 'routerPrompt' | 'routerTools' | 'workerPrompt' | 'workerTools' | 'workerEnv' | 'writes' | 'apps' | 'calendar' | 'defaultEnabled'>> {
   id: string
   title: string
   description?: string

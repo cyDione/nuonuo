@@ -2,7 +2,7 @@
  * SourceRegistry: owns the installed source kinds and their saved settings, starts and stops them, and serves the engine
  * (who may ask for work, outgoing messages through the `reply` effect) and the agents (tools, prompt text, environment).
  */
-import type { AgentExtensions, Engine, SourcePort, Ticket, ToolPolicy } from '@nuonuo/core'
+import type { AgentExtensions, CalendarBackend, Engine, SourcePort, Ticket, ToolPolicy } from '@nuonuo/core'
 import { kvGet, kvSet, schema, type Effects, type Store } from '@nuonuo/db'
 import type { ToolSet } from 'ai'
 import type { Health, OutgoingMessage, SavedFile, SourceContext, SourceKind } from './kind'
@@ -194,6 +194,14 @@ export class SourceRegistry implements SourcePort {
         return instance?.kind.threadInfo?.(instance.ctx, threadId)
       },
     }
+  }
+
+  /** Calendars of the running sources that have one (Google Calendar through Gmail…), for the shared calendar tools. */
+  calendars(): CalendarBackend[] {
+    return [...this.instances.values()].flatMap(i => {
+      if (!i.kind.calendar) return []
+      try { return [{ ...i.kind.calendar(i.ctx), id: i.kind.id }] } catch { return [] }
+    })
   }
 
   /**

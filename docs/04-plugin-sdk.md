@@ -139,6 +139,8 @@ definePlugin({
 | `threadInfo` | | 生成卡片上显示的线程摘要 |
 | `routerPrompt` / `routerTools` | | 给主 Agent 增加的提示词和工具 |
 | `workerPrompt` / `workerTools` / `workerEnv` | | 给 Worker 增加的提示词、工具和环境变量 |
+| `writes` / `apps` | | 会做改动的工具名，以及碰到你自己的应用的工具（`{ 工具名: 'calendar' }`）；权限关卡按它们决定隐藏、直接做还是先问你 |
+| `calendar(ctx)` | | 账号里的日历：`{ label, list({ from, to, calendar? }), add?(event) }`。不要自己写日历工具：糯糯把 Mac 日历、Google 日历和插件的日历合成同一对工具 `calendar_events` / `calendar_add`，按「权限 → 日历」的档位走 |
 | `actions` + `http` | | 设置卡片上的按钮（例如「授权」），以及插件自己的 HTTP 端点。`public: true` 的端点挂在 `/plugin/<id>/…` 下，不需要令牌，所以插件必须自己校验 state 参数 |
 
 ## 上下文 `ctx`

@@ -10,6 +10,7 @@ import { PROACTIVE_WORKER_PROMPT, ROUTER_PROMPT, SUBAGENT_PROMPT, WORKER_PROMPT 
 import { LOCAL_APPS, type LocalAccess } from './access'
 import type { LocalApps } from './localapps'
 import type { ToolGate, ToolPolicy } from './gate'
+import { calendarTools, registerCalendarExecutor, type CalendarBackend } from './calendar'
 import type { Instructions } from './instructions'
 import { proactiveSettings, saveProactiveSettings } from './proactive'
 import type { Memory, MemoryTrust } from './memory'
@@ -666,6 +667,12 @@ export function localAppsExtension(apps: LocalApps): AgentExtensions {
     workerTools: (ticket, ctx) => isProactive(ticket) ? {} : apps.tools(ticket, ctx.session.id),
     workerPrompt: ticket => isProactive(ticket) ? undefined : apps.prompt(),
   }
+}
+
+/** The owner's calendars (the Mac's, Google's, a plugin's) behind one pair of tools, under the 日历 level. */
+export function calendarExtension(backends: () => CalendarBackend[], gate: ToolGate, reviewer?: Reviewer): AgentExtensions {
+  registerCalendarExecutor(reviewer, backends)
+  return { workerTools: (ticket, ctx) => calendarTools(backends(), gate, ticket, ctx.session.id) }
 }
 
 /** The owner's folder rules for workers: file tools reach allowed folders and the attachments, never the never-touch ones. */
