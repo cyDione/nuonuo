@@ -630,6 +630,15 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
 
   // Plugins
   api.get('/plugins', c => c.json({ plugins: rt.plugins.list(), dir: `${rt.config.home}/plugins` }))
+  const pluginCall = async <T>(f: () => Promise<T>) => { try { return await f() } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) } }
+  /** Installs from a folder path, GitHub (`owner/repo`, `github:owner/repo#ref`, a github.com URL), an npm name or a .tgz URL; it arrives switched off. */
+  api.post('/plugins/install', async c => {
+    const { source } = await body(c, z.object({ source: z.string().trim().min(1).max(500) }))
+    return c.json({ plugin: await pluginCall(() => rt.plugins.install(source)) })
+  })
+  api.post('/plugins/:id/update', async c => c.json({ plugin: await pluginCall(() => rt.plugins.update(c.req.param('id'))) }))
+  api.post('/plugins/:id/reload', async c => c.json({ plugin: await pluginCall(() => rt.plugins.reload(c.req.param('id'))) }))
+  api.delete('/plugins/:id', async c => { await pluginCall(() => rt.plugins.uninstall(c.req.param('id'))); return c.json({ ok: true }) })
   api.post('/plugins/:id', async c => {
     const { enabled } = await body(c, z.object({ enabled: z.boolean() }))
     try { return c.json({ plugin: await rt.plugins.setEnabled(c.req.param('id'), enabled) }) } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) }

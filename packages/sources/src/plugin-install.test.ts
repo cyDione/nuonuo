@@ -1,0 +1,161 @@
+import { Effects, kvGet, openStore, type Store } from '@nuonuo/db'
+import { MemorySecrets } from '@nuonuo/models'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { gzipSync } from 'node:zlib'
+import { afterEach, describe, expect, it } from 'vitest'
+import { extractTarball, parseOrigin } from './plugin-install'
+import { PluginManager } from './plugins'
+import { SourceRegistry } from './registry'
+
+/** A minimal ustar writer for the tests: files (and `../` attempts) under a top folder. */
+function tgz(files: Record<string, string>, top = 'package'): Buffer {
+  const blocks: Buffer[] = []
+  for (const [name, content] of Object.entries(files)) {
+    const header = Buffer.alloc(512)
+    header.write(`${top}/${name}`, 0, 100)
+    header.write('0000644\0', 100); header.write('0000000\0', 108); header.write('0000000\0', 116)
+    const body = Buffer.from(content)
+    header.write(body.length.toString(8).padStart(11, '0') + '\0', 124)
+    header.write('00000000000\0', 136)
+    header.write('0', 156)
+    header.write('ustar\0', 257); header.write('00', 263)
+    header.fill(' ', 148, 156)
+    let sum = 0
+    for (const b of header) sum += b
+    header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148)
+    blocks.push(header, body, Buffer.alloc((512 - (body.length % 512)) % 512))
+  }
+  blocks.push(Buffer.alloc(1024))
+  return gzipSync(Buffer.concat(blocks))
+}
+
+const plugin = (id: string, version: string, extra = '') => ({
+  'package.json': JSON.stringify({ name: id, version, nuonuo: { plugin: './index.mjs' } }),
+  'index.mjs': `export default ({ z }) => ({ id: '${id}', version: '${version}', sources: [{ id: '${id}', title: 't', description: '', schema: z.object({ k: z.string().default('') }), fields: [{ key: 'tok', type: 'secret', label: 'x' }], start(ctx) { ctx.state.set('cursor', 1) } }]${extra} })`,
+})
+
+describe('parseOrigin', () => {
+  it('reads paths, GitHub, npm and tarball URLs', () => {
+    expect(parseOrigin('/opt/p')).toEqual({ kind: 'folder', path: '/opt/p' })
+    expect(parseOrigin('~/dev/p')).toEqual({ kind: 'folder', path: join(homedir(), 'dev/p') })
+    expect(parseOrigin('owner/repo')).toEqual({ kind: 'github', repo: 'owner/repo' })
+    expect(parseOrigin('github:owner/repo#v1.2')).toEqual({ kind: 'github', repo: 'owner/repo', ref: 'v1.2' })
+    expect(parseOrigin('https://github.com/owner/repo.git')).toEqual({ kind: 'github', repo: 'owner/repo' })
+    expect(parseOrigin('https://github.com/owner/repo/tree/main/plugins/rss')).toEqual({ kind: 'github', repo: 'owner/repo', ref: 'main', subdir: 'plugins/rss' })
+    expect(parseOrigin('nuonuo-rss')).toEqual({ kind: 'npm', name: 'nuonuo-rss' })
+    expect(parseOrigin('@me/nuonuo-rss@1.0.0')).toEqual({ kind: 'npm', name: '@me/nuonuo-rss', version: '1.0.0' })
+    expect(parseOrigin('https://example.com/p.tgz')).toEqual({ kind: 'url', url: 'https://example.com/p.tgz' })
+    expect(() => parseOrigin('http://example.com/p.tgz')).toThrow(/https/)
+    expect(() => parseOrigin('Not A Name!')).toThrow(/看不懂/)
+  })
+})
+
+describe('extractTarball', () => {
+  it('drops the top folder and refuses paths that leave the target', () => {
+    const into = mkdtempSync(join(tmpdir(), 'sa-tar-'))
+    extractTarball(tgz({ 'a.txt': 'hi', 'sub/b.txt': 'yo' }), into)
+    expect(readFileSync(join(into, 'sub/b.txt'), 'utf8')).toBe('yo')
+    expect(() => extractTarball(tgz({ '../../evil.txt': 'x' }), mkdtempSync(join(tmpdir(), 'sa-tar-')))).toThrow(/不安全/)
+  })
+})
+
+let store: Store
+let registry: SourceRegistry
+afterEach(async () => { await registry?.stopAll(); store?.close() })
+
+function setup(files: Record<string, Buffer> = {}) {
+  store = openStore(':memory:')
+  const secrets = new MemorySecrets()
+  registry = new SourceRegistry(store, new Effects(store), secrets)
+  const dir = mkdtempSync(join(tmpdir(), 'sa-plugins-'))
+  const fetched: string[] = []
+  const fakeFetch = (async (url: string) => {
+    fetched.push(String(url))
+    if (String(url) === 'https://registry.npmjs.org/nuonuo-hello')
+      return Response.json({ 'dist-tags': { latest: '2.0.0' }, versions: { '2.0.0': { dist: { tarball: 'https://registry.npmjs.org/nuonuo-hello/-/nuonuo-hello-2.0.0.tgz' } } } })
+    const body = files[String(url)]
+    return body ? new Response(new Uint8Array(body)) : new Response('nope', { status: 404 })
+  }) as typeof fetch
+  const plugins = new PluginManager(dir, registry, store, fakeFetch)
+  let changes = 0
+  plugins.onChange = () => { changes++ }
+  return { dir, plugins, secrets, fetched, changes: () => changes }
+}
+
+describe('installing plugins', () => {
+  it('installs from a folder switched off, reloads edits, and uninstalls with its settings', async () => {
+    const { plugins, dir, secrets } = setup()
+    const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
+    for (const [name, content] of Object.entries(plugin('hello', '1.0.0'))) writeFileSync(join(src, name), content)
+    const info = await plugins.install(src)
+    expect(info).toMatchObject({ id: 'hello', version: '1.0.0', enabled: false, loaded: false, origin: src })
+    expect(existsSync(join(dir, 'hello', 'index.mjs'))).toBe(true)
+    await expect(plugins.install(src)).rejects.toThrow(/已经装了/)
+
+    await plugins.setEnabled('hello', true)
+    await registry.save('hello', { enabled: true, config: { k: 'v', tok: 'secret-1' } })
+    expect(kvGet(store, 'source:hello:cursor')).toBe(1)
+    writeFileSync(join(dir, 'hello', 'index.mjs'), plugin('hello', '1.0.1')['index.mjs'])
+    expect(await plugins.reload('hello')).toMatchObject({ loaded: true })
+    expect(registry.has('hello')).toBe(true)
+
+    await plugins.uninstall('hello')
+    expect(existsSync(join(dir, 'hello'))).toBe(false)
+    expect(plugins.list()).toEqual([])
+    expect(registry.has('hello')).toBe(false)
+    expect(kvGet(store, 'source:hello')).toBeUndefined()
+    expect(kvGet(store, 'source:hello:cursor')).toBeUndefined()
+    expect(kvGet(store, 'plugin:hello:enabled')).toBeUndefined()
+    expect(secrets.get('source:hello:tok')).toBeUndefined()
+  })
+
+  it('installs from npm and GitHub, and updates in place keeping it on', async () => {
+    const files = {
+      'https://registry.npmjs.org/nuonuo-hello/-/nuonuo-hello-2.0.0.tgz': tgz(plugin('nuonuo-hello', '2.0.0')),
+      'https://codeload.github.com/me/plugins/tar.gz/HEAD': tgz(Object.fromEntries(Object.entries(plugin('gh', '0.1.0')).map(([k, v]) => [`tools/gh/${k}`, v])), 'plugins-abc123'),
+    }
+    const { plugins, fetched } = setup(files)
+    expect(await plugins.install('nuonuo-hello')).toMatchObject({ id: 'nuonuo-hello', version: '2.0.0', origin: 'nuonuo-hello' })
+    expect(await plugins.install('https://github.com/me/plugins/tree/HEAD/tools/gh')).toMatchObject({ id: 'gh', version: '0.1.0' })
+    expect(fetched).toContain('https://codeload.github.com/me/plugins/tar.gz/HEAD')
+
+    await plugins.setEnabled('gh', true)
+    files['https://codeload.github.com/me/plugins/tar.gz/HEAD'] = tgz(Object.fromEntries(Object.entries(plugin('gh', '0.2.0')).map(([k, v]) => [`tools/gh/${k}`, v])), 'plugins-def456')
+    expect(await plugins.update('gh')).toMatchObject({ id: 'gh', version: '0.2.0', enabled: true, loaded: true })
+    expect(registry.has('gh')).toBe(true)
+
+    await expect(plugins.install('nuonuo-missing')).rejects.toThrow(/npm 上没有/)
+    expect(plugins.list().map(p => p.id).sort()).toEqual(['gh', 'nuonuo-hello'])
+  })
+
+  it('refuses a package that is not a plugin and leaves no staging folder behind', async () => {
+    const { plugins, dir } = setup()
+    const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
+    writeFileSync(join(src, 'package.json'), JSON.stringify({ name: 'plain' }))
+    await expect(plugins.install(src)).rejects.toThrow(/不是 Nuonuo 插件/)
+    const manual = join(dir, 'manual')
+    mkdirSync(manual)
+    for (const [name, content] of Object.entries(plugin('manual', '1.0.0'))) writeFileSync(join(manual, name), content)
+    await expect(plugins.update('manual')).rejects.toThrow(/手动放进文件夹/)
+    expect(plugins.scan().map(m => m.id)).toEqual(['manual'])
+  })
+})
+
+describe('plugin MCP servers', () => {
+  it('are offered under the plugin\'s name once it is on, starting in its folder and always reviewed', async () => {
+    const { plugins, dir, changes } = setup()
+    const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
+    for (const [name, content] of Object.entries(plugin('mcpy', '1.0.0', `, mcpServers: [{ name: 'files', transport: 'stdio', command: 'node', args: ['server.mjs'] }]`))) writeFileSync(join(src, name), content)
+    await plugins.install(src)
+    expect(plugins.mcpServers()).toEqual([])
+    const before = changes()
+    await plugins.setEnabled('mcpy', true)
+    expect(changes()).toBeGreaterThan(before)
+    expect(plugins.mcpServers()).toEqual([{ name: 'mcpy_files', enabled: true, transport: 'stdio', command: 'node', args: ['server.mjs'], cwd: join(dir, 'mcpy'), roles: ['worker'], review: true }])
+    expect(plugins.list()[0]).toMatchObject({ mcpServers: ['mcpy_files'] })
+    await plugins.setEnabled('mcpy', false)
+    expect(plugins.mcpServers()).toEqual([])
+  })
+})
