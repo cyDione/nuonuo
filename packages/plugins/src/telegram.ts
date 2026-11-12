@@ -91,6 +91,7 @@ export function telegramKind(deps: { fetch?: typeof fetch } = {}) {
   return defineChannel<Config>({
     id: 'telegram',
     title: 'Telegram',
+    icon: 'send',
     description: '用 Telegram 机器人在手机上指挥家里的电脑：私聊直接对话，群里 @它。到 @BotFather 创建机器人拿到 token，再把你的 Telegram ID 或用户名加入允许列表（给机器人发 /start 可以看到 ID）。',
     capabilities: { inbound: 'longpoll', threads: 'topic', format: 'plain', maxLength: 4000, edit: true, buttons: true, typing: true, proactive: true },
     config: TelegramConfig,

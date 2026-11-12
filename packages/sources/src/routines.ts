@@ -78,6 +78,7 @@ export function routinesKind(routines: Routines): SourceKind<Record<string, neve
   return {
     id: 'cron',
     title: '定时任务',
+    icon: 'alarm-clock',
     description: '按计划自动执行的任务（例如每天 9 点的简报）。可以直接对主 Agent 说「每天早上 9 点…」来创建，也可以在「定时任务」页管理。',
     defaultEnabled: true,
     schema: z.object({}).strict() as unknown as z.ZodType<Record<string, never>>,

@@ -53,6 +53,7 @@ export default function plugin({ definePlugin, z }) {
     version: '0.1.0',
     sources: [{
       id: 'rss',
+      icon: 'rss',
       title: 'RSS 订阅',
       description: '监控 RSS/Atom 订阅：命中关键词时通知你，或者交给智能体处理（例如总结文章）。',
       schema: Config,

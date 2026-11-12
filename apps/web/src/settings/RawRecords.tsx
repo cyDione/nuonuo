@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 import { api, type ActivityEvent, type AuditEntry } from '../api'
-import { SourceIcon, SOURCE_LABEL } from '../icons'
+import { SourceIcon, SourceName } from '../icons'
 import { openTask } from '../live'
 import { cx } from '../ui'
 import { Block, Btn, Row, Section } from './kit'
@@ -29,7 +29,7 @@ export function RawRecords() {
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 text-xs text-muted">
             <span className="font-medium text-fg">{e.source === 'cron' ? tx('定时任务') : e.actor}</span>{!e.human && <span className="rounded bg-card px-1 text-[10px]">bot</span>}
-            <span className="text-faint">{SOURCE_LABEL[e.source] ?? e.source} · {stamp(e.at)}</span>
+            <span className="text-faint"><SourceName source={e.source} /> · {stamp(e.at)}</span>
             {e.url && <a href={e.url} target="_blank" rel="noreferrer" className="text-accent" aria-label={tx('打开原文')}><ExternalLink size={11} /></a>}
           </span>
           <span className="mt-0.5 line-clamp-2 block">{e.text}</span>

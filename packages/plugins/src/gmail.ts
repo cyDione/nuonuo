@@ -188,6 +188,7 @@ export function gmailKind(deps: { fetch?: typeof fetch } = {}): SourceKind<Confi
   return auth.source({
     id: 'gmail',
     title: 'Gmail',
+    icon: 'mail',
     description: '读邮件、起草回复，由你决定是否发送（智能体从不直接发信）。来自允许地址的邮件、或你打上标签的邮件会交给智能体处理。点「授权 Gmail」用 Google 账号登录授权即可接入。',
     schema: GmailConfig,
     fields: [

@@ -21,7 +21,7 @@ import type { SecretPort } from './registry'
 interface ToolDef { description: string; inputSchema: Record<string, unknown> }
 interface SourceSnapshot { authorized?: boolean; routerPrompt?: string; workerPrompt?: string; workerEnv?: Record<string, string>; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef>; threadInfo: Record<string, string> }
 interface Snapshot { plugin: { routerPrompt?: string; workerPrompt?: string; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef> }; sources: Record<string, SourceSnapshot> }
-interface HelloSource { id: string; title: string; description: string; fields: SourceKind['fields']; defaultEnabled?: boolean; actions?: SourceKind['actions']; writes?: string[]; configSchema: Record<string, unknown> | null; capabilities?: SourceKind['capabilities']; has: Record<string, boolean>; validStart: boolean }
+interface HelloSource { id: string; title: string; icon?: string; description: string; fields: SourceKind['fields']; defaultEnabled?: boolean; actions?: SourceKind['actions']; writes?: string[]; configSchema: Record<string, unknown> | null; capabilities?: SourceKind['capabilities']; has: Record<string, boolean>; validStart: boolean }
 interface Hello { plugin: { id: string; name?: string; version?: string; description?: string; writes: string[]; skills: NuonuoPlugin['skills']; mcpServers: PluginMcpServer[]; sources: HelloSource[] }; snapshot: Snapshot }
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -259,7 +259,7 @@ export class PluginSandbox {
       const configSchema = (s.configSchema ? (() => { try { return z.fromJSONSchema(s.configSchema as any) } catch { return z.any() } })() : z.any()) as z.ZodType<any>
       const sync = (ctx: SourceContext<any>) => { void sandbox.prepare(ctx).catch(() => {}) }
       const kind: SourceKind = {
-        id: s.id, title: s.title, description: s.description, fields: s.fields ?? [], schema: configSchema,
+        id: s.id, title: s.title, ...(typeof s.icon === 'string' ? { icon: s.icon } : {}), description: s.description, fields: s.fields ?? [], schema: configSchema,
         ...(s.capabilities ? { capabilities: s.capabilities } : {}),
         ...(s.defaultEnabled ? { defaultEnabled: true } : {}), ...(s.actions ? { actions: s.actions } : {}), ...(s.writes ? { writes: s.writes } : {}),
         start(ctx) {

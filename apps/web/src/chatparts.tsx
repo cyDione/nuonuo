@@ -5,7 +5,7 @@
  */
 import { ArrowUpRight, Bell, CalendarDays, ChevronDown, ChevronUp, FileSpreadsheet, FileText, Layers, MapPin, Search, Settings2, Shield, X, File as FileIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { Message, Upload } from './api'
+import type { LocalApp, Message, Upload } from './api'
 import { setPaneTab, type PaneTab } from './RightPane'
 import { go } from './route'
 import { openPane } from './Sidebar'
@@ -95,7 +95,7 @@ type Card =
   | { type: 'schedule'; date: string; events: { start: string; end?: string; title: string; location?: string }[] }
   | { type: 'reminder'; title: string; at: string; note?: string }
   | { type: 'place'; name: string; address?: string; note?: string; url?: string }
-  | { type: 'mac_permission'; app: 'calendar' | 'reminders' | 'notes' | 'contacts' | 'photos' }
+  | { type: 'mac_permission'; app: LocalApp }
 
 const WEEK = [tx('周日'), tx('周一'), tx('周二'), tx('周三'), tx('周四'), tx('周五'), tx('周六')]
 function dayLabel(date: string) {

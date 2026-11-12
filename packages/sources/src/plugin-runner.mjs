@@ -208,7 +208,7 @@ try {
       id: plugin.id, name: plugin.name, version: plugin.version, description: plugin.description,
       writes: plugin.writes ?? [], skills: plugin.skills ?? [], mcpServers: plugin.mcpServers ?? [],
       sources: (plugin.sources ?? []).map(k => ({
-        id: k.id, title: k.title, description: k.description, fields: k.fields, defaultEnabled: k.defaultEnabled, actions: k.actions, writes: k.writes,
+        id: k.id, title: k.title, icon: k.icon, description: k.description, fields: k.fields, defaultEnabled: k.defaultEnabled, actions: k.actions, writes: k.writes,
         capabilities: k.capabilities,
         configSchema: safe(() => { const s = z.toJSONSchema(k.schema, { io: 'input', unrepresentable: 'any' }); delete s.$schema; return s }, null),
         has: Object.fromEntries(['authorized', 'poll', 'allowed', 'send', 'threadInfo', 'routerPrompt', 'routerTools', 'workerPrompt', 'workerTools', 'workerEnv', 'http'].map(m => [m, typeof k[m] === 'function'])),

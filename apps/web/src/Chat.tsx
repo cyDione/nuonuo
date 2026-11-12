@@ -20,7 +20,7 @@ import { Avatar, usePersona } from './persona'
 import { go } from './route'
 import { Onboarding, useOnboarding } from './onboarding'
 import { LearnedNote, NeedsYou, needsOwner, useTickets, type Learned } from './tasks'
-import { SOURCE_LABEL, SourceIcon } from './icons'
+import { SourceIcon, SourceName } from './icons'
 import { cx } from './ui'
 import { locale, tx } from './i18n'
 
@@ -197,8 +197,8 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
         <button onClick={() => go('/')} aria-label={tx('回主聊')} title={tx('回主聊')} className="press -ml-1.5 flex size-7 shrink-0 items-center justify-center rounded-full text-muted hover:bg-sunken hover:text-fg"><ChevronLeft size={18} /></button>
         {external && <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-sunken text-muted"><SourceIcon source={current!.source} size={13} /></span>}
         <h1 className="min-w-0 shrink truncate font-display text-[15px] font-semibold">{title}</h1>
-        <span className="min-w-0 flex-1 truncate text-xs text-faint">{external ? SOURCE_LABEL[current!.source] ?? current!.source : [tx('侧聊'), sideStatus].filter(Boolean).join(' · ')}</span>
-        {current?.meta.url ? <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg"> {tx('在')} {SOURCE_LABEL[current.source] ?? current.source} {tx('打开')} <ExternalLink size={12} /></a>
+        <span className="min-w-0 flex-1 truncate text-xs text-faint">{external ? <SourceName source={current!.source} /> : [tx('侧聊'), sideStatus].filter(Boolean).join(' · ')}</span>
+        {current?.meta.url ? <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg"> {tx('在')} <SourceName source={current.source} /> {tx('打开')} <ExternalLink size={12} /></a>
           : !external && (made ? <a href="#/library" className="shrink-0 text-xs text-muted hover:text-fg">{tx('{0} 个成果 ›', made)}</a> : <span className="shrink-0 text-xs text-faint max-sm:hidden">{tx('做完了就收进成果')}</span>)}
       </div>
     </div>}
@@ -339,7 +339,7 @@ function Item({ m, fresh, tapback, name, actions }: { m: Message; fresh: boolean
     {m.meta.error && <div className="flex items-center gap-1 text-xs text-danger"><AlertTriangle size={12} />{m.meta.error}</div>}
     {m.meta.via && <div className="flex items-center gap-1 text-[11px] text-faint">
       <SourceIcon source={m.meta.via} size={11} />
-      {m.meta.delivery === 'sent' ? <>{tx('已发到')} {SOURCE_LABEL[m.meta.via] ?? m.meta.via}{m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent" aria-label={tx('打开')}><ArrowUpRight size={11} /></a>}</>
+      {m.meta.delivery === 'sent' ? <>{tx('已发到')} <SourceName source={m.meta.via} />{m.meta.url && <a href={m.meta.url} target="_blank" rel="noreferrer" className="text-accent" aria-label={tx('打开')}><ArrowUpRight size={11} /></a>}</>
         : m.meta.delivery === 'pending' ? tx('发送中…')
         : <span className="text-danger">{m.meta.delivery === 'dropped' ? tx('没能发出去') : tx('发送失败，稍后重试')}{m.meta.deliveryError ? `：${m.meta.deliveryError}` : ''}</span>}
     </div>}
