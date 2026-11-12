@@ -115,7 +115,7 @@ export function Plugins() {
   }
   const error = (toggle.error as Error | null)?.message ?? actionError
   return <Page title={tx('插件')} action={<InstallButton onInstalled={setFresh} />}>
-    <Section title={tx('第三方插件')} foot={<>{tx('打开开关才会运行插件代码。内置的 Telegram、飞书、Discord 和 Gmail 在「来源」里。')}{error && <span className="block text-danger">{error}</span>}</>}>
+    <Section title={tx('第三方插件')} foot={<>{tx('打开开关才会运行插件代码。内置的 Telegram、飞书、Discord、企业微信、钉钉、Slack 和 Gmail 在「来源」里。')}{error && <span className="block text-danger">{error}</span>}</>}>
       {external.map(p => { const failed = p.enabled && !p.loaded
         const sub = [p.version && `v${p.version}`, failed ? tx('加载失败：{0}', p.error ?? tx('原因不明')) : originLabel(p.origin) ?? p.description,
           p.sources.length ? tx('提供来源：{0}', p.sources.join('、')) : '', p.mcpServers.length ? tx('MCP：{0}', p.mcpServers.join('、')) : '',

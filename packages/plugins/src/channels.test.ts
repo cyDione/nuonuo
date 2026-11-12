@@ -14,7 +14,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { discordKind } from './discord'
-import { FakeDiscord, FakeFeishu, FakeTelegram } from './fakes'
+import { dingtalkKind } from './dingtalk'
+import { FakeDingTalk, FakeDiscord, FakeFeishu, FakeSlack, FakeTelegram, FakeWeCom } from './fakes'
+import { slackKind } from './slack'
+import { wecomKind } from './wecom'
 import { encodeFrame, decodeFrame, feishuKind } from './feishu'
 import { telegramKind } from './telegram'
 
@@ -55,6 +58,8 @@ interface Driver {
   press(u: User, data: string, chat: string): Promise<void>
   replies(): Reply[]
   edits(): { id: string; text: string }[]
+  /** The app delivers only group messages that @ the bot. */
+  mentionsOnly?: boolean
 }
 
 function telegramDriver(): Driver {
@@ -126,7 +131,54 @@ function discordDriver(): Driver {
   }
 }
 
-describe.each([['telegram', telegramDriver], ['feishu', feishuDriver], ['discord', discordDriver]] as const)('channel contract: %s', (_name, make) => {
+function wecomDriver(): Driver {
+  const wc = new FakeWeCom()
+  return {
+    kind: wecomKind({ socket: wc.socket }), owner: { id: 'zhangsan' }, stranger: { id: 'lisi' },
+    config: { botId: wc.botId, secret: wc.secret, allowed: ['zhangsan'] },
+    dm: u => u.id, group: 'wrgroup', mentionsOnly: true,
+    connect: async () => { await vi.waitFor(() => expect(registry.list().find(s => s.id === 'wecom')!.health.status).toBe('ok')) },
+    // A WeCom group only delivers messages that @ the bot, so an unaddressed group message never arrives.
+    say: async (u, text, where) => { if (where?.group && !where.mention) return; wc.say(u.id, text, where?.group ? 'wrgroup' : undefined); await settle() },
+    press: async () => { throw new Error('no buttons') },
+    replies: () => wc.sent.map((m, i) => ({ chat: m.chatid, text: m.content, buttons: [], id: String(i) })),
+    edits: () => [],
+  }
+}
+
+function dingtalkDriver(): Driver {
+  const dt = new FakeDingTalk()
+  return {
+    kind: dingtalkKind({ fetch: dt.fetch, socket: dt.socket }), owner: { id: 'staff42' }, stranger: { id: 'staff7' },
+    config: { clientId: dt.clientId, clientSecret: dt.clientSecret, apiUrl: 'https://fake-dingtalk.local', allowed: ['staff42'] },
+    dm: u => `@${u.id}`, group: 'cid_group',
+    connect: async () => { await vi.waitFor(() => expect(registry.list().find(s => s.id === 'dingtalk')!.health.status).toBe('ok')) },
+    say: async (u, text, where) => { dt.say(u.id, text, where?.group ? { group: 'cid_group', mention: Boolean(where.mention) } : {}); await settle() },
+    press: async () => { throw new Error('no buttons') },
+    replies: () => dt.sent.map((m, i) => ({ chat: m.to, text: m.text, buttons: [], id: String(i) })),
+    edits: () => [],
+  }
+}
+
+function slackDriver(): Driver {
+  const sl = new FakeSlack()
+  let n = 1
+  return {
+    kind: slackKind({ fetch: sl.fetch, socket: sl.socket }), owner: { id: 'U42', username: 'owner' }, stranger: { id: 'U7', username: 'stranger' },
+    config: { botToken: sl.botToken, appToken: sl.appToken, apiUrl: 'https://fake-slack.local/api', allowed: ['U42'] },
+    dm: u => `D${u.id}`, group: 'CGROUP',
+    connect: async () => { await vi.waitFor(() => expect(registry.list().find(s => s.id === 'slack')!.health.status).toBe('ok')) },
+    say: async (u, text, where) => {
+      sl.envelope('events_api', { event: { type: 'message', user: u.id, text: where?.mention ? `<@${sl.botId}> ${text}` : text, channel: where?.group ? 'CGROUP' : `D${u.id}`, channel_type: where?.group ? 'channel' : 'im', ts: `1700000100.${String(n++).padStart(6, '0')}` } })
+      await settle()
+    },
+    press: async (u, data, chat) => { sl.envelope('interactive', { type: 'block_actions', user: { id: u.id, username: u.username }, channel: { id: chat }, actions: [{ action_id: data, value: data }] }); await settle() },
+    replies: () => sl.sent.map(m => ({ chat: m.channel, text: m.text, id: m.ts, buttons: (m.blocks ?? []).flatMap((b: any) => (b.elements ?? []).map((e: any) => e.value)) })),
+    edits: () => sl.updates.map(u => ({ id: u.ts, text: u.text })),
+  }
+}
+
+describe.each([['telegram', telegramDriver], ['feishu', feishuDriver], ['discord', discordDriver], ['wecom', wecomDriver], ['dingtalk', dingtalkDriver], ['slack', slackDriver]] as const)('channel contract: %s', (_name, make) => {
   it('lets allowed accounts ask, ignores others, splits long replies, handles /new and answers approvals', async () => {
     const { engine, effects } = setup()
     const d = make()
@@ -147,7 +199,7 @@ describe.each([['telegram', telegramDriver], ['feishu', feishuDriver], ['discord
     // Groups: only a mention addresses the assistant
     await d.say(d.owner, '大家好', { group: true })
     await d.say(d.owner, '帮我订个会议室', { group: true, mention: true })
-    expect(triggers().slice(2).map(t => [(t.disposition as any).ignored ?? 'routed', t.text])).toEqual([['not_addressed', '大家好'], ['routed', expect.stringContaining('帮我订个会议室')]])
+    expect(triggers().slice(2).map(t => [(t.disposition as any).ignored ?? 'routed', t.text])).toEqual([...(d.mentionsOnly ? [] : [['not_addressed', '大家好']]), ['routed', expect.stringContaining('帮我订个会议室')]])
 
     // Replies: split under the app's limit; Markdown downgraded where the app shows plain text
     const conversationId = engine.conversationOfThread(triggers()[0]!.threadId)!
@@ -169,20 +221,28 @@ describe.each([['telegram', telegramDriver], ['feishu', feishuDriver], ['discord
     expect(fresh.threadId).not.toBe(triggers()[0]!.threadId)
     expect(engine.conversationOfThread(fresh.threadId)).not.toBe(conversationId)
 
-    // Approvals by button: only allowed accounts; the card is marked once answered
+    // Approvals by button (where the app has buttons): only allowed accounts; the card is marked once answered
     const answers: [string, string, boolean][] = []
     registry.onApprovalAnswer = (source, approvalId, approve) => { answers.push([source, approvalId, approve]) }
     registry.send({ messageId: 'apv_1:ask', source: id, threadId: fresh.threadId, text: '需要你确认：删除 build/', approval: { id: 'apv_1', state: 'pending' } })
     await effects.tick()
     const card = d.replies().at(-1)!
-    expect(card.buttons).toEqual(['nuonuo:apv:yes:apv_1', 'nuonuo:apv:no:apv_1'])
-    await d.press(d.stranger, card.buttons[0]!, d.dm(d.owner))
-    expect(answers).toEqual([])
-    await d.press(d.owner, card.buttons[0]!, d.dm(d.owner))
-    expect(answers).toEqual([[id, 'apv_1', true]])
-    registry.send({ messageId: 'apv_1:approved', source: id, threadId: fresh.threadId, text: '已同意', approval: { id: 'apv_1', state: 'approved' } })
-    await effects.tick()
-    expect(d.edits().at(-1)).toMatchObject({ id: card.id, text: expect.stringContaining('已同意') })
+    if (d.kind.capabilities!.buttons) {
+      expect(card.buttons).toEqual(['nuonuo:apv:yes:apv_1', 'nuonuo:apv:no:apv_1'])
+      await d.press(d.stranger, card.buttons[0]!, d.dm(d.owner))
+      expect(answers).toEqual([])
+      await d.press(d.owner, card.buttons[0]!, d.dm(d.owner))
+      await vi.waitFor(() => expect(answers).toEqual([[id, 'apv_1', true]]))
+      registry.send({ messageId: 'apv_1:approved', source: id, threadId: fresh.threadId, text: '已同意', approval: { id: 'apv_1', state: 'approved' } })
+      await effects.tick()
+      expect(d.edits().at(-1)).toMatchObject({ id: card.id, text: expect.stringContaining('已同意') })
+    } else {
+      expect(card).toMatchObject({ chat: d.dm(d.owner), buttons: [], text: expect.stringContaining('回复「同意」或「拒绝」') })
+      await d.say(d.stranger, '同意')
+      expect(answers).toEqual([])
+      await d.say(d.owner, '同意')
+      await vi.waitFor(() => expect(answers).toEqual([[id, 'apv_1', true]]))
+    }
 
     // …and by a typed answer
     registry.send({ messageId: 'apv_2:ask', source: id, threadId: fresh.threadId, text: '需要你确认：发邮件', approval: { id: 'apv_2', state: 'pending' } })

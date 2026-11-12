@@ -35,7 +35,7 @@ const GROUPS: { title: string; tabs: Tab[] }[] = [
     { id: 'routines', label: tx('定时任务'), icon: <AlarmClock size={17} />, words: tx('定时 cron 每天 简报 周报 提醒') },
   ] },
   { title: tx('连接'), tabs: [
-    { id: 'sources', label: tx('来源'), icon: <Plug size={17} />, words: tx('GitHub Gmail Telegram 飞书 Discord RSS 授权 唤起词 仓库 同步 主动留意') },
+    { id: 'sources', label: tx('来源'), icon: <Plug size={17} />, words: tx('GitHub Gmail Telegram 飞书 Discord 企业微信 钉钉 Slack RSS 授权 唤起词 仓库 同步 主动留意') },
     { id: 'plugins', label: tx('插件'), icon: <Puzzle size={17} />, words: tx('第三方 插件 plugins') },
     { id: 'mcp', label: tx('MCP 工具'), icon: <Server size={17} />, words: tx('MCP 工具 服务 notion filesystem') },
   ] },

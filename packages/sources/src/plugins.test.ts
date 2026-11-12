@@ -5,11 +5,13 @@ import { Effects, kvGet, openStore, schema, type Store } from '@nuonuo/db'
 import { MemorySecrets, ModelHub } from '@nuonuo/models'
 import { MockLanguageModelV4 } from 'ai/test'
 import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { createHmac } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
+import { CHANNEL_PRESETS, scaffoldChannel } from './channel-scaffold'
 import { PluginManager } from './plugins'
 import { SECRET_SET, SourceRegistry } from './registry'
 
@@ -167,6 +169,38 @@ describe('chat channels in the sandbox', () => {
     registry.onApprovalAnswer = () => { throw new Error('这个确认不属于这里的任务') }
     await registry.pollNow('echo')
     await vi.waitFor(() => expect(kvGet(store, 'source:echo:toast')).toBe('这个确认不属于这里的任务'))
+  })
+})
+
+describe('nuonuo channel new', () => {
+  const write = (dir: string, name: string, files: Record<string, string>) => {
+    mkdirSync(join(dir, name))
+    for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, name, path), text)
+  }
+
+  it('generates a skeleton for every preset that loads in the sandbox, with the shared fields and the declared capabilities', async () => {
+    const { dir, plugins } = setup()
+    for (const preset of Object.keys(CHANNEL_PRESETS)) write(dir, `x-${preset}`, scaffoldChannel({ name: `x-${preset}`, preset }))
+    for (const [preset, p] of Object.entries(CHANNEL_PRESETS)) {
+      await plugins.setEnabled(`x-${preset}`, true)
+      const kind = registry.list().find(s => s.id === `x-${preset}`)
+      expect(kind, preset).toBeTruthy()
+      expect(kind!.fields.map(f => f.key)).toEqual(['token', ...(p.capabilities.inbound === 'webhook' ? ['signingSecret'] : []), 'apiUrl', 'allowed', 'approvals'])
+    }
+    expect(() => scaffoldChannel({ name: 'Bad Name' })).toThrow('小写字母')
+    expect(() => scaffoldChannel({ name: 'ok', preset: 'nope' })).toThrow('没有这个预设')
+  })
+
+  it('a webhook skeleton takes signed callbacks on the public URL and rejects unsigned ones', async () => {
+    const { dir, plugins } = setup()
+    write(dir, 'hook', scaffoldChannel({ name: 'hook', preset: 'webhook' }))
+    await plugins.setEnabled('hook', true)
+    await registry.save('hook', { enabled: true, config: { token: 't', signingSecret: 's3', allowed: ['u1'], approvals: false } })
+    const body = JSON.stringify({ type: 'message', bot_id: 'b', data: { id: 'm1', chat_id: 'c1', is_private: true, user_id: 'u1', text: '你好' } })
+    const post = (sig: string) => registry.http('hook', new Request('http://x/plugin/hook/events', { method: 'POST', body, headers: { 'x-signature': sig } }), 'events', { public: true, origin: 'http://x' })
+    expect((await post('bad'))!.status).toBe(401)
+    expect((await post(createHmac('sha256', 's3').update(body).digest('hex')))!.status).toBe(200)
+    await vi.waitFor(() => expect(store.db.select().from(schema.triggers).all().map(t => [t.id, t.threadId])).toEqual([['hook:c1:m1', 'hook:c1:0']]))
   })
 })
 

@@ -222,3 +222,100 @@ export class FakeDiscord {
     return json({ message: 'Not Found' }, 404)
   }
 }
+
+/** WeCom's intelligent-bot long connection: subscribe, ping and aibot_send_msg are answered by req_id. */
+export class FakeWeCom {
+  readonly botId = 'bot_test'
+  readonly secret = 'wecom-secret'
+  sockets: FakeSocket[] = []
+  sent: { chatid: string; content: string }[] = []
+  socket = (url: string) => {
+    const ws = new FakeSocket(url)
+    this.sockets.push(ws)
+    ws.onSend = data => {
+      const f = JSON.parse(String(data))
+      const ok = (extra: Record<string, unknown> = {}) => setTimeout(() => ws.deliver(JSON.stringify({ headers: { req_id: f.headers.req_id }, errcode: 0, errmsg: 'ok', ...extra })), 0)
+      if (f.cmd === 'aibot_subscribe') return f.body.secret === this.secret ? ok() : setTimeout(() => ws.deliver(JSON.stringify({ headers: { req_id: f.headers.req_id }, errcode: 40001, errmsg: 'invalid secret' })), 0)
+      if (f.cmd === 'ping') return ok()
+      if (f.cmd === 'aibot_send_msg') { this.sent.push({ chatid: f.body.chatid, content: f.body.markdown.content }); return ok() }
+    }
+    return ws as unknown as import('@nuonuo/plugin-sdk').SocketLike
+  }
+  private n = 1
+  /** A user writes to the bot (in a group the text starts with the @mention). */
+  say(user: string, text: string, group?: string) {
+    this.sockets.at(-1)!.deliver(JSON.stringify({ cmd: 'aibot_msg_callback', headers: { req_id: `cb${this.n}` }, body: {
+      msgid: `msg${this.n++}`, aibotid: this.botId, chattype: group ? 'group' : 'single', ...(group ? { chatid: group } : {}), from: { userid: user }, msgtype: 'text', text: { content: group ? `@糯糯 ${text}` : text }, create_time: Math.floor(Date.now() / 1000) } }))
+  }
+}
+
+/** DingTalk: the Stream gateway, the access token and the robot send APIs. */
+export class FakeDingTalk {
+  readonly clientId = 'ding_test'
+  readonly clientSecret = 'ding-secret'
+  sockets: FakeSocket[] = []
+  acks: string[] = []
+  sent: { to: string; text: string }[] = []
+  private n = 1
+  fetch: typeof fetch = async (input, init) => this.handle(new Request(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, init))
+  socket = (url: string) => {
+    const ws = new FakeSocket(url)
+    this.sockets.push(ws)
+    ws.onSend = data => { const f = JSON.parse(String(data)); if (f.headers?.messageId) this.acks.push(String(f.headers.messageId)) }
+    return ws as unknown as import('@nuonuo/plugin-sdk').SocketLike
+  }
+  /** A user writes to the robot, privately or (with @) in a group. */
+  say(staffId: string, text: string, opts: { group?: string; mention?: boolean } = {}) {
+    const id = this.n++
+    this.sockets.at(-1)!.deliver(JSON.stringify({ specVersion: '1.0', type: 'CALLBACK', headers: { topic: '/v1.0/im/bot/messages/get', messageId: `m${id}` }, data: JSON.stringify({
+      conversationId: opts.group ?? `cid_dm_${staffId}`, conversationType: opts.group ? '2' : '1', senderStaffId: staffId, senderNick: `nick${staffId}`, isInAtList: opts.group ? Boolean(opts.mention) : undefined,
+      msgtype: 'text', text: { content: ` ${text}` }, msgId: `msg${id}`, robotCode: this.clientId, createAt: Date.now(), ...(opts.group ? { conversationTitle: '家' } : {}) }) }))
+  }
+
+  private async handle(req: Request): Promise<Response> {
+    const path = new URL(req.url).pathname
+    const body = await req.json().catch(() => ({})) as Record<string, any>
+    if (path === '/v1.0/oauth2/accessToken') return body.appSecret === this.clientSecret ? json({ accessToken: 'dt-token', expireIn: 7200 }) : json({ code: 'invalidClientIdOrSecret', message: 'bad secret' }, 400)
+    if (path === '/v1.0/gateway/connections/open') return json({ endpoint: 'wss://fake-dingtalk.local/connect', ticket: 't1' })
+    if (req.headers.get('x-acs-dingtalk-access-token') !== 'dt-token') return json({ code: 'InvalidAuthentication', message: 'no token' }, 401)
+    if (path === '/v1.0/robot/oToMessages/batchSend') { this.sent.push({ to: `@${body.userIds[0]}`, text: JSON.parse(body.msgParam).text }); return json({ processQueryKey: `q${this.n++}` }) }
+    if (path === '/v1.0/robot/groupMessages/send') { this.sent.push({ to: body.openConversationId, text: JSON.parse(body.msgParam).text }); return json({ processQueryKey: `q${this.n++}` }) }
+    return json({ code: 'NotFound', message: path }, 404)
+  }
+}
+
+/** Slack: auth.test, apps.connections.open (Socket Mode), chat.postMessage and chat.update. */
+export class FakeSlack {
+  readonly botToken = 'xoxb-test'
+  readonly appToken = 'xapp-test'
+  readonly botId = 'UBOT'
+  sockets: FakeSocket[] = []
+  acks: string[] = []
+  sent: { channel: string; text: string; thread_ts?: string; blocks?: any[]; ts: string }[] = []
+  updates: { channel: string; ts: string; text: string }[] = []
+  private n = 1
+  fetch: typeof fetch = async (input, init) => this.handle(new Request(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, init))
+  socket = (url: string) => {
+    const ws = new FakeSocket(url)
+    this.sockets.push(ws)
+    setTimeout(() => ws.deliver(JSON.stringify({ type: 'hello' })), 1)
+    ws.onSend = data => { const f = JSON.parse(String(data)); if (f.envelope_id) this.acks.push(f.envelope_id) }
+    return ws as unknown as import('@nuonuo/plugin-sdk').SocketLike
+  }
+  envelope(type: string, payload: unknown) { this.sockets.at(-1)!.deliver(JSON.stringify({ type, envelope_id: `env${this.n++}`, payload })) }
+
+  private async handle(req: Request): Promise<Response> {
+    const method = new URL(req.url).pathname.split('/').pop()
+    const token = req.headers.get('authorization')?.replace(/^Bearer /, '')
+    const body = await req.json().catch(() => ({})) as Record<string, any>
+    if (method === 'apps.connections.open') return json(token === this.appToken ? { ok: true, url: 'wss://fake-slack.local/link' } : { ok: false, error: 'invalid_auth' })
+    if (token !== this.botToken) return json({ ok: false, error: 'invalid_auth' })
+    if (method === 'auth.test') return json({ ok: true, user_id: this.botId, user: 'nuonuo', team: 'Home' })
+    if (method === 'chat.postMessage') {
+      if (body.channel === 'CGONE') return json({ ok: false, error: 'channel_not_found' })
+      const ts = `1700000000.${String(this.n++).padStart(6, '0')}`; this.sent.push({ ...body, ts } as any); return json({ ok: true, ts })
+    }
+    if (method === 'chat.update') { this.updates.push(body as any); return json({ ok: true }) }
+    return json({ ok: false, error: 'unknown_method' })
+  }
+}
