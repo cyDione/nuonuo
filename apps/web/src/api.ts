@@ -96,7 +96,7 @@ export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: numb
 export type Level = 'allow' | 'review' | 'ask' | 'deny'
 export interface ReviewSettings { external: Level; destructive: Exclude<Level, 'allow'>; mode: 'model' | 'ask'; rules: string[]; allow: string[]; deny: string[] }
 export interface AuditEntry { id: number; at: number; ticketId: string | null; actor: string; action: string; tool: string | null; input: string | null; risk: string | null; decision: string; reason: string | null }
-export interface Persona { name: string; avatar: string; color: string; personality: string; role: 'all' | 'life' | 'work' | 'study'; language: 'zh' | 'en' | 'auto' }
+export interface Persona { name: string; avatar: string; color: string; personality: string; limits: string[]; role: 'all' | 'life' | 'work' | 'study'; language: 'zh' | 'en' | 'auto' }
 export interface NotifySettings { message: boolean; price: boolean; feed: boolean; ideas: boolean; banner: boolean; sound: boolean; tone: 'nuonuo' | 'system'; badge: boolean; quiet: { on: boolean; from: string; to: string } }
 export interface PrivacySettings { keep: 'forever' | '365' | '90' | '30' }
 export interface UpdatePrefs { auto: boolean; channel: 'stable' | 'beta'; install: boolean }

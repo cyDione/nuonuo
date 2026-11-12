@@ -18,7 +18,7 @@ import { dispositionText, reportsOf, ticketView, transcript } from './views'
 import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@nuonuo/core'
 import { kvGet, kvSet, newId, schema } from '@nuonuo/db'
 import { BRIDGE_JS, fireRoutine, WINDOW_HEADERS } from '@nuonuo/sources'
-import { MOOD_PLUGIN_ID, moodView, resetMood, setMoodEnabled } from '@nuonuo/plugins'
+import { MOOD_PLUGIN_ID, moodView, pinDiary, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodValues } from '@nuonuo/plugins'
 import { runDoctor } from './doctor'
 import { MAX_UPLOAD, Uploads } from './uploads'
 import { search } from './search'
@@ -204,19 +204,32 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.get('/conversations/main', c => c.json({ id: rt.engine.mainConversation() }))
   api.get('/persona', c => c.json({ persona: persona(rt.store), defaults: DEFAULT_PERSONA }))
   api.put('/persona', async c => {
-    const input = await body(c, z.object({ name: z.string().max(40), avatar: z.string().max(16), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), personality: z.string().max(2_000), role: z.enum(PERSONA_ROLES), language: z.enum(PERSONA_LANGUAGES) }).partial())
+    const input = await body(c, z.object({ name: z.string().max(40), avatar: z.string().max(16), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), personality: z.string().max(2_000), limits: z.array(z.string().max(200)).max(20), role: z.enum(PERSONA_ROLES), language: z.enum(PERSONA_LANGUAGES) }).partial())
     const next = savePersona(rt.store, input)
     rt.bus.emit({ type: 'persona.updated' })
     return c.json({ persona: next })
   })
-  // 心境 (Figma section 29): the switch and what 它是谁 shows. The switch lives only there.
+  // 个性与心境 (Figma sections 29 and 31): what 它是谁 and its window show; they are its only entry.
   const mood = () => rt.plugins.stateOf(MOOD_PLUGIN_ID)
   api.get('/mood', c => c.json({ mood: moodView(mood()) }))
+  /** The switch, values dragged in the window (from the next message on), and the sensitivities / diary switch. */
   api.put('/mood', async c => {
-    const { enabled } = await body(c, z.object({ enabled: z.boolean() }))
-    setMoodEnabled(mood(), enabled)
+    const input = await body(c, z.object({
+      enabled: z.boolean().optional(),
+      values: z.object({ mood: z.number().min(-1).max(1), energy: z.number().min(0).max(1), patience: z.number().min(0).max(100), trust: z.number().min(0).max(100) }).partial().optional(),
+      config: z.object({ up: z.number(), down: z.number(), diary: z.boolean() }).partial().optional(),
+    }))
+    if (input.enabled !== undefined) setMoodEnabled(mood(), input.enabled)
+    if (input.values) setMoodValues(mood(), input.values)
+    if (input.config) setMindConfig(mood(), input.config)
     return c.json({ mood: moodView(mood()) })
   })
+  api.post('/mood/diary/:id', async c => {
+    const { pinned } = await body(c, z.object({ pinned: z.boolean() }))
+    pinDiary(mood(), c.req.param('id'), pinned)
+    return c.json({ mood: moodView(mood()) })
+  })
+  api.delete('/mood/diary/:id', c => { removeDiary(mood(), c.req.param('id')); return c.json({ mood: moodView(mood()) }) })
   api.post('/mood/reset', c => { resetMood(mood()); return c.json({ mood: moodView(mood()) }) })
   api.delete('/conversations/:id', c => {
     const id = c.req.param('id')

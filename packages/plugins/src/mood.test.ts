@@ -5,7 +5,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { applyReport, BASELINE, guessOwner, initialMood, MOOD_HALF_LIFE_H, moodContext, moodPlugin, moodSummary, moodView, resetMood, setMoodEnabled, settleMood, stanceFor } from './mood'
+import { addDiary, applyReport, BASELINE, diaryOf, guessOwner, initialMood, MOOD_HALF_LIFE_H, moodContext, moodPlugin, moodSummary, moodView, PATIENCE_HALF_LIFE_H, pinDiary, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodValues, settleMood, stanceFor } from './mood'
 
 describe('心境 model', () => {
   it('drifts mood and energy back to the baseline over time, but not trust', () => {
@@ -14,6 +14,21 @@ describe('心境 model', () => {
     expect(later.mood).toBeCloseTo(BASELINE.mood + (-0.8 - BASELINE.mood) / 2)
     expect(later.energy).toBeCloseTo(BASELINE.energy + (1 - BASELINE.energy) / 2)
     expect(later.trust).toBe(90)
+    const p = settleMood({ ...initialMood(0), patience: 0 }, PATIENCE_HALF_LIFE_H * 3_600_000)
+    expect(p.patience).toBeCloseTo(BASELINE.patience / 2)
+  })
+
+  it('turns cool once patience runs out after being snapped at, and the sensitivities scale how much it moves', () => {
+    let s = initialMood(0)
+    for (let i = 0; i < 4; i++) s = applyReport(s, { emotion: 'angry', intensity: 1, attitude: 'hostile', feedback: 'negative' }, 0).state
+    expect(s.patience).toBeLessThan(35)
+    expect(stanceFor(s, guessOwner('帮我写个部署脚本')).id).toBe('cool')
+    expect(moodContext(s, '帮我写个部署脚本')).toContain('不讨好地道歉')
+    expect(moodContext({ ...s, trust: 90 }, 'x')).not.toContain('直接、友善地指出')
+    const soft = applyReport(initialMood(0), { emotion: 'neutral', intensity: 0, attitude: 'hostile', feedback: 'neutral' }, 0, { up: 1, down: 0.4 })
+    const hard = applyReport(initialMood(0), { emotion: 'neutral', intensity: 0, attitude: 'hostile', feedback: 'neutral' }, 0, { up: 1, down: 1.6 })
+    expect(hard.delta.patience).toBe(soft.delta.patience * 4)
+    expect(applyReport(initialMood(0), { emotion: 'neutral', intensity: 0, attitude: 'grateful', feedback: 'neutral' }, 0, { up: 9, down: 1 }).delta.trust).toBe(5)
   })
 
   it('picks the tone from this turn\'s words, never a cold one, and keeps the reply rules', () => {
@@ -62,17 +77,49 @@ describe('心境 built in', () => {
 
     setMoodEnabled(state, true)
     const first = await ext.inlineContext!('烦死了，接口又报500', undefined)
-    expect(first).toContain('并肩解决')
+    expect(first).toContain('战友破局')
     expect(first).toContain('信任 50/100')
     const tools = ext.routerTools!() as Record<string, { execute: (a: unknown, o: unknown) => Promise<unknown> }>
     for (let i = 0; i < 6; i++) await tools.mood_sync!.execute({ emotion: 'happy', intensity: 0.8, attitude: 'grateful', feedback: 'positive' }, { toolCallId: '', messages: [] })
     expect(moodView(state)).toMatchObject({ enabled: true, trust: 68 })
     expect(moodView(state).history).toHaveLength(6)
+    expect(moodView(state).history[0]!.note).toBe('烦死了，接口又报500')
     expect(await ext.inlineContext!('今天天气不错', undefined)).toContain('直接、友善地指出')
 
+    setMoodValues(state, { mood: -0.9, patience: 10 })
+    expect(moodView(state).stance.id).toBe('cool')
     resetMood(state)
-    expect(moodView(state)).toMatchObject({ enabled: true, trust: 50, history: [] })
+    expect(moodView(state)).toMatchObject({ enabled: true, mood: BASELINE.mood, patience: BASELINE.patience, trust: 68 })
+    expect(moodView(state).history).toHaveLength(6)
+    expect(moodView(state).stance.id).toBe('partner')
     setMoodEnabled(state, false)
     expect(await ext.inlineContext!('今天天气不错', undefined)).toBe('')
+  })
+
+  it('keeps a few diary lines a day, shows them only when feelings come up, and lets the owner pin or delete them', async () => {
+    store = openStore(':memory:')
+    const plugins = new PluginManager(mkdtempSync(join(tmpdir(), 'nn-mood-')), new SourceRegistry(store, new Effects(store), new MemorySecrets()), store, { sandbox: false })
+    plugins.registerBuiltIn(moodPlugin)
+    const ext = plugins.agentExtensions()
+    const state = plugins.stateOf('mood')
+    setMoodEnabled(state, true)
+    const tools = ext.routerTools!() as Record<string, { execute: (a: unknown, o: unknown) => Promise<unknown> }>
+    const sync = (diary?: string) => tools.mood_sync!.execute({ emotion: 'happy', intensity: 0.5, attitude: 'grateful', feedback: 'positive', ...(diary ? { diary } : {}) }, { toolCallId: '', messages: [] })
+    expect(await sync('他终于修完了那个 bug，还说了谢谢。')).toMatchObject({ diary: 'kept' })
+    await sync(); await sync('第二条'); await sync('第三条')
+    expect(await sync('第四条')).not.toHaveProperty('diary')
+    expect(diaryOf(state).map(d => d.text)).toEqual(['第三条', '第二条', '他终于修完了那个 bug，还说了谢谢。'])
+    expect(await ext.inlineContext!('帮我写个部署脚本', undefined)).not.toContain('日记')
+    const id = diaryOf(state)[2]!.id
+    pinDiary(state, id, true)
+    removeDiary(state, diaryOf(state)[0]!.id)
+    const block = await ext.inlineContext!('唉，今天好累', undefined)
+    expect(block).toContain('你自己的日记')
+    expect(block).toContain('他终于修完了那个 bug')
+    setMindConfig(state, { diary: false, up: 7 })
+    expect(moodView(state).config).toEqual({ up: 2.5, down: 1, diary: false })
+    expect(await sync('不该记')).not.toHaveProperty('diary')
+    expect(await ext.inlineContext!('唉，今天好累', undefined)).not.toContain('你自己的日记')
+    expect(addDiary(state, '  ', 0)).toBe(false)
   })
 })

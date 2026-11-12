@@ -10,7 +10,7 @@ export const MASCOT = 'mascot'
 export const BRAND = 'var(--mochi)'
 /** The assistant's official name (Nuonuo in the English interface). 小助 was the old default and is shown as 糯糯. */
 export const OFFICIAL_NAME = tx('糯糯')
-const FALLBACK: Persona = { name: OFFICIAL_NAME, avatar: MASCOT, color: BRAND, personality: '', role: 'all', language: 'auto' }
+const FALLBACK: Persona = { name: OFFICIAL_NAME, avatar: MASCOT, color: BRAND, personality: '', limits: [], role: 'all', language: 'auto' }
 
 export const usePersona = () => {
   const p = useQuery({ queryKey: ['persona'], queryFn: () => api.get<{ persona: Persona }>('/persona'), staleTime: 60_000 }).data?.persona
