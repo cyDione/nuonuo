@@ -5,14 +5,16 @@
  * receives the SDK, so a plugin needs no dependencies of its own.
  */
 import type { McpServerConfig } from '@nuonuo/agent-runtime'
-import { kvGet, kvSet, type Store } from '@nuonuo/db'
-import { jsonSchema, tool } from 'ai'
+import type { AgentExtensions, SkillInput, Skills } from '@nuonuo/core'
+import { kvGet, kvSet, schema, type Store } from '@nuonuo/db'
+import { jsonSchema, tool, type ToolSet } from 'ai'
 import { randomBytes } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
 import type { SourceKind } from './kind'
+import { installDependencies } from './plugin-deps'
 import { fetchPlugin, parseOrigin } from './plugin-install'
 import type { SourceRegistry } from './registry'
 
@@ -27,6 +29,28 @@ export interface NuonuoPlugin {
    * starts in the plugin's folder, and worker calls always pass the review layer.
    */
   mcpServers?: PluginMcpServer[]
+  /**
+   * Tools for the agents that need no source. Names must start with `<plugin id>_`; tools listed in `writes` are asked
+   * about before every call.
+   */
+  routerTools?(ctx: PluginContext): ToolSet
+  workerTools?(ctx: PluginContext): ToolSet
+  writes?: string[]
+  /** Text added to the main agent's or the workers' prompt while the plugin is on. */
+  routerPrompt?: string | ((ctx: PluginContext) => string | undefined)
+  workerPrompt?: string | ((ctx: PluginContext) => string | undefined)
+  /** Procedures (会做的事) the plugin brings. They arrive switched off, for the owner to turn on in 它是谁. */
+  skills?: SkillInput[]
+}
+
+/** What a plugin's own tools and prompts receive. */
+export interface PluginContext {
+  id: string
+  /** The plugin's folder. */
+  dir: string
+  /** The plugin's small persistent state. */
+  state: { get<T>(key: string): T | undefined; set(key: string, value: unknown): void }
+  log(...args: unknown[]): void
 }
 
 export interface PluginMcpServer {
@@ -40,6 +64,8 @@ export interface PluginMcpServer {
   /** Which agents get the tools; defaults to the workers only. */
   roles?: ('worker' | 'router')[]
 }
+
+type PluginModuleText = string | ((ctx: PluginContext) => string | undefined) | undefined
 
 export const PLUGIN_API_VERSION = 1
 export const definePlugin = <T extends NuonuoPlugin>(plugin: T): T => plugin
@@ -58,6 +84,11 @@ export interface PluginInfo extends PluginManifest {
   sources: string[]
   /** Names of the MCP servers it adds (as they appear in the MCP list). */
   mcpServers: string[]
+  /** Names of its own tools and skills. */
+  tools: string[]
+  skills: string[]
+  /** What installing its dependencies left to say (install scripts not run, optional ones skipped). */
+  notes?: string[]
   /** Where it was installed from, when it was installed through the app (so it can be updated). */
   origin?: string
   error?: string
@@ -73,7 +104,59 @@ export class PluginManager {
   /** Called after plugins load or unload, so the MCP list can pick up their servers. */
   onChange?: () => void
 
-  constructor(private dir: string, private registry: SourceRegistry, private store: Store, private fetchImpl: typeof fetch = fetch) {}
+  private skills: Skills | undefined
+  private fetchImpl: typeof fetch
+
+  constructor(private dir: string, private registry: SourceRegistry, private store: Store, opts: { fetch?: typeof fetch; skills?: Skills } | typeof fetch = {}) {
+    const o = typeof opts === 'function' ? { fetch: opts } : opts
+    this.fetchImpl = o.fetch ?? fetch
+    if (o.skills) this.useSkills(o.skills)
+  }
+
+  /** Where plugins' skills go (会做的事). */
+  useSkills(skills: Skills): void {
+    this.skills = skills
+    skills.pluginActive = id => this.loaded.has(id)
+  }
+
+  private context(manifest: PluginManifest): PluginContext {
+    const key = (k: string) => `plugin:${manifest.id}:state:${k}`
+    return { id: manifest.id, dir: manifest.dir, log: (...args) => console.log(`[plugin ${manifest.id}]`, ...args),
+      state: { get: <T>(k: string) => kvGet<T>(this.store, key(k)), set: (k, v) => kvSet(this.store, key(k), v) } }
+  }
+
+  /** A plugin's tools named `<id>_…`; others are dropped so they cannot pass for the app's own. */
+  private ownTools(id: string, make: () => ToolSet | undefined): ToolSet {
+    let tools: ToolSet
+    try { tools = make() ?? {} } catch (error) { console.warn(`[plugin ${id}] 工具出错：${(error as Error).message}`); return {} }
+    const out: ToolSet = {}
+    for (const [name, t] of Object.entries(tools)) {
+      if (name.startsWith(`${id}_`)) out[name] = t
+      else console.warn(`[plugin ${id}] 插件工具名必须以 ${id}_ 开头，已忽略：${name}`)
+    }
+    return out
+  }
+
+  /** The loaded plugins' own tools and prompt text, for the agents. */
+  agentExtensions(): AgentExtensions {
+    const all = () => [...this.loaded.values()]
+    const text = (v: PluginModuleText, m: PluginManifest) => { try { return typeof v === 'function' ? v(this.context(m)) : v } catch { return undefined } }
+    return {
+      routerTools: () => Object.assign({}, ...all().map(({ plugin, manifest }) => this.ownTools(manifest.id, () => plugin.routerTools?.(this.context(manifest))))) as ToolSet,
+      workerTools: () => Object.assign({}, ...all().map(({ plugin, manifest }) => this.ownTools(manifest.id, () => plugin.workerTools?.(this.context(manifest))))) as ToolSet,
+      routerPrompt: () => all().map(({ plugin, manifest }) => text(plugin.routerPrompt, manifest)).filter(Boolean).map(t => String(t).slice(0, 4_000)).join('\n\n'),
+      workerPrompt: () => all().map(({ plugin, manifest }) => text(plugin.workerPrompt, manifest)).filter(Boolean).map(t => String(t).slice(0, 4_000)).join('\n\n') || undefined,
+    }
+  }
+
+  private toolNames(plugin: NuonuoPlugin, m: PluginManifest): string[] {
+    return [...new Set([...Object.keys(this.ownTools(m.id, () => plugin.routerTools?.(this.context(m)))), ...Object.keys(this.ownTools(m.id, () => plugin.workerTools?.(this.context(m))))])]
+  }
+
+  /** Acting tools of loaded plugins (their `writes`): asked about before every call. */
+  askFirstTools(): Set<string> {
+    return new Set([...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.writes ?? []).filter(n => n.startsWith(`${manifest.id}_`))))
+  }
 
   /** First-party plugins ship with the app and are always loaded; their sources start disabled like any other. */
   registerBuiltIn(plugin: NuonuoPlugin): void {
@@ -98,13 +181,15 @@ export class PluginManager {
 
   list(): PluginInfo[] {
     const builtIn: PluginInfo[] = [...this.builtIns.values()].map(p => ({ id: p.id, name: p.name ?? p.id, version: p.version ?? '', description: p.description ?? '',
-      dir: '', entry: '', apiVersion: PLUGIN_API_VERSION, enabled: true, loaded: true, builtIn: true, sources: (p.sources ?? []).map(k => k.id), mcpServers: [] }))
+      dir: '', entry: '', apiVersion: PLUGIN_API_VERSION, enabled: true, loaded: true, builtIn: true, sources: (p.sources ?? []).map(k => k.id), mcpServers: [], tools: [], skills: [] }))
     const external = this.scan().map(m => {
       const loaded = this.loaded.get(m.id)
       const error = this.errors.get(m.id)
       const origin = kvGet<string>(this.store, `plugin:${m.id}:origin`)
+      const notes = kvGet<string[]>(this.store, `plugin:${m.id}:notes`)
       return { ...m, enabled: this.enabled(m.id), loaded: Boolean(loaded), builtIn: false, sources: (loaded?.plugin.sources ?? []).map(k => k.id),
-        mcpServers: (loaded?.plugin.mcpServers ?? []).map(sv => mcpName(m.id, sv.name)), ...(origin ? { origin } : {}), ...(error ? { error } : {}) }
+        mcpServers: (loaded?.plugin.mcpServers ?? []).map(sv => mcpName(m.id, sv.name)), tools: loaded ? this.toolNames(loaded.plugin, m) : [],
+        skills: (loaded?.plugin.skills ?? []).map(sk => String(sk.name)), ...(origin ? { origin } : {}), ...(notes?.length ? { notes } : {}), ...(error ? { error } : {}) }
     })
     return [...builtIn, ...external]
   }
@@ -143,12 +228,14 @@ export class PluginManager {
       if (opts.replace && manifest.id !== opts.replace) throw new Error(`新版本的 id 是「${manifest.id}」，和「${opts.replace}」对不上`)
       const existing = this.scan().find(m => m.id === manifest.id)
       if (existing && !opts.replace) throw new Error(`已经装了「${existing.name}」，要换新版本请用「更新」`)
+      const deps = await installDependencies(root, this.fetchImpl)
       const wasOn = Boolean(existing) && this.enabled(manifest.id)
       if (existing) { await this.unload(manifest.id); rmSync(existing.dir, { recursive: true, force: true }) }
       const target = existing?.dir ?? join(this.dir, manifest.id)
       if (existsSync(target)) throw new Error(`插件文件夹里已经有 ${manifest.id}/，但它不是插件；请先移走它`)
       renameSync(root, target)
       kvSet(this.store, `plugin:${manifest.id}:origin`, input.trim())
+      kvSet(this.store, `plugin:${manifest.id}:notes`, deps.notes.length ? deps.notes : null)
       this.errors.delete(manifest.id)
       if (wasOn) await this.load(readManifest(target)!).catch(() => {})
       this.onChange?.()
@@ -183,7 +270,8 @@ export class PluginManager {
     for (const source of sources) this.registry.forget(source)
     await this.unload(id)
     rmSync(manifest.dir, { recursive: true, force: true })
-    for (const key of ['enabled', 'origin', 'sources']) kvSet(this.store, `plugin:${id}:${key}`, null)
+    for (const { key } of this.store.db.select({ key: schema.kv.key }).from(schema.kv).all()) if (key.startsWith(`plugin:${id}:`)) kvSet(this.store, key, null)
+    this.skills?.removePlugin(id)
     this.errors.delete(id)
     this.onChange?.()
   }
@@ -220,8 +308,10 @@ export class PluginManager {
         if (!sv || typeof sv.name !== 'string' || !/^[a-z0-9_-]{1,24}$/.test(sv.name)) throw new Error(`MCP 服务名「${String(sv?.name)}」不合法`)
         if (sv.transport === 'stdio' ? !sv.command : sv.transport === 'http' ? !sv.url : true) throw new Error(`MCP 服务 ${sv.name} 缺少 command 或 url`)
       }
+      if (plugin.skills !== undefined && !Array.isArray(plugin.skills)) throw new Error('skills 必须是数组')
       this.loaded.set(manifest.id, { plugin, manifest })
       kvSet(this.store, `plugin:${manifest.id}:sources`, (plugin.sources ?? []).map(k => k.id))
+      this.skills?.syncPlugin(manifest.id, plugin.skills ?? [])
       for (const kind of plugin.sources ?? []) if (this.registry.settings(kind.id).enabled) await this.registry.save(kind.id, this.registry.settings(kind.id))
     } catch (error) {
       this.errors.set(manifest.id, error instanceof Error ? error.message : String(error))

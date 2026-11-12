@@ -14,7 +14,7 @@
 2. 到「设置 → 插件」里启用它。插件以本机服务的权限运行，所以启用前要确认你信任它。
 3. 到「设置 → 来源」里配置并打开它提供的来源。
 
-不会替插件安装 npm 依赖：发布前请把依赖打包进入口文件（例如用 esbuild 打成一个 `.mjs`），或者只用 SDK 里的东西。
+安装时会自动装好 `package.json` 里的 `dependencies`（不装 `devDependencies`），直接从 npm 下载，不需要电脑上装了 npm。为了安全，**依赖的安装脚本不会运行**：需要编译原生模块的包装不上，插件页会提示；这类依赖请打包进插件。依赖的版本必须是 npm 版本号，`github:`、`file:` 这类写法会被拒绝。插件文件夹里已经带了 `node_modules` 时不会重新安装。
 
 其他接口：
 
@@ -60,6 +60,28 @@ export default function plugin({ definePlugin, z, tool }) {
 ```
 
 完整的示例见 [`examples/plugins/rss-watch`](../examples/plugins/rss-watch/index.mjs)。用 TypeScript 写插件时，从 `@nuonuo/plugin-sdk` 导入类型即可。
+
+## 工具、提示词和会做的事
+
+不需要事件来源的插件，可以直接给智能体加工具和提示词，也可以带上「会做的事」（技能）：
+
+```js
+export default ({ definePlugin, tool, z }) => definePlugin({
+  id: 'calc',
+  routerTools: ctx => ({
+    calc_add: tool({ description: '加法', inputSchema: z.object({ a: z.number(), b: z.number() }), execute: async ({ a, b }) => a + b }),
+  }),
+  workerTools: ctx => ({ calc_save: tool({ /* … */ }) }),
+  writes: ['calc_save'],                 // 每次调用前先问你
+  routerPrompt: '算钱的时候用 calc_add。',
+  workerPrompt: ctx => '…',
+  skills: [{ name: '算账', when: '要算钱的时候', steps: '- 先用 calc_add 加总\n- 再…' }],
+})
+```
+
+- 工具名必须以 `<插件 id>_` 开头，否则会被忽略。
+- `ctx` 有 `id`、`dir`（插件文件夹）、`state.get/set`（插件自己的小状态）和 `log`。
+- 插件带来的会做的事出现在「它是谁 → 会做的事」里，**默认关着**，你打开后才生效；插件停用时它们也不生效，卸载插件时一起删掉。
 
 ## MCP 服务器
 

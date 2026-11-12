@@ -5,15 +5,24 @@
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
   "dependencies": {
     "@nuonuo/agent-runtime": "workspace:*",
     "@nuonuo/core": "workspace:*",
     "@nuonuo/db": "workspace:*",
     "ai": "^7.0.162",
     "drizzle-orm": "^0.45.4",
+    "semver": "^7.8.6",
     "zod": "^4.6.7"
   },
-  "devDependencies": { "@ai-sdk/provider": "^4.0.35", "@nuonuo/models": "workspace:*" }
+  "devDependencies": {
+    "@ai-sdk/provider": "^4.0.35",
+    "@nuonuo/models": "workspace:*",
+    "@types/semver": "^7.8.0"
+  }
 }

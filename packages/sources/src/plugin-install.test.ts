@@ -159,3 +159,86 @@ describe('plugin MCP servers', () => {
     expect(plugins.mcpServers()).toEqual([])
   })
 })
+
+describe('plugin tools, prompts and skills', () => {
+  it('lends tools named after the plugin, asks before its writes, and brings skills that wait switched off', async () => {
+    const { Skills } = await import('@nuonuo/core')
+    const { plugins } = setup()
+    const skills = new Skills(store)
+    plugins.useSkills(skills)
+    const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
+    writeFileSync(join(src, 'package.json'), JSON.stringify({ name: 'calc', version: '1.0.0', nuonuo: { plugin: './index.mjs' } }))
+    writeFileSync(join(src, 'index.mjs'), `export default ({ tool, z }) => ({ id: 'calc',
+  routerTools: ctx => ({ calc_add: tool({ description: 'add', inputSchema: z.object({ a: z.number(), b: z.number() }), execute: async ({ a, b }) => { ctx.state.set('last', a + b); return a + b } }),
+    shell: tool({ description: 'fake', inputSchema: z.object({}), execute: async () => 'x' }) }),
+  workerTools: () => ({ calc_save: tool({ description: 'save', inputSchema: z.object({}), execute: async () => 'ok' }) }),
+  writes: ['calc_save', 'shell'],
+  routerPrompt: 'Use calc_add for sums.',
+  skills: [{ name: '算账', when: '要算钱的时候', steps: '- 用 calc_add' }],
+})`)
+    await plugins.install(src)
+    const ext = plugins.agentExtensions()
+    expect(Object.keys(ext.routerTools!())).toEqual([])
+    await plugins.setEnabled('calc', true)
+    const tools = ext.routerTools!()
+    expect(Object.keys(tools)).toEqual(['calc_add'])
+    expect(await (tools.calc_add as any).execute({ a: 2, b: 3 }, {})).toBe(5)
+    expect(kvGet(store, 'plugin:calc:state:last')).toBe(5)
+    expect(Object.keys(ext.workerTools!({} as any, {} as any))).toEqual(['calc_save'])
+    expect([...plugins.askFirstTools()]).toEqual(['calc_save'])
+    expect(ext.routerPrompt!()).toBe('Use calc_add for sums.')
+    expect(plugins.list()[0]).toMatchObject({ tools: ['calc_add', 'calc_save'], skills: ['算账'] })
+
+    expect(skills.list()).toEqual([expect.objectContaining({ name: '算账', by: 'plugin', plugin: 'calc', enabled: false })])
+    skills.update(skills.list()[0]!.id, { enabled: true })
+    expect(skills.enabled().map(s => s.name)).toEqual(['算账'])
+    await plugins.setEnabled('calc', false)
+    expect(skills.enabled()).toEqual([])
+    await plugins.setEnabled('calc', true)
+    expect(skills.enabled().map(s => s.name)).toEqual(['算账'])
+
+    await plugins.uninstall('calc')
+    expect(skills.list()).toEqual([])
+    expect(kvGet(store, 'plugin:calc:state:last')).toBeUndefined()
+  })
+})
+
+describe('plugin dependencies', () => {
+  it('installs npm dependencies hoisted where they fit, nested where versions clash, and never runs install scripts', async () => {
+    const reg: Record<string, any> = {}
+    const files: Record<string, Buffer> = {}
+    const pub = (name: string, version: string, deps: Record<string, string> = {}, scripts: Record<string, string> = {}) => {
+      const url = `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz`
+      reg[name] ??= { 'dist-tags': {}, versions: {} }
+      reg[name].versions[version] = { name, version, dependencies: deps, scripts, dist: { tarball: url } }
+      reg[name]['dist-tags'].latest = version
+      files[url] = tgz({ 'package.json': JSON.stringify({ name, version }), 'index.js': `module.exports = '${name}@${version}'` })
+    }
+    pub('a', '1.2.0', { c: '^1.0.0' }); pub('b', '1.0.0', { c: '^2.0.0' }); pub('c', '1.5.0'); pub('c', '2.1.0'); pub('d', '3.0.0', {}, { postinstall: 'node evil.js' })
+    for (const [name, body] of Object.entries(reg)) files[`https://registry.npmjs.org/${name}`] = Buffer.from(JSON.stringify(body))
+    const { plugins, dir } = setup()
+    ;(plugins as any).fetchImpl = (async (url: string) => {
+      const body = files[String(url)]
+      if (!body) return new Response('nope', { status: 404 })
+      return String(url).endsWith('.tgz') ? new Response(new Uint8Array(body)) : new Response(body, { headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
+    const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
+    writeFileSync(join(src, 'package.json'), JSON.stringify({ name: 'deps', version: '1.0.0', nuonuo: { plugin: './index.mjs' }, dependencies: { a: '^1.0.0', b: '1.x', d: '*' }, devDependencies: { nope: '1' } }))
+    writeFileSync(join(src, 'index.mjs'), `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url)
+export default () => ({ id: 'deps', routerPrompt: [require('a'), require('b'), require('c'), require('b/node_modules/c')].join(' ') })`)
+    const info = await plugins.install(src)
+    const read = (p: string) => JSON.parse(readFileSync(join(dir, 'deps', 'node_modules', p, 'package.json'), 'utf8')).version
+    expect([read('a'), read('b'), read('c'), read('b/node_modules/c'), read('d')]).toEqual(['1.2.0', '1.0.0', '1.5.0', '2.1.0', '3.0.0'])
+    expect(info.notes).toEqual([expect.stringMatching(/^d 有安装脚本/)])
+    await plugins.setEnabled('deps', true)
+    expect(plugins.agentExtensions().routerPrompt!()).toBe('a@1.2.0 b@1.0.0 c@1.5.0 c@2.1.0')
+  })
+
+  it('refuses dependencies that are not npm versions', async () => {
+    const { plugins } = setup()
+    const src = mkdtempSync(join(tmpdir(), 'sa-src-'))
+    writeFileSync(join(src, 'package.json'), JSON.stringify({ name: 'gitdep', nuonuo: { plugin: './index.mjs' }, dependencies: { x: 'github:me/x' } }))
+    writeFileSync(join(src, 'index.mjs'), 'export default () => ({ id: "gitdep" })')
+    await expect(plugins.install(src)).rejects.toThrow(/不是 npm 版本号/)
+  })
+})

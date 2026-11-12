@@ -129,7 +129,7 @@ export interface SourceAction { id: string; label: string; path: string; show?: 
 export interface SourceInfo { id: string; title: string; description: string; fields: FieldSpec[]; actions: SourceAction[]; authorized?: boolean; enabled: boolean; config: Record<string, any>
   health: { status: 'off' | 'starting' | 'ok' | 'error'; detail?: string; at: number }; facts: Record<string, string> }
 export interface Routine { id: string; name: string; schedule: string; prompt: string; enabled: boolean; conversationId: string | null; lastFiredAt: number | null; next: number | null }
-export interface PluginInfo { id: string; name: string; version: string; description: string; dir: string; enabled: boolean; loaded: boolean; builtIn: boolean; sources: string[]; mcpServers: string[]; origin?: string; error?: string }
+export interface PluginInfo { id: string; name: string; version: string; description: string; dir: string; enabled: boolean; loaded: boolean; builtIn: boolean; sources: string[]; mcpServers: string[]; tools: string[]; skills: string[]; notes?: string[]; origin?: string; error?: string }
 export interface McpServer { name: string; enabled: boolean; transport: 'stdio' | 'http'; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string>; roles: ('worker' | 'router')[]; review: boolean }
 export interface McpStatus { name: string; state: 'off' | 'connecting' | 'connected' | 'error'; tools: { name: string; description: string }[]; error?: string }
 export type GoalIcon = 'target' | 'moon' | 'wallet' | 'book' | 'run' | 'dumbbell' | 'heart' | 'music' | 'code' | 'leaf' | 'globe' | 'pen'
@@ -148,6 +148,6 @@ export interface GoalLogEntry { id: string; goalId: string; at: number; text: st
 export type AppLevel = 'auto' | 'ask' | 'read' | 'off'
 export type LocalApp = 'calendar' | 'reminders' | 'notes' | 'contacts' | 'photos'
 export interface AccessSettings { folders: { path: string; write: boolean }[]; never: string[]; locked: string[]; apps: Record<LocalApp, AppLevel>; sources: Record<string, 'read' | 'act'> }
-export interface Skill { id: string; name: string; when: string; steps: string; enabled: boolean; by: 'owner' | 'assistant'; createdAt: number; updatedAt: number }
+export interface Skill { id: string; name: string; when: string; steps: string; enabled: boolean; by: 'owner' | 'assistant' | 'plugin'; plugin?: string; createdAt: number; updatedAt: number }
 export interface BrowserStep { n: number; at: number; action: string; url: string; title: string; shot: boolean }
 export interface RoutineRun { id: string; at: number; ok: boolean; outcome: { tone: string; text: string }; reply: { id: string; text: string; conversationId: string } | null; ticket: { id: string; title: string; stage: Stage } | null }
