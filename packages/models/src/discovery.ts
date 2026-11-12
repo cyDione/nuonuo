@@ -9,7 +9,8 @@ import { isDecisionModel, type ProviderKind } from './catalog'
 export type ModelType = 'chat' | 'embedding' | 'rerank' | 'decision' | 'image' | 'audio' | 'video'
 export const MODEL_TYPES: readonly ModelType[] = ['chat', 'embedding', 'rerank', 'decision', 'image', 'audio', 'video']
 
-export interface ModelInfo { id: string; type: ModelType }
+/** `created` is when the provider released the model (ms since epoch), from the list's own metadata when it has it. */
+export interface ModelInfo { id: string; type: ModelType; created?: number }
 
 const RERANK = /rerank/i
 const EMBEDDING = /embed|(^|[/_.:-])(bge|e5|gte|m3e|bce)([-_.:]|$)/i
@@ -62,6 +63,43 @@ function typeFromMeta(o: Record<string, unknown>): ModelType | undefined {
   return undefined
 }
 
+/** The release time a list entry carries: OpenAI-style `created` (seconds), Anthropic `created_at` (ISO), or the like. */
+function createdOf(o: Record<string, unknown>): number | undefined {
+  for (const key of ['created', 'created_at', 'createdAt', 'released', 'release_date']) {
+    const v = o[key]
+    const ms = typeof v === 'number' ? (v < 1e12 ? v * 1000 : v) : typeof v === 'string' && v.trim() ? (/^\d+$/.test(v) ? Number(v) * (v.length <= 10 ? 1000 : 1) : Date.parse(v)) : NaN
+    if (Number.isFinite(ms) && ms > 0) return ms
+  }
+  return undefined
+}
+
+const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
+
+/** Newest first where the provider dates its models, then the undated ones by id. */
+export function sortCatalog(list: ModelInfo[]): ModelInfo[] {
+  return [...list].sort((a, b) => (b.created ?? -1) - (a.created ?? -1) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+}
+
+/** Chat models that are not general-purpose assistants: realtime/audio/search/computer-use variants, moderation, old completions. */
+const SPECIAL_CHAT = /realtime|audio|search|transcri|tts|moderation|instruct|computer-use|-codex|guard|ocr|(^|[/_.:-])(davinci|babbage)/i
+const SMALL = /(^|[/_.:-])(mini|nano|lite|tiny|small|haiku|flash-lite)([-_.:]|$)|[-_:][1-9](\.\d+)?b([-_.:]|$)/i
+const PREVIEW = /preview|(^|[-_.:])exp(erimental)?([-_.:]|$)|alpha|beta/i
+
+/**
+ * The model a new install starts on, chosen from what the provider lists right now rather than from a table in the code that
+ * goes out of date: a general chat model, full size and released before a preview where the list allows, newest first by the
+ * provider's own release dates, else the highest version by id. Undefined when the list has no chat model.
+ */
+export function pickDefaultModel(list: ModelInfo[]): string | undefined {
+  const chat = list.filter(m => m.type === 'chat' && !SPECIAL_CHAT.test(m.id))
+  if (!chat.length) return undefined
+  const tiers = [chat.filter(m => !SMALL.test(m.id) && !PREVIEW.test(m.id)), chat.filter(m => !PREVIEW.test(m.id)), chat]
+  const pool = tiers.find(t => t.length)!
+  const dated = pool.filter(m => m.created !== undefined)
+  if (dated.length) return dated.reduce((a, b) => (b.created! > a.created! ? b : a)).id
+  return [...pool].sort((a, b) => collator.compare(b.id, a.id))[0]!.id
+}
+
 function entries(body: unknown): unknown[] {
   const nested = (v: unknown): unknown[] | undefined => {
     if (Array.isArray(v)) return v
@@ -84,28 +122,31 @@ export function parseModelCatalog(body: unknown, kind: ProviderKind = 'openai-co
   for (const m of entries(body)) {
     let id: string | undefined
     let meta: ModelType | undefined
+    let created: number | undefined
     if (typeof m === 'string') id = m.trim()
     else if (m && typeof m === 'object') {
       const o = m as Record<string, unknown>
       id = [o.id, o.model, o.name].find((v): v is string => typeof v === 'string' && v.trim() !== '')?.trim().replace(/^models\//, '')
       meta = typeFromMeta(o)
+      created = createdOf(o)
     }
     if (!id || out.has(id)) continue
     const fromId = typeFromId(id, kind)
     const type = fromId === 'decision' ? 'decision' : meta ?? (fromId === 'chat' && fallback ? fallback : fromId)
-    out.set(id, { id, type })
+    out.set(id, created === undefined ? { id, type } : { id, type, created })
   }
-  return [...out.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  return sortCatalog([...out.values()])
 }
 
-/** Merges model lists; an earlier list's entry wins, except that a specific type beats a guessed "chat". */
+/** Merges model lists; an earlier list's entry wins, except that a specific type beats a guessed "chat". A known date is kept. */
 export function mergeCatalogs(...lists: ModelInfo[][]): ModelInfo[] {
   const out = new Map<string, ModelInfo>()
   for (const list of lists) for (const m of list) {
     const seen = out.get(m.id)
-    if (!seen || (seen.type === 'chat' && m.type !== 'chat')) out.set(m.id, m)
+    if (!seen || (seen.type === 'chat' && m.type !== 'chat')) out.set(m.id, seen?.created !== undefined && m.created === undefined ? { ...m, created: seen.created } : m)
+    else if (seen.created === undefined && m.created !== undefined) out.set(m.id, { ...seen, created: m.created })
   }
-  return [...out.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  return sortCatalog([...out.values()])
 }
 
 /** Jev ids a decision endpoint names in its answer, such as magpie's "name the provider before it, like typesafe/jev-latest". */

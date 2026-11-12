@@ -365,14 +365,53 @@ describe('Jev through a multi-provider gateway', () => {
     // The gateway names its own Jev, so the generic suggestion is not added beside it.
     expect((await hub.modelOptions(gw.id, 'reviewer')).models).toEqual(['typesafe/jev-1.13', 'gpt-x'])
     expect((await hub.modelOptions(gw.id, 'worker')).models).toEqual(['gpt-x'])
-    // A failure keeps the suggestions and says why; every call asks the provider again, so a retry picks up a fixed key.
+    // A failure falls back to the last list the provider gave and says why; every call asks the provider again, so a retry
+    // picks up a fixed key.
     live = new Error('401 Unauthorized')
-    expect(await hub.modelOptions(gw.id, 'reviewer')).toMatchObject({ models: ['jev-latest'], error: '401 Unauthorized' })
+    const failed = await hub.modelOptions(gw.id, 'reviewer')
+    expect(failed).toMatchObject({ models: ['typesafe/jev-1.13', 'gpt-x'], error: '401 Unauthorized' })
+    expect(failed.cachedAt).toBeTypeOf('number')
     live = ['gpt-y']
     expect(await hub.modelOptions(gw.id, 'reviewer')).toMatchObject({ models: ['jev-latest', 'gpt-y'] })
     expect(calls).toBe(6)
     const ts = hub.createProvider({ kind: 'typesafe', name: 'TypeSafe', apiKey: 'k' })
     expect((await hub.modelOptions(ts.id, 'reviewer')).models).toEqual(['jev-latest', 'gpt-y'])
+  })
+
+  it('lists live models newest first and never offers a hard-coded model id beside them', async () => {
+    store = openStore(':memory:')
+    const { parseModelCatalog } = await import('./discovery')
+    // Anthropic dates models with ISO `created_at`, OpenAI-style lists with `created` in seconds.
+    const anthropic = parseModelCatalog({ data: [{ id: 'claude-old', created_at: '2025-01-01T00:00:00Z' }, { id: 'claude-new', created_at: '2026-10-01T00:00:00Z' }] }, 'anthropic')
+    expect(anthropic.map(m => m.id)).toEqual(['claude-new', 'claude-old'])
+    expect(parseModelCatalog({ data: [{ id: 'a', created: 1_700_000_000 }, { id: 'b', created: 1_790_000_000 }, { id: 'c' }] }).map(m => m.id)).toEqual(['b', 'a', 'c'])
+    const factory: ModelFactory = { language: () => { throw new Error('unused') }, embedding: () => { throw new Error('unused') }, listModels: async () => anthropic }
+    const hub = new ModelHub(store, new MemorySecrets(), factory)
+    const p = hub.createProvider({ kind: 'anthropic', name: 'Anthropic', apiKey: 'k' })
+    expect((await hub.modelOptions(p.id, 'router')).models).toEqual(['claude-new', 'claude-old'])
+  })
+
+  it('starts a new install on a model picked from the live list, and only when no layer is set', async () => {
+    store = openStore(':memory:')
+    const { pickDefaultModel } = await import('./discovery')
+    const t = (id: string, created?: number, type: 'chat' | 'embedding' = 'chat') => ({ id, type, ...(created ? { created } : {}) })
+    expect(pickDefaultModel([t('gpt-a', 1), t('gpt-b-realtime', 9), t('gpt-b-mini', 8), t('gpt-b', 7), t('text-embedding-z', 10, 'embedding')])).toBe('gpt-b')
+    expect(pickDefaultModel([t('gemini-2.5-pro'), t('gemini-10-pro'), t('gemini-10-flash-lite'), t('gemini-11-pro-preview')])).toBe('gemini-10-pro')
+    expect(pickDefaultModel([t('llama-3.3-70b'), t('qwen3-8b')])).toBe('llama-3.3-70b')
+    expect(pickDefaultModel([t('bge-m3', undefined, 'embedding')])).toBeUndefined()
+    let live: { id: string; type: 'chat'; created: number }[] | Error = [t('m-old', 1) as any, t('m-new', 2) as any]
+    const factory: ModelFactory = { language: () => { throw new Error('unused') }, embedding: () => { throw new Error('unused') },
+      listModels: async () => { if (live instanceof Error) throw live; return live } }
+    const hub = new ModelHub(store, new MemorySecrets(), factory)
+    const p = hub.createProvider({ kind: 'openai', name: 'OpenAI', apiKey: 'k' })
+    expect(await hub.applyLiveDefault(p.id)).toBe('m-new')
+    expect(hub.resolve('worker')?.config.chain[0]).toEqual({ providerId: p.id, model: 'm-new' })
+    live = [t('m-newer', 3) as any]
+    expect(await hub.applyLiveDefault(p.id)).toBeUndefined()
+    expect(hub.resolve('router')?.config.chain[0]?.model).toBe('m-new')
+    const ts = hub.createProvider({ kind: 'typesafe', name: 'TypeSafe', apiKey: 'k' })
+    hub.saveRole('router', { enabled: true, chain: [] })
+    expect(await hub.applyLiveDefault(ts.id)).toBeUndefined()
   })
 
   it('lists every model of an aggregation gateway with its type, and puts the layer\'s kind first', async () => {

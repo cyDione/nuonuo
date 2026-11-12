@@ -138,7 +138,10 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.post('/providers', async c => {
     const input = await body(c, ProviderBody)
     if (input.kind === 'openai-compatible' && !input.baseUrl) throw new HttpError(400, 'invalid', 'OpenAI 兼容供应商需要 Base URL')
-    return c.json({ provider: rt.hub.createProvider({ ...input, baseUrl: input.baseUrl || null }) }, 201)
+    const provider = rt.hub.createProvider({ ...input, baseUrl: input.baseUrl || null })
+    // The first provider of a new install puts the layers on a model from its live list; nothing changes once one is set.
+    void rt.hub.applyLiveDefault(provider.id).catch(() => {})
+    return c.json({ provider }, 201)
   })
   api.patch('/providers/:id', async c => {
     const input = await body(c, ProviderBody.partial())

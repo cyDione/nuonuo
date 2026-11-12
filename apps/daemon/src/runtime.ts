@@ -258,12 +258,19 @@ function announced(tools: ToolSet, after: (name: string, result: unknown) => voi
 
 /**
  * Registers providers for `*_API_KEY` variables. On first start (no layer configured yet), NUONUO_MODEL puts the layers on
- * that model of the first provider found in the environment, e.g. for a quick test setup without opening Settings.
+ * that model of the first provider found in the environment; without it, they go on a model picked from that provider's
+ * live list, in the background so a slow provider never holds up startup.
  */
 export async function bootstrapModels(hub: ModelHub, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   hub.syncEnvProviders()
   const model = env.NUONUO_MODEL?.trim()
   const provider = hub.listProviders().find(p => p.keyEnv && p.hasKey && !DECISION_KINDS.includes(p.kind))
-  if (!model || !provider) return
-  if (hub.applyDefaultModel(provider.id, model)) console.log(`已将各层模型设为 ${provider.name} 的 ${model}（NUONUO_MODEL）`)
+  if (!provider) return
+  if (model) {
+    if (hub.applyDefaultModel(provider.id, model)) console.log(`已将各层模型设为 ${provider.name} 的 ${model}（NUONUO_MODEL）`)
+    return
+  }
+  void hub.applyLiveDefault(provider.id).then(picked => {
+    if (picked) console.log(`已将各层模型设为 ${provider.name} 的 ${picked}（从供应商的实时模型列表选出，可在「设置 → 分层模型」更改）`)
+  }, () => {})
 }
