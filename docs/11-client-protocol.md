@@ -155,7 +155,14 @@ POST /client/v1/conversations/main/messages
 | `POST /uploads`（multipart，字段 `file`） | `201 { upload: { id, name, mime, size } }`，最大 50 MB。然后把 `id` 放进发消息的 `attachments` |
 | `GET /uploads/:id` | 下载 |
 
-语音设备的推荐做法：在设备端（或手机上）做语音识别和语音合成，和糯糯之间只传文字；需要时把录音当附件传。
+### 语音（需 `chat`；`hello.features` 里有 `speech` / `transcribe` 才可用）
+
+| 接口 | 说明 |
+|---|---|
+| `POST /transcribe`（multipart，字段 `file`） | `{ text, language? }`，用「设置 → 模型 → 听写」的模型；最大 25 MB |
+| `POST /speech` `{ text, voice?, format? }` | 返回音频（`content-type` 是音频格式），用「设置 → 模型 → 朗读」的模型 |
+
+主人没设置对应的模型时这两个接口返回 `409 unavailable`，`features` 里也不会有它们。这时设备可以自己做语音识别和合成，和糯糯之间只传文字。
 
 ### 确认（需 `approvals`）
 

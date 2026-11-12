@@ -124,7 +124,16 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     reviewer.sandboxed = ticket => sandboxApplies(engine.execution().sandbox, ticket)
     const uploadsDir = join(config.home, 'uploads')
     // Files sent in chat apps land next to the ones the owner attaches in the web.
-    sources.files = new Uploads(store, uploadsDir)
+    // A voice message also gets a transcript when the owner set a model for the 听写 layer.
+    const uploads = new Uploads(store, uploadsDir)
+    sources.files = {
+      save: async file => {
+        const saved = uploads.save(file)
+        if (!saved.mime.startsWith('audio/')) return saved
+        const heard = await hub.transcribe(file.bytes, { ref: saved.id }).catch((error: unknown) => { console.error('[transcribe]', error); return undefined })
+        return heard?.text ? { ...saved, transcript: heard.text } : saved
+      },
+    }
     /** What the sandbox mounts: the folders allowed in 权限 and the attachments (read-only); never-touch ones inside them are covered. */
     const sandboxFolders = () => {
       const s = access.settings()

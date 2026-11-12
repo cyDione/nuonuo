@@ -6,13 +6,13 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions, LanguageModelV4StreamPart, LanguageModelV4Usage } from '@ai-sdk/provider'
 import { APICallError } from '@ai-sdk/provider'
 import { kvGet, kvSet, newId, schema, type Store } from '@nuonuo/db'
-import { embed, generateText } from 'ai'
+import { embed, generateSpeech, generateText, transcribe } from 'ai'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import { DECISION_KINDS, DECISION_MODEL_SUGGESTIONS, isDecisionModel, presetOf, type ProviderKind } from './catalog'
 import type { EmbeddingModelV4 } from '@ai-sdk/provider'
 import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOptions, type ProviderRecord } from './factory'
 import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
-import { DECISION_ROLES, resolveRole, roleSpec, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId } from './roles'
+import { DECISION_ROLES, resolveRole, roleSpec, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId, type RoleKind } from './roles'
 import type { SecretStore } from './secrets'
 import { mergeCatalogs, MODEL_TYPES, pickDefaultModel, typeFromId, type ModelInfo, type ModelPrice, type ModelType } from './discovery'
 import { decisionEndpoints, systemOneClient, type SystemOneRequest, type SystemOneResponse } from './systemone'
@@ -240,7 +240,8 @@ export class ModelHub {
     const seen = new Set<string>()
     let all = [...suggested, ...live].filter(m => !seen.has(m.id) && seen.add(m.id))
     if (role !== undefined && !decisionLayer) all = all.filter(m => m.type !== 'decision')
-    const first: ModelType = role === undefined ? 'chat' : decisionLayer ? 'decision' : roleSpec(role).kind === 'embedding' ? 'embedding' : 'chat'
+    const kind = role === undefined ? 'language' : roleSpec(role).kind
+    const first: ModelType = decisionLayer ? 'decision' : kind === 'embedding' ? 'embedding' : kind === 'transcription' || kind === 'speech' ? 'audio' : 'chat'
     const rank = (t: ModelType) => (t === first ? -1 : t === 'chat' ? 0 : MODEL_TYPES.indexOf(t) + 1)
     all = all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m.type) - rank(b.m.type) || a.i - b.i).map(({ m }) => m)
     const result = { models: all.map(m => m.id), types: Object.fromEntries(all.map(m => [m.id, m.type])) as Record<string, ModelType> }
@@ -252,7 +253,7 @@ export class ModelHub {
    * embeddings endpoint: an embedding model sent to the chat endpoint is rejected by most providers as a missing model.
    * Without `kind` (the provider page's connection test) it is guessed from the model id.
    */
-  async testModel(ref: ModelRef, kind: 'language' | 'embedding' = guessModelKind(ref.model)): Promise<{ ok: true; latencyMs: number; text: string } | { ok: false; latencyMs: number; error: string }> {
+  async testModel(ref: ModelRef, kind: RoleKind = guessModelKind(ref.model)): Promise<{ ok: true; latencyMs: number; text: string } | { ok: false; latencyMs: number; error: string }> {
     const started = this.now()
     try {
       const p = this.getProvider(ref.providerId)
@@ -261,6 +262,14 @@ export class ModelHub {
           questions: { ok: { type: 'noul', instructions: 'This is a harmless request.' } } }, { abortSignal: AbortSignal.timeout(30_000) })
         const answer = result.answers?.ok
         return { ok: true, latencyMs: this.now() - started, text: `${result.model ?? ref.model}${answer?.type === 'noul' ? ` · noul ${answer.noul.toFixed(2)}` : ''}` }
+      }
+      if (kind === 'speech') {
+        const result = await generateSpeech({ model: this.audio(p, 'speech', ref.model), text: '你好', maxRetries: 0, abortSignal: AbortSignal.timeout(30_000) })
+        return { ok: true, latencyMs: this.now() - started, text: `${Math.round(result.audio.uint8Array.byteLength / 1024)} KB ${result.audio.format}` }
+      }
+      if (kind === 'transcription') {
+        await transcribe({ model: this.audio(p, 'transcription', ref.model), audio: SILENCE, maxRetries: 0, abortSignal: AbortSignal.timeout(30_000) })
+        return { ok: true, latencyMs: this.now() - started, text: '能听写' }
       }
       if (kind === 'embedding') {
         const result = await embed({ model: this.factory.embedding(p, this.key(p), ref.model), value: 'ping', maxRetries: 0,
@@ -402,6 +411,53 @@ export class ModelHub {
     throw lastError
   }
 
+  /**
+   * Speech to text through the `transcribe` layer: undefined when the owner set no model for it. Tries the chain in
+   * order on retryable failures and writes a ledger row per attempt (no tokens; the provider bills by duration).
+   */
+  async transcribe(audio: Uint8Array, context: CallContext = {}): Promise<{ text: string; language?: string } | undefined> {
+    return this.audioCall('transcribe', context, async ref => {
+      const result = await transcribe({ model: this.audio(this.getProvider(ref.providerId), 'transcription', ref.model), audio, maxRetries: 0, abortSignal: AbortSignal.timeout(120_000) })
+      return { text: result.text.trim(), ...(result.language ? { language: result.language } : {}) }
+    })
+  }
+
+  /** Text to speech through the `speech` layer: undefined when the owner set no model for it. */
+  async speak(text: string, options: { voice?: string; format?: string } = {}, context: CallContext = {}): Promise<{ bytes: Uint8Array; mime: string } | undefined> {
+    return this.audioCall('speech', context, async ref => {
+      const result = await generateSpeech({ model: this.audio(this.getProvider(ref.providerId), 'speech', ref.model), text: text.slice(0, 4000),
+        ...(options.voice ? { voice: options.voice } : {}), ...(options.format ? { outputFormat: options.format } : {}), maxRetries: 0, abortSignal: AbortSignal.timeout(120_000) })
+      return { bytes: result.audio.uint8Array, mime: result.audio.mediaType || `audio/${result.audio.format}` }
+    })
+  }
+
+  private async audioCall<T>(role: 'transcribe' | 'speech', context: CallContext, run: (ref: ModelRef) => Promise<T>): Promise<T | undefined> {
+    const resolved = this.resolve(role)
+    if (!resolved?.config.chain.length) return undefined
+    this.checkBudget(role, resolved.config)
+    const chain = resolved.config.chain
+    let lastError: unknown
+    for (const [index, ref] of chain.entries()) {
+      try {
+        const result = await run(ref)
+        this.record(role, ref, undefined, context)
+        return result
+      } catch (error) {
+        lastError = error
+        this.record(role, ref, undefined, context, error)
+        if (index === chain.length - 1 || !isRetryable(error)) throw error
+      }
+    }
+    throw lastError
+  }
+
+  private audio(p: ProviderRecord, kind: 'transcription', model: string): ReturnType<NonNullable<ModelFactory['transcription']>>
+  private audio(p: ProviderRecord, kind: 'speech', model: string): ReturnType<NonNullable<ModelFactory['speech']>>
+  private audio(p: ProviderRecord, kind: 'transcription' | 'speech', model: string) {
+    const make = (this.factory[kind] ?? defaultFactory[kind])!
+    return make(p, this.key(p), model)
+  }
+
   private systemOneClient(p: ProviderRecord) {
     return this.factory.systemOne?.(p, this.key(p)) ?? systemOneClient(decisionEndpoints(p.baseUrl, p.kind, p.options.decisionsUrl), this.key(p), p.options.headers)
   }
@@ -475,6 +531,15 @@ export class ModelHub {
   }
 }
 
+/** Half a second of 16 kHz mono silence (WAV), for testing a transcription model without a recording. */
+const SILENCE = (() => {
+  const samples = 8000
+  const b = Buffer.alloc(44 + samples * 2)
+  b.write('RIFF', 0); b.writeUInt32LE(36 + samples * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22)
+  b.writeUInt32LE(16000, 24); b.writeUInt32LE(32000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(samples * 2, 40)
+  return new Uint8Array(b)
+})()
+
 export function describeError(error: unknown): string {
   if (APICallError.isInstance(error)) {
     const body = typeof error.responseBody === 'string' ? error.responseBody.slice(0, 300) : ''
@@ -489,7 +554,7 @@ export function guessModelKind(model: string): 'language' | 'embedding' {
 }
 
 /** Adds a hint to "model does not exist" style failures, the usual sign of a chat model on the embedding layer or the reverse. */
-function withHint(message: string, kind: 'language' | 'embedding'): string {
+function withHint(message: string, kind: RoleKind): string {
   if (!/(model[^.]*(not exist|not found|does not exist)|unknown model|invalid model|模型不存在)/i.test(message)) return message
   return kind === 'embedding'
     ? `${message}\n提示：向量层需要 embedding 模型（例如 SiliconFlow 的 BAAI/bge-m3），对话模型不能用于向量；请核对模型 id 与供应商模型列表一致。`

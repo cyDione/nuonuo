@@ -1,8 +1,10 @@
 /** The execution layers of the system and the per-layer model configuration a person sets in Settings → Models. */
 import { z } from 'zod'
 
-export const ROLE_IDS = ['router', 'worker', 'subagent', 'filter', 'reviewer', 'watchdog', 'summarizer', 'embedding', 'vision'] as const
+export const ROLE_IDS = ['router', 'worker', 'subagent', 'filter', 'reviewer', 'watchdog', 'summarizer', 'embedding', 'vision', 'transcribe', 'speech'] as const
 export type RoleId = typeof ROLE_IDS[number]
+
+export type RoleKind = 'language' | 'embedding' | 'transcription' | 'speech'
 
 export interface RoleSpec {
   id: RoleId
@@ -13,7 +15,8 @@ export interface RoleSpec {
   inherits?: RoleId
   /** Off-able layers are skipped (not inherited) when disabled. */
   optional?: boolean
-  kind: 'language' | 'embedding'
+  /** What the layer's models do: chat, vectors, speech to text, or text to speech. */
+  kind: RoleKind
 }
 
 export const ROLES: readonly RoleSpec[] = [
@@ -26,6 +29,8 @@ export const ROLES: readonly RoleSpec[] = [
   { id: 'summarizer', label: '摘要（Summarizer）', duty: '上下文压缩、日报与摘要', advice: '便宜、长上下文', inherits: 'router', kind: 'language' },
   { id: 'embedding', label: '向量（Embedding）', duty: '记忆检索', advice: '本地或云端 embedding 模型', optional: true, kind: 'embedding' },
   { id: 'vision', label: '视觉（Vision）', duty: '截图与网页理解', advice: '多模态；为空时用 Worker', inherits: 'worker', kind: 'language' },
+  { id: 'transcribe', label: '听写（Transcribe）', duty: '把语音消息转成文字', advice: '语音识别模型（whisper、gpt-4o-transcribe 等）；为空时语音只作为附件', optional: true, kind: 'transcription' },
+  { id: 'speech', label: '朗读（Speech）', duty: '把回复读出来（音箱、语音回复）', advice: '语音合成模型（tts 等）；为空时不朗读', optional: true, kind: 'speech' },
 ]
 
 /** Layers that may use a decision model (TypeSafe Jev) instead of a language model. */
