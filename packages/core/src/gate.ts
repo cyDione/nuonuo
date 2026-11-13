@@ -67,9 +67,9 @@ export class ToolGate {
   }
 
   /** A shell command, through the reviewer's command classifier. */
-  shell(ticket: Ticket, sessionId: string, command: string, cwd: string): Promise<GateDecision> {
+  shell(ticket: Ticket, sessionId: string, command: string, cwd: string, remote?: { tool: string; input: Record<string, unknown> }): Promise<GateDecision> {
     if (!this.reviewer) return Promise.resolve({ action: 'allow', by: 'normal' })
-    return this.reviewer.gateShell(ticket, sessionId, command, cwd)
+    return this.reviewer.gateShell(ticket, sessionId, command, cwd, remote)
   }
 
   /**

@@ -15,11 +15,13 @@ import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
 import { appToken, oauth } from './auth.mjs'
 import { ChannelError, fetchFile, makeDefineChannel } from './channel.mjs'
-import type { SourceKind } from './kind'
+import type { FieldSpec, SourceKind } from './kind'
 import { installDependencies } from './plugin-deps'
 import { fetchPlugin, parseOrigin } from './plugin-install'
 import { PluginSandbox, sandboxWanted } from './plugin-sandbox'
-import type { SourceRegistry } from './registry'
+import { coerce, defaultValue, readSettings, readWindow, windowFile, type PluginWindow } from './plugin-window'
+import { computerProblem, defineComputer, type BoundComputer, type ComputerKind } from './computer'
+import { SECRET_SET, type SourceRegistry } from './registry'
 
 export interface NuonuoPlugin {
   id: string
@@ -42,8 +44,25 @@ export interface NuonuoPlugin {
   /** Text added to the main agent's or the workers' prompt while the plugin is on. */
   routerPrompt?: string | ((ctx: PluginContext) => string | undefined)
   workerPrompt?: string | ((ctx: PluginContext) => string | undefined)
+  /**
+   * Context for the main agent's next turn, worked out from the owner's new message(s) in the batch. It is appended to
+   * that input (after the recalled memories), not to the system prompt, so it can change every turn without breaking the
+   * prompt cache. Called only for batches that carry a request; it must answer fast (a slow or failing answer is skipped)
+   * and is clipped to 2,000 characters.
+   */
+  inlineContext?(ctx: PluginContext, input: PluginTurnInput): string | undefined | Promise<string | undefined>
   /** Procedures (会做的事) the plugin brings. They arrive switched off, for the owner to turn on in 它是谁. */
   skills?: SkillInput[]
+  /**
+   * What the plugin's window (package.json `nuonuo.window`) may ask for: its page calls `nuonuo.call(name, input)` and
+   * gets back what the function returns (plain JSON). Nothing else of the plugin is reachable from the page.
+   */
+  windowCalls?: Record<string, (ctx: PluginContext, input: unknown) => unknown>
+  /**
+   * Cloud computers (云电脑) the plugin connects: how to reach one provider's machine. The shared layer in computer.ts
+   * sets up nuonuo's own space there and gives the workers its shell, files and browsers (see docs/13-computers.md).
+   */
+  computers?: ComputerKind[]
 }
 
 /** What a plugin's own tools and prompts receive. */
@@ -53,8 +72,22 @@ export interface PluginContext {
   dir: string
   /** The plugin's small persistent state. */
   state: { get<T>(key: string): T | undefined; set(key: string, value: unknown): void }
+  /** What the owner set in the plugin's settings (package.json `nuonuo.settings`), secrets included. */
+  settings: { get<T = unknown>(key: string): T | undefined }
   log(...args: unknown[]): void
 }
+
+/** What `inlineContext` sees of the turn. */
+export interface PluginTurnInput {
+  /** The text of the new message(s) the main agent is about to answer. */
+  text: string
+  /** The project they belong to (a side chat, a repository), when there is one. */
+  scope?: string
+}
+
+/** How long the main agent waits for a plugin's turn context before going on without it. */
+export const INLINE_CONTEXT_TIMEOUT = 1_500
+const INLINE_CONTEXT_LIMIT = 2_000
 
 export interface PluginMcpServer {
   name: string
@@ -75,11 +108,17 @@ export const definePlugin = <T extends NuonuoPlugin>(plugin: T): T => plugin
 
 /** Everything a plugin may use from the host, passed to its factory. */
 export const defineChannel = makeDefineChannel(z)
-export const sdk = { apiVersion: PLUGIN_API_VERSION, definePlugin, defineChannel, ChannelError, fetchFile, oauth, appToken, tool, jsonSchema, z }
+export const sdk = { apiVersion: PLUGIN_API_VERSION, definePlugin, defineChannel, defineComputer, ChannelError, fetchFile, oauth, appToken, tool, jsonSchema, z }
 export type PluginSdk = typeof sdk
 export type PluginModule = NuonuoPlugin | ((sdk: PluginSdk) => NuonuoPlugin | Promise<NuonuoPlugin>)
 
-export interface PluginManifest { id: string; name: string; version: string; description: string; dir: string; entry: string; apiVersion: number }
+export interface PluginManifest {
+  id: string; name: string; version: string; description: string; dir: string; entry: string; apiVersion: number
+  /** The settings form (package.json `nuonuo.settings`). */
+  settings?: FieldSpec[]
+  /** The plugin's own window (package.json `nuonuo.window`). */
+  window?: PluginWindow
+}
 
 export interface PluginInfo extends PluginManifest {
   enabled: boolean
@@ -90,6 +129,8 @@ export interface PluginInfo extends PluginManifest {
   mcpServers: string[]
   /** Names of its own tools and skills. */
   tools: string[]
+  /** The cloud computers it connects (titles). */
+  computers?: string[]
   skills: string[]
   /** What installing its dependencies left to say (install scripts not run, optional ones skipped). */
   notes?: string[]
@@ -130,7 +171,70 @@ export class PluginManager {
   private context(manifest: PluginManifest): PluginContext {
     const key = (k: string) => `plugin:${manifest.id}:state:${k}`
     return { id: manifest.id, dir: manifest.dir, log: (...args) => console.log(`[plugin ${manifest.id}]`, ...args),
-      state: { get: <T>(k: string) => kvGet<T>(this.store, key(k)), set: (k, v) => kvSet(this.store, key(k), v) } }
+      state: { get: <T>(k: string) => kvGet<T>(this.store, key(k)), set: (k, v) => kvSet(this.store, key(k), v) },
+      settings: { get: <T>(k: string) => this.settingValues(manifest)[k] as T | undefined } }
+  }
+
+  private manifestOf(id: string): PluginManifest {
+    const manifest = this.scan().find(m => m.id === id)
+    if (!manifest) throw new Error(`没有插件 ${id}`)
+    return manifest
+  }
+
+  private secretRef = (id: string, key: string) => `plugin:${id}:setting:${key}`
+
+  /** The plugin's settings with secrets filled in, as its code sees them. */
+  private settingValues(manifest: PluginManifest): Record<string, unknown> {
+    const saved = kvGet<Record<string, unknown>>(this.store, `plugin:${manifest.id}:settings`) ?? {}
+    return Object.fromEntries((manifest.settings ?? []).map(f => [f.key, f.type === 'secret'
+      ? this.registry.secretStore?.get(this.secretRef(manifest.id, f.key)) ?? ''
+      : (() => { try { return f.key in saved ? coerce(f, saved[f.key]) : defaultValue(f) } catch { return defaultValue(f) } })()]))
+  }
+
+  /** The settings form of a plugin and what is set, secrets shown only as set or not. */
+  settingsOf(id: string): { fields: FieldSpec[]; values: Record<string, unknown> } {
+    const manifest = this.manifestOf(id)
+    const values = this.settingValues(manifest)
+    for (const f of manifest.settings ?? []) if (f.type === 'secret') values[f.key] = values[f.key] ? SECRET_SET : ''
+    return { fields: manifest.settings ?? [], values }
+  }
+
+  /** Saves a plugin's settings (unknown keys are dropped; a masked secret keeps the stored one, empty clears it). */
+  async saveSettings(id: string, input: Record<string, unknown>): Promise<{ fields: FieldSpec[]; values: Record<string, unknown> }> {
+    const manifest = this.manifestOf(id)
+    const stored: Record<string, unknown> = {}
+    for (const f of manifest.settings ?? []) {
+      const v = input[f.key]
+      if (f.type === 'secret') {
+        const ref = this.secretRef(id, f.key)
+        if (typeof v === 'string' && v && v !== SECRET_SET) {
+          if (!this.registry.secretStore) throw new Error('没有可用的钥匙串，存不了密钥')
+          this.registry.secretStore.set(ref, v.slice(0, 4_000))
+        } else if (v === '' || v === null) this.registry.secretStore?.delete(ref)
+      } else stored[f.key] = v === undefined ? this.settingValues(manifest)[f.key] : coerce(f, v)
+    }
+    kvSet(this.store, `plugin:${id}:settings`, stored)
+    await this.sandboxes.get(id)?.updateSettings(this.settingValues(manifest)).catch(() => {})
+    return this.settingsOf(id)
+  }
+
+  /** The plugin's window, when it declares one. */
+  windowOf(id: string): PluginWindow | undefined { return this.manifestOf(id).window }
+
+  /** A file of the plugin's window, for the service to serve. */
+  windowFile(id: string, path: string): { body: Buffer; type: string } | undefined {
+    const manifest = this.scan().find(m => m.id === id)
+    return manifest?.window ? windowFile(manifest.dir, manifest.window, path) : undefined
+  }
+
+  /** Answers a call from the plugin's window page. */
+  async windowCall(id: string, name: string, input: unknown): Promise<unknown> {
+    const entry = this.loaded.get(id)
+    if (!entry) throw new Error('插件没开，打开开关后再试')
+    const fn = entry.plugin.windowCalls?.[name]
+    if (typeof fn !== 'function') throw new Error(`插件没有「${name}」`)
+    const value = await fn(this.context(entry.manifest), input)
+    return value === undefined ? null : JSON.parse(JSON.stringify(value))
   }
 
   /** A plugin's tools named `<id>_…`; others are dropped so they cannot pass for the app's own. */
@@ -145,9 +249,20 @@ export class PluginManager {
     return out
   }
 
-  /** The loaded plugins' own tools and prompt text, for the agents. */
+  /** A built-in plugin as the agents see it: always loaded, with no folder of its own. */
+  private builtInEntry(plugin: NuonuoPlugin): { plugin: NuonuoPlugin; manifest: PluginManifest } {
+    return { plugin, manifest: { id: plugin.id, name: plugin.name ?? plugin.id, version: plugin.version ?? '', description: plugin.description ?? '', dir: '', entry: '', apiVersion: PLUGIN_API_VERSION } }
+  }
+
+  /** A plugin's small persistent state, for the service's own pages (e.g. 心境 in 它是谁). */
+  stateOf(id: string): PluginContext['state'] {
+    const key = (k: string) => `plugin:${id}:state:${k}`
+    return { get: <T>(k: string) => kvGet<T>(this.store, key(k)), set: (k, v) => kvSet(this.store, key(k), v) }
+  }
+
+  /** The built-in and loaded plugins' own tools and prompt text, for the agents. */
   agentExtensions(): AgentExtensions {
-    const all = () => [...this.loaded.values()]
+    const all = () => [...[...this.builtIns.values()].map(p => this.builtInEntry(p)), ...this.loaded.values()]
     const text = (v: PluginModuleText, m: PluginManifest) => { try { return typeof v === 'function' ? v(this.context(m)) : v } catch { return undefined } }
     return {
       routerTools: () => Object.assign({}, ...all().map(({ plugin, manifest }) => this.ownTools(manifest.id, () => plugin.routerTools?.(this.context(manifest))))) as ToolSet,
@@ -155,6 +270,13 @@ export class PluginManager {
       routerPrompt: () => all().map(({ plugin, manifest }) => text(plugin.routerPrompt, manifest)).filter(Boolean).map(t => String(t).slice(0, 4_000)).join('\n\n'),
       workerPrompt: () => all().map(({ plugin, manifest }) => text(plugin.workerPrompt, manifest)).filter(Boolean).map(t => String(t).slice(0, 4_000)).join('\n\n') || undefined,
       toolPolicy: name => this.toolPolicy(name),
+      inlineContext: async (input, scope) => {
+        const parts = await Promise.all(all().filter(({ plugin }) => typeof plugin.inlineContext === 'function').map(({ plugin, manifest }) =>
+          withTimeout(Promise.resolve().then(() => plugin.inlineContext!(this.context(manifest), { text: input, ...(scope ? { scope } : {}) })), INLINE_CONTEXT_TIMEOUT)
+            .then(t => typeof t === 'string' && t.trim() ? t.trim().slice(0, INLINE_CONTEXT_LIMIT) : '')
+            .catch(error => { console.warn(`[plugin ${manifest.id}] inlineContext 出错：${(error as Error).message}`); return '' })))
+        return parts.filter(Boolean).join('\n\n')
+      },
     }
   }
 
@@ -162,9 +284,19 @@ export class PluginManager {
     return [...new Set([...Object.keys(this.ownTools(m.id, () => plugin.routerTools?.(this.context(m)))), ...Object.keys(this.ownTools(m.id, () => plugin.workerTools?.(this.context(m))))])]
   }
 
-  /** Acting tools of installed plugins (their `writes`): third-party code, so the owner is asked before every call. */
+  /** The cloud computers of the loaded plugins, with each plugin's context bound (see computer.ts). */
+  computers(): BoundComputer[] {
+    return [...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.computers ?? []).map((k): BoundComputer => {
+      const ctx = () => this.context(manifest)
+      return { id: k.id, title: k.title, ...(k.description ? { description: k.description } : {}), pluginId: manifest.id, capabilities: k.capabilities,
+        status: () => k.status(ctx()), wake: () => k.wake(ctx()), exec: request => k.exec(ctx(), request),
+        ...(typeof k.keepAwake === 'function' ? { keepAwake: (request: { key: string; seconds: number }) => k.keepAwake!(ctx(), request) } : {}) }
+    }))
+  }
+
+  /** Acting tools of plugins (their `writes`), built-in or installed: the owner is asked before every call. */
   toolPolicy(name: string): ToolPolicy | undefined {
-    for (const { plugin, manifest } of this.loaded.values()) {
+    for (const { plugin, manifest } of [...[...this.builtIns.values()].map(p => this.builtInEntry(p)), ...this.loaded.values()]) {
       if (name.startsWith(`${manifest.id}_`) && plugin.writes?.includes(name)) return { effect: 'write', thirdParty: true }
     }
     return undefined
@@ -201,7 +333,7 @@ export class PluginManager {
       const notes = kvGet<string[]>(this.store, `plugin:${m.id}:notes`)
       return { ...m, enabled: this.enabled(m.id), loaded: Boolean(loaded), builtIn: false, sources: (loaded?.plugin.sources ?? []).map(k => k.id),
         mcpServers: loaded ? this.mcpServers().map(c => c.name).filter(n => n.startsWith(`${m.id}_`)) : [], tools: loaded ? this.toolNames(loaded.plugin, m) : [],
-        skills: (loaded?.plugin.skills ?? []).map(sk => String(sk.name)), ...(origin ? { origin } : {}), ...(notes?.length ? { notes } : {}), ...(error ? { error } : {}) }
+        skills: (loaded?.plugin.skills ?? []).map(sk => String(sk.name)), ...(loaded?.plugin.computers?.length ? { computers: loaded.plugin.computers.map(k => k.title) } : {}), ...(origin ? { origin } : {}), ...(notes?.length ? { notes } : {}), ...(error ? { error } : {}) }
     })
     return [...builtIn, ...external]
   }
@@ -287,6 +419,7 @@ export class PluginManager {
     await this.unload(id)
     for (const source of sources) this.registry.forget(source, kinds.get(source))
     rmSync(manifest.dir, { recursive: true, force: true })
+    for (const f of manifest.settings ?? []) if (f.type === 'secret') this.registry.secretStore?.delete(this.secretRef(id, f.key))
     for (const { key } of this.store.db.select({ key: schema.kv.key }).from(schema.kv).all()) if (key.startsWith(`plugin:${id}:`)) kvSet(this.store, key, null)
     this.skills?.removePlugin(id)
     this.errors.delete(id)
@@ -322,6 +455,8 @@ export class PluginManager {
         if (sv.transport === 'stdio' ? !sv.command : sv.transport === 'http' ? !sv.url : true) throw new Error(`MCP 服务 ${sv.name} 缺少 command 或 url`)
       }
       if (plugin.skills !== undefined && !Array.isArray(plugin.skills)) throw new Error('skills 必须是数组')
+      if (plugin.computers !== undefined && !Array.isArray(plugin.computers)) throw new Error('computers 必须是数组')
+      for (const k of plugin.computers ?? []) { const problem = computerProblem(k); if (problem) throw new Error(problem) }
       this.loaded.set(manifest.id, { plugin, manifest })
       kvSet(this.store, `plugin:${manifest.id}:sources`, (plugin.sources ?? []).map(k => k.id))
       this.skills?.syncPlugin(manifest.id, plugin.skills ?? [])
@@ -342,7 +477,7 @@ export class PluginManager {
 
   private async startSandbox(manifest: PluginManifest): Promise<NuonuoPlugin> {
     const box = new PluginSandbox(manifest, {
-      store: this.store, ...(this.registry.secretStore ? { secrets: this.registry.secretStore } : {}),
+      store: this.store, ...(this.registry.secretStore ? { secrets: this.registry.secretStore } : {}), settings: () => this.settingValues(manifest),
       onExit: reason => {
         if (this.sandboxes.get(manifest.id) !== box) return
         this.errors.set(manifest.id, reason)
@@ -363,6 +498,12 @@ export class PluginManager {
   }
 }
 
+/** Resolves with undefined when `p` takes longer than `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined
+  return Promise.race([p, new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), ms) })]).finally(() => clearTimeout(timer))
+}
+
 const mcpName = (pluginId: string, name: string) => `${pluginId}_${name}`
 
 /** The plugin described by `<dir>/package.json`, or undefined when that package is not a Nuonuo plugin. */
@@ -378,8 +519,10 @@ function readManifest(dir: string): PluginManifest | undefined {
   const entry = resolve(dir, meta.plugin)
   if (!ID.test(id)) throw new Error(`插件 id "${id}" 不合法`)
   if (!entry.startsWith(dir + sep)) throw new Error('入口文件必须在插件目录内')
+  const settings = readSettings(meta.settings)
+  const window = readWindow(meta.window, dir)
   return { id, name: meta.name ?? pkg.name ?? id, version: pkg.version ?? '0.0.0', description: meta.description ?? pkg.description ?? '', dir, entry,
-    apiVersion: Number(meta.apiVersion ?? 1) }
+    apiVersion: Number(meta.apiVersion ?? 1), ...(settings.length ? { settings } : {}), ...(window ? { window } : {}) }
 }
 
 /** Runs a plugin inside the service (sandbox off). A query string busts Node's module cache so a re-enabled plugin picks up edits. */

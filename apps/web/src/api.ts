@@ -92,11 +92,14 @@ export type TranscriptItem =
   | { id: string; kind: 'compaction'; summary: string; at: number }
 export interface TicketDetail { ticket: Ticket; reports: (Report & { id: number; humanAction: Report['humanAction'] | null })[]; transcript: TranscriptItem[]; running: boolean; jobs: { jobId: string; command: string; startedAt: number }[]; browser: boolean; project: string | null; usage: { tokens: number; costUsd: number | null }; files?: { id: string; name: string; size: number }[] }
 export interface SandboxSettings { mode: 'off' | 'external' | 'all'; image: string; network: 'bridge' | 'none' }
-export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: number; timeoutMinutes: number; blockedCommands: string[]; workspaceRoots: string[]; sandbox: SandboxSettings }
+export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: number; timeoutMinutes: number; blockedCommands: string[]; workspaceRoots: string[]; sandbox: SandboxSettings; environment?: 'auto' | 'local' }
+export type ComputerState = 'ready' | 'asleep' | 'waking' | 'off' | 'unconfigured' | 'error'
+export interface ComputerView { id: string; title: string; pluginId: string; workspace: string; state: ComputerState; name?: string; detail?: string; retryAfterSeconds?: number }
+export interface ComputerBrowser { name: string; tabs: { name: string; url: string; title: string }[]; idleSeconds: number }
 export type Level = 'allow' | 'review' | 'ask' | 'deny'
 export interface ReviewSettings { external: Level; destructive: Exclude<Level, 'allow'>; mode: 'model' | 'ask'; rules: string[]; allow: string[]; deny: string[] }
 export interface AuditEntry { id: number; at: number; ticketId: string | null; actor: string; action: string; tool: string | null; input: string | null; risk: string | null; decision: string; reason: string | null }
-export interface Persona { name: string; avatar: string; color: string; personality: string; role: 'all' | 'life' | 'work' | 'study'; language: 'zh' | 'en' | 'auto' }
+export interface Persona { name: string; avatar: string; color: string; personality: string; limits: string[]; role: 'all' | 'life' | 'work' | 'study'; language: 'zh' | 'en' | 'auto' }
 export interface NotifySettings { message: boolean; price: boolean; feed: boolean; ideas: boolean; banner: boolean; sound: boolean; tone: 'nuonuo' | 'system'; badge: boolean; quiet: { on: boolean; from: string; to: string } }
 export interface PrivacySettings { keep: 'forever' | '365' | '90' | '30' }
 export interface UpdatePrefs { auto: boolean; channel: 'stable' | 'beta'; install: boolean }
@@ -129,7 +132,9 @@ export interface SourceAction { id: string; label: string; path: string; show?: 
 export interface SourceInfo { id: string; title: string; icon?: string; firstRun?: true; description: string; fields: FieldSpec[]; actions: SourceAction[]; authorized?: boolean; enabled: boolean; config: Record<string, any>
   health: { status: 'off' | 'starting' | 'ok' | 'error'; detail?: string; at: number }; facts: Record<string, string> }
 export interface Routine { id: string; name: string; schedule: string; prompt: string; enabled: boolean; conversationId: string | null; lastFiredAt: number | null; next: number | null }
-export interface PluginInfo { id: string; name: string; version: string; description: string; dir: string; enabled: boolean; loaded: boolean; builtIn: boolean; sources: string[]; mcpServers: string[]; tools: string[]; skills: string[]; notes?: string[]; origin?: string; error?: string }
+export interface PluginInfo { id: string; name: string; version: string; description: string; dir: string; enabled: boolean; loaded: boolean; builtIn: boolean; sources: string[]; mcpServers: string[]; tools: string[]; skills: string[]; notes?: string[]; origin?: string; error?: string
+  settings?: FieldSpec[]; window?: PluginWindow }
+export interface PluginWindow { page: string; title?: string; width: number; height: number }
 export interface McpServer { name: string; enabled: boolean; transport: 'stdio' | 'http'; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string>; roles: ('worker' | 'router')[]; review: boolean }
 export interface McpStatus { name: string; state: 'off' | 'connecting' | 'connected' | 'error'; tools: { name: string; description: string }[]; error?: string }
 export type GoalIcon = 'target' | 'moon' | 'wallet' | 'book' | 'run' | 'dumbbell' | 'heart' | 'music' | 'code' | 'leaf' | 'globe' | 'pen'

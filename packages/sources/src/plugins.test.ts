@@ -172,6 +172,51 @@ describe('chat channels in the sandbox', () => {
   })
 })
 
+describe('cloud computers in the sandbox', () => {
+  it('loads a provider declared with defineComputer and calls it over IPC with the plugin\'s settings', async () => {
+    const { dir, plugins } = setup()
+    mkdirSync(join(dir, 'box'))
+    writeFileSync(join(dir, 'box', 'package.json'), JSON.stringify({ name: 'box', nuonuo: { plugin: './index.mjs', settings: [{ key: 'token', label: 'T', type: 'secret' }] } }))
+    writeFileSync(join(dir, 'box', 'index.mjs'), `export default ({ definePlugin, defineComputer }) => definePlugin({ id: 'box', computers: [defineComputer({
+  id: 'box', title: '盒子', capabilities: { sudo: true, docker: false, sleeps: true, dataDir: '/data', maxExecSeconds: 300 },
+  async status(ctx) { return ctx.settings.get('token') ? { state: 'asleep' } : { state: 'unconfigured', detail: '没有令牌' } },
+  async wake() { return { state: 'ready' } },
+  async exec(ctx, r) { return { exitCode: 0, stdout: 'ran ' + r.command + ' ' + r.timeoutSeconds, stderr: '' } },
+  async keepAwake(ctx, r) { ctx.state.set('lease', r) },
+})] })`)
+    await plugins.setEnabled('box', true)
+    const [box] = plugins.computers()
+    expect(box).toMatchObject({ id: 'box', title: '盒子', pluginId: 'box', capabilities: { dataDir: '/data', maxExecSeconds: 300 } })
+    expect(await box!.status()).toEqual({ state: 'unconfigured', detail: '没有令牌' })
+    await plugins.saveSettings('box', { token: 't0' })
+    expect(await box!.status()).toEqual({ state: 'asleep' })
+    expect(await box!.exec({ command: 'ls', timeoutSeconds: 9 })).toEqual({ exitCode: 0, stdout: 'ran ls 9', stderr: '' })
+    await box!.keepAwake!({ key: 'tkt_1', seconds: 60 })
+    await vi.waitFor(() => expect(kvGet(store, 'plugin:box:state:lease')).toEqual({ key: 'tkt_1', seconds: 60 }))
+    expect(plugins.list().find(p => p.id === 'box')!.computers).toEqual(['盒子'])
+    await plugins.setEnabled('box', false)
+    expect(plugins.computers()).toEqual([])
+  })
+
+  it('refuses a provider without exec', async () => {
+    const { dir, plugins } = setup()
+    mkdirSync(join(dir, 'half'))
+    writeFileSync(join(dir, 'half', 'package.json'), JSON.stringify({ name: 'half', nuonuo: { plugin: './index.mjs' } }))
+    writeFileSync(join(dir, 'half', 'index.mjs'), `export default { id: 'half', computers: [{ id: 'half', title: 'H', capabilities: { dataDir: '/d', maxExecSeconds: 60 }, status() {}, wake() {} }] }`)
+    await expect(plugins.setEnabled('half', true)).rejects.toThrow(/缺少 exec/)
+  })
+
+  it('loads the Instabox plugin from the repository', async () => {
+    const { dir, plugins } = setup()
+    cpSync(join(process.cwd(), 'plugins', 'instabox'), join(dir, 'instabox'), { recursive: true })
+    await plugins.setEnabled('instabox', true)
+    const [box] = plugins.computers()
+    expect(box).toMatchObject({ id: 'instabox', capabilities: { sudo: true, docker: true, dataDir: '/data' } })
+    expect(await box!.status()).toMatchObject({ state: 'unconfigured' })
+    expect(plugins.settingsOf('instabox').fields.map(f => f.key)).toEqual(['apiKey', 'machine'])
+  })
+})
+
 describe('nuonuo channel new', () => {
   const write = (dir: string, name: string, files: Record<string, string>) => {
     mkdirSync(join(dir, name))

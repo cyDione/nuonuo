@@ -2,6 +2,25 @@
 
 插件给智能体增加**来源**（Source）：一条事件流，加上回到原处的回复渠道。也可以给主 Agent 和 Worker 增加工具、提示词和环境变量。GitHub、定时任务、Telegram、飞书、Discord、企业微信、钉钉、Slack、Gmail 都是按这套协议写的；第三方插件和它们用的是同一套接口。
 
+## 插件能接进哪里
+
+一个插件可以只做其中一件，也可以全都做。除了「自己的页面」，每一项都会在系统里某个固定的位置生效：
+
+| 接入点 | 在 `definePlugin` 里写 | 在系统里的位置 |
+|---|---|---|
+| 来源 | `sources`（或用 `defineChannel` 接聊天软件） | 事件进 Engine，回复经 `send` 回到原处；设置在「设置 → 来源」 |
+| 工具 | `routerTools` / `workerTools`，写操作列进 `writes` | 主 Agent / Worker 的工具表；`writes` 里的每次调用先问你 |
+| 提示词 | `routerPrompt` / `workerPrompt` | 系统提示词末尾，插件开着时一直在 |
+| 每轮上下文 | `inlineContext` | 主 Agent 每次回答你之前，附在这一轮输入后面 |
+| 会做的事 | `skills` | 「它是谁 → 会做的事」，默认关着 |
+| MCP 服务 | `mcpServers` | 和你自己的 MCP 服务器一起连接，Worker 调用时过审核 |
+| 授权 | `sdk.oauth(...)` / `sdk.appToken(...)` | 来源设置卡片上的「授权」按钮，令牌进钥匙串 |
+| 设置 | package.json `nuonuo.settings` | 插件窗口的「设置」页，按字段自动生成；代码里 `ctx.settings.get` |
+| 自己的页面 | package.json `nuonuo.window` + `windowCalls` | 插件页上的「打开」，页面完全由插件自己写 |
+| 云电脑 | `computers`（用 `defineComputer`） | Worker 的默认执行环境：shell、docker、多个浏览器，见 [云电脑](13-computers.md) |
+
+插件只通过这些接入点和系统打交道，拿不到数据库，也不能冒充别的来源或内置工具（见最后的「安全」）。内置的「个性与心境」就是只用 `inlineContext`、`routerTools` 和插件状态拼出来的，见 [`packages/plugins/src/mood.ts`](../packages/plugins/src/mood.ts)。
+
 ## 安装与启用
 
 1. 安装：调用 `POST /api/plugins/install`，`source` 可以是
@@ -82,8 +101,100 @@ export default ({ definePlugin, tool, z }) => definePlugin({
 ```
 
 - 工具名必须以 `<插件 id>_` 开头，否则会被忽略。
-- `ctx` 有 `id`、`dir`（插件文件夹）、`state.get/set`（插件自己的小状态）和 `log`。
+- `ctx` 有 `id`、`dir`（插件文件夹）、`state.get/set`（插件自己的小状态）、`settings.get`（你在插件设置里填的值，含密钥）和 `log`。
+- `inlineContext(ctx, { text, scope })`：主 Agent 每次回答你的新消息前调用，返回的文字附在这批输入的后面（在召回的记忆之后），而不是放进系统提示词，所以每轮都变也不会打破提示词缓存。`text` 是这批新消息的原文，`scope` 是所属项目。要在 1.5 秒内返回，超时或出错就跳过这一轮；最多 2,000 字。内置的「心境」就是这样写的，见 [`packages/plugins/src/mood.ts`](../packages/plugins/src/mood.ts)。
 - 插件带来的会做的事出现在「它是谁 → 会做的事」里，**默认关着**，你打开后才生效；插件停用时它们也不生效，卸载插件时一起删掉。
+
+## 设置和窗口
+
+插件可以在 package.json 里声明自己的**设置**和**窗口**。它们写在清单里而不是代码里，所以插件还没打开时，插件页就能显示设置、打开窗口。
+
+```json
+"nuonuo": {
+  "plugin": "./index.mjs",
+  "settings": [
+    { "key": "shareWithAgent", "label": "让糯糯看到便签", "type": "switch" },
+    { "key": "limit", "label": "最多几条", "type": "number", "min": 1, "max": 50 },
+    { "key": "token", "label": "令牌", "type": "secret" }
+  ],
+  "window": { "page": "ui/index.html", "title": "便签", "width": 420, "height": 520 }
+}
+```
+
+- `settings` 的字段和来源的设置表单一样：`switch`、`number`、`text`、`list`、`select`（`options`）、`secret`。`secret` 存进钥匙串，界面上只显示“已设置”。可以写 `default` 作为默认值。代码里用 `ctx.settings.get('limit')` 读。
+- `window.page` 是插件文件夹里的一个 html 文件。它和同一文件夹（及子文件夹）里的文件一起，在一个**隔离的框**里打开：没有同源权限，不能联网，也碰不到糯糯的接口。
+- 页面里引入 `<script src="__nuonuo.js"></script>`，就能用 `await nuonuo.call(name, input)` 找插件，由插件的 `windowCalls[name](ctx, input)` 回答（返回普通 JSON；抛出的错误会变成 reject）。`nuonuo.close()` 关窗口，`nuonuo.theme` 是 `light` 或 `dark`，`<html data-theme>` 会跟着变。
+- 插件没打开时窗口也能看，但 `nuonuo.call` 会报「插件没开」。
+
+### 写一个自己的页面
+
+页面就是普通的 html、css 和 js，用什么框架都行（打包好放进文件夹即可）。最小的一套：
+
+```html
+<!-- ui/index.html -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="style.css"><script src="__nuonuo.js"></script></head>
+<body>
+  <button id="go">刷新</button> <span id="out"></span>
+  <script src="app.js"></script>
+</body>
+</html>
+```
+
+```js
+// ui/app.js
+const show = async () => { const { count } = await nuonuo.call('stats', null); out.textContent = `共 ${count} 条` }
+go.onclick = () => show().catch(e => { out.textContent = e.message })
+show()
+```
+
+```js
+// index.mjs
+export default ({ definePlugin }) => definePlugin({
+  id: 'counter',
+  windowCalls: {
+    stats: ctx => ({ count: ctx.state.get('count') ?? 0 }),
+  },
+})
+```
+
+要注意的几点：
+
+- **数据放在插件里，不放在页面里。** 页面没有同源权限，`localStorage`、cookie 都用不了；要存的东西经 `nuonuo.call` 交给插件，用 `ctx.state` 存。
+- **页面不能联网。** 内容安全策略禁止了 `fetch`、外部脚本和外部图片。要访问网络，就在插件代码里做（插件进程可以联网），再把结果交给页面。
+- **能加载的文件**：页面所在文件夹及其子文件夹里的 html、js/mjs、css、json、svg、png、jpg、gif、webp、ico、woff/woff2、txt。插件的其他文件（包括入口代码和 package.json）页面拿不到。
+- **深浅色**：`nuonuo.theme` 是打开时的主题，`<html data-theme="light|dark">` 会跟着应用切换；需要自己处理时监听 `nuonuo:theme` 事件。用 `[data-theme=dark]` 写深色样式即可。
+- **窗口大小**：`width` 320 ~ 1200，`height` 240 ~ 900，默认 520 × 600；手机上全屏显示。
+- `windowCalls` 的函数可以是 async；输入和返回值都要能 JSON 化。页面能调用的只有 `windowCalls` 里列出的名字。
+
+完整例子见 [`examples/plugins/notes`](../examples/plugins/notes)：一个便签本，页面里增删便签，设置里能限制条数，并可以选择让糯糯在聊天时看到这些便签（`routerPrompt`）。
+
+## `definePlugin` 成员一览
+
+| 成员 | 作用 |
+|---|---|
+| `id` | 必需。小写字母、数字、`-`、`_`，写成和 package.json 的 `name`（或 `nuonuo.id`）一样 |
+| `name` `version` `description` | 显示在插件页上 |
+| `sources` | 事件来源，见下面的 SourceKind 接口 |
+| `routerTools(ctx)` / `workerTools(ctx)` | 给主 Agent / Worker 的工具，名字以 `<插件 id>_` 开头 |
+| `writes` | 有后果的工具名，每次调用前问你 |
+| `routerPrompt` / `workerPrompt` | 字符串，或 `ctx => 字符串`（返回 `undefined` 就不加） |
+| `inlineContext(ctx, { text, scope })` | 每轮上下文，1.5 秒、2,000 字以内 |
+| `skills` | 会做的事：`{ name, when, steps }` |
+| `mcpServers` | MCP 服务器 |
+| `windowCalls` | 自己的页面能调用的函数 |
+| `computers` | 云电脑供应商，用 `defineComputer` 声明，见 [云电脑](13-computers.md) |
+
+工具、提示词、`inlineContext` 和 `windowCalls` 收到的 `ctx` 是同一个：`id`、`dir`、`state.get/set`、`settings.get`、`log`。来源的 `ctx` 不一样，见下面的「上下文 `ctx`」。
+
+## 开发和调试
+
+1. 新建一个文件夹，放 `package.json`（带 `nuonuo.plugin`）和入口文件，直接放进 `~/.nuonuo/plugins/<名字>/`，或者用 `POST /api/plugins/install` 装本机路径。
+2. 在「设置 → 插件」里打开它；有窗口或设置的话，点「打开」。
+3. 改了代码以后点 ⋯ →「重新加载」；只改了页面文件的话，关掉窗口再打开就行。改了 package.json 里的 `settings` / `window` 也要重新加载。
+4. `ctx.log(...)` 和报错会打印在服务的日志里；加载失败的原因显示在插件页上。调试时可以设置 `NUONUO_PLUGIN_SANDBOX=off`，让插件直接在服务进程里运行。
+5. 页面本身用浏览器开发者工具调试即可：它就是插件窗口里的一个 iframe。
 
 ## 授权
 

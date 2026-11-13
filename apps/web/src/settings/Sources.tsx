@@ -149,7 +149,8 @@ function Authorization({ s, onDone }: { s: SourceInfo; onDone(): void }) {
   </>
 }
 
-function FieldRow({ f, value, onChange }: { f: FieldSpec; value: any; onChange(v: unknown): void }) {
+/** One field of a generated settings form (sources, plugins). */
+export function FieldRow({ f, value, onChange }: { f: FieldSpec; value: any; onChange(v: unknown): void }) {
   const sub = <>{f.type === 'secret' && value === '••••••' ? tx('已存在钥匙串里；清空后保存会删除') : f.hint}
     {f.links?.map(l => <a key={l.href} href={l.href} target="_blank" rel="noopener" className="ml-1.5 inline-flex items-center gap-0.5 text-accent">{l.label}<ExternalLink size={11} /></a>)}</>
   switch (f.type) {

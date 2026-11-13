@@ -71,6 +71,11 @@ export interface AgentExtensions {
   toolPolicy?(name: string): ToolPolicy | undefined
   /** Wraps worker shell commands for the execution tier (Docker sandbox). */
   wrapShell?(ticket: Ticket): ((command: string) => string) | undefined
+  /**
+   * Another default execution environment (a cloud computer): its `shell` / `job_status` / `job_stop` take those names,
+   * and this machine's become `local_shell` / `local_job_status` / `local_job_stop`. Undefined keeps the local shell.
+   */
+  shellOverride?(ticket: Ticket, ctx: TurnContext): ToolSet | undefined
   /** Text added to every agent's system prompt (memory). */
   sharedPrompt?(role: 'router' | 'worker', ticket?: Ticket): string
   /** Context recalled for new input (memory): appended to the input it was recalled for. */
@@ -433,13 +438,13 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       return {
         ...(ext.workerTools?.(ticket, ctx) ?? {}),
         ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket), { describeImage: runtime.imageReader(ctx.session.modelRole, ticket.id) }),
-        ...shellTools(runtime.jobs, runtime.blobs, {
+        ...withShellOverride(shellTools(runtime.jobs, runtime.blobs, {
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
           env: workerEnv({ NUONUO_TICKET: ticket.id, NUONUO_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
           foregroundMs: exec.foregroundSeconds * 1000, timeoutMs: exec.timeoutMinutes * 60_000,
           ...(ext.gateShell ? { gate: (command: string) => ext.gateShell!(ticket, ctx.session.id, command, ticket.directory) } : {}),
           ...(ext.wrapShell?.(ticket) ? { wrap: ext.wrapShell(ticket)! } : {}),
-        }),
+        }), ext.shellOverride?.(ticket, ctx)),
         ...webTools(runtime.blobs),
         ...recallTool(runtime),
         report: tool({
@@ -590,13 +595,13 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
       const exec = engine.execution()
       return {
         ...fsTools(ticket.directory, runtime.blobs, ext.fsAccess?.(ticket), { describeImage: runtime.imageReader(ctx.session.modelRole, ticket.id) }),
-        ...shellTools(runtime.jobs, runtime.blobs, {
+        ...withShellOverride(shellTools(runtime.jobs, runtime.blobs, {
           sessionId: ctx.session.id, cwd: ticket.directory, signal: ctx.signal, blocked: exec.blockedCommands,
           env: workerEnv({ NUONUO_TICKET: ticket.id, NUONUO_DIR: ticket.directory, ...(ext.workerEnv?.(ticket) ?? {}) }),
           foregroundMs: exec.foregroundSeconds * 1000, timeoutMs: exec.timeoutMinutes * 60_000,
           ...(ext.gateShell ? { gate: (command: string) => ext.gateShell!(ticket, ctx.session.id, command, ticket.directory) } : {}),
           ...(ext.wrapShell?.(ticket) ? { wrap: ext.wrapShell(ticket)! } : {}),
-        }),
+        }), ext.shellOverride?.(ticket, ctx)),
         ...webTools(runtime.blobs),
         ...recallTool(runtime),
         finish: tool({
@@ -630,10 +635,21 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
 export { DomainError, STAGE_LABEL }
 
 /** Merges several extension sets (sources, memory, review) into one. */
+/** The local shell tools, renamed `local_*` when another environment takes the plain names. */
+export function withShellOverride(local: ToolSet, override: ToolSet | undefined): ToolSet {
+  if (!override) return local
+  const renamed: ToolSet = {}
+  for (const [name, t] of Object.entries(local)) {
+    renamed[`local_${name}`] = { ...t, description: `On the owner's own machine (not the cloud computer): ${t.description ?? ''}` } as typeof t
+  }
+  return { ...renamed, ...override }
+}
+
 export function combineExtensions(...exts: AgentExtensions[]): AgentExtensions {
   const join = (parts: (string | undefined)[]) => parts.filter(Boolean).join('\n\n')
   const gate = exts.find(e => e.gateShell)?.gateShell
   const wrap = exts.find(e => e.wrapShell)?.wrapShell
+  const shellOverride = exts.find(e => e.shellOverride)?.shellOverride
   const fsAccess = exts.find(e => e.fsAccess)?.fsAccess
   return {
     routerPrompt: () => join(exts.map(e => e.routerPrompt?.())),
@@ -647,6 +663,7 @@ export function combineExtensions(...exts: AgentExtensions[]): AgentExtensions {
     toolPolicy: name => exts.map(e => e.toolPolicy?.(name)).find(Boolean),
     ...(gate ? { gateShell: gate } : {}),
     ...(wrap ? { wrapShell: wrap } : {}),
+    ...(shellOverride ? { shellOverride } : {}),
     ...(fsAccess ? { fsAccess } : {}),
   }
 }

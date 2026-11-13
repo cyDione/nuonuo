@@ -6,7 +6,7 @@ import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, 
 import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, calendarExtension, gatedToolsExtension, shellGateExtension, ToolGate, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@nuonuo/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@nuonuo/db'
 import { BUILT_IN_PLUGINS } from '@nuonuo/plugins'
-import { githubKind, PluginManager, Routines, routinesKind, SourceRegistry } from '@nuonuo/sources'
+import { computerExtension, Computers, githubKind, PluginManager, Routines, routinesKind, runApproved, SourceRegistry } from '@nuonuo/sources'
 import { Devices } from './clients'
 import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@nuonuo/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -46,6 +46,7 @@ export interface Runtime {
   browser: BrowserManager
   browserPath?: string
   plugins: PluginManager
+  computers: Computers
   mcp: McpManager
   /** Paired client devices (client protocol). */
   devices: Devices
@@ -177,6 +178,8 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     // One gate for every way an agent acts: source and plugin tools by their declared policies, MCP review, shell commands.
     const gate = new ToolGate(access, reviewer)
     const localApps = new LocalApps(access, reviewer)
+    const computers = new Computers(() => plugins.computers())
+    reviewer.registerExecutor('computer', input => runApproved(computers, input))
     registerAgents(store, agents, engine, combineExtensions(
       gatedToolsExtension(combineExtensions(sources.agentExtensions(), plugins.agentExtensions()), gate),
       memoryExtension(memory, engine),
@@ -193,6 +196,11 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       // One calendar for the agent: the Mac's and every connected source's (Google through Gmail, plugins).
       calendarExtension(() => [localApps.calendarBackend(), ...sources.calendars()].filter(b => b !== undefined), gate, reviewer),
       mcpExtension(mcp, engine, reviewer, gate),
+      computerExtension(computers, {
+        blobs: agents.blobs, mode: () => engine.execution().environment, push: (sessionId, payload) => store.atomic(() => agents.push(sessionId, payload)),
+        limits: () => engine.execution(),
+        gate: (ticket, sessionId, command, input) => gate.shell(ticket, sessionId, command, String(input.cwd ?? ''), { tool: 'computer', input }),
+      }),
       shellGateExtension(gate),
     ))
     watchdog.register()
@@ -215,7 +223,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, access, uploadsDir, skills, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, mcp, devices: new Devices(store), startedAt: Date.now(),
+      config, store, secrets, access, uploadsDir, skills, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, computers, mcp, devices: new Devices(store), startedAt: Date.now(),
       startAgents() {
         engine.mainConversation()
         agents.recover(session => engine.recoveryNote(session.id, session.role))

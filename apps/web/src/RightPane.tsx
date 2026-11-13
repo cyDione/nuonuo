@@ -1,7 +1,7 @@
 /**
  * The right pane (Figma v6, 81:1128 / 92:1057 / section 20): opened from 糯糯 in the sidebar. Its face and status line on
  * top, then an icon-only switch (Figma v7, section 23): 活动 (what waits for you, what it is doing, what comes next, what
- * it has done — the full history opens in place), 它是谁 (名字 · 角色 · 样子 · 性格 · 灵魂 · 记忆) and 权限 (what it may do
+ * it has done — the full history opens in place), 它是谁 (名字 · 角色 · 样子 · 灵魂 · 记忆 · 个性与心境) and 权限 (what it may do
  * on its own, where, and the rules). These live only here, never in settings. 目标 lives only on its page (更多 → 目标).
  * On narrower windows the same pane opens as a drawer, and on phones as a sheet from the bottom.
  */
@@ -11,6 +11,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { api, type AccessSettings, type AppLevel, type AuditEntry, type ExecutionSettings, type InstructionsState, type Level, type LocalApp, type Persona, type ReviewSettings, type Routine, type SourceInfo, type Ticket } from './api'
 import { BrowserWatch } from './watch'
 import { SkillsSection } from './skills'
+import { MoodSection } from './mood'
 import { openActivity, openTask, useActivityOpen, useLive } from './live'
 import { Avatar, isMascot, Mascot, MASCOT, statusLine, usePersona } from './persona'
 import { go } from './route'
@@ -161,8 +162,6 @@ function dayName(at: number) {
 
 interface MemoryRow { id: string; kind: string; text: string; status: 'active' | 'pending' }
 interface Memories { memories: MemoryRow[]; kinds: { id: string; label: string }[] }
-/** A few words from the personality, for the little tags under it. */
-const traits = (text: string) => text.split(/[，,；;、。.!！\n]/).map(s => s.trim()).filter(s => s.length >= 2 && s.length <= 8).slice(0, 4)
 /** How many parts the 灵魂 document has: its ## sections, or 1 for a document without headings. */
 const soulParts = (body: string) => body.trim() ? Math.max(1, (body.match(/^#{1,3}\s/gm) ?? []).length) : 0
 
@@ -171,13 +170,10 @@ function WhoTab() {
   const raw = useQuery({ queryKey: ['persona'], queryFn: () => api.get<{ persona: Persona }>('/persona') }).data?.persona
   const instructions = useQuery({ queryKey: ['instructions'], queryFn: () => api.get<InstructionsState>('/instructions') }).data
   const memories = useQuery({ queryKey: ['memories'], queryFn: () => api.get<Memories>('/memories') }).data
-  const [editing, setEditing] = useState<string | null>(null)
   const [modal, setModal] = useState<'soul' | 'memory' | null>(null)
   // A new pair of colours each time 它是谁 opens (Figma section 24).
   const [hues] = useState(() => pickHues())
-  const savePersonality = useMutation({ mutationFn: (personality: string) => api.put('/persona', { ...raw!, personality }), onSuccess: () => { setEditing(null); qc.invalidateQueries({ queryKey: ['persona'] }) } })
   const decide = useMutation({ mutationFn: (v: { id: string; action: 'confirm' | 'reject' }) => api.patch(`/memories/${v.id}`, { action: v.action }), onSuccess: () => qc.invalidateQueries({ queryKey: ['memories'] }) })
-  const personality = raw?.personality ?? ''
   const active = memories?.memories.filter(m => m.status === 'active') ?? []
   const pending = memories?.memories.filter(m => m.status === 'pending') ?? []
   const soul = instructions?.current
@@ -185,26 +181,13 @@ function WhoTab() {
   return <div className="space-y-5">
     {raw && <Identity persona={raw} />}
     <section className="border-t border-line pt-5">
-      <Head title={tx('性格')} action={editing == null && <LinkBtn onClick={() => setEditing(personality)}>{tx('改一改')}</LinkBtn>} />
-      {editing != null ? <div className="space-y-2">
-        <textarea autoFocus value={editing} onChange={e => setEditing(e.target.value)} placeholder={tx('说话直接，先说结论，偶尔开个玩笑。')}
-          className="min-h-20 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm leading-6 outline-none focus:border-faint" />
-        <div className="flex justify-end gap-1.5">
-          <button onClick={() => setEditing(null)} className="press h-8 rounded-full px-3 text-[13px] text-muted hover:bg-sunken">{tx('取消')}</button>
-          <button onClick={() => savePersonality.mutate(editing.trim())} disabled={savePersonality.isPending || !raw} className="press h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-ink-fg disabled:opacity-50">{tx('保存')}</button>
-        </div>
-      </div> : <>
-        <p className={cx('text-[15px] leading-relaxed', personality ? 'font-medium' : 'text-faint')}>{personality || tx('还没写它的性格，点「改一改」告诉它该怎么说话。')}</p>
-        {traits(personality).length > 0 && <div className="mt-2.5 flex flex-wrap gap-1.5">{traits(personality).map(t => <span key={t} className="rounded-full border border-line px-2.5 py-0.5 text-xs">{t}</span>)}</div>}
-      </>}
-    </section>
-    <section className="border-t border-line pt-5">
       <div className="flex gap-3">
         <LiquidButton hues={hues.soul} icon={<ScrollText size={18} />} title={tx('灵魂')} sub={soul?.version ? tx('第 {0} 版 · {1} 段', soul.version, parts) : tx('还没写')} onClick={() => setModal('soul')} />
         <LiquidButton hues={hues.memory} icon={<Brain size={18} />} title={tx('记忆')} sub={tx('{0} 件', active.length)} onClick={() => setModal('memory')} />
       </div>
       <p className="mt-2.5 text-[11px] text-faint">{tx('点开看全文，可以直接改。')}</p>
     </section>
+    <MoodSection Head={Head} />
     <SkillsSection Head={Head} LinkBtn={LinkBtn} />
     {pending.length > 0 && <section className="rounded-2xl bg-sunken px-3.5 py-3">
       <Head title={tx('新学到的，等你确认')} count={pending.length} />

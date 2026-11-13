@@ -213,6 +213,28 @@ describe('external tool calls', () => {
   })
 })
 
+describe('commands on a cloud computer', () => {
+  it('skip the checks about the owner\'s folders and run through the computer executor once approved', async () => {
+    const { engine, reviewer, start } = setup(() => ({ text: '{}' }))
+    const ticket = start()
+    await settle()
+    const t = engine.ticket(ticket.id)
+    const remote = (command: string) => ({ tool: 'computer', input: { computer: 'box', command, cwd: '/data/nuonuo/tasks/x' } })
+    // Writing outside the task folder is about this machine's files; there it is nuonuo's own space.
+    expect(await reviewer.gateShell(t, ticket.sessionId, 'echo hi > /data/nuonuo/notes.txt', '/data/nuonuo/tasks/x', remote('echo hi > /data/nuonuo/notes.txt'))).toMatchObject({ action: 'allow' })
+    kvSet(store, 'settings:review', { external: 'ask' })
+    const calls: unknown[] = []
+    reviewer.registerExecutor('computer', async input => { calls.push(input); return 'pushed' })
+    const decision = await reviewer.gateShell(t, ticket.sessionId, 'git push origin main', '/data/nuonuo/tasks/x', remote('git push origin main'))
+    expect(decision).toMatchObject({ action: 'escalate' })
+    expect(reviewer.pending(ticket.id)[0]).toMatchObject({ tool: 'computer' })
+    reviewer.decide((decision as { approvalId: string }).approvalId, true)
+    await new Promise(r => setTimeout(r, 50))
+    expect(calls).toEqual([expect.objectContaining({ computer: 'box', command: 'git push origin main' })])
+    engine.stopTask(ticket.id, 'person')
+  })
+})
+
 describe('permission levels (the right pane\'s 权限)', () => {
   it('does, asks or refuses external actions by level, without the model', async () => {
     let calls = 0

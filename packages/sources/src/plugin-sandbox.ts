@@ -15,6 +15,7 @@ import { createRequire } from 'node:module'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
+import type { ComputerCapabilities, ComputerKind } from './computer'
 import type { SourceContext, SourceKind } from './kind'
 import type { NuonuoPlugin, PluginManifest, PluginMcpServer } from './plugins'
 import type { SecretPort } from './registry'
@@ -23,7 +24,8 @@ interface ToolDef { description: string; inputSchema: Record<string, unknown> }
 interface SourceSnapshot { authorized?: boolean; routerPrompt?: string; workerPrompt?: string; workerEnv?: Record<string, string>; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef>; threadInfo: Record<string, string>; homeThread?: string }
 interface Snapshot { plugin: { routerPrompt?: string; workerPrompt?: string; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef> }; sources: Record<string, SourceSnapshot> }
 interface HelloSource { id: string; title: string; icon?: string; description: string; fields: SourceKind['fields']; defaultEnabled?: boolean; actions?: SourceKind['actions']; writes?: string[]; apps?: Record<string, string>; configSchema: Record<string, unknown> | null; capabilities?: SourceKind['capabilities']; has: Record<string, boolean>; validStart: boolean }
-interface Hello { plugin: { id: string; name?: string; version?: string; description?: string; writes: string[]; skills: NuonuoPlugin['skills']; mcpServers: PluginMcpServer[]; sources: HelloSource[] }; snapshot: Snapshot }
+interface Hello { plugin: { id: string; name?: string; version?: string; description?: string; writes: string[]; skills: NuonuoPlugin['skills']; mcpServers: PluginMcpServer[]; sources: HelloSource[]; hasInlineContext?: boolean; windowCalls?: string[]; computers?: HelloComputer[] }; snapshot: Snapshot }
+interface HelloComputer { id: string; title: string; description?: string; capabilities: ComputerCapabilities; has: Record<string, boolean> }
 
 const here = dirname(fileURLToPath(import.meta.url))
 /** The runner sits next to this module in the repository and next to cli.mjs in the built service. */
@@ -46,6 +48,8 @@ export const sandboxWanted = () => process.env.NUONUO_PLUGIN_SANDBOX !== 'off'
 export interface SandboxHost {
   store: Store
   secrets?: SecretPort
+  /** The plugin's own settings (secrets included), handed to the process at start. */
+  settings?(): Record<string, unknown>
   /** Called when the process ends on its own (crash, exit), with why. */
   onExit(reason: string): void
 }
@@ -135,12 +139,12 @@ export class PluginSandbox {
 
   // ── Messages ───────────────────────────────────────────────────────────────
 
-  private call<T = unknown>(type: string, body: Record<string, unknown> = {}): Promise<T> {
+  private call<T = unknown>(type: string, body: Record<string, unknown> = {}, timeoutMs = ANSWER_TIMEOUT): Promise<T> {
     const child = this.child
     if (!child?.connected) return Promise.reject(new Error('插件进程没有在运行'))
     const id = ++this.seq
     return new Promise<T>((resolveCall, rejectCall) => {
-      const timer = setTimeout(() => { this.waiting.delete(id); rejectCall(new Error(`插件 ${this.manifest.id} 没有回应（${type}）`)) }, ANSWER_TIMEOUT)
+      const timer = setTimeout(() => { this.waiting.delete(id); rejectCall(new Error(`插件 ${this.manifest.id} 没有回应（${type}）`)) }, timeoutMs)
       this.waiting.set(id, { resolve: resolveCall as (v: unknown) => void, reject: rejectCall, timer })
       child.send({ kind: 'call', id, type, ...body })
     })
@@ -157,7 +161,7 @@ export class PluginSandbox {
       msg.error ? w.reject(new Error(msg.error)) : w.resolve(msg.value)
       return
     }
-    if (msg?.kind === 'ask' && msg.type === 'init') { this.answer(msg.id, { pluginState: this.readState(`plugin:${this.manifest.id}:state:`) }); return }
+    if (msg?.kind === 'ask' && msg.type === 'init') { this.answer(msg.id, { pluginState: this.readState(`plugin:${this.manifest.id}:state:`), pluginSettings: this.host.settings?.() ?? {} }); return }
     if (msg?.kind === 'ask' && msg.type === 'approval') {
       const ctx = typeof msg.source === 'string' ? this.ctxs.get(msg.source) : undefined
       Promise.resolve().then(() => {
@@ -234,6 +238,9 @@ export class PluginSandbox {
       this.call('engine', { view: { main: ctx.engine.mainConversation(), followed, threads } }).catch(() => {})
     } catch {}
   }
+
+  /** Hands the process the plugin's settings after the owner changed them. */
+  updateSettings(values: Record<string, unknown>): Promise<unknown> { return this.call('settings', { values }) }
 
   /** Hands the process the context of one of its sources (settings, state, runtime secrets) when it changes. */
   private prepare(ctx: SourceContext<any>): Promise<unknown> {
@@ -314,6 +321,18 @@ export class PluginSandbox {
       workerTools: () => this.tools(this.snap.plugin.workerTools, (name, args) => this.call('tool', { scope: 'plugin', role: 'worker', name, args })),
       routerPrompt: () => this.snap.plugin.routerPrompt,
       workerPrompt: () => this.snap.plugin.workerPrompt,
+      ...(p.hasInlineContext ? { inlineContext: (_ctx, input) => this.call<string | null>('inlineContext', { input }).then(t => t ?? undefined) } : {}),
+      computers: (p.computers ?? []).map((k): ComputerKind => {
+        const call = <T>(method: string, args?: unknown, timeoutMs?: number) => this.call<T>('computer', { computer: k.id, method, args }, timeoutMs)
+        // A method the plugin lacks stays missing, so loading reports it like it would without the sandbox.
+        const kind: Partial<ComputerKind> = { id: k.id, title: k.title, ...(k.description ? { description: k.description } : {}), capabilities: k.capabilities,
+          ...(k.has.status ? { status: () => call('status') } : {}),
+          ...(k.has.wake ? { wake: () => call('wake', undefined, 300_000) } : {}),
+          ...(k.has.exec ? { exec: (_ctx: unknown, request: { timeoutSeconds: number }) => call('exec', request, (request.timeoutSeconds + 90) * 1000) } : {}),
+          ...(k.has.keepAwake ? { keepAwake: (_ctx: unknown, request: { key: string; seconds: number }) => call<void>('keepAwake', request) } : {}) }
+        return kind as ComputerKind
+      }),
+      ...(p.windowCalls?.length ? { windowCalls: Object.fromEntries(p.windowCalls.map(name => [name, (_ctx: unknown, input: unknown) => this.call('windowCall', { name, input })])) } : {}),
       sandbox: this,
     }
     return plugin
