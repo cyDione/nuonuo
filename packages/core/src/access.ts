@@ -11,6 +11,7 @@ import { kvGet, kvSet, type Store } from '@nuonuo/db'
 export type AppLevel = 'auto' | 'ask' | 'read' | 'off'
 export const LOCAL_APPS = ['calendar', 'reminders', 'notes', 'contacts', 'photos'] as const
 export type LocalApp = typeof LOCAL_APPS[number]
+export const APP_NAMES: Record<LocalApp, string> = { calendar: '日历', reminders: '提醒事项', notes: '备忘录', contacts: '通讯录', photos: '照片' }
 
 export interface AllowedFolder { path: string; write: boolean }
 export interface AccessSettings {

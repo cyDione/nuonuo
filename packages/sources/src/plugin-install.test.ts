@@ -191,7 +191,8 @@ describe('plugin tools, prompts and skills', () => {
     expect(await (tools.calc_add as any).execute({ a: 2, b: 3 }, {})).toBe(5)
     expect(kvGet(store, 'plugin:calc:state:last')).toBe(5)
     expect(Object.keys(ext.workerTools!({} as any, {} as any))).toEqual(['calc_save'])
-    expect([...plugins.askFirstTools()]).toEqual(['calc_save'])
+    expect(ext.toolPolicy!('calc_save')).toEqual({ effect: 'write', thirdParty: true })
+    expect(ext.toolPolicy!('calc_add')).toBeUndefined()
     expect(ext.routerPrompt!()).toBe('Use calc_add for sums.')
     expect(plugins.list()[0]).toMatchObject({ tools: ['calc_add', 'calc_save'], skills: ['算账'] })
 

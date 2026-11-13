@@ -250,6 +250,8 @@ definePlugin({
 | `threadInfo` | | 生成卡片上显示的线程摘要 |
 | `routerPrompt` / `routerTools` | | 给主 Agent 增加的提示词和工具 |
 | `workerPrompt` / `workerTools` / `workerEnv` | | 给 Worker 增加的提示词、工具和环境变量 |
+| `writes` / `apps` | | 会做改动的工具名，以及碰到你自己的应用的工具（`{ 工具名: 'calendar' }`）；权限关卡按它们决定隐藏、直接做还是先问你 |
+| `calendar(ctx)` | | 账号里的日历：`{ label, list({ from, to, calendar? }), add?(event) }`。不要自己写日历工具：糯糯把 Mac 日历、Google 日历和插件的日历合成同一对工具 `calendar_events` / `calendar_add`，按「权限 → 日历」的档位走 |
 | `actions` + `http` | | 设置卡片上的按钮（例如「授权」），以及插件自己的 HTTP 端点。`public: true` 的端点挂在 `/plugin/<id>/…` 下，不需要令牌，所以插件必须自己校验 state 参数 |
 
 ## 上下文 `ctx`
@@ -300,5 +302,7 @@ Engine 处理一个事件的规则：
 - 开发插件时可以设置环境变量 `NUONUO_PLUGIN_SANDBOX=off`，让插件直接在服务进程里运行，方便调试。
 - 第三方插件的工具名必须以 `<来源 id>_` 或 `<插件 id>_` 开头（例如 `rss_search`），否则会被忽略，这样插件不能顶替应用自带的 `shell`、`reply` 这类工具。
 - 第三方插件在 `writes` 里列出的写操作工具，每次调用前都会先问你批准；在「权限」里把来源设为「只能看」时，这些工具直接去掉。
+- 碰到你自己的应用的工具，在来源里用 `apps` 声明（例如 `apps: { shop_remind: 'reminders' }`），就和本机应用一样按「权限 → 本机应用」的档位走：不允许时去掉，只能看时去掉写操作，先问你时每次问。
+- 这些都由同一个权限关卡（`packages/core/src/gate.ts` 的 `ToolGate`）处理：来源、插件、MCP 的审核、本机应用和 shell 命令都经过它，工具只声明自己做什么（读 / 写）、碰到什么（应用、来源），不自己写检查。
 - 令牌、API key 这类配置请用 `secret` 字段：它们存进系统钥匙串，不会写进数据库，设置页只显示「已设置」。
 - Worker 的命令行环境里会去掉凭据类的环境变量。插件给 Worker 提供能力时，应该通过工具（在插件进程里拿到凭据），而不是把凭据放进环境变量。

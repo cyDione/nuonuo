@@ -5,7 +5,7 @@
 // argv: <zod entry path> <plugin entry path> <plugin id> <plugin dir>
 import { pathToFileURL } from 'node:url'
 import { appToken, oauth } from './auth.mjs'
-import { ChannelError, makeDefineChannel } from './channel.mjs'
+import { ChannelError, fetchFile, makeDefineChannel } from './channel.mjs'
 
 const [zodPath, entry, pluginId, pluginDir] = process.argv.slice(2)
 const zodModule = await import(pathToFileURL(zodPath).href)
@@ -27,6 +27,7 @@ const sdk = {
   defineChannel: makeDefineChannel(z),
   defineComputer: c => c,
   ChannelError,
+  fetchFile,
   oauth,
   appToken,
   tool: t => t,
@@ -164,6 +165,12 @@ const handlers = {
   },
   async poll({ source }) { const e = sources.get(source); await e.kind.poll?.(e.ctx) },
   async send({ source, message }) { const e = sources.get(source); return await e.kind.send(e.ctx, message) },
+  async calendar({ source, op, args }) {
+    const e = sources.get(source)
+    const backend = e?.kind.calendar?.(e.ctx)
+    if (!backend || (op !== 'list' && op !== 'add') || typeof backend[op] !== 'function') throw new Error('这个来源没有这个日历操作')
+    return await backend[op](args)
+  },
   async tool({ scope, source, role, name, args }) {
     if (scope === 'plugin') return await runTool(role === 'router' ? plugin.routerTools?.(pluginCtx) : plugin.workerTools?.(pluginCtx), name, args)
     const e = sources.get(source)
@@ -232,10 +239,10 @@ try {
       computers: (plugin.computers ?? []).map(k => ({ id: k?.id, title: k?.title, description: k?.description, capabilities: k?.capabilities,
         has: Object.fromEntries(['status', 'wake', 'exec', 'keepAwake'].map(m => [m, typeof k?.[m] === 'function'])) })),
       sources: (plugin.sources ?? []).map(k => ({
-        id: k.id, title: k.title, icon: k.icon, description: k.description, fields: k.fields, defaultEnabled: k.defaultEnabled, actions: k.actions, writes: k.writes,
+        id: k.id, title: k.title, icon: k.icon, description: k.description, fields: k.fields, defaultEnabled: k.defaultEnabled, actions: k.actions, writes: k.writes, apps: k.apps,
         capabilities: k.capabilities,
         configSchema: safe(() => { const s = z.toJSONSchema(k.schema, { io: 'input', unrepresentable: 'any' }); delete s.$schema; return s }, null),
-        has: Object.fromEntries(['authorized', 'poll', 'allowed', 'send', 'threadInfo', 'homeThread', 'routerPrompt', 'routerTools', 'workerPrompt', 'workerTools', 'workerEnv', 'http'].map(m => [m, typeof k[m] === 'function'])),
+        has: Object.fromEntries(['authorized', 'poll', 'allowed', 'send', 'threadInfo', 'homeThread', 'calendar', 'routerPrompt', 'routerTools', 'workerPrompt', 'workerTools', 'workerEnv', 'http'].map(m => [m, typeof k[m] === 'function'])),
         validStart: typeof k.start === 'function',
       })),
     },

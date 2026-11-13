@@ -6,6 +6,7 @@
  * snapshot the process keeps sending; everything else is a message round trip.
  */
 import type { McpServerConfig } from '@nuonuo/agent-runtime'
+import { LOCAL_APPS, type CalendarEvent } from '@nuonuo/core'
 import { kvGet, kvSet, schema, type Store } from '@nuonuo/db'
 import { jsonSchema, tool, type ToolSet } from 'ai'
 import { fork, type ChildProcess } from 'node:child_process'
@@ -22,7 +23,7 @@ import type { SecretPort } from './registry'
 interface ToolDef { description: string; inputSchema: Record<string, unknown> }
 interface SourceSnapshot { authorized?: boolean; routerPrompt?: string; workerPrompt?: string; workerEnv?: Record<string, string>; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef>; threadInfo: Record<string, string>; homeThread?: string }
 interface Snapshot { plugin: { routerPrompt?: string; workerPrompt?: string; routerTools: Record<string, ToolDef>; workerTools: Record<string, ToolDef> }; sources: Record<string, SourceSnapshot> }
-interface HelloSource { id: string; title: string; icon?: string; description: string; fields: SourceKind['fields']; defaultEnabled?: boolean; actions?: SourceKind['actions']; writes?: string[]; configSchema: Record<string, unknown> | null; capabilities?: SourceKind['capabilities']; has: Record<string, boolean>; validStart: boolean }
+interface HelloSource { id: string; title: string; icon?: string; description: string; fields: SourceKind['fields']; defaultEnabled?: boolean; actions?: SourceKind['actions']; writes?: string[]; apps?: Record<string, string>; configSchema: Record<string, unknown> | null; capabilities?: SourceKind['capabilities']; has: Record<string, boolean>; validStart: boolean }
 interface Hello { plugin: { id: string; name?: string; version?: string; description?: string; writes: string[]; skills: NuonuoPlugin['skills']; mcpServers: PluginMcpServer[]; sources: HelloSource[]; hasInlineContext?: boolean; windowCalls?: string[]; computers?: HelloComputer[] }; snapshot: Snapshot }
 interface HelloComputer { id: string; title: string; description?: string; capabilities: ComputerCapabilities; has: Record<string, boolean> }
 
@@ -277,6 +278,7 @@ export class PluginSandbox {
         id: s.id, title: s.title, ...(typeof s.icon === 'string' ? { icon: s.icon } : {}), description: s.description, fields: s.fields ?? [], schema: configSchema,
         ...(s.capabilities ? { capabilities: s.capabilities } : {}),
         ...(s.defaultEnabled ? { defaultEnabled: true } : {}), ...(s.actions ? { actions: s.actions } : {}), ...(s.writes ? { writes: s.writes } : {}),
+        ...(s.apps ? { apps: Object.fromEntries(Object.entries(s.apps).filter(([, a]) => (LOCAL_APPS as readonly string[]).includes(a))) as SourceKind['apps'] } : {}),
         start(ctx) {
           void sandbox.prepare(ctx).then(() => sandbox.call('start', { source: s.id })).catch(error => ctx.health('error', (error as Error).message))
           return async () => { await sandbox.call('stop', { source: s.id }).catch(() => {}) }
@@ -287,6 +289,14 @@ export class PluginSandbox {
         ...(has('send') ? { send: async (ctx, message) => { await sandbox.prepare(ctx); return await sandbox.call('send', { source: s.id, message }) as { url?: string } | 'gone' } } : {}),
         ...(has('threadInfo') ? { threadInfo: (_ctx, threadId) => snap()?.threadInfo?.[threadId] } : {}),
         ...(has('homeThread') ? { homeThread: () => snap()?.homeThread } : {}),
+        // A third-party calendar: reads and adds go to the plugin process; the gate still applies the 日历 level here.
+        ...(has('calendar') ? {
+          calendar: (ctx: SourceContext<unknown>) => ({
+            label: s.title,
+            list: async range => { await sandbox.prepare(ctx); return await sandbox.call('calendar', { source: s.id, op: 'list', args: range }) as CalendarEvent[] },
+            add: async event => { await sandbox.prepare(ctx); return await sandbox.call('calendar', { source: s.id, op: 'add', args: event }) as { id: string } },
+          }),
+        } : {}),
         ...(has('routerPrompt') ? { routerPrompt: () => snap()?.routerPrompt } : {}),
         ...(has('workerPrompt') ? { workerPrompt: () => snap()?.workerPrompt } : {}),
         ...(has('workerEnv') ? { workerEnv: () => snap()?.workerEnv ?? {} } : {}),

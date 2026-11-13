@@ -108,11 +108,9 @@ function ModelStep({ onDone }: { onDone(): void }) {
   </form>
 }
 
-const PICKS = ['github', 'gmail', 'telegram', 'feishu']
-
 function SourceStep({ onDone }: { onDone(): void }) {
   const sources = (useQuery({ queryKey: ['sources'], queryFn: () => api.get<{ sources: SourceInfo[] }>('/sources') }).data?.sources ?? [])
-    .filter(s => PICKS.includes(s.id)).sort((a, b) => PICKS.indexOf(a.id) - PICKS.indexOf(b.id))
+    .filter(s => s.firstRun).slice(0, 4)
   return <div>
     <div className="text-xs text-muted">{tx('有变化我才会说，没变化不打扰你')}</div>
     <div className="mt-2 grid grid-cols-2 gap-1.5">

@@ -121,7 +121,7 @@
 | 开了沙箱后，权限里允许的文件夹在容器里看不到 | 沙箱按权限挂载允许的文件夹（只能看的只读挂载）和附件目录；里面的"永远不碰"目录用空目录盖住 | `sandbox.ts`、daemon `runtime.ts` 的 `sandboxFolders` |
 | 运行时自己的数据只增不减（已取的收件箱、命令输出、工具输出 blob、工具调用标记） | 每小时清理：已取收件箱 7 天、结束的命令 30 天、工具调用标记 30 天、溢出的工具输出 90 天。任务、汇报、产物和聊天不动（聊天按「数据和隐私」的保留期） | daemon `data.ts` 的 `pruneRuntime` |
 | 第三方插件拿到整个 Engine 和数据库 | 第三方插件的 `ctx.engine` 只剩 receive / follow / followed / threadClosed / mainConversation / conversationOfThread，且只能用自己 `<id>:` 开头的线程；`ctx.store` 不可用 | `sources/src/registry.ts` 的 `outsiderContext` |
-| 插件工具与自带工具同名时会顶替自带的（比如一个叫 `shell` 的插件工具绕过审核） | 扩展工具先放、自带工具后放，自带的总是赢；第三方插件工具名必须以 `<id>_` 开头；第三方插件的写操作每次先问你 | `agents.ts`、`registry.ts`、`localapps.ts` 的 `gateSourceTools` |
+| 插件工具与自带工具同名时会顶替自带的（比如一个叫 `shell` 的插件工具绕过审核） | 扩展工具先放、自带工具后放，自带的总是赢；第三方插件工具名必须以 `<id>_` 开头；第三方插件的写操作每次先问你 | `agents.ts`、`registry.ts`、`gate.ts` 的 `ToolGate` |
 | 进程崩溃后，后台命令还在跑却被标成已终止 | 记录每条命令的进程号；重启时确认还是原来那条命令（开机之后启动，Linux 上再核对环境变量里的任务号）后杀掉整个进程组 | `agent-runtime/src/jobs.ts` 的 `recover` |
 | Windows 上没有 bash 时每条命令都失败 | 有 bash（Git Bash）用 bash，没有就用 PowerShell；终止用 `taskkill /T /F` | `jobs.ts` 的 `shellFor` / `killGroup` |
 | 主 Agent 的记忆信任状态是模块级全局变量 | 改为按 Engine 实例保存 | `agents.ts` 的 `routerContextOf` |

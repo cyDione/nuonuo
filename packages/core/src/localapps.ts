@@ -7,13 +7,15 @@
 import { tool, type ToolSet } from 'ai'
 import { execFile } from 'node:child_process'
 import { z } from 'zod'
-import type { AppLevel, LocalAccess, LocalApp } from './access'
+import { APP_NAMES, type AppLevel, type LocalAccess, type LocalApp } from './access'
+import type { CalendarBackend, CalendarEvent } from './calendar'
+import { pendingNote, ToolGate } from './gate'
 import type { Ticket } from './model'
-import type { GateDecision, Reviewer } from './review'
+import type { Reviewer } from './review'
 
 export type JxaRunner = (script: string, args: Record<string, unknown>) => Promise<unknown>
 
-const APP_NAME: Record<LocalApp, string> = { calendar: '日历', reminders: '提醒事项', notes: '备忘录', contacts: '通讯录', photos: '照片' }
+const APP_NAME = APP_NAMES
 const MAC_APP: Record<LocalApp, string> = { calendar: 'Calendar', reminders: 'Reminders', notes: 'Notes', contacts: 'Contacts', photos: 'Photos' }
 
 export class MacPermissionError extends Error {
@@ -92,7 +94,10 @@ const S = {
 
 /** A local app's tools for one worker, filtered by the app's level and with changes routed by it. */
 export class LocalApps {
+  private gate: ToolGate
+
   constructor(private access: LocalAccess, private reviewer: Reviewer | undefined, private run: JxaRunner = osascript, private platform: NodeJS.Platform = process.platform) {
+    this.gate = new ToolGate(access, reviewer)
     reviewer?.registerExecutor('localapp', async input => {
       const app = input.app as LocalApp
       return JSON.stringify(await this.jxa(app, S[input.script as keyof typeof S], input.args as Record<string, unknown>))
@@ -111,15 +116,9 @@ export class LocalApps {
 
   /** Runs a change at the app's level: directly, or after an approval card. */
   private async change(ticket: Ticket, sessionId: string, app: LocalApp, script: keyof typeof S, args: Record<string, unknown>, display: string): Promise<unknown> {
-    const level = this.access.app(app)
-    if (level === 'read' || level === 'off') throw new Error(`按主人的设置，「${APP_NAME[app]}」${level === 'read' ? '只能看，不能改' : '不允许使用'}`)
-    if (level === 'ask' && this.reviewer) {
-      const decision: GateDecision = this.reviewer.askOwner(ticket, sessionId, 'localapp', display, { app, script, args, label: `改${APP_NAME[app]}` }, `要改你的「${APP_NAME[app]}」，按设置先问你`)
-      if (decision.action === 'block') throw new Error(decision.reason)
-      if (decision.action === 'escalate') return `[需要主人批准（${decision.approvalId}）：${decision.reason}。批准后会自动执行，结果作为新消息送达。]`
-    } else {
-      this.reviewer?.audit({ ticketId: ticket.id, actor: 'system', action: 'review', tool: 'localapp', input: display, risk: 'external', decision: 'allow', reason: '按你的权限设置直接做' })
-    }
+    const decision = await this.gate.check(ticket, sessionId, { toolId: 'localapp', display, input: { app, script, args } }, { effect: 'write', app })
+    if (decision.action === 'block') throw new Error(decision.reason)
+    if (decision.action === 'escalate') return pendingNote(decision)
     return this.jxa(app, S[script], args)
   }
 
@@ -132,24 +131,22 @@ export class LocalApps {
     return `## The owner's apps on this Mac\n${lines.join('\n')}\nUse local times with an offset in ISO dates (e.g. 2026-11-12T15:00:00+08:00). A change that needs the owner's yes returns a pending note: end the turn and wait.`
   }
 
+  /** The Mac's Calendar as a backend of the shared calendar tools (calendar.ts), which apply the 日历 level. */
+  calendarBackend(): CalendarBackend | undefined {
+    if (!this.available()) return undefined
+    return {
+      id: 'mac', label: 'Mac 日历',
+      list: async range => ((await this.jxa('calendar', S.calendarList, range)) as { events: CalendarEvent[] }).events.map(({ location, ...e }) => ({ ...e, ...(location ? { location } : {}) })),
+      add: async e => (await this.jxa('calendar', S.calendarAdd, { ...e })) as { id: string; calendar: string },
+    }
+  }
+
   tools(ticket: Ticket, sessionId: string): ToolSet {
     if (!this.available()) return {}
     const level = (a: LocalApp) => this.access.app(a)
     const canWrite = (a: LocalApp) => level(a) === 'auto' || level(a) === 'ask'
     const t: ToolSet = {}
     const iso = z.string().describe('ISO 8601 date-time')
-    if (level('calendar') !== 'off') {
-      t.calendar_events = tool({
-        description: 'List events in the owner\'s Calendar between two times (optionally one calendar). Returns calendars and events.',
-        inputSchema: z.object({ from: iso, to: iso, calendar: z.string().optional() }),
-        execute: async args => this.jxa('calendar', S.calendarList, args),
-      })
-      if (canWrite('calendar')) t.calendar_add = tool({
-        description: 'Add an event to the owner\'s Calendar. Check calendar_events for conflicts first.',
-        inputSchema: z.object({ title: z.string().min(1), start: iso, end: iso, calendar: z.string().optional(), location: z.string().optional(), notes: z.string().optional(), all_day: z.boolean().optional() }),
-        execute: async ({ all_day, ...a }) => this.change(ticket, sessionId, 'calendar', 'calendarAdd', { ...a, allDay: Boolean(all_day) }, `在日历里加「${a.title}」${a.start} – ${a.end}${a.location ? ` @ ${a.location}` : ''}`),
-      })
-    }
     if (level('reminders') !== 'off') {
       t.reminders_list = tool({
         description: 'List the owner\'s Reminders (open ones unless completed is true), optionally from one list.',
@@ -216,57 +213,4 @@ export class LocalApps {
 
 function levelText(level: AppLevel): string {
   return level === 'auto' ? 'read and change directly' : level === 'ask' ? 'read; every change is asked on an approval card' : 'read only'
-}
-
-/** Source tools that reach one of the owner's apps (Google Calendar is 日历 too): they follow that app's level. */
-export const SOURCE_APP_TOOLS: Record<string, { app: LocalApp; write: boolean }> = {
-  gcal_events: { app: 'calendar', write: false },
-  gcal_add: { app: 'calendar', write: true },
-}
-
-/** A third-party plugin's acting tool: the owner approves each call (blocked when there is no reviewer to ask). */
-function askOwnerFirst(name: string, t: ToolSet[string], ticket: Ticket, sessionId: string, reviewer: Reviewer | undefined): ToolSet[string] {
-  const run = t.execute!.bind(t)
-  const toolId = `plugin:${name}`
-  reviewer?.registerExecutor(toolId, async input => String(await run(input.args as never, { toolCallId: 'approved', messages: [] } as never)))
-  return {
-    ...t,
-    execute: async (args: unknown, options: unknown) => {
-      if (!reviewer) throw new Error(`${name} 是插件的写操作，需要主人批准，但审批没有启用`)
-      const decision = reviewer.askOwner(ticket, sessionId, toolId, `插件：${name} ${JSON.stringify(args)}`, { args, label: `插件 ${name}` }, '第三方插件要做改动，先问你')
-      if (decision.action === 'block') throw new Error(decision.reason)
-      if (decision.action === 'escalate') return `[需要主人批准（${decision.approvalId}）：${decision.reason}。批准后会自动执行，结果作为新消息送达。]`
-      return run(args as never, options as never)
-    },
-  } as typeof t
-}
-
-/** Applies the app levels to a source's tools: hidden when off, writes removed at 只能看 and asked at 先问你. */
-export function gateSourceTools(tools: ToolSet, ticket: Ticket, sessionId: string, access: LocalAccess, reviewer: Reviewer | undefined,
-  askFirst: ReadonlySet<string> = new Set()): ToolSet {
-  const out: ToolSet = {}
-  for (const [name, t] of Object.entries(tools)) {
-    const rule = SOURCE_APP_TOOLS[name]
-    if (!rule && askFirst.has(name) && t.execute) { out[name] = askOwnerFirst(name, t, ticket, sessionId, reviewer); continue }
-    if (!rule) { out[name] = t; continue }
-    const level = access.app(rule.app)
-    if (level === 'off' || (rule.write && level === 'read')) continue
-    if (!rule.write || !t.execute) { out[name] = t; continue }
-    const run = t.execute.bind(t)
-    const toolId = `source:${name}`
-    reviewer?.registerExecutor(toolId, async input => String(await run(input.args as never, { toolCallId: 'approved', messages: [] } as never)))
-    out[name] = {
-      ...t,
-      execute: async (args: unknown, options: unknown) => {
-        if (level === 'ask' && reviewer) {
-          const display = `${APP_NAME[rule.app]}：${name} ${JSON.stringify(args)}`
-          const decision = reviewer.askOwner(ticket, sessionId, toolId, display, { args, label: `改${APP_NAME[rule.app]}` }, `要改你的「${APP_NAME[rule.app]}」，按设置先问你`)
-          if (decision.action === 'block') throw new Error(decision.reason)
-          if (decision.action === 'escalate') return `[需要主人批准（${decision.approvalId}）：${decision.reason}。批准后会自动执行，结果作为新消息送达。]`
-        }
-        return run(args as never, options as never)
-      },
-    } as typeof t
-  }
-  return out
 }

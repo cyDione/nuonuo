@@ -55,6 +55,21 @@ export function plainText(md) {
 }
 
 /** Splits text into pieces of at most `max` characters, at a paragraph, then a line, then a space when it can. */
+/**
+ * Downloads a file a chat app holds (for `download()`): the bytes and the type the server reports. Stops reading past
+ * `maxBytes` so a huge file is never buffered whole. `fetch` lets tests and adapters pass their own.
+ */
+export async function fetchFile(url, { headers = {}, fetch: f = fetch, maxBytes = 100 * 1024 * 1024, timeoutMs = 60_000 } = {}) {
+  const res = await f(url, { headers, signal: AbortSignal.timeout(timeoutMs) })
+  if (!res.ok) throw new Error(`下载失败 ${res.status}`)
+  const length = Number(res.headers.get('content-length'))
+  if (length > maxBytes) throw new Error(`文件太大（${Math.round(length / 1048576)}MB）`)
+  const bytes = new Uint8Array(await res.arrayBuffer())
+  if (bytes.byteLength > maxBytes) throw new Error(`文件太大（${Math.round(bytes.byteLength / 1048576)}MB）`)
+  const mime = res.headers.get('content-type')?.split(';')[0]?.trim()
+  return { bytes, ...(mime ? { mime } : {}) }
+}
+
 export function splitText(text, max) {
   const out = []
   let rest = String(text)
@@ -323,7 +338,7 @@ export function makeDefineChannel(z) {
     }
 
     const formatNote = caps.format === 'plain' ? 'shown as plain text, no Markdown' : caps.format === 'html' ? 'basic formatting works' : 'Markdown works'
-    const passThrough = ['icon', 'actions', 'authorized', 'http', 'routerPrompt', 'routerTools', 'workerPrompt', 'workerTools', 'workerEnv', 'writes', 'defaultEnabled']
+    const passThrough = ['icon', 'firstRun', 'actions', 'authorized', 'http', 'routerPrompt', 'routerTools', 'workerPrompt', 'workerTools', 'workerEnv', 'writes', 'apps', 'calendar', 'defaultEnabled']
     return {
       ...Object.fromEntries(passThrough.filter(k => spec[k] !== undefined).map(k => [k, spec[k]])),
       id, title,

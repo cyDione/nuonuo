@@ -84,7 +84,7 @@ describe('Gmail', () => {
     expect(secrets.get('source:gmail:runtime:refresh_token')).toBe(gm.refreshToken)
     expect(registry.list().find(s => s.id === 'gmail')!.actions.map(a => a.id)).toEqual(['reauthorize', 'disconnect'])
 
-    await registry.save('gmail', { enabled: true, config: { clientId: 'cid', clientSecret: '••••••', allowedSenders: ['boss@work.com'], apiUrl: base, authUrl: `${base}/auth`, tokenUrl: `${base}/token` } })
+    await registry.save('gmail', { enabled: true, config: { clientId: 'cid', clientSecret: '••••••', allowedSenders: ['boss@work.com'], apiUrl: base, calendarUrl: `${base}/calendar/v3`, authUrl: `${base}/auth`, tokenUrl: `${base}/token` } })
     await registry.pollNow('gmail') // remembers the account and the cursor
     gm.receive('Boss <boss@work.com>', '周报', '请把本周的周报整理一下发我')
     const spam = gm.receive('Shop <deals@shop.com>', '大促', '全场五折')
@@ -105,6 +105,18 @@ describe('Gmail', () => {
     expect(Buffer.from(gm.drafts[0]!.raw.split('\r\n\r\n')[1]!, 'base64').toString()).toBe('好的，周报周五前给您。')
     const sent = store.db.select().from(schema.messages).all().find(m => m.content.startsWith('好的，周报'))
     expect(sent!.meta).toMatchObject({ via: 'gmail', delivery: 'sent' })
+
+    // Google Calendar is a backend of the shared calendar tools, not tools of Gmail's own.
+    const [google] = registry.calendars()
+    expect(google).toMatchObject({ id: 'gmail', label: 'Google 日历' })
+    expect(Object.keys(registry.agentExtensions().workerTools!({ id: 'tkt_1' } as any, {} as any)).filter(n => n.startsWith('gcal'))).toEqual([])
+    expect(await google!.list({ from: '2026-11-12T00:00:00Z', to: '2026-11-15T00:00:00Z' })).toEqual([
+      { id: 'e1', title: '周会', start: '2026-11-12T02:00:00Z', end: '2026-11-12T03:00:00Z' },
+      { id: 'e2', title: '年假', start: '2026-11-13', end: '2026-11-14', allDay: true },
+    ])
+    expect(await google!.add!({ title: '体检', start: '2026-11-14T09:00:00+08:00', end: '2026-11-14T10:00:00+08:00' })).toEqual({ id: 'e3', url: 'https://calendar.google.com/event?eid=e3' })
+    await google!.add!({ title: '出差', start: '2026-11-20T00:00:00+08:00', end: '2026-11-22T00:00:00+08:00', allDay: true })
+    expect(gm.events.slice(2).map(e => [e.summary, e.start])).toEqual([['体检', { dateTime: '2026-11-14T01:00:00.000Z' }], ['出差', { date: '2026-11-20' }]])
 
     await registry.http('gmail', new Request(`${origin}/api/sources/gmail/http/oauth/disconnect`, { method: 'POST' }), 'oauth/disconnect', { public: false, origin })
     expect(secrets.get('source:gmail:runtime:refresh_token')).toBeUndefined()

@@ -7,7 +7,7 @@
  * protobuf (`pbbp2.Frame`); control frames carry ping/pong, data frames carry event JSON and are acknowledged by
  * sending the frame back with a `{code: 200}` payload. Only one client of an app receives each event.
  */
-import { appToken, ChannelError, defineChannel, definePlugin, z, type ChannelIO, type ChannelMessage, type SocketLike } from '@nuonuo/plugin-sdk'
+import { appToken, ChannelError, fetchFile, defineChannel, definePlugin, z, type ChannelIO, type ChannelMessage, type SocketLike } from '@nuonuo/plugin-sdk'
 import pkg from '../package.json' with { type: 'json' }
 
 export const FeishuConfig = z.object({
@@ -186,13 +186,6 @@ function contentOf(type: string, raw: string, mentions: NonNullable<NonNullable<
 
 
 /** Downloads a received file (Uint8Array), refusing anything over the channel's limit. */
-async function grab(f: typeof fetch, url: string, headers: Record<string, string> = {}): Promise<{ bytes: Uint8Array; mime?: string }> {
-  const res = await f(url, { headers, signal: AbortSignal.timeout(60_000) })
-  if (!res.ok) throw new Error(`下载失败 ${res.status}`)
-  const mime = res.headers.get('content-type')?.split(';')[0]
-  return { bytes: new Uint8Array(await res.arrayBuffer()), ...(mime ? { mime } : {}) }
-}
-
 export function feishuKind(deps: { fetch?: typeof fetch; socket?: (url: string) => SocketLike } = {}) {
   const sessions = new WeakMap<object, { api: FeishuApi; bot: { open_id: string; app_name?: string } }>()
   const session = async (io: IO) => {
@@ -241,6 +234,7 @@ export function feishuKind(deps: { fetch?: typeof fetch; socket?: (url: string) 
   return defineChannel<Config>({
     id: 'feishu',
     title: '飞书',
+    firstRun: true,
     description: '在飞书里和糯糯对话：私聊直接说，群里 @它。到飞书开放平台创建企业自建应用，开启机器人能力，事件订阅选「长连接」并订阅「接收消息」（im.message.receive_v1）；要用按钮回答确认，卡片回调也选长连接。不需要公网地址。',
     capabilities: { inbound: 'websocket', threads: 'reply', format: 'plain', maxLength: 4000, edit: true, buttons: true, files: { in: true, out: false, maxBytes: 100 * 1024 * 1024 }, proactive: true },
     config: FeishuConfig,
@@ -303,8 +297,8 @@ export function feishuKind(deps: { fetch?: typeof fetch; socket?: (url: string) 
     async download(io, file) {
       const ref = file.ref as { key: string; type: string; message: string }
       const { api } = await session(io)
-      const got = await grab(deps.fetch ?? fetch, `${io.config.domain.replace(/\/$/, '')}/open-apis/im/v1/messages/${encodeURIComponent(ref.message)}/resources/${encodeURIComponent(ref.key)}?type=${ref.type}`,
-        { authorization: `Bearer ${await api.tenantToken()}` })
+      const got = await fetchFile(`${io.config.domain.replace(/\/$/, '')}/open-apis/im/v1/messages/${encodeURIComponent(ref.message)}/resources/${encodeURIComponent(ref.key)}?type=${ref.type}`,
+        { headers: { authorization: `Bearer ${await api.tenantToken()}` }, maxBytes: 100 * 1024 * 1024, ...(deps.fetch ? { fetch: deps.fetch } : {}) })
       return { ...got, ...(file.name ? { name: file.name } : {}) }
     },
   })

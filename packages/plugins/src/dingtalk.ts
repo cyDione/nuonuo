@@ -4,7 +4,7 @@
  * /v1.0/im/bot/messages/get and are acknowledged at once; replies go out through the robot OpenAPI, one-to-one to a
  * user or into a group. Groups only deliver messages that @ the robot. Everything chat apps share comes from the channel layer.
  */
-import { appToken, ChannelError, defineChannel, definePlugin, z, type ChannelIO, type ChannelMessage, type SocketLike } from '@nuonuo/plugin-sdk'
+import { appToken, ChannelError, defineChannel, fetchFile, definePlugin, z, type ChannelIO, type ChannelMessage, type SocketLike } from '@nuonuo/plugin-sdk'
 import pkg from '../package.json' with { type: 'json' }
 
 export const DingTalkConfig = z.object({
@@ -47,12 +47,19 @@ export class DingTalkApi {
   }
 }
 
+/** `ref` is the message's temporary downloadCode, exchanged for a link by `download()`. */
+const code = (c: unknown) => (typeof c === 'string' && c ? { ref: c } : {})
+
 function contentOf(d: any): { text: string; files: ChannelMessage['files'] } {
   if (d.msgtype === 'text') return { text: String(d.text?.content ?? '').trim(), files: [] }
-  if (d.msgtype === 'richText') return { text: (d.content?.richText ?? []).map((n: any) => n.text ?? '').join('').trim(), files: (d.content?.richText ?? []).some((n: any) => n.pictureDownloadCode || n.downloadCode) ? [{ kind: 'image' }] : [] }
-  if (d.msgtype === 'picture') return { text: '', files: [{ kind: 'image' }] }
-  if (d.msgtype === 'audio') return { text: String(d.content?.recognition ?? ''), files: d.content?.recognition ? [] : [{ kind: 'voice' }] }
-  if (d.msgtype === 'file') return { text: '', files: [{ kind: 'file', ...(d.content?.fileName ? { name: d.content.fileName } : {}) }] }
+  if (d.msgtype === 'richText') {
+    const nodes: any[] = d.content?.richText ?? []
+    return { text: nodes.map(n => n.text ?? '').join('').trim(), files: nodes.filter(n => n.pictureDownloadCode || n.downloadCode).map(n => ({ kind: 'image' as const, ...code(n.downloadCode ?? n.pictureDownloadCode) })) }
+  }
+  if (d.msgtype === 'picture') return { text: '', files: [{ kind: 'image', ...code(d.content?.downloadCode ?? d.content?.pictureDownloadCode) }] }
+  // A voice note comes with DingTalk's own transcript; the recording is kept too.
+  if (d.msgtype === 'audio') return { text: String(d.content?.recognition ?? ''), files: [{ kind: 'voice', ...code(d.content?.downloadCode) }] }
+  if (d.msgtype === 'file') return { text: '', files: [{ kind: 'file', ...(d.content?.fileName ? { name: d.content.fileName } : {}), ...code(d.content?.downloadCode) }] }
   return { text: `[${d.msgtype}]`, files: [] }
 }
 
@@ -72,7 +79,7 @@ export function dingtalkKind(deps: { fetch?: typeof fetch; socket?: (url: string
     id: 'dingtalk',
     title: '钉钉',
     description: '在钉钉里和糯糯对话：单聊直接说，群里 @它。在钉钉开放平台创建企业内部应用，添加机器人，消息接收模式选「Stream 模式」，再把 Client ID 和 Client Secret 填在这里。不需要公网地址。',
-    capabilities: { inbound: 'websocket', threads: 'none', format: 'markdown', maxLength: 3000, groups: { mention: true, replyToBot: false }, proactive: true },
+    capabilities: { inbound: 'websocket', threads: 'none', format: 'markdown', maxLength: 3000, groups: { mention: true, replyToBot: false }, files: { in: true, out: false, maxBytes: 100 * 1024 * 1024 }, proactive: true },
     config: DingTalkConfig,
     fields: [
       { key: 'clientId', type: 'text', label: 'Client ID（AppKey）', links: [{ label: '钉钉开放平台', href: 'https://open-dev.dingtalk.com/' }] },
@@ -116,6 +123,11 @@ export function dingtalkKind(deps: { fetch?: typeof fetch; socket?: (url: string
         ? await api(io).call<{ processQueryKey?: string }>('/v1.0/robot/oToMessages/batchSend', { robotCode, userIds: [target.chat.slice(1)], msgKey: 'sampleMarkdown', msgParam })
         : await api(io).call<{ processQueryKey?: string }>('/v1.0/robot/groupMessages/send', { robotCode, openConversationId: target.chat, msgKey: 'sampleMarkdown', msgParam })
       return sent.processQueryKey ? { id: sent.processQueryKey } : {}
+    },
+    async download(io, file) {
+      const { downloadUrl } = await api(io).call<{ downloadUrl?: string }>('/v1.0/robot/messageFiles/download', { downloadCode: String(file.ref), robotCode: io.config.clientId })
+      if (!downloadUrl) return undefined
+      return { ...await fetchFile(downloadUrl, { maxBytes: 100 * 1024 * 1024, ...(deps.fetch ? { fetch: deps.fetch } : {}) }), ...(file.name ? { name: file.name } : {}) }
     },
   })
 }

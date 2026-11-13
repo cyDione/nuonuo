@@ -4,7 +4,7 @@
  * Its settings form is generated from `fields`, so a new source needs no UI code.
  */
 import type { TurnContext } from '@nuonuo/agent-runtime'
-import type { Engine, Ticket } from '@nuonuo/core'
+import type { CalendarBackend, Engine, LocalApp, Ticket } from '@nuonuo/core'
 import type { Store } from '@nuonuo/db'
 import type { ToolSet } from 'ai'
 import type { z } from 'zod'
@@ -81,6 +81,8 @@ export interface SourceKind<C = any> {
    * `github` is the GitHub mark. The UI falls back to a speech bubble for a name it does not ship.
    */
   icon?: string
+  /** Offered on the first-run page (接上一个来源). Honoured for the app's own sources only. */
+  firstRun?: boolean
   schema: z.ZodType<C>
   fields: FieldSpec[]
   /** What a chat app can do (sources made with `defineChannel`); see channel.d.mts. */
@@ -116,6 +118,16 @@ export interface SourceKind<C = any> {
   workerTools?(ctx: SourceContext<C>, ticket: Ticket, turn: TurnContext): ToolSet
   /** Worker tools that act in the account (write a draft, add an event): left out while the owner set it to 只能看 in 权限. */
   writes?: string[]
+  /**
+   * Tools that reach one of the owner's apps, by tool name (`shop_add_reminder: 'reminders'`). They
+   * follow that app's level in 权限 (直接做 / 先问你 / 只能看 / 不允许) like the app's own tools.
+   */
+  apps?: Record<string, LocalApp>
+  /**
+   * The account's calendar, as a backend of the shared calendar tools (calendar_events / calendar_add) under the 日历
+   * level in 权限. Declaring this instead of tools of its own keeps one calendar for the agent, whatever holds it.
+   */
+  calendar?(ctx: SourceContext<C>): Omit<CalendarBackend, 'id'>
   workerEnv?(ctx: SourceContext<C>, ticket: Ticket): Record<string, string>
   /**
    * HTTP endpoints of the source, under /api/sources/<id>/http/<path> (owner only) and, when `public` is true, also under

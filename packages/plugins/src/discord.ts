@@ -5,7 +5,7 @@
  *
  * In the Developer Portal, turn on the MESSAGE CONTENT intent for the bot, or server messages arrive without text.
  */
-import { ChannelError, defineChannel, definePlugin, z, type ChannelIO, type SocketLike } from '@nuonuo/plugin-sdk'
+import { ChannelError, fetchFile, defineChannel, definePlugin, z, type ChannelIO, type SocketLike } from '@nuonuo/plugin-sdk'
 import pkg from '../package.json' with { type: 'json' }
 
 export const DiscordConfig = z.object({
@@ -41,13 +41,6 @@ export class DiscordApi {
 
 
 /** Downloads a received file (Uint8Array), refusing anything over the channel's limit. */
-async function grab(f: typeof fetch, url: string, headers: Record<string, string> = {}): Promise<{ bytes: Uint8Array; mime?: string }> {
-  const res = await f(url, { headers, signal: AbortSignal.timeout(60_000) })
-  if (!res.ok) throw new Error(`下载失败 ${res.status}`)
-  const mime = res.headers.get('content-type')?.split(';')[0]
-  return { bytes: new Uint8Array(await res.arrayBuffer()), ...(mime ? { mime } : {}) }
-}
-
 export function discordKind(deps: { fetch?: typeof fetch; socket?: (url: string) => SocketLike } = {}) {
   const apis = new WeakMap<object, DiscordApi>()
   const api = (io: IO) => {
@@ -141,7 +134,7 @@ export function discordKind(deps: { fetch?: typeof fetch; socket?: (url: string)
       const url = String(file.ref)
       // Attachments live on Discord's CDN and need no token.
       if (!/^https:\/\/(cdn|media)\.discord(app)?\.(com|net)\//.test(url)) return undefined
-      return { ...await grab(deps.fetch ?? fetch, url), ...(file.name ? { name: file.name } : {}) }
+      return { ...await fetchFile(url, { ...(deps.fetch ? { fetch: deps.fetch } : {}) }), ...(file.name ? { name: file.name } : {}) }
     },
     async edit(io, target, messageId, out) {
       await api(io).call('PATCH', `/channels/${target.chat}/messages/${messageId}`, { content: out.text, components: [] })

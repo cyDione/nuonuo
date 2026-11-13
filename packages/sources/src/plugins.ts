@@ -5,7 +5,7 @@
  * receives the SDK, so a plugin needs no dependencies of its own.
  */
 import type { McpServerConfig } from '@nuonuo/agent-runtime'
-import type { AgentExtensions, SkillInput, Skills } from '@nuonuo/core'
+import type { AgentExtensions, SkillInput, Skills, ToolPolicy } from '@nuonuo/core'
 import { kvGet, kvSet, schema, type Store } from '@nuonuo/db'
 import { jsonSchema, tool, type ToolSet } from 'ai'
 import { randomBytes } from 'node:crypto'
@@ -14,7 +14,7 @@ import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
 import { appToken, oauth } from './auth.mjs'
-import { ChannelError, makeDefineChannel } from './channel.mjs'
+import { ChannelError, fetchFile, makeDefineChannel } from './channel.mjs'
 import type { FieldSpec, SourceKind } from './kind'
 import { installDependencies } from './plugin-deps'
 import { fetchPlugin, parseOrigin } from './plugin-install'
@@ -108,7 +108,7 @@ export const definePlugin = <T extends NuonuoPlugin>(plugin: T): T => plugin
 
 /** Everything a plugin may use from the host, passed to its factory. */
 export const defineChannel = makeDefineChannel(z)
-export const sdk = { apiVersion: PLUGIN_API_VERSION, definePlugin, defineChannel, defineComputer, ChannelError, oauth, appToken, tool, jsonSchema, z }
+export const sdk = { apiVersion: PLUGIN_API_VERSION, definePlugin, defineChannel, defineComputer, ChannelError, fetchFile, oauth, appToken, tool, jsonSchema, z }
 export type PluginSdk = typeof sdk
 export type PluginModule = NuonuoPlugin | ((sdk: PluginSdk) => NuonuoPlugin | Promise<NuonuoPlugin>)
 
@@ -269,6 +269,7 @@ export class PluginManager {
       workerTools: () => Object.assign({}, ...all().map(({ plugin, manifest }) => this.ownTools(manifest.id, () => plugin.workerTools?.(this.context(manifest))))) as ToolSet,
       routerPrompt: () => all().map(({ plugin, manifest }) => text(plugin.routerPrompt, manifest)).filter(Boolean).map(t => String(t).slice(0, 4_000)).join('\n\n'),
       workerPrompt: () => all().map(({ plugin, manifest }) => text(plugin.workerPrompt, manifest)).filter(Boolean).map(t => String(t).slice(0, 4_000)).join('\n\n') || undefined,
+      toolPolicy: name => this.toolPolicy(name),
       inlineContext: async (input, scope) => {
         const parts = await Promise.all(all().filter(({ plugin }) => typeof plugin.inlineContext === 'function').map(({ plugin, manifest }) =>
           withTimeout(Promise.resolve().then(() => plugin.inlineContext!(this.context(manifest), { text: input, ...(scope ? { scope } : {}) })), INLINE_CONTEXT_TIMEOUT)
@@ -293,9 +294,12 @@ export class PluginManager {
     }))
   }
 
-  /** Acting tools of loaded plugins (their `writes`): asked about before every call. */
-  askFirstTools(): Set<string> {
-    return new Set([...[...this.builtIns.values()].map(p => this.builtInEntry(p)), ...this.loaded.values()].flatMap(({ plugin, manifest }) => (plugin.writes ?? []).filter(n => n.startsWith(`${manifest.id}_`))))
+  /** Acting tools of plugins (their `writes`), built-in or installed: the owner is asked before every call. */
+  toolPolicy(name: string): ToolPolicy | undefined {
+    for (const { plugin, manifest } of [...[...this.builtIns.values()].map(p => this.builtInEntry(p)), ...this.loaded.values()]) {
+      if (name.startsWith(`${manifest.id}_`) && plugin.writes?.includes(name)) return { effect: 'write', thirdParty: true }
+    }
+    return undefined
   }
 
   /** First-party plugins ship with the app and are always loaded; their sources start disabled like any other. */

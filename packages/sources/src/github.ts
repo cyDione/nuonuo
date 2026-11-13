@@ -226,6 +226,7 @@ export function githubKind(deps: { fetch?: typeof fetch; token?: () => Promise<s
     id: 'github',
     title: 'GitHub',
     icon: 'github',
+    firstRun: true,
     description: '在 Issue / PR 里 @ 智能体即可派活；它会在原处回复、开 PR，并跟进评审与 CI。点「授权 GitHub」用你的 GitHub 账号登录授权即可接入。',
     schema: GithubConfigSchema,
     fields: [
