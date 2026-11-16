@@ -215,6 +215,7 @@ export class PluginManager {
     }
     kvSet(this.store, `plugin:${id}:settings`, stored)
     await this.sandboxes.get(id)?.updateSettings(this.settingValues(manifest)).catch(() => {})
+    this.onChange?.()
     return this.settingsOf(id)
   }
 

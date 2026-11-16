@@ -33,6 +33,49 @@ export function clearDraft(conversationId: string, callId?: string) {
   set(s => { const drafts = { ...s.drafts }; delete drafts[conversationId]; return { drafts } })
 }
 
+const currentAsset = () =>
+  typeof document !== 'undefined' ? document.querySelector('script[type="module"][src*="/assets/"]')?.getAttribute('src') ?? undefined : undefined
+let bootVersion: string | undefined
+let checkingFresh = false
+
+function reloadOnce(target: string) {
+  try {
+    if (sessionStorage.getItem('nuonuo:reloaded-for') === target) return
+    sessionStorage.setItem('nuonuo:reloaded-for', target)
+  } catch {
+    return
+  }
+  void fetch(location.pathname + location.search, { cache: 'reload', credentials: 'same-origin' })
+    .catch(() => {})
+    .finally(() => location.reload())
+}
+
+/** Reloads the tab once when the daemon upgraded or the built JS bundle hash changed across a reconnect or stale HTML load. */
+async function checkFreshUi() {
+  if (checkingFresh) return
+  checkingFresh = true
+  try {
+    const res = await fetch('/api/health', { cache: 'no-store', credentials: 'same-origin' })
+    if (res.ok) {
+      const health = await res.json() as { version?: string }
+      if (health.version) {
+        if (bootVersion === undefined) bootVersion = health.version
+        else if (bootVersion !== health.version) { reloadOnce(health.version); return }
+      }
+    }
+    const asset = currentAsset()
+    if (asset) {
+      const html = await fetch('/', { cache: 'no-store', credentials: 'same-origin', headers: { pragma: 'no-cache' } })
+      if (html.ok) {
+        const nextAsset = (await html.text()).match(/\/assets\/index-[^"']+\.js/)?.[0]
+        if (nextAsset && nextAsset !== asset) reloadOnce(nextAsset)
+      }
+    }
+  } catch { /* offline or restarting */ } finally {
+    checkingFresh = false
+  }
+}
+
 export function useLiveEvents() {
   const qc = useQueryClient()
   useEffect(() => {
@@ -47,6 +90,7 @@ export function useLiveEvents() {
       source = new EventSource('/api/events')
       source.addEventListener('ready', () => {
         set({ connected: true })
+        void checkFreshUi()
         // Anything may have changed while disconnected.
         qc.invalidateQueries()
       })

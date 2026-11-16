@@ -29,36 +29,67 @@ const MAX_FILES = 5_000
 
 const NPM_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const GH_PART = /^[A-Za-z0-9_.-]+$/
+const GH_UI = new Set(['blob', 'raw', 'issues', 'pull', 'pulls', 'commit', 'commits', 'releases', 'actions', 'discussions', 'wiki', 'pulse', 'security'])
+const OFFICIAL_REPO = ['cyDione', 'nuonuo'] as const
 
-/** Reads what the owner typed: a path, `github:owner/repo#ref`, a github.com URL, `owner/repo`, an npm name or a .tgz URL. */
-export function parseOrigin(input: string): PluginOrigin {
+/** Reads what the owner typed: a path, `github:owner/repo#ref`, a github.com URL, `owner/repo[/subdir]`, `plugins/<name>`, an npm name or a .tgz URL. */
+export function parseOrigin(input: string, cwd = process.cwd()): PluginOrigin {
   const s = input.trim()
   if (!s) throw new Error('请填写插件地址')
   if (s.startsWith('~/') || s === '~') return { kind: 'folder', path: join(homedir(), s.slice(1)) }
-  if (isAbsolute(s) || s.startsWith('./') || s.startsWith('../') || /^[A-Za-z]:[\\/]/.test(s)) return { kind: 'folder', path: resolve(s) }
+  if (isAbsolute(s) || /^[A-Za-z]:[\\/]/.test(s)) return { kind: 'folder', path: resolve(s) }
+  if (s.startsWith('./') || s.startsWith('../')) return { kind: 'folder', path: resolve(cwd, s) }
   if (s.startsWith('npm:')) return npm(s.slice(4))
-  const gh = s.match(/^github:([^/#]+)\/([^/#]+?)(?:#(.+))?$/)
-  if (gh) return github(gh[1]!, gh[2]!, gh[3])
+  if (s.startsWith('@')) return npm(s)
+  if (s.startsWith('github:')) return githubSpec(s.slice(7))
+  if (/^(?:www\.)?github\.com\//i.test(s)) return parseOrigin(`https://${s}`, cwd)
   if (/^https?:\/\//i.test(s)) {
     const url = new URL(s)
-    if (url.hostname === 'github.com' && !/\.(tgz|tar\.gz)$/i.test(url.pathname)) {
-      const [owner, repo, tree, ref, ...rest] = url.pathname.split('/').filter(Boolean)
-      if (!owner || !repo) throw new Error('GitHub 地址要包含仓库，例如 https://github.com/owner/repo')
-      if (tree && tree !== 'tree') throw new Error('GitHub 地址只支持仓库首页或 /tree/<分支>/<目录>')
-      return github(owner, repo.replace(/\.git$/, ''), ref, rest.join('/') || undefined)
+    if ((url.hostname === 'github.com' || url.hostname === 'www.github.com') && !/\.(tgz|tar\.gz)$/i.test(url.pathname)) {
+      const hashRef = url.hash ? decodeURIComponent(url.hash.slice(1)) : undefined
+      return githubParts(url.pathname, hashRef)
     }
     if (url.protocol !== 'https:') throw new Error('只支持 https 下载')
     return { kind: 'url', url: url.href }
   }
-  const short = s.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:#(.+))?$/)
-  if (short) return github(short[1]!, short[2]!, short[3])
+  const official = s.match(/^(plugins\/[A-Za-z0-9_./-]+?)\/?(?:#(.*))?$/)
+  if (official) {
+    const sub = official[1]!
+    const ref = official[2]
+    if (ref === '') throw new Error('分支或标签名不合法')
+    if (sub.split('/').some(p => !p || p === '.' || p === '..')) throw new Error('目录不合法')
+    const local = resolve(cwd, sub)
+    if (!ref && existsSync(join(local, 'package.json')) && statSync(local).isDirectory()) return { kind: 'folder', path: local }
+    return github(OFFICIAL_REPO[0], OFFICIAL_REPO[1], ref, sub)
+  }
+  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+(?:#.*)?$/.test(s)) return githubSpec(s)
   return npm(s)
 }
 
+function githubSpec(spec: string): PluginOrigin {
+  const hash = spec.indexOf('#')
+  const pathPart = hash >= 0 ? spec.slice(0, hash) : spec
+  const hashRef = hash >= 0 ? spec.slice(hash + 1) : undefined
+  if (hash >= 0 && !hashRef) throw new Error('分支或标签名不合法')
+  return githubParts(pathPart, hashRef)
+}
+
+function githubParts(pathname: string, hashRef?: string): PluginOrigin {
+  const trimmed = pathname.replace(/^\/+|\/+$/g, '')
+  if (trimmed.includes('//')) throw new Error('目录不合法')
+  const [owner, rawRepo, seg, ref, ...rest] = trimmed.split('/').filter(Boolean)
+  if (!owner || !rawRepo) throw new Error('GitHub 地址要包含仓库，例如 https://github.com/owner/repo')
+  const repo = rawRepo.replace(/\.git$/, '')
+  if (seg === 'tree') return github(owner, repo, hashRef || ref, rest.join('/') || undefined)
+  if (seg && GH_UI.has(seg)) throw new Error('GitHub 地址只支持仓库首页或 /tree/<分支>/<目录>')
+  const subdir = [seg, ref, ...rest].filter(Boolean).join('/') || undefined
+  return github(owner, repo, hashRef, subdir)
+}
+
 function github(owner: string, repo: string, ref?: string, subdir?: string): PluginOrigin {
-  if (!GH_PART.test(owner) || !GH_PART.test(repo)) throw new Error('GitHub 仓库名不合法')
+  if (!GH_PART.test(owner) || !GH_PART.test(repo) || owner === '.' || owner === '..' || repo === '.' || repo === '..') throw new Error('GitHub 仓库名不合法')
   if (ref !== undefined && !/^[A-Za-z0-9_./-]+$/.test(ref)) throw new Error('分支或标签名不合法')
-  if (subdir !== undefined && (subdir.split('/').some(p => p === '..' || p === '.'))) throw new Error('目录不合法')
+  if (subdir !== undefined && (subdir.split('/').some(p => !p || p === '..' || p === '.'))) throw new Error('目录不合法')
   return { kind: 'github', repo: `${owner}/${repo}`, ...(ref ? { ref } : {}), ...(subdir ? { subdir } : {}) }
 }
 

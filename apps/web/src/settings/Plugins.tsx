@@ -16,8 +16,10 @@ import { tx } from '../i18n'
 export function originLabel(origin?: string): string | undefined {
   if (!origin) return undefined
   const s = origin.trim()
+  if (!s) return undefined
   if (/^(~|\/|\.\.?\/|[A-Za-z]:[\\/])/.test(s)) return tx('来自文件夹')
-  if (s.startsWith('github:') || /^https?:\/\/github\.com\//i.test(s) || /^[\w.-]+\/[\w.-]+(#.+)?$/.test(s)) return tx('来自 GitHub')
+  if (s.startsWith('npm:') || s.startsWith('@')) return tx('来自 npm')
+  if (s.startsWith('github:') || (/^(https?:\/\/)?(www\.)?github\.com\//i.test(s) && !/\.(tgz|tar\.gz)$/i.test(s)) || /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+(#.+)?$/.test(s)) return tx('来自 GitHub')
   if (/^https?:\/\//i.test(s)) return tx('来自网址')
   return tx('来自 npm')
 }

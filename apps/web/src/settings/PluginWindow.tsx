@@ -125,10 +125,15 @@ function PluginSettings({ id, onDirty }: { id: string; onDirty(dirty: boolean): 
   useEffect(() => { if (data) setValues(data.values) }, [JSON.stringify(data?.values)])
   const save = useMutation({
     mutationFn: (v: Record<string, unknown>) => api.put<{ fields: FieldSpec[]; values: Record<string, unknown> }>(`/plugins/${id}/settings`, { values: v }),
-    onSuccess: next => qc.setQueryData(['plugin-settings', id], next),
+    onSuccess: next => {
+      qc.setQueryData(['plugin-settings', id], next)
+      setValues(next.values)
+      void qc.invalidateQueries({ queryKey: ['computers'] })
+      void qc.invalidateQueries({ queryKey: ['plugins'] })
+    },
   })
   const changed = data && values ? data.fields.filter(f => JSON.stringify(values[f.key]) !== JSON.stringify(data.values[f.key])).length : 0
-  useEffect(() => onDirty(changed > 0), [changed])
+  useEffect(() => { onDirty(changed > 0); return () => onDirty(false) }, [changed])
   if (!data || !values) return <div className="flex-1 p-4" />
   const fields = [...data.fields.filter(f => !f.advanced), ...data.fields.filter(f => f.advanced)]
   return <>

@@ -81,6 +81,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   app.get('/auth', c => {
     if (c.req.query('token') !== token) return c.text('令牌无效。运行 nuonuo token 获取新的登录链接。', 401)
     setCookie(c, COOKIE, token, { httpOnly: true, sameSite: 'Strict', path: '/', maxAge: 60 * 60 * 24 * 400 })
+    c.header('cache-control', 'no-store')
     return c.redirect('/')
   })
 
@@ -677,8 +678,11 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   /** A plugin's settings form (package.json `nuonuo.settings`) and what is set; secrets show only as set. */
   api.get('/plugins/:id/settings', async c => c.json(await pluginCall(async () => rt.plugins.settingsOf(c.req.param('id')))))
   api.put('/plugins/:id/settings', async c => {
+    const id = c.req.param('id')
     const { values } = await body(c, z.object({ values: z.record(z.string(), z.unknown()) }))
-    return c.json(await pluginCall(() => rt.plugins.saveSettings(c.req.param('id'), values)))
+    const saved = await pluginCall(() => rt.plugins.saveSettings(id, values))
+    for (const comp of rt.plugins.computers().filter(x => x.pluginId === id)) rt.computers.stale(comp)
+    return c.json(saved)
   })
   /** Where the plugin's window page is served (a sandboxed frame; see plugin-window.ts). */
   api.get('/plugins/:id/window', async c => {
@@ -822,8 +826,13 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     // never stays stuck on the previous version's heuristically cached HTML.
     app.use('/*', async (c, next) => {
       await next()
-      if (c.res.status === 200 && !c.res.headers.has('cache-control')) {
-        c.res.headers.set('cache-control', c.req.path.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache')
+      if ((c.res.status === 200 || c.res.status === 304) && !c.res.headers.has('cache-control')) {
+        if (c.req.path.startsWith('/assets/')) {
+          c.res.headers.set('cache-control', 'public, max-age=31536000, immutable')
+        } else {
+          c.res.headers.set('cache-control', 'no-cache, no-store, must-revalidate')
+          c.res.headers.set('pragma', 'no-cache')
+        }
       }
     })
     app.use('/*', serveStatic({ root }))

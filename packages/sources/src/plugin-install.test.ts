@@ -39,14 +39,32 @@ const plugin = (id: string, version: string, extra = '') => ({
 describe('parseOrigin', () => {
   it('reads paths, GitHub, npm and tarball URLs', () => {
     expect(parseOrigin('/opt/p')).toEqual({ kind: 'folder', path: '/opt/p' })
+    expect(parseOrigin('/plugins/instabox')).toEqual({ kind: 'folder', path: '/plugins/instabox' })
     expect(parseOrigin('~/dev/p')).toEqual({ kind: 'folder', path: join(homedir(), 'dev/p') })
     expect(parseOrigin('owner/repo')).toEqual({ kind: 'github', repo: 'owner/repo' })
     expect(parseOrigin('github:owner/repo#v1.2')).toEqual({ kind: 'github', repo: 'owner/repo', ref: 'v1.2' })
     expect(parseOrigin('https://github.com/owner/repo.git')).toEqual({ kind: 'github', repo: 'owner/repo' })
     expect(parseOrigin('https://github.com/owner/repo/tree/main/plugins/rss')).toEqual({ kind: 'github', repo: 'owner/repo', ref: 'main', subdir: 'plugins/rss' })
+    expect(parseOrigin('cyDione/nuonuo/tree/main/plugins/instabox')).toEqual({ kind: 'github', repo: 'cyDione/nuonuo', ref: 'main', subdir: 'plugins/instabox' })
+    expect(parseOrigin('cyDione/nuonuo/plugins/instabox')).toEqual({ kind: 'github', repo: 'cyDione/nuonuo', subdir: 'plugins/instabox' })
+    expect(parseOrigin('cyDione/nuonuo/plugins/instabox#dev')).toEqual({ kind: 'github', repo: 'cyDione/nuonuo', ref: 'dev', subdir: 'plugins/instabox' })
+    expect(parseOrigin('github:cyDione/nuonuo/tree/main/plugins/instabox')).toEqual({ kind: 'github', repo: 'cyDione/nuonuo', ref: 'main', subdir: 'plugins/instabox' })
+    expect(parseOrigin('github:cyDione/nuonuo/plugins/instabox#dev')).toEqual({ kind: 'github', repo: 'cyDione/nuonuo', ref: 'dev', subdir: 'plugins/instabox' })
+    expect(parseOrigin('github.com/cyDione/nuonuo/tree/main/plugins/instabox')).toEqual({ kind: 'github', repo: 'cyDione/nuonuo', ref: 'main', subdir: 'plugins/instabox' })
+
+    const empty = mkdtempSync(join(tmpdir(), 'sa-empty-'))
+    expect(parseOrigin('plugins/instabox', empty)).toEqual({ kind: 'github', repo: 'cyDione/nuonuo', subdir: 'plugins/instabox' })
+    expect(parseOrigin('plugins/instabox#dev', empty)).toEqual({ kind: 'github', repo: 'cyDione/nuonuo', ref: 'dev', subdir: 'plugins/instabox' })
+    mkdirSync(join(empty, 'plugins/instabox'), { recursive: true })
+    writeFileSync(join(empty, 'plugins/instabox/package.json'), '{}')
+    expect(parseOrigin('plugins/instabox', empty)).toEqual({ kind: 'folder', path: join(empty, 'plugins/instabox') })
+
     expect(parseOrigin('nuonuo-rss')).toEqual({ kind: 'npm', name: 'nuonuo-rss' })
+    expect(parseOrigin('@scope/pkg')).toEqual({ kind: 'npm', name: '@scope/pkg' })
     expect(parseOrigin('@me/nuonuo-rss@1.0.0')).toEqual({ kind: 'npm', name: '@me/nuonuo-rss', version: '1.0.0' })
     expect(parseOrigin('https://example.com/p.tgz')).toEqual({ kind: 'url', url: 'https://example.com/p.tgz' })
+    expect(() => parseOrigin('https://github.com/owner/repo/blob/main/plugins/rss/index.mjs')).toThrow(/tree/)
+    expect(() => parseOrigin('cyDione/nuonuo/../evil')).toThrow(/目录不合法/)
     expect(() => parseOrigin('http://example.com/p.tgz')).toThrow(/https/)
     expect(() => parseOrigin('Not A Name!')).toThrow(/看不懂/)
   })
@@ -120,7 +138,7 @@ describe('installing plugins', () => {
     }
     const { plugins, fetched } = setup(files)
     expect(await plugins.install('nuonuo-hello')).toMatchObject({ id: 'nuonuo-hello', version: '2.0.0', origin: 'nuonuo-hello' })
-    expect(await plugins.install('https://github.com/me/plugins/tree/HEAD/tools/gh')).toMatchObject({ id: 'gh', version: '0.1.0' })
+    expect(await plugins.install('me/plugins/tree/HEAD/tools/gh')).toMatchObject({ id: 'gh', version: '0.1.0', origin: 'me/plugins/tree/HEAD/tools/gh' })
     expect(fetched).toContain('https://codeload.github.com/me/plugins/tar.gz/HEAD')
 
     await plugins.setEnabled('gh', true)

@@ -53,22 +53,39 @@ describe('plugin settings and window', () => {
     })
   }
 
-  it('keeps secrets in the secret store and shows them only as set', async () => {
-    const { dir, secrets, plugins } = setup(false)
-    mkdirSync(join(dir, 'keyed'))
-    writeFileSync(join(dir, 'keyed', 'package.json'), JSON.stringify({ name: 'keyed', nuonuo: { plugin: './index.mjs', settings: [{ key: 'token', label: '令牌', type: 'secret' }, { key: 'mode', label: '模式', type: 'select', options: ['a', 'b'] }] } }))
-    writeFileSync(join(dir, 'keyed', 'index.mjs'), `export default { id: 'keyed', windowCalls: { peek: ctx => ({ token: ctx.settings.get('token'), mode: ctx.settings.get('mode') }) } }`)
-    await plugins.setEnabled('keyed', true)
-    await plugins.saveSettings('keyed', { token: 's3cret', mode: 'b' })
-    expect(plugins.settingsOf('keyed').values).toEqual({ token: SECRET_SET, mode: 'b' })
-    expect(JSON.stringify(store!.db.select().from((await import('@nuonuo/db')).schema.kv).all())).not.toContain('s3cret')
-    expect(await plugins.windowCall('keyed', 'peek', null)).toEqual({ token: 's3cret', mode: 'b' })
-    await plugins.saveSettings('keyed', { token: SECRET_SET, mode: 'a' })
-    expect(secrets.get('plugin:keyed:setting:token')).toBe('s3cret')
-    await expect(plugins.saveSettings('keyed', { mode: 'c' })).rejects.toThrow('没有选项「c」')
-    await plugins.uninstall('keyed')
-    expect(secrets.get('plugin:keyed:setting:token')).toBeUndefined()
-  })
+  for (const sandbox of [false, true]) {
+    it(`keeps secrets in the secret store and overwrites an existing secret without clearing first${sandbox ? ' (sandboxed)' : ''}`, async () => {
+      const { dir, secrets, plugins } = setup(sandbox)
+      let changes = 0
+      plugins.onChange = () => { changes++ }
+      mkdirSync(join(dir, 'keyed'))
+      writeFileSync(join(dir, 'keyed', 'package.json'), JSON.stringify({ name: 'keyed', nuonuo: { plugin: './index.mjs', settings: [{ key: 'token', label: '令牌', type: 'secret' }, { key: 'mode', label: '模式', type: 'select', options: ['a', 'b'] }] } }))
+      writeFileSync(join(dir, 'keyed', 'index.mjs'), `export default { id: 'keyed', windowCalls: { peek: ctx => ({ token: ctx.settings.get('token'), mode: ctx.settings.get('mode') }) } }`)
+      await plugins.setEnabled('keyed', true)
+      const beforeSave = changes
+      await plugins.saveSettings('keyed', { token: 'sk-1', mode: 'b' })
+      expect(changes).toBe(beforeSave + 1)
+      expect(plugins.settingsOf('keyed').values).toEqual({ token: SECRET_SET, mode: 'b' })
+      expect(JSON.stringify(store!.db.select().from((await import('@nuonuo/db')).schema.kv).all())).not.toContain('sk-1')
+      expect(await plugins.windowCall('keyed', 'peek', null)).toEqual({ token: 'sk-1', mode: 'b' })
+
+      // Overwrite the secret directly without clearing in between.
+      await plugins.saveSettings('keyed', { token: 'sk-2', mode: 'b' })
+      expect(changes).toBe(beforeSave + 2)
+      expect(secrets.get('plugin:keyed:setting:token')).toBe('sk-2')
+      expect(plugins.settingsOf('keyed').values).toEqual({ token: SECRET_SET, mode: 'b' })
+      expect(await plugins.windowCall('keyed', 'peek', null)).toEqual({ token: 'sk-2', mode: 'b' })
+
+      // Masked sentinel keeps the stored secret when another field changes.
+      await plugins.saveSettings('keyed', { token: SECRET_SET, mode: 'a' })
+      expect(secrets.get('plugin:keyed:setting:token')).toBe('sk-2')
+      expect(await plugins.windowCall('keyed', 'peek', null)).toEqual({ token: 'sk-2', mode: 'a' })
+
+      await expect(plugins.saveSettings('keyed', { mode: 'c' })).rejects.toThrow('没有选项「c」')
+      await plugins.uninstall('keyed')
+      expect(secrets.get('plugin:keyed:setting:token')).toBeUndefined()
+    })
+  }
 
   it('refuses malformed declarations', () => {
     expect(() => readSettings([{ key: '1bad', type: 'text' }])).toThrow('不合法')

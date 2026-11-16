@@ -56,7 +56,15 @@ function SourceDetail({ s }: { s: SourceInfo }) {
   useEffect(() => setConfig(s.config), [JSON.stringify(s.config)])
   const dirty = JSON.stringify(config) !== JSON.stringify(s.config)
   const refresh = () => qc.invalidateQueries({ queryKey: ['sources'] })
-  const save = useMutation({ mutationFn: (body: { enabled: boolean; config: Record<string, unknown> }) => api.put(`/sources/${s.id}`, body), onSuccess: refresh })
+  const save = useMutation({
+    mutationFn: (body: { enabled: boolean; config: Record<string, unknown> }) => api.put<{ sources: SourceInfo[] }>(`/sources/${s.id}`, body),
+    onSuccess: data => {
+      qc.setQueryData(['sources'], data)
+      const next = data.sources.find(x => x.id === s.id)
+      if (next) setConfig(next.config)
+      void refresh()
+    },
+  })
   const poll = useMutation({ mutationFn: () => api.post(`/sources/${s.id}/poll`), onSuccess: refresh })
   const proactive = useQuery({ queryKey: ['proactive'], queryFn: () => api.get<{ settings: ProactiveSettings }>('/settings/proactive') }).data?.settings
   const all = (useQuery({ queryKey: ['sources'], queryFn: () => api.get<{ sources: SourceInfo[] }>('/sources') }).data?.sources ?? []).filter(x => x.id !== 'cron').map(x => x.id)
@@ -162,7 +170,12 @@ export function FieldRow({ f, value, onChange }: { f: FieldSpec; value: any; onC
     </Block>
     case 'number': return <Row label={f.label} sub={sub}><NumberInput min={f.min} max={f.max} value={value ?? ''} onChange={e => onChange(Number(e.target.value))} aria-label={f.label} /></Row>
     case 'select': return <Row label={f.label} sub={sub}><SelectInput value={value ?? ''} onChange={e => onChange(e.target.value)}>{f.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</SelectInput></Row>
-    case 'secret': return <Row label={f.label} sub={sub}><TextInput type="password" autoComplete="off" value={value ?? ''} placeholder={f.placeholder} onChange={e => onChange(e.target.value)} onFocus={e => { if (value === '••••••') e.target.select() }} /></Row>
+    case 'secret': return <Row label={f.label} sub={sub}>
+      <TextInput type="password" autoComplete="new-password" value={value ?? ''} placeholder={f.placeholder}
+        onFocus={e => { if (value === '••••••') e.target.select() }}
+        onMouseUp={e => { if (value === '••••••') { e.preventDefault(); e.currentTarget.select() } }}
+        onChange={e => onChange(value === '••••••' ? e.target.value.replace('••••••', '') : e.target.value)} />
+    </Row>
     default: return <Row label={f.label} sub={sub}><TextInput value={value ?? ''} placeholder={f.placeholder} onChange={e => onChange(e.target.value)} /></Row>
   }
 }

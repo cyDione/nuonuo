@@ -1,7 +1,7 @@
 // Nuonuo desktop: the web UI in a window, plus what only a desktop app can do —
 // a tray icon showing what needs you, native notifications, a global shortcut, and starting at login.
 const { app, BrowserWindow, Menu, Notification, Tray, globalShortcut, nativeImage, nativeTheme, screen, shell, ipcMain, session } = require('electron')
-const { existsSync, readFileSync, writeFileSync } = require('node:fs')
+const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs')
 const path = require('node:path')
 const { ensureDaemon, stopDaemon, readLock, home } = require('./lib/daemon.cjs')
 const { startInstall } = require('./lib/update.cjs')
@@ -29,6 +29,8 @@ if (!app.requestSingleInstanceLock()) app.quit()
 app.on('second-instance', () => show())
 
 const base = () => `http://${daemon.host}:${daemon.port}`
+const NO_CACHE_LOAD = { extraHeaders: 'pragma: no-cache\ncache-control: no-cache\n' }
+const authUrl = () => `${base()}/auth?token=${daemon.token}&v=${encodeURIComponent(ownVersion() || Date.now())}`
 const api = async (path, init = {}) => {
   const res = await fetch(`${base()}${path}`, { ...init, headers: { authorization: `Bearer ${daemon.token}`, ...(init.headers || {}) } })
   if (!res.ok) throw new Error(`${path} → ${res.status}`)
@@ -56,7 +58,7 @@ function createWindow() {
     ...(mac ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 19 } } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   })
-  win.loadURL(`${base()}/auth?token=${daemon.token}`)
+  win.loadURL(authUrl(), NO_CACHE_LOAD)
   // The page dims its title bar when the window is in the background, and moves things aside in full screen.
   const tell = (event, value) => { if (!win.isDestroyed()) win.webContents.send(`sa:${event}`, value) }
   win.on('focus', () => tell('focus', true))
@@ -85,7 +87,7 @@ function createQuick() {
     ...(mac ? { type: 'panel', visibleOnAllWorkspaces: true } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   })
-  quick.loadURL(`${base()}/#/quick`)
+  quick.loadURL(`${base()}/#/quick`, NO_CACHE_LOAD)
   quick.on('blur', () => { if (!process.env.NUONUO_DESKTOP_SMOKE) quick.hide() })
   quick.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
   quick.on('closed', () => { quick = undefined })
@@ -182,25 +184,38 @@ async function pollAttention() {
   } catch { void reconnect() }
 }
 
+async function connectDaemon() {
+  const found = await ensureDaemon(console.log, ownVersion())
+  return { ...found, startedAt: found.startedAt ?? readLock()?.startedAt }
+}
+
 /**
  * The daemon restarted (Settings → System changed its address or port, or it was updated): find it again, starting it if
- * it stopped, and reload the window on the new address.
+ * it stopped, and reload the window on the new address or refreshed bundle.
  */
 let reconnecting = false
 async function reconnect() {
-  if (reconnecting) return
+  if (reconnecting || quitting || stopService) return
   reconnecting = true
   try {
     for (let i = 0; i < 20; i++) {
       await new Promise(r => setTimeout(r, 1_500))
+      if (quitting || stopService) return
       const lock = readLock()
       if (!lock && i < 6) continue
-      const next = await ensureDaemon(console.log, ownVersion()).catch(() => undefined)
+      const next = await connectDaemon().catch(() => undefined)
       if (!next) continue
+      if (quitting || stopService) return
       const moved = next.port !== daemon.port || next.host !== daemon.host
+      const restarted = next.startedAt && daemon.startedAt && next.startedAt !== daemon.startedAt
       daemon = next
-      if (moved && win) win.loadURL(`${base()}/auth?token=${daemon.token}`)
-      if (moved && quick) { quick.destroy(); quick = undefined }
+      if (moved && win && !win.isDestroyed()) win.loadURL(authUrl(), NO_CACHE_LOAD)
+      if (moved && quick && !quick.isDestroyed()) { quick.destroy(); quick = undefined }
+      if (!moved && (restarted || next.started)) {
+        await session.defaultSession.clearCache().catch(() => {})
+        if (win && !win.isDestroyed()) win.webContents.reloadIgnoringCache()
+        if (quick && !quick.isDestroyed()) quick.webContents.reloadIgnoringCache()
+      }
       return
     }
   } finally { reconnecting = false }
@@ -211,6 +226,7 @@ async function followEvents() {
   for (;;) {
     try {
       const res = await fetch(`${base()}/api/events`, { headers: { authorization: `Bearer ${daemon.token}` } })
+      if (!res.ok || !res.body) throw new Error(`/api/events → ${res.status}`)
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
       let buffer = ''
       for (;;) {
@@ -228,6 +244,8 @@ async function followEvents() {
         }
       }
     } catch { /* reconnect below */ }
+    if (quitting || stopService) break
+    void reconnect()
     await new Promise(r => setTimeout(r, 3_000))
   }
 }
@@ -312,19 +330,37 @@ ipcMain.on('badge', (_e, count) => { attention = Number(count) || 0; refreshTray
 
 app.whenReady().then(async () => {
   try {
-    daemon = await ensureDaemon(console.log, ownVersion())
+    daemon = await connectDaemon()
   } catch (error) {
     const { dialog } = require('electron')
     dialog.showErrorBox('Nuonuo 无法启动', String(error.message || error))
     app.quit()
     return
   }
-  // Clear Chromium's HTTP disk cache before opening the window so an upgrade never serves a previous version's index.html.
+  // Clear Chromium's HTTP disk cache before opening the window so an upgrade never serves a previous version's index.html;
+  // when the app version changed, also clear CacheStorage and ServiceWorkers and record the rendered version.
   await session.defaultSession.clearCache().catch(() => {})
+  const uiVersionFile = path.join(app.getPath('userData'), 'ui-version.txt')
+  const currentVersion = ownVersion() || app.getVersion()
+  let lastUiVersion = ''
+  try { lastUiVersion = readFileSync(uiVersionFile, 'utf8').trim() } catch { /* first run */ }
+  if (currentVersion && currentVersion !== lastUiVersion) {
+    await session.defaultSession.clearStorageData({ storages: ['cachestorage', 'serviceworkers'] }).catch(() => {})
+    try {
+      mkdirSync(path.dirname(uiVersionFile), { recursive: true })
+      writeFileSync(uiVersionFile, currentVersion)
+    } catch { /* best effort */ }
+  }
   // Marks the window's requests as the desktop app's: with browser access off, the daemon serves pages only to it.
   session.defaultSession.webRequest.onBeforeSendHeaders((details, done) => {
     const headers = details.requestHeaders
-    if (details.url.startsWith(base())) headers['x-nuonuo-client'] = 'desktop'
+    if (details.url.startsWith(base())) {
+      headers['x-nuonuo-client'] = 'desktop'
+      if (details.resourceType === 'mainFrame') {
+        headers['pragma'] = 'no-cache'
+        headers['cache-control'] = 'no-cache'
+      }
+    }
     done({ requestHeaders: headers })
   })
   loadPrefs()
