@@ -7,7 +7,7 @@ import { kvGet, kvSet, schema, type Store } from '@nuonuo/db'
 import type { ModelHub } from '@nuonuo/models'
 import { and, asc, eq, gt } from 'drizzle-orm'
 import { z } from 'zod'
-import { MEMORY_KINDS, type Memory, type MemoryTrust } from './memory'
+import { isHeatedText, MEMORY_KINDS, type Memory, type MemoryTrust } from './memory'
 import { generateStructured } from './structured'
 
 const TRIAGE_PROMPT = `You decide whether a stretch of conversation between the owner and their assistant contains anything worth keeping in long-term memory.
@@ -17,7 +17,7 @@ Answer keep (clearly worth it), review (maybe), or drop, with your confidence 0.
 
 const DISTILL_PROMPT = `Distil 0–3 long-term memory entries from the conversation below. Each entry: one short, self-contained sentence in the owner's language (Chinese by default), written as a fact ("主人…" / "项目…"), with:
 - kind: profile (lasting facts/preferences of the owner) | project (a convention or decision of this conversation's project) | episodic (something happening or decided that matters for a while) | lesson (how to do the job better, verified)
-- confidence 0..1: how sure you are that the owner holds this and wants it remembered. Stated plainly by the owner → high; inferred → lower.
+- confidence 0..1: how sure you are that the owner holds this and wants it remembered. Stated plainly by the owner → high; inferred → lower. Sweeping vows or self-descriptions blurted out in anger or distress ("我不干了", "再也不用 X 了") are venting, not settled facts: skip them or give confidence ≤ 0.7 so the owner confirms.
 - ttl_days for episodic entries (how long it stays relevant).
 - replaces: ids of existing entries (from the list given) that this entry corrects or updates.
 Do not repeat existing entries. Never include secrets. Statements by other people are not facts about the owner.`
@@ -40,7 +40,13 @@ const Distilled = z.object({ entries: z.array(z.object({
 })).max(3) })
 
 export class Distiller {
-  constructor(private store: Store, private hub: ModelHub, private memory: Memory, private scopeOf: (conversationId: string) => string | undefined) {}
+  constructor(
+    private store: Store,
+    private hub: ModelHub,
+    private memory: Memory,
+    private scopeOf: (conversationId: string) => string | undefined,
+    private isHeated?: (fromMs: number, toMs: number) => boolean,
+  ) {}
 
   private role(preferred: 'filter' | 'summarizer') { return this.hub.resolve(preferred) ? preferred : 'router' }
 
@@ -54,7 +60,8 @@ export class Distiller {
     if (!rows.length) return { triage: 'empty', added: [] }
     const last = rows.at(-1)!.createdAt
     const owner = (m: typeof rows[number]) => m.role === 'user' && ((m.meta as { source?: string }).source ?? 'webchat') === 'webchat'
-    if (!rows.some(owner)) { kvSet(this.store, cursorKey, last); return { triage: 'no-owner-words', added: [] } }
+    const ownerRows = rows.filter(owner)
+    if (!ownerRows.length) { kvSet(this.store, cursorKey, last); return { triage: 'no-owner-words', added: [] } }
     const transcript = rows.map(m => `[${m.id}] ${owner(m) ? 'owner' : m.role === 'assistant' ? 'assistant' : `${(m.meta as { actor?: string }).actor ?? 'someone'} (not the owner)`}: ${m.content.replace(/\s+/g, ' ').slice(0, 800)}`).join('\n').slice(-8_000)
 
     const triage = await generateStructured(this.hub, this.role('filter'), { system: TRIAGE_PROMPT, prompt: transcript, schema: Triage,
@@ -67,7 +74,9 @@ export class Distiller {
       prompt: `Existing entries:\n${existing.map(m => `- [${m.id} ${m.kind}] ${m.text}`).join('\n') || '（无）'}\n\nConversation${scope ? ` (project ${this.memory.scopeName(scope)})` : ''}:\n${transcript}`,
       schema: Distilled, fields: DISTILL_FIELDS, example: { entries: [{ text: '主人习惯用中文交流，回复要简洁', kind: 'profile', confidence: 0.9 }] } })
     // What the owner said is theirs; anything an outsider said in the thread can only ask to be remembered.
+    // Emotionally heated stretches (reported by mood_sync or unmistakable venting) also land in pending for confirmation.
     const trust: MemoryTrust = rows.every(m => m.role === 'assistant' || owner(m)) ? 'user' : 'external'
+    const heated = Boolean(this.isHeated?.(ownerRows[0]!.createdAt, last)) || ownerRows.some(m => isHeatedText(m.content))
     const known = new Set(existing.map(m => m.id))
     const added: { id: string; status: string }[] = []
     for (const e of output.entries) {
@@ -75,7 +84,7 @@ export class Distiller {
       // A "review" triage caps confidence below the write threshold: the owner confirms.
       const confidence = triage.decision === 'review' ? Math.min(e.confidence, 0.79) : e.confidence
       try {
-        const r = this.memory.add({ kind, text: e.text, scope, trust, confidence, sources: rows.filter(owner).map(m => m.id).slice(-5), createdBy: 'distiller',
+        const r = this.memory.add({ kind, text: e.text, scope, trust, confidence, heated, sources: ownerRows.map(m => m.id).slice(-5), createdBy: 'distiller',
           ttlDays: e.ttl_days, supersedes: (e.replaces ?? []).filter(id => known.has(id)) })
         if (r.status !== 'dropped') added.push({ id: r.id, status: r.status })
       } catch { /* a secret or empty text: skip */ }

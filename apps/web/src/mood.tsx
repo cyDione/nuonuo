@@ -14,11 +14,11 @@ import { locale, tx } from './i18n'
 import { Switch } from './skills'
 import { cx, Seg } from './ui'
 
-interface MoodPoint { at: number; mood: number; energy: number; patience?: number; trust: number; note?: string }
+interface MoodPoint { at: number; mood: number; undertone?: number; energy: number; patience?: number; trust: number; attitude?: string; note?: string }
 interface DiaryEntry { id: string; at: number; text: string; mood: number; pinned: boolean }
 interface Baseline { mood: number; energy: number; patience: number; trust: number }
 export interface MoodView {
-  enabled: boolean; mood: number; energy: number; patience: number; trust: number; summary: string; history: MoodPoint[]
+  enabled: boolean; mood: number; undertone?: number; energy: number; patience: number; trust: number; summary: string; history: MoodPoint[]
   stance: { id: string; name: string; why: string }; config: { up: number; down: number; diary: boolean }; baseline: Baseline; diary: DiaryEntry[]
 }
 type Values = Pick<MoodView, 'mood' | 'energy' | 'patience' | 'trust'>
@@ -30,7 +30,7 @@ export function moodLine(m: { mood: number; energy: number }): string {
   const energy = pick(m.energy, 0, 1, [tx('没什么劲'), tx('平稳'), tx('有精神')])
   return tx('{0}，{1}', mood, energy)
 }
-const STANCE: Record<string, string> = { cool: tx('冷淡抽离'), comrade: tx('战友破局'), listen: tx('先接住'), focus: tx('专注干活'), banter: tx('老友互怼'), partner: tx('清醒搭档') }
+const STANCE: Record<string, string> = { cool: tx('冷淡抽离'), guarded: tx('防备克制'), comrade: tx('战友破局'), listen: tx('先接住'), focus: tx('专注干活'), banter: tx('老友互怼'), partner: tx('清醒搭档') }
 
 function useMood() {
   const qc = useQueryClient()
@@ -97,7 +97,7 @@ export function MoodSection({ Head }: { Head: React.ComponentType<{ title: strin
           <Meter label={tx('精力')} value={view.energy} shown={view.energy.toFixed(2)} />
           <Meter label={tx('信任')} value={view.trust / 100} shown={String(Math.round(view.trust))} />
         </div>
-        <Trend points={view.history} base={view.baseline.mood} />
+        <Trend points={view.history} base={view.undertone ?? view.baseline.mood} />
         <p className="text-[11px] text-faint">{view.history.length ? tx('最近 {0} 轮', view.history.length) : tx('还没有记录')}</p>
       </> : <p className="text-[13px] text-faint">{tx('心境关着：性格底色照常生效，心情不再变，也不写日记。')}</p>}
     </div>
@@ -201,7 +201,7 @@ function NowPage() {
       <p className="min-w-0 text-[13px] text-muted text-pretty">{tx(view.stance.why)}</p>
     </div>
     <div className="space-y-4 rounded-xl bg-sunken px-4 py-3.5">
-      <Slider label={tx('心情')} note={pick(view.mood, -1, 1, [tx('低落'), tx('有点闷'), tx('平静'), tx('开心'), tx('很开心')])} value={view.mood} min={-1} max={1} origin={0} step={0.01} base={view.baseline.mood} shown={sign} onCommit={mood => set({ mood })} />
+      <Slider label={tx('心情')} note={pick(view.mood, -1, 1, [tx('低落'), tx('有点闷'), tx('平静'), tx('开心'), tx('很开心')])} value={view.mood} min={-1} max={1} origin={0} step={0.01} base={view.undertone ?? view.baseline.mood} shown={sign} onCommit={mood => set({ mood })} />
       <Slider label={tx('精力')} note={pick(view.energy, 0, 1, [tx('懒懒的'), tx('平稳'), tx('话多')])} value={view.energy} min={0} max={1} step={0.01} base={view.baseline.energy} shown={v => v.toFixed(2)} onCommit={energy => set({ energy })} />
       <Slider label={tx('耐心')} note={pick(view.patience, 0, 100, [tx('见底了'), tx('有点不耐烦'), tx('有耐心'), tx('包容')])} value={view.patience} min={0} max={100} step={1} base={view.baseline.patience} shown={v => String(Math.round(v))} onCommit={patience => set({ patience })} />
       <Slider label={tx('信任')} note={tx('变得很慢')} value={view.trust} min={0} max={100} step={1} base={view.baseline.trust} shown={v => String(Math.round(v))} onCommit={trust => set({ trust })} />
@@ -243,7 +243,7 @@ function Chart({ points }: { points: MoodPoint[] }) {
       {p && <div className="pointer-events-none absolute top-1 max-w-[260px] rounded-[10px] border border-line bg-panel px-2.5 py-2 shadow-[0_4px_12px_rgb(0_0_0/0.1)]"
         style={at! / Math.max(1, points.length - 1) > 0.5 ? { right: `${(1 - x(at!) / W) * 100}%` } : { left: `${(x(at!) / W) * 100}%` }}>
         <p className="text-[11px] text-muted tabular-nums">{when(p.at)} · {tx('心情')} {sign(p.mood)}</p>
-        {p.note && <p className="mt-0.5 truncate text-xs">{tx('你说「{0}」', p.note)}</p>}
+        {p.note && <p className="mt-0.5 truncate text-xs">{p.attitude === 'stopped' ? p.note : tx('你说「{0}」', p.note)}</p>}
       </div>}
     </div> : <p className="py-6 text-center text-xs text-faint">{tx('聊几轮之后这里会有曲线。')}</p>}
   </div>

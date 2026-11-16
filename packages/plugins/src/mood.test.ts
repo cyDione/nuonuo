@@ -5,7 +5,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { addDiary, applyReport, BASELINE, diaryOf, guessOwner, initialMood, MOOD_HALF_LIFE_H, moodContext, moodPlugin, moodSummary, moodView, PATIENCE_HALF_LIFE_H, pinDiary, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodValues, settleMood, stanceFor } from './mood'
+import { addDiary, applyReport, applyStop, BASELINE, diaryOf, GRUDGE_HALF_LIFE_H, guessOwner, hadHeatedTurn, initialMood, isHeatedTurn, MOOD_HALF_LIFE_H, moodContext, moodPlugin, moodSummary, moodView, PATIENCE_HALF_LIFE_H, pinDiary, recordMoodStop, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodValues, settleMood, stanceFor, UNDERTONE_HALF_LIFE_H } from './mood'
 
 describe('心境 model', () => {
   it('drifts mood and energy back to the baseline over time, but not trust', () => {
@@ -59,6 +59,48 @@ describe('心境 model', () => {
     expect(moodSummary(s)).toBe('低落，有精神')
     expect(moodSummary(initialMood())).toBe('心情不错，平稳')
   })
+
+  it('holds grudges across a two-layer mood: one compliment after hostility recovers less and stays guarded until it fades', () => {
+    const freshPraise = applyReport(initialMood(0), { emotion: 'happy', intensity: 0.8, attitude: 'grateful', feedback: 'positive' }, 0)
+    let hurt = initialMood(0)
+    hurt = applyReport(hurt, { emotion: 'angry', intensity: 0.9, attitude: 'hostile', feedback: 'negative' }, 0).state
+    hurt = applyReport(hurt, { emotion: 'angry', intensity: 0.9, attitude: 'hostile', feedback: 'negative' }, 0).state
+    expect(hurt.grudge).toBeGreaterThan(0.6)
+    expect(hurt.undertone).toBeLessThan(BASELINE.mood)
+
+    // One sudden compliment is dampened by the grudge (stays cool at first; a second compliment leaves cool into 防备克制, still not partner).
+    const firstPraise = applyReport(hurt, { emotion: 'happy', intensity: 0.8, attitude: 'grateful', feedback: 'positive' }, 0)
+    expect(firstPraise.delta.mood).toBeLessThan(freshPraise.delta.mood * 0.65)
+    expect(stanceFor(firstPraise.state, guessOwner('今天天气不错')).id).toBe('cool')
+    const secondPraise = applyReport(firstPraise.state, { emotion: 'happy', intensity: 0.5, attitude: 'respectful', feedback: 'positive' }, 0)
+    expect(secondPraise.state.mood).toBeGreaterThan(-0.3)
+    expect(stanceFor(secondPraise.state, guessOwner('今天天气不错')).id).toBe('guarded')
+    expect(moodContext(secondPraise.state, '今天天气不错')).toContain('防备克制')
+    expect(moodContext(secondPraise.state, '今天天气不错')).toContain('积了点怨气')
+
+    // Fast mood settles toward the lowered undertone over MOOD_HALF_LIFE_H, while grudge and undertone fade much slower.
+    const sixHours = settleMood(hurt, MOOD_HALF_LIFE_H * 3_600_000)
+    expect(sixHours.undertone).toBeLessThan(0.1)
+    expect(sixHours.grudge).toBeGreaterThan(0.35)
+    const twoDays = settleMood(hurt, Math.max(GRUDGE_HALF_LIFE_H * 3, UNDERTONE_HALF_LIFE_H) * 3_600_000)
+    expect(twoDays.grudge).toBeLessThan(0.2)
+    expect(stanceFor(twoDays, guessOwner('今天天气不错')).id).toBe('partner')
+  })
+
+  it('treats stopping mid-flight as a faint signal and detects heated turns for memory gating', () => {
+    const once = applyStop(initialMood(0), 0, { down: 1 }, '停下「查机票」')
+    expect(once.mood).toBeCloseTo(BASELINE.mood - 0.03)
+    expect(once.patience).toBe(BASELINE.patience - 2)
+    expect(once.trust).toBe(BASELINE.trust)
+    expect(once.grudge).toBeCloseTo(0.03)
+    expect(stanceFor(once).id).toBe('partner')
+    expect(once.history.at(-1)).toMatchObject({ attitude: 'stopped', note: '停下「查机票」' })
+
+    expect(isHeatedTurn({ emotion: 'angry', intensity: 0.85, attitude: 'casual' })).toBe(true)
+    expect(isHeatedTurn({ emotion: 'neutral', intensity: 0.5, attitude: 'hostile' })).toBe(true)
+    expect(isHeatedTurn({ emotion: 'happy', intensity: 0.9, attitude: 'grateful' })).toBe(false)
+    expect(isHeatedTurn({ emotion: 'anxious', intensity: 0.3, attitude: 'respectful' })).toBe(false)
+  })
 })
 
 describe('心境 built in', () => {
@@ -91,6 +133,17 @@ describe('心境 built in', () => {
     resetMood(state)
     expect(moodView(state)).toMatchObject({ enabled: true, mood: BASELINE.mood, patience: BASELINE.patience, trust: 68 })
     expect(moodView(state).history).toHaveLength(6)
+    expect(moodView(state).stance.id).toBe('partner')
+    setMoodEnabled(state, false)
+    recordMoodStop(state, '不该记')
+    expect(moodView(state).history).toHaveLength(6)
+    setMoodEnabled(state, true)
+    recordMoodStop(state, '停下「部署」', 10_000)
+    expect(moodView(state).history).toHaveLength(7)
+    expect(hadHeatedTurn(state, 0, 20_000)).toBe(false)
+    await tools.mood_sync!.execute({ emotion: 'angry', intensity: 0.9, attitude: 'hostile', feedback: 'negative' }, { toolCallId: '', messages: [] })
+    expect(hadHeatedTurn(state, Date.now() - 1_000)).toBe(true)
+    resetMood(state)
     expect(moodView(state).stance.id).toBe('partner')
     setMoodEnabled(state, false)
     expect(await ext.inlineContext!('今天天气不错', undefined)).toBe('')

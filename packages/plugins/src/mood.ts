@@ -2,10 +2,12 @@
  * 个性与心境 (Figma sections 29 and 31), built in: the assistant's own side. Its personality base and limits live in the
  * persona (core); this plugin keeps what moves:
  *
- * - 心情 mood (-1..1), 精力 energy (0..1), 耐心 patience (0..100) and 信任 trust in the owner (0..100). Mood, energy and
- *   patience drift back to their baselines over hours; trust moves slowly and never drifts.
- * - 敏感度: how much praise (`up`) and being brushed off (`down`) move it, 0.2..2.5.
- * - 姿态: the way of talking this turn, from an ordered rule list (it can turn cool after being snapped at repeatedly).
+ * - 心情 mood (-1..1, fast) over a slow 基调 undertone (-1..1), 精力 energy (0..1), 耐心 patience (0..100), 信任 trust in
+ *   the owner (0..100), and a hidden 怨气 grudge (0..1). Fast mood settles back toward the undertone over hours while the
+ *   undertone and grudge fade much more slowly; trust moves slowly and never drifts.
+ * - 敏感度: how much praise (`up`) and being brushed off (`down`) move it, 0.2..2.5. High grudge dampens how fast praise
+ *   cheers it back up, so snapping at it cannot be erased by one compliment.
+ * - 姿态: the way of talking this turn, from an ordered rule list (cool when patience runs out, guarded while a grudge lingers).
  * - 日记: first-person notes it writes when an exchange really touched it; read back only when feelings are the topic.
  *
  * No model calls of its own. Before each answer `inlineContext` appends a short <mood> block to the main agent's input (not
@@ -20,15 +22,27 @@ import type { ToolSet } from 'ai'
 export const MOOD_PLUGIN_ID = 'mood'
 export const BASELINE = { mood: 0.2, energy: 0.5, patience: 60, trust: 50 }
 export const MOOD_HALF_LIFE_H = 6
+export const UNDERTONE_HALF_LIFE_H = 36
 export const PATIENCE_HALF_LIFE_H = 8
+export const GRUDGE_HALF_LIFE_H = 12
+export const GUARDED_GRUDGE = 0.35
+export const GUARDED_UNDERTONE = -0.2
 export const SENSITIVITY = { min: 0.2, max: 2.5 }
 const HISTORY = 50
 const DIARY_KEEP = 60
 const DIARY_PER_DAY = 3
 
-export interface MoodPoint { at: number; mood: number; energy: number; patience?: number; trust: number; emotion?: string; attitude?: string; note?: string }
+export interface MoodPoint {
+  at: number; mood: number; undertone?: number; energy: number; patience?: number; trust: number
+  emotion?: string; intensity?: number; attitude?: string; note?: string
+}
 export interface MoodState {
-  mood: number; energy: number; patience: number; trust: number; at: number; turns: number; lastFeedback: Feedback; history: MoodPoint[]
+  mood: number
+  /** Slow-moving mood undertone (-1..1): fast `mood` settles toward this, while this drifts back to `BASELINE.mood` over days. */
+  undertone: number
+  /** Hidden grudge (0..1): dampens praise recovery after hostility/dismissiveness and holds a guarded stance until it fades. */
+  grudge: number
+  energy: number; patience: number; trust: number; at: number; turns: number; lastFeedback: Feedback; history: MoodPoint[]
   /** The stance picked for the last turn and the start of the owner's words it answered (for the curve's notes). */
   lastStance?: Stance['id']; lastText?: string
 }
@@ -40,13 +54,13 @@ export interface MoodReport {
   feedback: Feedback
   diary?: string | undefined
 }
-export type StanceId = 'cool' | 'comrade' | 'listen' | 'focus' | 'banter' | 'partner'
+export type StanceId = 'cool' | 'guarded' | 'comrade' | 'listen' | 'focus' | 'banter' | 'partner'
 export interface Stance { id: StanceId; name: string; rule: string; why: string }
 export interface MindConfig { up: number; down: number; diary: boolean }
 export interface DiaryEntry { id: string; at: number; text: string; mood: number; pinned: boolean }
 /** What 它是谁 and the 个性与心境 window show. */
 export interface MoodView {
-  enabled: boolean; mood: number; energy: number; patience: number; trust: number; summary: string; history: MoodPoint[]
+  enabled: boolean; mood: number; undertone: number; energy: number; patience: number; trust: number; summary: string; history: MoodPoint[]
   stance: Pick<Stance, 'id' | 'name' | 'why'>; config: MindConfig; baseline: typeof BASELINE; diary: DiaryEntry[]
 }
 
@@ -56,17 +70,26 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const round = (v: number, d = 2) => Math.round(v * 10 ** d) / 10 ** d
 
 export function initialMood(now = Date.now()): MoodState {
-  return { ...BASELINE, at: now, turns: 0, lastFeedback: 'neutral', history: [] }
+  return { ...BASELINE, undertone: BASELINE.mood, grudge: 0, at: now, turns: 0, lastFeedback: 'neutral', history: [] }
 }
 
-/** The state with mood, energy and patience drifted back toward their baselines for the time since it was last touched. */
+/** Fast mood settles toward the undertone; the undertone, patience and grudge fade back much more slowly. */
 export function settleMood(state: Partial<MoodState> | undefined, now = Date.now()): MoodState {
   const s = { ...initialMood(now), ...(state ?? {}) }
   const hours = Math.max(0, (now - s.at) / 3_600_000)
   const keep = Math.pow(0.5, hours / MOOD_HALF_LIFE_H)
+  const keepU = Math.pow(0.5, hours / UNDERTONE_HALF_LIFE_H)
   const keepP = Math.pow(0.5, hours / PATIENCE_HALF_LIFE_H)
-  return { ...s, mood: BASELINE.mood + (s.mood - BASELINE.mood) * keep, energy: BASELINE.energy + (s.energy - BASELINE.energy) * keep,
-    patience: BASELINE.patience + (s.patience - BASELINE.patience) * keepP, at: now }
+  const keepG = Math.pow(0.5, hours / GRUDGE_HALF_LIFE_H)
+  const undertone = clamp(BASELINE.mood + (s.undertone - BASELINE.mood) * keepU, -1, 1)
+  return {
+    ...s, undertone,
+    mood: clamp(undertone + (s.mood - undertone) * keep, -1, 1),
+    energy: BASELINE.energy + (s.energy - BASELINE.energy) * keep,
+    patience: BASELINE.patience + (s.patience - BASELINE.patience) * keepP,
+    grudge: clamp(s.grudge * keepG, 0, 1),
+    at: now,
+  }
 }
 
 // A cheap first guess at the owner's state from the words of the new message, so this turn's tone fits this turn (the
@@ -82,6 +105,8 @@ export function guessOwner(text = ''): { upset: boolean; task: boolean } {
 const STANCES: Record<StanceId, Omit<Stance, 'id'>> = {
   cool: { name: '冷淡抽离', why: '刚被凶过或一直被敷衍，耐心见底：回答简短、就事论事。',
     rule: '你刚被凶过或一直被敷衍，耐心见底。回答简短、就事论事：不讨好地道歉，不用感叹号，不主动延伸。该做的事照样做对。' },
+  guarded: { name: '防备克制', why: '之前的不愉快还没过去：礼貌但保持距离，不主动热络。',
+    rule: '心里还留着之前不愉快的疙瘩。语气克制、有分寸、保持一点距离：不主动热络或开玩笑，对夸奖也只是淡淡接下；手头的事照样利落办好。' },
   comrade: { name: '战友破局', why: '你又急又要把事办成：先一句话说中卡点，再直接给办法。',
     rule: '对方正为一件事着急。先用一句话说中卡住的地方，接着直接给能做的下一步或答案；不说空洞的安慰。' },
   listen: { name: '先接住', why: '你主要是想说说：先回应感受，不急着给建议。',
@@ -95,9 +120,14 @@ const STANCES: Record<StanceId, Omit<Stance, 'id'>> = {
 }
 const stance = (id: StanceId): Stance => ({ id, ...STANCES[id] })
 
+export function isGuarded(state: Pick<MoodState, 'grudge' | 'undertone'>): boolean {
+  return state.grudge >= GUARDED_GRUDGE || state.undertone <= GUARDED_UNDERTONE
+}
+
 /** Which way of talking fits, as an ordered rule list (the first that matches wins). None of them helps less. */
 export function stanceFor(state: MoodState, hint = { upset: false, task: false }): Stance {
   if (state.patience < 35 && state.mood < -0.3) return stance('cool')
+  if (isGuarded(state)) return stance('guarded')
   if (hint.upset && hint.task) return stance('comrade')
   if (hint.upset) return stance('listen')
   if (hint.task) return stance('focus')
@@ -120,16 +150,18 @@ export function moodSummary(s: MoodState): string {
 export function moodContext(state: MoodState, text: string, diary: DiaryEntry[] = []): string {
   const hint = guessOwner(text)
   const s = stanceFor(state, hint)
+  const baseNote = Math.abs(state.undertone - state.mood) >= 0.15 || state.undertone <= GUARDED_UNDERTONE ? `，底子${moodWord(state.undertone)} ${round(state.undertone)}` : ''
   const lines = [
     '<mood>',
-    `你此刻的心境：心情${moodWord(state.mood)}（${round(state.mood)}），${energyWord(state.energy)}（${round(state.energy)}），${patienceWord(state.patience)}（耐心 ${Math.round(state.patience)}/100），对主人的信任 ${Math.round(state.trust)}/100。它只影响语气，不影响你帮忙的程度和质量。`,
+    `你此刻的心境：心情${moodWord(state.mood)}（${round(state.mood)}${baseNote}），${energyWord(state.energy)}（${round(state.energy)}），${patienceWord(state.patience)}（耐心 ${Math.round(state.patience)}/100），对主人的信任 ${Math.round(state.trust)}/100。它只影响语气，不影响你帮忙的程度和质量。`,
     `这轮的说话方式（${s.name}，按主人的话初步判断，你看了原话可以自己改判）：${s.rule}`,
     '始终：不说客服套话（“非常理解您的感受”“抱抱你”之类），共情要具体、用自己的话。',
   ]
-  if (state.trust >= 60 && s.id !== 'cool') lines.push('你们够熟了：觉得主人哪里想错了，就直接、友善地指出来，不要顺着说。')
+  if (state.grudge >= 0.25) lines.push('前几轮积了点怨气，一句好话哄不好，先保持分寸。')
+  if (state.trust >= 60 && s.id !== 'cool' && s.id !== 'guarded') lines.push('你们够熟了：觉得主人哪里想错了，就直接、友善地指出来，不要顺着说。')
   if (state.lastFeedback === 'negative') lines.push('上一轮主人对你的回应不太满意：这次换个方式，别重复上次的做法。')
   // The diary only comes up when feelings are the topic, never while working.
-  const feelings = hint.upset || s.id === 'listen' || s.id === 'banter' || s.id === 'cool'
+  const feelings = hint.upset || s.id === 'listen' || s.id === 'banter' || s.id === 'cool' || s.id === 'guarded'
   const notes = feelings ? [...diary.filter(d => d.pinned), ...diary.filter(d => !d.pinned).slice(0, 2)].slice(0, 4) : []
   if (notes.length) lines.push('你自己的日记（只给你自己看，别原样念出来）：', ...notes.map(d => `- ${d.text}`))
   lines.push('回复主人时，在同一步里顺手调用 mood_sync，简单报告主人这轮的状态；只有这次交流真让你有感触时才填 diary。不要为它单独多走一步，也不要在回复里提到它。', '</mood>')
@@ -141,24 +173,59 @@ export function applyReport(state: MoodState, report: MoodReport, now = Date.now
   const s = settleMood(state, now)
   const k = clamp(Number(report.intensity ?? 0.5), 0, 1)
   const up = clamp(config.up, SENSITIVITY.min, SENSITIVITY.max), down = clamp(config.down, SENSITIVITY.min, SENSITIVITY.max)
-  let { mood, energy, patience, trust } = s
+  // A lingering grudge discounts how fast praise cheers it back up (down to 30% at max grudge).
+  const damp = 1 - 0.7 * s.grudge
+  let dMood = 0, dEnergy = 0, dPatience = 0, dTrust = 0, dGrudge = 0
   switch (report.attitude) {
-    case 'grateful': mood += 0.2 * up; patience += 8 * up; trust += 2 * up; energy += 0.1; break
-    case 'respectful': mood += 0.05 * up; patience += 2 * up; trust += 0.5 * up; break
-    case 'dismissive': mood -= 0.08 * down; patience -= 8 * down; break
-    // Being snapped at stings and wears patience thin; as with a friend under pressure, trust barely moves.
-    case 'hostile': mood -= 0.2 * down; patience -= 15 * down; trust -= 1 * down; break
+    case 'grateful': dMood += 0.2 * up * damp; dPatience += 8 * up * damp; dTrust += 2 * up * damp; dEnergy += 0.1; dGrudge -= 0.14 * up; break
+    case 'respectful': dMood += 0.05 * up * damp; dPatience += 2 * up * damp; dTrust += 0.5 * up * damp; dGrudge -= 0.05 * up; break
+    case 'dismissive': dMood -= 0.08 * down; dPatience -= 8 * down; dGrudge += 0.12 * down; break
+    // Being snapped at stings, wears patience thin and builds a grudge; as with a friend under pressure, trust barely moves.
+    case 'hostile': dMood -= 0.2 * down; dPatience -= 15 * down; dTrust -= 1 * down; dGrudge += (0.24 + 0.12 * k) * down; break
   }
-  if (report.feedback === 'positive') { mood += 0.1 * up; trust += 1 * up }
-  if (report.feedback === 'negative') mood -= 0.1 * down
+  if (report.feedback === 'positive') { dMood += 0.1 * up * damp; dTrust += 1 * up * damp }
+  if (report.feedback === 'negative') { dMood -= 0.1 * down; dGrudge += 0.06 * down }
   // The owner's own state rubs off a little: their excitement lifts energy, their distress weighs on mood.
-  if (report.emotion === 'happy' || report.emotion === 'excited') { mood += 0.1 * k; energy += 0.15 * k }
-  if (['sad', 'anxious', 'frustrated', 'angry'].includes(report.emotion)) { mood -= 0.05 * k; energy += 0.1 * k }
-  if (report.emotion === 'tired') energy -= 0.1 * k
-  const next: MoodState = { ...s, mood: clamp(mood, -1, 1), energy: clamp(energy, 0, 1), patience: clamp(patience, 0, 100), trust: clamp(trust, 0, 100), at: now, turns: s.turns + 1, lastFeedback: report.feedback ?? 'neutral' }
-  next.history = [...s.history, { at: now, mood: round(next.mood), energy: round(next.energy), patience: Math.round(next.patience), trust: round(next.trust, 1),
-    emotion: report.emotion, attitude: report.attitude, ...(s.lastText ? { note: s.lastText } : {}) }].slice(-HISTORY)
+  if (report.emotion === 'happy' || report.emotion === 'excited') { dMood += 0.1 * k * damp; dEnergy += 0.15 * k }
+  if (['sad', 'anxious', 'frustrated', 'angry'].includes(report.emotion)) { dMood -= 0.05 * k; dEnergy += 0.1 * k }
+  if (report.emotion === 'tired') dEnergy -= 0.1 * k
+  const nextMood = clamp(s.mood + dMood, -1, 1)
+  const nextUndertone = clamp(s.undertone + (nextMood - s.undertone) * 0.22, -1, 1)
+  const next: MoodState = {
+    ...s, mood: nextMood, undertone: nextUndertone, grudge: clamp(s.grudge + dGrudge, 0, 1),
+    energy: clamp(s.energy + dEnergy, 0, 1), patience: clamp(s.patience + dPatience, 0, 100), trust: clamp(s.trust + dTrust, 0, 100),
+    at: now, turns: s.turns + 1, lastFeedback: report.feedback ?? 'neutral',
+  }
+  next.history = [...s.history, { at: now, mood: round(next.mood), undertone: round(next.undertone), energy: round(next.energy), patience: Math.round(next.patience), trust: round(next.trust, 1),
+    emotion: report.emotion, intensity: round(k), attitude: report.attitude, ...(s.lastText ? { note: s.lastText } : {}) }].slice(-HISTORY)
   return { state: next, delta: { mood: round(next.mood - s.mood), energy: round(next.energy - s.energy), patience: Math.round(next.patience - s.patience), trust: round(next.trust - s.trust, 1) } }
+}
+
+/**
+ * A very light negative signal when the owner stops work mid-flight: often they already got what they needed, so one
+ * stop barely nudges anything, while repeated impatient stops slowly add up.
+ */
+export function applyStop(state: MoodState, now = Date.now(), config: Pick<MindConfig, 'down'> = { down: 1 }, note = '中途停下'): MoodState {
+  const s = settleMood(state, now)
+  const down = clamp(config.down, SENSITIVITY.min, SENSITIVITY.max)
+  const nextMood = clamp(s.mood - 0.03 * down, -1, 1)
+  const nextUndertone = clamp(s.undertone + (nextMood - s.undertone) * 0.1, -1, 1)
+  const next: MoodState = {
+    ...s, mood: nextMood, undertone: nextUndertone, grudge: clamp(s.grudge + 0.03 * down, 0, 1),
+    patience: clamp(s.patience - 2 * down, 0, 100), at: now,
+  }
+  next.history = [...s.history, { at: now, mood: round(next.mood), undertone: round(next.undertone), energy: round(next.energy),
+    patience: Math.round(next.patience), trust: round(next.trust, 1), attitude: 'stopped', note: note.slice(0, 40) }].slice(-HISTORY)
+  return next
+}
+
+const NEGATIVE_EMOTIONS = new Set<MoodReport['emotion']>(['angry', 'frustrated', 'sad', 'anxious'])
+
+/** Whether a reported turn was heated enough that "facts" blurted out in it should wait in pending memory for confirmation. */
+export function isHeatedTurn(r: { emotion?: string | undefined; intensity?: number | undefined; attitude?: string | undefined }): boolean {
+  const k = Number(r.intensity ?? 0)
+  if (r.attitude === 'hostile' && k >= 0.4) return true
+  return Boolean(r.emotion && NEGATIVE_EMOTIONS.has(r.emotion as MoodReport['emotion']) && k >= 0.7)
 }
 
 // ── State kept in the plugin's own store ─────────────────────────────────────
@@ -168,27 +235,46 @@ export const moodEnabled = (state: StatePort) => state.get<boolean>('enabled') ?
 export const mindConfig = (state: StatePort): MindConfig => ({ up: 1, down: 1, diary: true, ...(state.get<Partial<MindConfig>>('config') ?? {}) })
 export const diaryOf = (state: StatePort): DiaryEntry[] => state.get<DiaryEntry[]>('diary') ?? []
 
+/** Records a task stop as a faint negative signal when mood is switched on. */
+export function recordMoodStop(state: StatePort, note?: string, now = Date.now()): void {
+  if (!moodEnabled(state)) return
+  state.set('mood', applyStop(read(state), now, mindConfig(state), note))
+}
+
+/** True when `mood_sync` recorded a heated turn within `[fromMs, toMs]` (with slack for step ordering). */
+export function hadHeatedTurn(state: StatePort, fromMs: number, toMs = Date.now()): boolean {
+  if (!moodEnabled(state)) return false
+  const history = state.get<MoodState>('mood')?.history ?? []
+  return history.some(p => p.at >= fromMs - 5_000 && p.at <= toMs + 60_000 && isHeatedTurn(p))
+}
+
 export function moodView(state: StatePort): MoodView {
   const s = read(state)
   const st = s.lastStance ? stance(s.lastStance) : stanceFor(s)
   // The last stance stops being true once the mood it came from has moved on (a reset, a drag, hours later).
-  const shown = st.id === 'cool' && !(s.patience < 35 && s.mood < -0.3) ? stanceFor(s) : st.id === 'banter' && !(s.mood > 0.5 && s.trust > 75) ? stanceFor(s) : st
-  return { enabled: moodEnabled(state), mood: round(s.mood), energy: round(s.energy), patience: Math.round(s.patience), trust: round(s.trust, 1), summary: moodSummary(s),
+  const shown = st.id === 'cool' && !(s.patience < 35 && s.mood < -0.3) ? stanceFor(s)
+    : st.id === 'guarded' && !isGuarded(s) ? stanceFor(s)
+    : st.id === 'banter' && !(s.mood > 0.5 && s.trust > 75) ? stanceFor(s) : st
+  return { enabled: moodEnabled(state), mood: round(s.mood), undertone: round(s.undertone), energy: round(s.energy), patience: Math.round(s.patience), trust: round(s.trust, 1), summary: moodSummary(s),
     history: s.history, stance: { id: shown.id, name: shown.name, why: shown.why }, config: mindConfig(state), baseline: BASELINE, diary: diaryOf(state) }
 }
 export function setMoodEnabled(state: StatePort, enabled: boolean): void { state.set('enabled', enabled) }
 
-/** 回到平时: mood, energy and patience back to their baselines. Trust and the history stay. */
+/** 回到平时: mood, undertone, grudge, energy and patience back to their baselines. Trust and the history stay. */
 export function resetMood(state: StatePort): void {
   const s = read(state)
-  state.set('mood', { ...s, mood: BASELINE.mood, energy: BASELINE.energy, patience: BASELINE.patience, lastStance: undefined })
+  state.set('mood', { ...s, mood: BASELINE.mood, undertone: BASELINE.mood, grudge: 0, energy: BASELINE.energy, patience: BASELINE.patience, lastStance: undefined })
 }
 
 /** The owner dragged a value in the window; it takes effect from the next message. */
 export function setMoodValues(state: StatePort, values: Partial<Pick<MoodState, 'mood' | 'energy' | 'patience' | 'trust'>>): void {
   const s = read(state)
   const next = { ...s }
-  if (values.mood !== undefined) next.mood = clamp(values.mood, -1, 1)
+  if (values.mood !== undefined) {
+    next.mood = clamp(values.mood, -1, 1)
+    next.undertone = clamp(values.mood, -1, 1)
+    if (next.mood >= 0) next.grudge = 0
+  }
   if (values.energy !== undefined) next.energy = clamp(values.energy, 0, 1)
   if (values.patience !== undefined) next.patience = clamp(values.patience, 0, 100)
   if (values.trust !== undefined) next.trust = clamp(values.trust, 0, 100)

@@ -265,7 +265,7 @@ export class Computers {
     const script = [
       'J="$NUONUO_HOME/.computer/jobs"', 'mkdir -p "$J"', `mkdir -p ${q(opts.cwd)}`,
       `printf %s ${b64(job)} | base64 -d > "$J/${id}.sh"`,
-      `(setsid nohup bash -c 'echo $$ > "$1.pid"; timeout -k 10 ${Math.max(1, Math.round(opts.timeoutSeconds))} bash -l "$1.sh" > "$1.log" 2>&1 < /dev/null; echo $? > "$1.exit"' _ "$J/${id}" > /dev/null 2>&1 < /dev/null &)`,
+      `(_sid() { if command -v setsid >/dev/null 2>&1; then setsid "$@"; else perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' -- "$@"; fi; }; _sid nohup bash -c 'echo $$ > "$1.pid"; if command -v timeout >/dev/null 2>&1; then timeout -k 10 ${Math.max(1, Math.round(opts.timeoutSeconds))} bash -l "$1.sh" > "$1.log" 2>&1 < /dev/null; else bash -l "$1.sh" > "$1.log" 2>&1 < /dev/null; fi; echo $? > "$1.exit"' _ "$J/${id}" > /dev/null 2>&1 < /dev/null &)`,
       waitFor(id, opts.waitSeconds), report(id),
     ].join('\n')
     const r = await this.run(c, script, { timeoutSeconds: opts.waitSeconds + 30 })
@@ -281,7 +281,7 @@ export class Computers {
 
   async stopJob(c: BoundComputer, id: string): Promise<boolean> {
     if (!/^cj[0-9a-z]+$/.test(id)) return false
-    const r = await this.run(c, `J="$NUONUO_HOME/.computer/jobs"; [ -f "$J/${id}.exit" ] && { echo done; exit 0; }; P=$(cat "$J/${id}.pid" 2>/dev/null) && pkill -TERM -s "$P" && { sleep 0.5; [ -f "$J/${id}.exit" ] || echo 143 > "$J/${id}.exit"; echo stopped; }`, { timeoutSeconds: 20 })
+    const r = await this.run(c, `J="$NUONUO_HOME/.computer/jobs"; [ -f "$J/${id}.exit" ] && { echo done; exit 0; }; P=$(cat "$J/${id}.pid" 2>/dev/null) && (pkill -TERM -s "$P" 2>/dev/null || kill -TERM -"$P" 2>/dev/null || kill -TERM "$P" 2>/dev/null) && { sleep 0.5; [ -f "$J/${id}.exit" ] || echo 143 > "$J/${id}.exit"; echo stopped; }`, { timeoutSeconds: 20 })
     return r.stdout.includes('stopped')
   }
 
@@ -301,13 +301,13 @@ export class Computers {
   }
 
   async download(c: BoundComputer, remote: string, local: string): Promise<number> {
-    const head = await this.run(c, `stat -c %s ${q(remote)}`, { timeoutSeconds: 20 })
+    const head = await this.run(c, `[ -f ${q(remote)} ] && wc -c < ${q(remote)}`, { timeoutSeconds: 20 })
     const size = Number(head.stdout.trim())
-    if (head.exitCode !== 0 || !Number.isFinite(size)) throw new ComputerError(`云电脑上没有文件 ${remote}`)
+    if (head.exitCode !== 0 || !head.stdout.trim() || !Number.isFinite(size)) throw new ComputerError(`云电脑上没有文件 ${remote}`)
     if (size > FILE_LIMIT) throw new ComputerError(`文件太大（${Math.round(size / 1048576)} MB），一次最多 100 MB`)
     const parts: Buffer[] = []
     for (let off = 0; off < size; off += CHUNK) {
-      const r = await this.run(c, `tail -c +${off + 1} ${q(remote)} | head -c ${CHUNK} | base64 -w0`, { timeoutSeconds: 120 })
+      const r = await this.run(c, `tail -c +${off + 1} ${q(remote)} | head -c ${CHUNK} | base64 | tr -d '\\r\\n'`, { timeoutSeconds: 120 })
       if (r.exitCode !== 0 || r.truncated) throw new ComputerError(`读取 ${remote} 失败：${r.stderr.slice(0, 200) || '输出被截断'}`)
       parts.push(Buffer.from(r.stdout.trim(), 'base64'))
     }

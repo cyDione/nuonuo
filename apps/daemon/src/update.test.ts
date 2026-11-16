@@ -75,8 +75,10 @@ describe('Updater', () => {
     expect(assetPattern(true, 'darwin', 'arm64').test('nuonuo-1.0.0-mac-arm64.dmg')).toBe(true)
     expect(assetPattern(true, 'win32', 'x64').test('nuonuo-1.0.0-win-x64-setup.exe')).toBe(true)
     expect(assetPattern(true, 'win32', 'x64').test('nuonuo-1.0.0-win-arm64-setup.exe')).toBe(false)
-    const desktop = new Updater({ home: mkdtempSync(join(tmpdir(), 'sa-home-')), entry: join(fakePackage(), 'lib/cli.mjs'), env: {}, desktop: true })
-    expect(desktop.status()).toMatchObject({ install: 'desktop', canUpdate: false })
+    const desktopLinux = new Updater({ home: mkdtempSync(join(tmpdir(), 'sa-home-')), entry: join(fakePackage(), 'lib/cli.mjs'), env: {}, desktop: true, platform: 'linux' })
+    expect(desktopLinux.status()).toMatchObject({ install: 'desktop', canUpdate: false })
+    const desktopMac = new Updater({ home: mkdtempSync(join(tmpdir(), 'sa-home-')), entry: join(fakePackage(), 'lib/cli.mjs'), env: {}, desktop: true, platform: 'darwin' })
+    expect(desktopMac.status()).toMatchObject({ install: 'desktop', canUpdate: true })
   })
 
   it('prepares install.sh from the release tag with the prefix, version and token', async () => {
