@@ -286,9 +286,9 @@ describe('Muse features (backend)', () => {
     expect(done).toEqual({ added: 2, existing: 0, skipped: 0 })
   })
 
-  it('records stopping a task as a faint mood signal when mood is on', async () => {
-    await call('/api/mood', json('PUT', { enabled: true }))
+  it('has mood on by default, records stopping a task as a faint mood signal, and stays quiet when switched off', async () => {
     const before = ((await (await call('/api/mood')).json()) as any).mood
+    expect(before.enabled).toBe(true)
     const cnv = rt.engine.mainConversation()
     const trig = rt.engine.receiveMessage(cnv, '帮我查一下')
     const ticket = rt.engine.startTask({ conversationId: cnv, triggerIds: [trig.triggerId], title: '查机票' })
@@ -298,6 +298,13 @@ describe('Muse features (backend)', () => {
     expect(after.patience).toBe(before.patience - 2)
     expect(after.mood).toBeLessThan(before.mood)
     expect(after.history.at(-1)).toMatchObject({ attitude: 'stopped', note: '停下「查机票」' })
+
+    await call('/api/mood', json('PUT', { enabled: false }))
+    expect(((await (await call('/api/mood')).json()) as any).mood.enabled).toBe(false)
+    const trig2 = rt.engine.receiveMessage(cnv, '再查一下')
+    const ticket2 = rt.engine.startTask({ conversationId: cnv, triggerIds: [trig2.triggerId], title: '订酒店' })
+    await call(`/api/tickets/${ticket2.id}/stop`, { method: 'POST' })
+    expect(((await (await call('/api/mood')).json()) as any).mood.history).toHaveLength(after.history.length)
   })
 })
 

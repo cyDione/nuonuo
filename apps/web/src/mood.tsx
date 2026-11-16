@@ -1,14 +1,15 @@
 /**
- * 个性与心境 (Figma sections 29 and 31, 202:1183). In 它是谁: the switch, its stance and a line on how it is, its
- * personality base, three meters and the last turns; 「打开」 opens the window with three pages:
+ * 个性与心境 (Figma sections 29, 31 and 33 · 210:1187). On by default (switched on/off in 设置 · 主动).
+ * In 它是谁: a framed live card with stance pill + qualitative state, a 2×2 micro-capsule grid for all four dimensions
+ * (心情 · 精力 · 耐心 · 信任), a compact sparkline once turns accumulate, and the personality base underneath.
+ * 「打开」 (or tapping the card) opens the window with three pages:
  *   此刻 — the stance and why, four values to drag (they apply from the next message), the last 50 turns (tap for why).
  *   性格 — its personality base (the persona's 性格), its limits and how much praise / being brushed off move it.
  *   日记 — what it wrote down in its own words; pin or delete.
- * This block and its window are the only place any of it is set. Black, white and grey; the stance dot is the one accent.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Pin, Plus, RotateCcw, Trash2, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { BookOpen, ChevronRight, Pin, Plus, RotateCcw, Trash2, X } from 'lucide-react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { api, type Persona } from './api'
 import { locale, tx } from './i18n'
 import { Switch } from './skills'
@@ -23,16 +24,23 @@ export interface MoodView {
 }
 type Values = Pick<MoodView, 'mood' | 'energy' | 'patience' | 'trust'>
 
-const pick = (v: number, lo: number, hi: number, words: string[]) => words[Math.min(words.length - 1, Math.max(0, Math.floor(((v - lo) / (hi - lo)) * words.length)))]!
+const moodShort = (v: number) => v < -0.55 ? tx('低落') : v < -0.15 ? tx('有点闷') : v <= 0.25 ? tx('平静') : v < 0.65 ? tx('开心') : tx('很开心')
+const energyShort = (v: number) => v < 0.34 ? tx('没什么劲') : v < 0.67 ? tx('平稳') : tx('有精神')
+const patienceShort = (v: number) => v < 20 ? tx('见底了') : v < 35 ? tx('不耐烦') : v < 80 ? tx('有耐心') : tx('包容')
+const trustShort = (v: number) => v < 30 ? tx('疏远') : v < 48 ? tx('保留') : v < 60 ? tx('熟悉') : tx('默契')
+
 /** The same words the assistant hears about itself (packages/plugins/src/mood.ts). */
 export function moodLine(m: { mood: number; energy: number }): string {
-  const mood = pick(m.mood, -1, 1, [tx('低落'), tx('有点闷'), tx('心情平静'), tx('心情不错'), tx('心情很好')])
-  const energy = pick(m.energy, 0, 1, [tx('没什么劲'), tx('平稳'), tx('有精神')])
+  const mood = m.mood < -0.55 ? tx('低落') : m.mood < -0.15 ? tx('有点闷') : m.mood <= 0.25 ? tx('心情平静') : m.mood < 0.65 ? tx('心情不错') : tx('心情很好')
+  const energy = energyShort(m.energy)
   return tx('{0}，{1}', mood, energy)
 }
 const STANCE: Record<string, string> = { cool: tx('冷淡抽离'), guarded: tx('防备克制'), comrade: tx('战友破局'), listen: tx('先接住'), focus: tx('专注干活'), banter: tx('老友互怼'), partner: tx('清醒搭档') }
+const STANCE_DOT: Record<string, string> = { partner: 'bg-accent', banter: 'bg-accent', comrade: 'bg-sky', focus: 'bg-sky', listen: 'bg-ok', guarded: 'bg-warn', cool: 'bg-faint' }
+const stanceDot = (id: string) => STANCE_DOT[id] ?? 'bg-accent'
+const sign = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(2)}`
 
-function useMood() {
+export function useMood() {
   const qc = useQueryClient()
   const view = useQuery({ queryKey: ['mood'], queryFn: () => api.get<{ mood: MoodView }>('/mood'), refetchInterval: 20_000 }).data?.mood
   const put = (data: { mood: MoodView }) => qc.setQueryData(['mood'], data)
@@ -46,71 +54,127 @@ function useMood() {
 
 // ── 它是谁 ──────────────────────────────────────────────────────────────────
 
-/** A thin track; the fill moves with transform only, so a change glides instead of jumping. */
-function Meter({ label, value, shown, centred }: { label: string; value: number; shown: string; centred?: boolean }) {
+/** Symmetrical bipolar micro-capsules (-1..+1) anchored around a center equilibrium notch. */
+function BipolarTile({ label, sub, value, shown }: { label: string; sub: string; value: number; shown: string }) {
   const v = Math.max(-1, Math.min(1, value))
-  return <div className="contents text-[13px]">
-    <span className="text-[13px] text-muted">{label}</span>
-    <span className="relative h-1.5 overflow-hidden rounded-full bg-line" role="meter" aria-label={label} aria-valuemin={centred ? -1 : 0} aria-valuemax={1} aria-valuenow={v}>
-      {centred
-        ? <>
-          <span className={cx('absolute inset-y-0 w-1/2 rounded-full bg-fg transition-transform duration-[240ms] ease-[var(--ease-out-strong)] motion-reduce:transition-none', v >= 0 ? 'left-1/2 origin-left' : 'right-1/2 origin-right')}
-            style={{ transform: `scaleX(${Math.abs(v)})` }} />
-          <span className="absolute inset-y-0 left-1/2 w-px bg-faint" />
-        </>
-        : <span className="absolute inset-0 origin-left rounded-full bg-fg transition-transform duration-[240ms] ease-[var(--ease-out-strong)] motion-reduce:transition-none" style={{ transform: `scaleX(${Math.max(0, v)})` }} />}
-    </span>
-    <span className="text-right text-xs text-muted tabular-nums">{shown}</span>
+  const steps = Math.abs(v) < 0.06 ? 0 : Math.min(4, Math.max(1, Math.round(Math.abs(v) * 4)))
+  return <div className="rounded-[10px] border border-line bg-card px-3 py-2.5" role="meter" aria-label={label} aria-valuemin={-1} aria-valuemax={1} aria-valuenow={v} aria-valuetext={`${sub} ${shown}`}>
+    <div className="mb-2 flex items-baseline gap-1.5">
+      <span className="shrink-0 text-xs font-medium text-fg">{label}</span>
+      <span className={cx('min-w-0 truncate text-[11px]', v >= 0.65 ? 'text-accent' : 'text-muted')}>{sub}</span>
+      <span className="ml-auto shrink-0 text-xs font-semibold text-fg tabular-nums">{shown}</span>
+    </div>
+    <div className="flex h-2.5 items-center gap-[3px]" aria-hidden>
+      {[3, 2, 1, 0].map(slot => {
+        const lit = v < 0 && slot < steps
+        return <span key={`l${slot}`} className="h-[5px] flex-1 rounded-full bg-fg/[0.09] dark:bg-fg/[0.14]">
+          <span className={cx('block size-full rounded-full bg-muted transition-[transform,opacity] duration-[180ms] ease-[var(--ease-out-strong)] motion-reduce:transition-none', lit ? 'scale-100 opacity-100' : 'scale-90 opacity-0')} />
+        </span>
+      })}
+      <span className={cx('mx-[1px] h-[10px] w-[1.5px] shrink-0 rounded-full', steps === 0 ? 'bg-fg/45' : 'bg-faint/80')} />
+      {[0, 1, 2, 3].map(slot => {
+        const lit = v > 0 && slot < steps
+        return <span key={`r${slot}`} className="h-[5px] flex-1 rounded-full bg-fg/[0.09] dark:bg-fg/[0.14]">
+          <span className={cx('block size-full rounded-full bg-accent transition-[transform,opacity] duration-[180ms] ease-[var(--ease-out-strong)] motion-reduce:transition-none', lit ? 'scale-100 opacity-100' : 'scale-90 opacity-0')} />
+        </span>
+      })}
+    </div>
   </div>
 }
 
-/** The mood of the last turns as one line; the dashed rule is where it settles back to. Data, so it never animates. */
-function Trend({ points, base }: { points: MoodPoint[]; base: number }) {
-  const W = 312, H = 36
-  const y = (v: number) => H / 2 - v * (H / 2.2)
-  const d = points.map((p, i) => `${i ? 'L' : 'M'}${(points.length === 1 ? W - 4 : i / (points.length - 1) * (W - 4)).toFixed(1)} ${y(p.mood).toFixed(1)}`).join(' ')
-  const last = points.at(-1)
-  return <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full overflow-visible text-fg" aria-hidden>
-    <line x1={0} x2={W} y1={y(base)} y2={y(base)} className="stroke-line" strokeDasharray="3 3" />
-    {points.length > 1 && <path d={d} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
-    {last && <circle cx={W - 4} cy={y(last.mood)} r={3} fill="currentColor" />}
+/** 8-capsule unipolar micro-gauge (0..1); shifts to warm amber warning when patience runs low. */
+function PipTile({ label, sub, value, shown, warn }: { label: string; sub: string; value: number; shown: string; warn?: boolean }) {
+  const u = Math.max(0, Math.min(1, value))
+  const litCount = u <= 0.02 ? 0 : Math.min(8, Math.max(1, Math.round(u * 8)))
+  return <div className="rounded-[10px] border border-line bg-card px-3 py-2.5" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={1} aria-valuenow={u} aria-valuetext={`${sub} ${shown}`}>
+    <div className="mb-2 flex items-baseline gap-1.5">
+      <span className="shrink-0 text-xs font-medium text-fg">{label}</span>
+      <span className={cx('min-w-0 truncate text-[11px]', warn ? 'text-warn' : 'text-muted')}>{sub}</span>
+      <span className={cx('ml-auto shrink-0 text-xs font-semibold tabular-nums', warn ? 'text-warn' : 'text-fg')}>{shown}</span>
+    </div>
+    <div className="flex h-2.5 items-center gap-[3px]" aria-hidden>
+      {Array.from({ length: 8 }, (_, i) => <span key={i} className="h-[5px] flex-1 rounded-full bg-fg/[0.09] dark:bg-fg/[0.14]">
+        <span className={cx('block size-full rounded-full transition-[transform,opacity] duration-[180ms] ease-[var(--ease-out-strong)] motion-reduce:transition-none', warn ? 'bg-warn' : 'bg-fg/[0.78]', i < litCount ? 'scale-100 opacity-100' : 'scale-90 opacity-0')} />
+      </span>)}
+    </div>
+  </div>
+}
+
+/** Compact 140×26 mood sparkline for the card footer; dashed rule marks where mood settles back to. */
+function Trend({ points, base, positive }: { points: MoodPoint[]; base: number; positive: boolean }) {
+  const gid = useId()
+  const W = 140, H = 26, pad = 3
+  const x = (i: number) => pad + (i / Math.max(1, points.length - 1)) * (W - pad * 2)
+  const y = (v: number) => H / 2 - Math.max(-1, Math.min(1, v)) * (H / 2 - pad)
+  const lineD = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.mood).toFixed(1)}`).join(' ')
+  const areaD = `${lineD} L${x(points.length - 1).toFixed(1)} ${H} L${x(0).toFixed(1)} ${H} Z`
+  const last = points.at(-1)!
+  return <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className={cx('block h-[26px] w-[140px] shrink-0 overflow-visible', positive ? 'text-accent' : 'text-muted')} aria-hidden>
+    <defs>
+      <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="currentColor" stopOpacity="0.18" />
+        <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+      </linearGradient>
+    </defs>
+    <line x1={pad} x2={W - pad} y1={y(base)} y2={y(base)} className="stroke-fg/15" strokeDasharray="2.5 2.5" vectorEffect="non-scaling-stroke" />
+    <path d={areaD} fill={`url(#${gid})`} />
+    <path d={lineD} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+    <circle cx={x(points.length - 1)} cy={y(last.mood)} r={2.5} fill="currentColor" />
   </svg>
 }
 
+type Tab = 'now' | 'persona' | 'diary'
+
 export function MoodSection({ Head }: { Head: React.ComponentType<{ title: string; count?: number | string | undefined; action?: React.ReactNode }> }) {
-  const { view, update } = useMood()
+  const { view } = useMood()
   const persona = useQuery({ queryKey: ['persona'], queryFn: () => api.get<{ persona: Persona }>('/persona') }).data?.persona
-  const [open, setOpen] = useState(false)
+  const [openTab, setOpenTab] = useState<Tab | null>(null)
   if (!view) return null
   const base = persona?.personality.trim()
   return <section className="border-t border-line pt-5">
-    <Head title={tx('个性与心境')} action={<span className="-my-1.5 flex items-center gap-3 self-center">
-      <button type="button" onClick={() => setOpen(true)} className="press text-[13px] font-medium text-fg hover:opacity-70">{tx('打开')}</button>
-      <Switch on={view.enabled} onChange={v => update.mutate({ enabled: v })} label={tx('心境')} disabled={update.isPending} />
-    </span>} />
-    <div className="space-y-3">
-      {view.enabled && <p className="text-[15px] font-medium text-pretty">{STANCE[view.stance.id] ?? view.stance.name} · {moodLine(view)}</p>}
-      <p className={cx('text-[13px] text-pretty', base ? 'text-muted' : 'text-faint')}>{base ? tx('底色：{0}', base) : tx('还没写性格底色，点「打开」→ 性格。')}</p>
-      {view.enabled ? <>
-        <div className="grid grid-cols-[auto_1fr_2.5rem] items-center gap-x-2.5 gap-y-2.5">
-          <Meter label={tx('心情')} value={view.mood} shown={`${view.mood > 0 ? '+' : ''}${view.mood.toFixed(2)}`} centred />
-          <Meter label={tx('精力')} value={view.energy} shown={view.energy.toFixed(2)} />
-          <Meter label={tx('信任')} value={view.trust / 100} shown={String(Math.round(view.trust))} />
-        </div>
-        <Trend points={view.history} base={view.undertone ?? view.baseline.mood} />
-        <p className="text-[11px] text-faint">{view.history.length ? tx('最近 {0} 轮', view.history.length) : tx('还没有记录')}</p>
-      </> : <p className="text-[13px] text-faint">{tx('心境关着：性格底色照常生效，心情不再变，也不写日记。')}</p>}
-    </div>
-    {open && <MindWindow onClose={() => setOpen(false)} />}
+    <Head title={tx('个性与心境')} action={
+      <button type="button" onClick={() => setOpenTab('now')} className="press -my-1 -mr-1.5 inline-flex h-7 items-center gap-0.5 rounded-lg px-1.5 text-xs font-medium text-fg hover:bg-sunken">
+        {tx('打开')}<ChevronRight size={13} className="text-muted" />
+      </button>
+    } />
+    {view.enabled ? <button type="button" onClick={() => setOpenTab('now')}
+      className="block w-full rounded-2xl bg-sunken p-3 text-left transition-[transform,background-color] duration-150 ease-[var(--ease-out-strong)] hover:bg-hero-2/65 active:scale-[0.985] motion-reduce:transition-none motion-reduce:active:scale-100">
+      <div className="flex items-center gap-2 pb-2.5">
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-card py-1 pr-2.5 pl-2 text-xs font-medium text-fg">
+          <span className={cx('size-[7px] shrink-0 rounded-full', stanceDot(view.stance.id))} />
+          {STANCE[view.stance.id] ?? view.stance.name}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-right text-xs text-muted">{moodLine(view)}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <BipolarTile label={tx('心情')} sub={moodShort(view.mood)} value={view.mood} shown={sign(view.mood)} />
+        <PipTile label={tx('精力')} sub={energyShort(view.energy)} value={view.energy} shown={`${Math.round(view.energy * 100)}%`} />
+        <PipTile label={tx('耐心')} sub={patienceShort(view.patience)} value={view.patience / 100} shown={String(Math.round(view.patience))} warn={view.patience < 35} />
+        <PipTile label={tx('信任')} sub={trustShort(view.trust)} value={view.trust / 100} shown={String(Math.round(view.trust))} />
+      </div>
+      {view.history.length > 1 && <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-line pt-2.5">
+        <span className="shrink-0 text-[11px] text-faint tabular-nums">{tx('最近 {0} 轮', view.history.length)}</span>
+        <Trend points={view.history} base={view.undertone ?? view.baseline.mood} positive={view.mood >= 0} />
+      </div>}
+    </button> : <div className="flex items-center justify-between gap-3 rounded-2xl bg-sunken px-3.5 py-3">
+      <span className="min-w-0 flex-1 text-xs text-muted text-pretty">{tx('心境已关闭，性格底色照常生效')}</span>
+      <a href="#/settings/persona" className="inline-flex shrink-0 items-center gap-0.5 text-xs font-medium text-fg hover:opacity-75">
+        {tx('去设置开启')}<ChevronRight size={13} className="text-muted" />
+      </a>
+    </div>}
+    <button type="button" onClick={() => setOpenTab('persona')} className="mt-2.5 block w-full rounded-lg px-0.5 text-left text-xs text-pretty transition-colors duration-150">
+      <span className={cx('line-clamp-2', base ? 'text-muted hover:text-fg' : 'text-faint hover:text-muted')}>
+        {base ? tx('底色：{0}', base) : tx('还没写性格底色，点这里写一句。')}
+      </span>
+    </button>
+    {openTab && <MindWindow initialTab={openTab} onClose={() => setOpenTab(null)} />}
   </section>
 }
 
 // ── The window ──────────────────────────────────────────────────────────────
 
-type Tab = 'now' | 'persona' | 'diary'
-
-function MindWindow({ onClose }: { onClose(): void }) {
-  const [tab, setTab] = useState<Tab>('now')
+function MindWindow({ initialTab = 'now', onClose }: { initialTab?: Tab; onClose(): void }) {
+  const [tab, setTab] = useState<Tab>(initialTab)
   const [leaving, setLeaving] = useState(false)
   const dirty = useRef(false)
   const opener = useRef<Element | null>(document.activeElement)
@@ -141,41 +205,44 @@ function MindWindow({ onClose }: { onClose(): void }) {
         <span className="flex-1" />
         <button type="button" onClick={close} aria-label={tx('关闭')} title={tx('关闭')} className="press flex size-8 items-center justify-center rounded-lg text-muted hover:bg-sunken hover:text-fg"><X size={16} /></button>
       </header>
-      {tab === 'now' && <NowPage />}
+      {tab === 'now' && <NowPage onClose={close} />}
       {tab === 'persona' && <PersonaPage onDirty={d => { dirty.current = d }} />}
       {tab === 'diary' && <DiaryPage />}
     </div>
   </div>
 }
 
-/** A slider drawn like Figma 31: a grey rail, the fill from the origin, a short tick where it settles, a ring knob. */
-function Slider({ label, note, value, min, max, base, origin, step, shown, onCommit }: {
-  label: string; note: string; value: number; min: number; max: number; base: number; origin?: number; step: number; shown(v: number): string; onCommit(v: number): void
+/** A slider drawn like Figma 31 & 33D: a capsule rail, fill from the origin, a crisp baseline tick, and an 18px ring knob. */
+function Slider({ label, note, value, min, max, base, origin, step, shown, accent, warn, onCommit }: {
+  label: string; note: string | ((v: number) => string); value: number; min: number; max: number; base: number; origin?: number; step: number; shown(v: number): string; accent?: boolean; warn?: boolean; onCommit(v: number): void
 }) {
   const [v, setV] = useState(value)
   const dragging = useRef(false)
   useEffect(() => { if (!dragging.current) setV(value) }, [value])
-  const at = (x: number) => `${((x - min) / (max - min)) * 100}%`
+  const pct = (x: number) => `${((Math.max(min, Math.min(max, x)) - min) / (max - min)) * 100}%`
   const o = origin ?? min
+  const lo = Math.min(o, v), hi = Math.max(o, v)
   const commit = () => { dragging.current = false; if (v !== value) onCommit(v) }
+  const noteText = typeof note === 'function' ? note(v) : note
+  const fillCls = accent ? (v >= 0 ? 'bg-accent' : 'bg-muted') : warn ? 'bg-warn' : 'bg-fg'
   return <div>
     <div className="mb-2 flex items-baseline gap-2">
-      <span className="text-[13px] font-medium">{label}</span><span className="text-xs text-muted">{note}</span>
-      <span className="ml-auto text-[13px] font-medium tabular-nums">{shown(v)}</span>
+      <span className="text-[13px] font-medium">{label}</span><span className={cx('text-xs', warn ? 'text-warn' : 'text-muted')}>{noteText}</span>
+      <span className={cx('ml-auto text-[13px] font-semibold tabular-nums', accent && v > 0 ? 'text-accent' : warn ? 'text-warn' : 'text-fg')}>{shown(v)}</span>
     </div>
-    <div className="relative h-[18px]">
-      <span className="absolute inset-x-0 top-[7px] h-1 rounded-full bg-line" />
-      <span className="absolute top-[7px] h-1 rounded-full bg-fg" style={{ left: at(Math.min(o, v)), width: `calc(${at(Math.max(o, v))} - ${at(Math.min(o, v))})` }} />
-      <span className="absolute top-[3px] h-3 w-0.5 -translate-x-1/2 rounded-full bg-muted" style={{ left: at(base) }} />
-      <span className="pointer-events-none absolute top-0 size-[18px] -translate-x-1/2 rounded-full border-2 border-fg bg-panel peer-focus-visible:ring-4" style={{ left: at(v) }} />
+    <div className="relative flex h-6 items-center">
       <input type="range" aria-label={label} min={min} max={max} step={step} value={v}
-        onChange={e => { dragging.current = true; setV(Number(e.target.value)) }} onPointerUp={commit} onKeyUp={commit} onBlur={commit}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+        onChange={e => { dragging.current = true; setV(Number(e.target.value)) }} onPointerUp={commit} onPointerCancel={commit} onKeyUp={commit} onBlur={commit}
+        className="peer absolute -inset-y-1 inset-x-0 z-10 h-8 w-full cursor-pointer opacity-0" />
+      <span className="pointer-events-none relative h-1.5 w-full rounded-full bg-fg/[0.10] dark:bg-fg/[0.15]">
+        <span className={cx('absolute inset-y-0 rounded-full', fillCls)} style={{ left: pct(lo), width: `calc(${pct(hi)} - ${pct(lo)})` }} />
+      </span>
+      <span title={tx('平时')} className="pointer-events-none absolute top-1/2 h-3.5 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted" style={{ left: pct(base) }} />
+      <span className="pointer-events-none absolute top-1/2 size-[18px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-fg bg-panel shadow-[0_1px_3px_rgb(0_0_0/0.18)] transition-transform duration-150 ease-[var(--ease-out-strong)] peer-hover:scale-105 peer-active:scale-110 peer-focus-visible:ring-4 peer-focus-visible:ring-accent/25 motion-reduce:transition-none" style={{ left: pct(v) }} />
     </div>
   </div>
 }
 
-const sign = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(2)}`
 const when = (at: number) => {
   const d = new Date(at), now = new Date()
   const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -184,27 +251,28 @@ const when = (at: number) => {
   return tx('{0} 月 {1} 日 {2}', d.getMonth() + 1, d.getDate(), time)
 }
 
-function NowPage() {
+function NowPage({ onClose }: { onClose(): void }) {
   const { view, update, put } = useMood()
   const reset = useMutation({ mutationFn: () => api.post<{ mood: MoodView }>('/mood/reset', {}), onSuccess: put })
   if (!view) return <div className="flex-1" />
   const set = (values: Partial<Values>) => update.mutate({ values })
   return <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
     {!view.enabled && <div className="flex items-center gap-3 rounded-xl bg-sunken px-4 py-2.5 text-xs text-muted">
-      <span className="flex-1">{tx('心境关着：这些数不会变，也不影响它说话。')}</span>
-      <button type="button" onClick={() => update.mutate({ enabled: true })} className="press h-7 rounded-lg bg-ink px-2.5 font-medium text-ink-fg">{tx('打开心境')}</button>
+      <span className="flex-1 text-pretty">{tx('心境变化已关闭：这些数不会随对话变，也不影响它说话。')}</span>
+      <a href="#/settings/persona" onClick={onClose} className="shrink-0 font-medium text-muted underline underline-offset-2 hover:text-fg">{tx('设置')}</a>
+      <button type="button" onClick={() => update.mutate({ enabled: true })} className="press h-7 shrink-0 rounded-lg bg-ink px-2.5 font-medium text-ink-fg">{tx('打开心境')}</button>
     </div>}
     <div className="flex items-center gap-3">
       <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-line py-1 pr-3 pl-2.5 text-[13px] font-medium">
-        <span className="size-[7px] rounded-full bg-accent" />{STANCE[view.stance.id] ?? view.stance.name}
+        <span className={cx('size-[7px] rounded-full', stanceDot(view.stance.id))} />{STANCE[view.stance.id] ?? view.stance.name}
       </span>
       <p className="min-w-0 text-[13px] text-muted text-pretty">{tx(view.stance.why)}</p>
     </div>
-    <div className="space-y-4 rounded-xl bg-sunken px-4 py-3.5">
-      <Slider label={tx('心情')} note={pick(view.mood, -1, 1, [tx('低落'), tx('有点闷'), tx('平静'), tx('开心'), tx('很开心')])} value={view.mood} min={-1} max={1} origin={0} step={0.01} base={view.undertone ?? view.baseline.mood} shown={sign} onCommit={mood => set({ mood })} />
-      <Slider label={tx('精力')} note={pick(view.energy, 0, 1, [tx('懒懒的'), tx('平稳'), tx('话多')])} value={view.energy} min={0} max={1} step={0.01} base={view.baseline.energy} shown={v => v.toFixed(2)} onCommit={energy => set({ energy })} />
-      <Slider label={tx('耐心')} note={pick(view.patience, 0, 100, [tx('见底了'), tx('有点不耐烦'), tx('有耐心'), tx('包容')])} value={view.patience} min={0} max={100} step={1} base={view.baseline.patience} shown={v => String(Math.round(v))} onCommit={patience => set({ patience })} />
-      <Slider label={tx('信任')} note={tx('变得很慢')} value={view.trust} min={0} max={100} step={1} base={view.baseline.trust} shown={v => String(Math.round(v))} onCommit={trust => set({ trust })} />
+    <div className="space-y-4 rounded-2xl bg-sunken px-4 py-4">
+      <Slider label={tx('心情')} note={v => moodShort(v)} value={view.mood} min={-1} max={1} origin={0} step={0.01} base={view.undertone ?? view.baseline.mood} shown={sign} accent onCommit={mood => set({ mood })} />
+      <Slider label={tx('精力')} note={v => energyShort(v)} value={view.energy} min={0} max={1} step={0.01} base={view.baseline.energy} shown={v => `${Math.round(v * 100)}%`} onCommit={energy => set({ energy })} />
+      <Slider label={tx('耐心')} note={v => patienceShort(v)} value={view.patience} min={0} max={100} step={1} base={view.baseline.patience} shown={v => String(Math.round(v))} warn={view.patience < 35} onCommit={patience => set({ patience })} />
+      <Slider label={tx('信任')} note={v => `${trustShort(v)} · ${tx('变得很慢')}`} value={view.trust} min={0} max={100} step={1} base={view.baseline.trust} shown={v => String(Math.round(v))} onCommit={trust => set({ trust })} />
     </div>
     <div className="flex items-center gap-3">
       <p className="flex-1 text-xs text-muted text-pretty">{tx('拖动就生效，下一句话开始用新的状态。灰色短线是它平时的样子，心情和耐心会慢慢回去。')}</p>

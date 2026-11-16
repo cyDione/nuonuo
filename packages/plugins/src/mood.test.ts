@@ -5,7 +5,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { addDiary, applyReport, applyStop, BASELINE, diaryOf, GRUDGE_HALF_LIFE_H, guessOwner, hadHeatedTurn, initialMood, isHeatedTurn, MOOD_HALF_LIFE_H, moodContext, moodPlugin, moodSummary, moodView, PATIENCE_HALF_LIFE_H, pinDiary, recordMoodStop, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodValues, settleMood, stanceFor, UNDERTONE_HALF_LIFE_H } from './mood'
+import { addDiary, applyReport, applyStop, BASELINE, diaryOf, GRUDGE_HALF_LIFE_H, guessOwner, hadHeatedTurn, initialMood, isHeatedTurn, MOOD_HALF_LIFE_H, moodContext, moodEnabled, moodPlugin, moodSummary, moodView, PATIENCE_HALF_LIFE_H, pinDiary, recordMoodStop, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodValues, settleMood, stanceFor, UNDERTONE_HALF_LIFE_H } from './mood'
 
 describe('心境 model', () => {
   it('drifts mood and energy back to the baseline over time, but not trust', () => {
@@ -107,13 +107,19 @@ describe('心境 built in', () => {
   let store: Store | undefined
   afterEach(() => { store?.close(); store = undefined })
 
-  it('stays silent until switched on, then adds its block and takes mood_sync; reset starts over', async () => {
+  it('is on by default, stays silent when switched off, adds its block and takes mood_sync; reset starts over', async () => {
     store = openStore(':memory:')
     const plugins = new PluginManager(mkdtempSync(join(tmpdir(), 'nn-mood-')), new SourceRegistry(store, new Effects(store), new MemorySecrets()), store, { sandbox: false })
     plugins.registerBuiltIn(moodPlugin)
     expect(plugins.list().find(p => p.id === 'mood')).toMatchObject({ builtIn: true })
     const ext = plugins.agentExtensions()
     const state = plugins.stateOf('mood')
+    expect(moodEnabled(state)).toBe(true)
+    expect(moodView(state).enabled).toBe(true)
+    expect(Object.keys(ext.routerTools!())).toEqual(['mood_sync'])
+
+    setMoodEnabled(state, false)
+    expect(moodEnabled(state)).toBe(false)
     expect(await ext.inlineContext!('烦死了，接口又报500', undefined)).toBe('')
     expect(Object.keys(ext.routerTools!())).toEqual([])
 
@@ -155,7 +161,6 @@ describe('心境 built in', () => {
     plugins.registerBuiltIn(moodPlugin)
     const ext = plugins.agentExtensions()
     const state = plugins.stateOf('mood')
-    setMoodEnabled(state, true)
     const tools = ext.routerTools!() as Record<string, { execute: (a: unknown, o: unknown) => Promise<unknown> }>
     const sync = (diary?: string) => tools.mood_sync!.execute({ emotion: 'happy', intensity: 0.5, attitude: 'grateful', feedback: 'positive', ...(diary ? { diary } : {}) }, { toolCallId: '', messages: [] })
     expect(await sync('他终于修完了那个 bug，还说了谢谢。')).toMatchObject({ diary: 'kept' })

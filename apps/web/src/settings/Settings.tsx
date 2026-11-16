@@ -31,7 +31,7 @@ import { tx } from '../i18n'
 type Tab = { id: SettingsTab; label: string; icon: ReactNode; words: string }
 const GROUPS: { title: string; tabs: Tab[] }[] = [
   { title: tx('助理'), tabs: [
-    { id: 'persona', label: tx('主动'), icon: <Smile size={17} />, words: tx('主动 主动程度 多主动 只留意 点子 策略 节奏 同时 每天 不理会 账号 安静时间') },
+    { id: 'persona', label: tx('主动'), icon: <Smile size={17} />, words: tx('主动 主动程度 多主动 只留意 点子 策略 节奏 同时 每天 不理会 账号 安静时间 心境 个性 心情 情绪 日记 姿态') },
     { id: 'routines', label: tx('定时任务'), icon: <AlarmClock size={17} />, words: tx('定时 cron 每天 简报 周报 提醒') },
   ] },
   { title: tx('连接'), tabs: [

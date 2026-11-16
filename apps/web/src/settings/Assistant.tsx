@@ -1,11 +1,12 @@
 /**
- * 主动 (Figma v7, 23 · I): how proactive it is, the strategy in the owner's own words, and its pace — how much it does
- * quietly at once and per day, whose events it ignores, and the quiet hours when it does not reach out. Its name and look
- * moved to the right pane's 它是谁.
+ * 主动 (Figma v7, 23 · I): how proactive it is, dynamic mood & diary switches, the strategy in the owner's own words, and
+ * its pace — how much it does quietly at once and per day, whose events it ignores, and the quiet hours when it does not
+ * reach out. Its name, look and live mood view sit in the right pane's 它是谁.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api, type IdeaSettings, type NotifySettings, type ProactiveSettings } from '../api'
+import { useMood } from '../mood'
 import { cx } from '../ui'
 import { Area, Block, Btn, Choice, Foot, NumberInput, Page, Row, SaveBar, Section, TextInput, Toggle } from './kit'
 import { useNotify } from './hooks'
@@ -25,6 +26,7 @@ export function AssistantPage() {
     onSettled: () => { qc.invalidateQueries({ queryKey: ['proactive'] }); qc.invalidateQueries({ queryKey: ['activity'] }) },
   })
   const ideas = useQuery({ queryKey: ['ideas'], queryFn: () => api.get<{ settings: IdeaSettings }>('/ideas') }).data?.settings
+  const { view: mood, update: toggleMood } = useMood()
   const setCadence = useMutation({
     mutationFn: (cadence: IdeaSettings['cadence']) => api.put('/settings/ideas', { cadence }),
     onMutate: cadence => qc.setQueryData<{ settings: IdeaSettings }>(['ideas'], old => old && { ...old, settings: { ...old.settings, cadence } }),
@@ -47,6 +49,15 @@ export function AssistantPage() {
         <Choice label={tx('点子')} value={ideas.cadence} onChange={c => setCadence.mutate(c)} options={CADENCES} className="w-[280px]" />
       </Row>}
     </Section>
+
+    {mood && <Section title={tx('个性与心境')} foot={tx('关掉后性格底色照常生效，心情不再随对话起伏，也不写日记。')}>
+      <Row label={tx('心境变化')} sub={tx('让糯糯的心情、精力、耐心和信任随你们相处自然波动')}>
+        <Toggle label={tx('心境变化')} checked={mood.enabled} disabled={toggleMood.isPending} onChange={enabled => toggleMood.mutate({ enabled })} />
+      </Row>
+      <Row label={tx('心境日记')} sub={tx('有感触时用第一人称记一笔，只在聊到感受时翻出来')} className={cx(!mood.enabled && 'opacity-50')}>
+        <Toggle label={tx('心境日记')} checked={mood.enabled && mood.config.diary} disabled={!mood.enabled || toggleMood.isPending} onChange={diary => toggleMood.mutate({ config: { diary } })} />
+      </Row>
+    </Section>}
 
     <section>
       <h2 className="mb-2 text-[13px] text-muted">{tx('主动的策略')}</h2>

@@ -14,7 +14,7 @@
  * the system prompt, so the prompt cache stays intact); the agent reports the turn with `mood_sync` in the same step as
  * its reply. A missing report leaves everything as it was. It only changes tone, never how much the assistant helps.
  *
- * Off until the owner switches it on in 它是谁; that block and its window are its only entry.
+ * On by default; the owner can switch it off in 设置 · 主动, while 它是谁 and its window show the live state, persona base and diary.
  */
 import { definePlugin, tool, z, type PluginContext } from '@nuonuo/plugin-sdk'
 import type { ToolSet } from 'ai'
@@ -231,7 +231,7 @@ export function isHeatedTurn(r: { emotion?: string | undefined; intensity?: numb
 // ── State kept in the plugin's own store ─────────────────────────────────────
 
 const read = (state: StatePort) => settleMood(state.get<MoodState>('mood'))
-export const moodEnabled = (state: StatePort) => state.get<boolean>('enabled') ?? false
+export const moodEnabled = (state: StatePort) => state.get<boolean>('enabled') ?? true
 export const mindConfig = (state: StatePort): MindConfig => ({ up: 1, down: 1, diary: true, ...(state.get<Partial<MindConfig>>('config') ?? {}) })
 export const diaryOf = (state: StatePort): DiaryEntry[] => state.get<DiaryEntry[]>('diary') ?? []
 
