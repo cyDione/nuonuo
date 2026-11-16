@@ -78,8 +78,8 @@ export default ({ definePlugin, defineComputer }) => {
     description: '云端的一台 Linux 机器（4 核 8 GB），空闲时自动休眠',
     capabilities: {
       sudo: true, docker: true, sleeps: true, dataDir: '/data', maxExecSeconds: 600,
-      // Browsers started from a shell show up on the machine's desktop unless told not to: that desktop is the owner's.
-      env: { INSTABOX_HEADLESS: '1' },
+      desktop: { display: ':1', width: 1280, height: 800 },
+      env: { DISPLAY: ':1', NUONUO_BROWSER_HEADED: '1' },
     },
     async status(ctx) {
       if (!keyOf(ctx)) return { state: 'unconfigured', detail: '在插件设置里填上 Instabox 的 API key' }
@@ -126,12 +126,53 @@ export default ({ definePlugin, defineComputer }) => {
       const id = await machineId(ctx)
       await api(ctx, 'PUT', `/v1/machines/${id}/activity-leases/${encodeURIComponent(`nuonuo-${key}`.slice(0, 64))}`, { ttlSeconds: Math.max(30, Math.min(3600, seconds)) })
     },
+    async startDesktop(ctx) {
+      const id = await machineId(ctx)
+      let s = await api(ctx, 'POST', `/v1/machines/${id}/desktop`, { action: 'start', width: 1280, height: 800 }, { timeoutMs: 90_000 })
+      if (!s.installed) {
+        if (!s.installing) s = await api(ctx, 'POST', `/v1/machines/${id}/desktop`, { action: 'install' }, { timeoutMs: 90_000 })
+        const deadline = Date.now() + 240_000
+        while (!s.installed) {
+          if (s.failed) throw new Error(`云电脑桌面环境安装失败：${s.log ?? '请查看 /tmp/instabox-desktop-install.log'}`)
+          if (Date.now() > deadline) throw new Error('云电脑桌面环境安装超时（超过 4 分钟）')
+          await new Promise(r => setTimeout(r, 3_000))
+          s = await api(ctx, 'POST', `/v1/machines/${id}/desktop`, { action: 'status' }, { timeoutMs: 90_000 })
+        }
+        s = await api(ctx, 'POST', `/v1/machines/${id}/desktop`, { action: 'start', width: 1280, height: 800 }, { timeoutMs: 90_000 })
+      }
+      if (!s.running) throw new Error('云电脑图形桌面未能启动')
+    },
+    async desktopUrl(ctx, opts = {}) {
+      const st = await instabox.status(ctx)
+      if (st.state !== 'ready') {
+        const woken = await instabox.wake(ctx)
+        if (woken.state !== 'ready') throw new Error(`Instabox 云电脑现在用不了（${woken.detail ?? woken.state}）`)
+      }
+      await instabox.startDesktop(ctx)
+      const id = await machineId(ctx)
+      let r
+      try {
+        r = await api(ctx, 'POST', `/v1/machines/${id}/desktop/stream`, { viewOnly: Boolean(opts?.viewOnly), ttlSeconds: 3600 })
+      } catch (error) {
+        if (error?.status === 403 || error?.code === 'permission_denied') {
+          throw new Error('当前使用的是团队 Workspace Key，Instabox 仅允许个人 API Key 生成桌面流链接；仍可直接在接管窗口里使用网页或桌面截图操控')
+        }
+        throw error
+      }
+      return { url: r.url, ...(r.expiresAt ? { expiresAt: String(r.expiresAt) } : {}) }
+    },
+    async desktopControl(ctx, action) {
+      try {
+        const id = await machineId(ctx)
+        await api(ctx, 'POST', `/v1/machines/${id}/desktop`, { action }, { timeoutMs: 15_000 })
+      } catch { /* optional on older Instabox runtimes */ }
+    },
   })
 
   return definePlugin({
     id: 'instabox',
     name: 'Instabox 云电脑',
-    version: '0.1.0',
+    version: '0.2.0',
     description: '把 Instabox 的云端 Linux 机器接成糯糯自己的云电脑',
     computers: [instabox],
   })

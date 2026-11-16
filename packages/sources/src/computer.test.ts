@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { computerExtension, Computers, defineComputer, type BoundComputer, type ComputerExecRequest, type ComputerExecResult, type ComputerStatus } from './computer'
+import { BROWSERD_SOURCE } from './computer-browserd'
+import { computerExtension, Computers, defineComputer, mapXdoKey, type BoundComputer, type ComputerExecRequest, type ComputerExecResult, type ComputerStatus } from './computer'
 import { sdk } from './plugins'
 
 /** A "cloud computer" that is this machine: commands run in bash, nuonuo's space is a temporary folder. */
@@ -105,6 +106,104 @@ describe('Computers', () => {
   it('rejects incomplete providers', () => {
     expect(() => defineComputer({ id: 'Bad Id' } as any)).toThrow(/不合法/)
     expect(() => sdk.defineComputer({ id: 'x', title: 'X', capabilities: { dataDir: '/data', maxExecSeconds: 60 } } as any)).toThrow(/缺少 status/)
+    expect(BROWSERD_SOURCE).not.toContain('`')
+    expect(BROWSERD_SOURCE).not.toContain('${')
+  })
+
+  it('starts the graphical desktop and grants nuonuo X11 access when desktop capability is enabled', async () => {
+    let desktopStarts = 0
+    const execs: { command: string; stdin?: string }[] = []
+    let version = ''
+    const c: BoundComputer = {
+      id: 'desk',
+      title: '桌面测试机',
+      pluginId: 'test',
+      capabilities: {
+        sudo: true,
+        docker: false,
+        sleeps: false,
+        dataDir: '/data',
+        maxExecSeconds: 120,
+        desktop: { display: ':1', width: 1280, height: 800 },
+        env: { DISPLAY: ':1', NUONUO_BROWSER_HEADED: '1' },
+      },
+      status: async () => ({ state: 'ready' }),
+      wake: async () => ({ state: 'ready' }),
+      startDesktop: async () => { desktopStarts++ },
+      exec: async req => {
+        execs.push({ command: req.command, ...(req.stdin !== undefined ? { stdin: req.stdin } : {}) })
+        if (req.command.includes('__nuonuo_ok__')) {
+          return { exitCode: 0, stdout: `__nuonuo_ok__\n${version}\n`, stderr: '' }
+        }
+        const m = /echo ([0-9a-f]{12}) > "\$D\/version"/.exec(req.stdin ?? '')
+        if (m) version = m[1]!
+        // Mock scrot base64 output if desktopScreenshot runs
+        if (req.command.includes('sudo -n -u nuonuo') && req.command.includes('bash -lc')) {
+          const b64Part = /printf %s ([A-Za-z0-9+/=]+) \| base64 -d/.exec(req.command)?.[1]
+          const decoded = b64Part ? Buffer.from(b64Part, 'base64').toString('utf8') : ''
+          execs[execs.length - 1]!.command = decoded
+          if (decoded.includes('scrot -o')) {
+            return { exitCode: 0, stdout: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64'), stderr: '' }
+          }
+        }
+        return { exitCode: 0, stdout: '', stderr: '' }
+      },
+    }
+    const computers = new Computers(() => [c])
+    await computers.ready(c)
+    expect(desktopStarts).toBe(1)
+    expect(execs.some(e => e.command.includes("DISPLAY=':1' xhost +SI:localuser:nuonuo") && e.command.includes("'/data/nuonuo/.Xauthority'"))).toBe(true)
+
+    // Subsequent ensureDesktop within READY_FOR_MS does not re-run startDesktop; stale() resets it.
+    await computers.ensureDesktop(c)
+    expect(desktopStarts).toBe(1)
+    computers.stale(c)
+    await computers.ready(c)
+    expect(desktopStarts).toBe(2)
+
+    // Test desktopScreenshot and desktopInput xdotool generation + computer_desktop_* tools
+    const ext = computerExtension(computers, { blobs, mode: () => 'auto', limits: () => ({ foregroundSeconds: 5, timeoutMinutes: 5 }), push: () => {} })
+    const dir = mkdtempSync(join(tmpdir(), 'nn-work-'))
+    const tools = ext.workerTools!(ticket(dir), ctx)
+    expect(Object.keys(tools)).toEqual(expect.arrayContaining([
+      'computer_desktop_screenshot',
+      'computer_desktop_click',
+      'computer_desktop_move',
+      'computer_desktop_drag',
+      'computer_desktop_scroll',
+      'computer_desktop_type',
+      'computer_desktop_press',
+    ]))
+    expect(ext.workerPrompt!(ticket(dir))).toContain('computer_desktop_screenshot')
+    expect(ext.routerPrompt!()).toContain('graphical desktop')
+
+    const shot = await run(tools.computer_desktop_screenshot, { save: 'desk1' })
+    expect(shot.mediaType).toBe('image/png')
+    expect(readFileSync(join(dir, 'screenshots', 'desk1.png')).subarray(0, 4).toString('latin1')).toBe('\x89PNG')
+
+    await run(tools.computer_desktop_click, { x: 320, y: 240, button: 'right', double: true })
+    expect(execs.at(-1)!.command).toContain("export DISPLAY=':1'; xdotool mousemove 320 240 click --repeat 2 --delay 80 3")
+
+    await run(tools.computer_desktop_move, { x: 100, y: 150 })
+    expect(execs.at(-1)!.command).toContain("xdotool mousemove 100 150")
+
+    await run(tools.computer_desktop_drag, { from_x: 10, from_y: 20, to_x: 300, to_y: 400 })
+    expect(execs.at(-1)!.command).toContain('xdotool mousemove 10 20 mousedown 1 sleep 0.1 mousemove 300 400 sleep 0.1 mouseup 1')
+
+    await run(tools.computer_desktop_scroll, { direction: 'down', amount: 4 })
+    expect(execs.at(-1)!.command).toContain('xdotool click --repeat 4 --delay 30 5')
+    await computers.desktopInput(c, { type: 'scroll', dy: -220 })
+    expect(execs.at(-1)!.command).toContain('xdotool click --repeat 2 --delay 30 4')
+
+    await run(tools.computer_desktop_type, { text: '你好 world' })
+    expect(execs.at(-1)).toMatchObject({ stdin: '你好 world' })
+    expect(execs.at(-1)!.command).toContain('xdotool type --delay 12 --file -')
+
+    await run(tools.computer_desktop_press, { key: 'Control+l' })
+    expect(execs.at(-1)!.command).toContain("xdotool key -- 'ctrl+l'")
+    expect(mapXdoKey('Enter')).toBe('Return')
+    expect(mapXdoKey('Backspace')).toBe('BackSpace')
+    expect(mapXdoKey('ArrowDown')).toBe('Down')
   })
 })
 
@@ -216,6 +315,21 @@ describe.skipIf(!chromium)('the browser service', () => {
       const shot = await run(tools.computer_browser_screenshot, { save: 'a' })
       expect(shot.mediaType).toBe('image/jpeg')
       expect(existsSync(join(dir, 'screenshots', 'a.jpg'))).toBe(true)
+
+      // Owner handoff: locks out AI actions while allowing owner input, then releases.
+      const ho = await computers.browser<{ url: string; title: string; handoff: boolean }>(c, { op: 'handoff', browser: 'main', tab: 'tkt_test1' })
+      expect(ho).toMatchObject({ title: '点过了', handoff: true })
+      const listed = await computers.browser<{ browsers: any[] }>(c, { op: 'list' })
+      expect(listed.browsers.find(x => x.name === 'main').tabs[0].handoff).toBe(true)
+      await expect(run(tools.computer_browser_click, { ref: button })).rejects.toThrow(/主人正在接管/)
+      const afterGoto = await computers.browser<{ url: string; title: string }>(c, {
+        op: 'input', browser: 'main', tab: 'tkt_test1', owner: true, action: { type: 'goto', url: `${base}/b` },
+      })
+      expect(afterGoto.title).toBe('第二页')
+      await computers.browser(c, { op: 'release', browser: 'main', tab: 'tkt_test1' })
+      expect((await computers.browser<{ browsers: any[] }>(c, { op: 'list' })).browsers.find(x => x.name === 'main').tabs[0].handoff).toBe(false)
+      expect(await run(tools.computer_browser_back, {})).toContain('按钮')
+
       expect(await run(tools.computer_browser_close, { browser: 'work' })).toBe('已关闭')
     } finally {
       await computers.run(c, 'pkill -f "node browserd.mjs" || true', { timeoutSeconds: 10 })

@@ -291,7 +291,10 @@ export class PluginManager {
       const ctx = () => this.context(manifest)
       return { id: k.id, title: k.title, ...(k.description ? { description: k.description } : {}), pluginId: manifest.id, capabilities: k.capabilities,
         status: () => k.status(ctx()), wake: () => k.wake(ctx()), exec: request => k.exec(ctx(), request),
-        ...(typeof k.keepAwake === 'function' ? { keepAwake: (request: { key: string; seconds: number }) => k.keepAwake!(ctx(), request) } : {}) }
+        ...(typeof k.keepAwake === 'function' ? { keepAwake: (request: { key: string; seconds: number }) => k.keepAwake!(ctx(), request) } : {}),
+        ...(typeof k.startDesktop === 'function' ? { startDesktop: () => k.startDesktop!(ctx()) } : {}),
+        ...(typeof k.desktopUrl === 'function' ? { desktopUrl: (opts?: { viewOnly?: boolean }) => k.desktopUrl!(ctx(), opts) } : {}),
+        ...(typeof k.desktopControl === 'function' ? { desktopControl: (action: 'takeover' | 'handback') => k.desktopControl!(ctx(), action) } : {}) }
     }))
   }
 

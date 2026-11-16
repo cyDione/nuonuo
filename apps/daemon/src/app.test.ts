@@ -323,3 +323,175 @@ describe('reply streaming', () => {
     expect(part({ kind: 'tool-input-delta', id: 'c1', delta: 'lo"}' })[0]).toMatchObject({ text: 'Hello' })
   })
 })
+
+describe('unified browsers & cloud desktop endpoints', () => {
+  const json = (method: string, b: unknown) => ({ method, body: JSON.stringify(b) })
+
+  it('drives cloud browsers, desktop stream, screenshots, takeover input, and ticket resume on return', async () => {
+    const controls: string[] = []
+    const browserCalls: Record<string, unknown>[] = []
+    const desktopInputs: unknown[] = []
+    let handoffActive = false
+    const fakePng = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+    const fakeJpg = Buffer.from([255, 216, 255, 224])
+
+    const cnv = rt.engine.mainConversation()
+    const trig = rt.engine.receiveMessage(cnv, '登录后台看看')
+    const ticket = rt.engine.startTask({ conversationId: cnv, triggerIds: [trig.triggerId], title: '查看后台' })
+
+    const fakeComp = {
+      id: 'instabox',
+      title: 'Instabox 云电脑',
+      pluginId: 'instabox',
+      capabilities: {
+        sudo: true,
+        docker: true,
+        sleeps: true,
+        dataDir: '/data',
+        maxExecSeconds: 600,
+        desktop: { display: ':1', width: 1280, height: 800 },
+      },
+      status: async () => ({ state: 'ready' as const, name: 'box-1' }),
+      wake: async () => ({ state: 'ready' as const }),
+      exec: async (req: { command: string }) => ({
+        exitCode: 0,
+        stdout: req.command.includes('__nuonuo_ok__') ? '__nuonuo_ok__\n' : '',
+        stderr: '',
+      }),
+      startDesktop: async () => {},
+      desktopUrl: async (opts?: { viewOnly?: boolean }) => ({
+        url: `https://stream.instabox.test/s1?ro=${Boolean(opts?.viewOnly)}`,
+        expiresAt: '2099-01-01T00:00:00Z',
+      }),
+      desktopControl: async (action: 'takeover' | 'handback') => { controls.push(action) },
+    }
+    ;(rt.computers as any).list = () => [fakeComp]
+    ;(rt.computers as any).ready = async () => {}
+    ;(rt.computers as any).ensureDesktop = async () => {}
+    ;(rt.computers as any).desktopScreenshot = async () => fakePng
+    ;(rt.computers as any).desktopInput = async (_c: unknown, action: unknown) => { desktopInputs.push(action) }
+    ;(rt.computers as any).browser = async (_c: unknown, req: Record<string, any>) => {
+      browserCalls.push(req)
+      if (req.op === 'list') {
+        return {
+          browsers: [{
+            name: 'main',
+            idleSeconds: 2,
+            tabs: [{ name: ticket.id, url: 'https://example.com/login', title: '登录页', handoff: handoffActive }],
+          }],
+        }
+      }
+      if (req.op === 'open') return { page: { title: 'Opened', url: req.url, items: [], text: '' } }
+      if (req.op === 'screenshot') return { image: fakeJpg.toString('base64'), mediaType: 'image/jpeg', url: 'https://example.com/login', title: '登录页' }
+      if (req.op === 'handoff') { handoffActive = true; return { url: 'https://example.com/login', title: '登录页', handoff: true } }
+      if (req.op === 'input') return { url: req.action?.url || 'https://example.com/home', title: '首页' }
+      if (req.op === 'release') { handoffActive = false; return { ok: true } }
+      if (req.op === 'close') return { closed: true }
+      return {}
+    }
+
+    // 1. Desktop stream & desktop screenshot
+    const deskStream = await (await call('/api/computers/instabox/desktop', json('POST', { viewOnly: true }))).json() as any
+    expect(deskStream).toEqual({ ok: true, url: 'https://stream.instabox.test/s1?ro=true', expiresAt: '2099-01-01T00:00:00Z' })
+    const deskShot = await call('/api/computers/instabox/desktop/screenshot')
+    expect(deskShot.status).toBe(200)
+    expect(deskShot.headers.get('content-type')).toBe('image/png')
+    expect(Buffer.from(await deskShot.arrayBuffer()).equals(fakePng)).toBe(true)
+
+    // 2. List browsers
+    const listed = await (await call('/api/browsers')).json() as any
+    const tabKey = `cloud:instabox:main:${ticket.id}`
+    expect(listed).toEqual({
+      available: true,
+      computer: { id: 'instabox', title: 'Instabox 云电脑', state: 'ready', hasDesktop: true },
+      pages: [{
+        key: tabKey,
+        kind: 'cloud',
+        computerId: 'instabox',
+        browser: 'main',
+        tab: ticket.id,
+        title: '登录页',
+        url: 'https://example.com/login',
+        handoff: false,
+        hasDesktop: true,
+      }],
+    })
+
+    // 3. Open URL (auto-prepending https://)
+    const opened = await (await call('/api/browsers/open', json('POST', { url: 'example.org/path' }))).json() as any
+    expect(opened.key).toMatch(/^cloud:instabox:main:web_/)
+    expect(browserCalls.at(-1)).toMatchObject({ op: 'open', url: 'https://example.org/path', owner: true })
+
+    // 4. Page screenshot
+    const pageShot = await call(`/api/browsers/screenshot?key=${encodeURIComponent(tabKey)}`)
+    expect(pageShot.status).toBe(200)
+    expect(pageShot.headers.get('content-type')).toBe('image/jpeg')
+    expect(Buffer.from(await pageShot.arrayBuffer()).equals(fakeJpg)).toBe(true)
+
+    // 5. Handoff -> page input & desktop input -> return (resumes ticket!)
+    const ho = await (await call('/api/browsers/handoff', json('POST', { key: tabKey }))).json() as any
+    expect(ho).toEqual({ ok: true, url: 'https://example.com/login', title: '登录页', hasDesktop: true, computerId: 'instabox' })
+    expect(controls).toEqual(['takeover'])
+
+    const inpPage = await (await call('/api/browsers/input', json('POST', {
+      key: tabKey, mode: 'page', action: { type: 'goto', url: 'example.com/dashboard' },
+    }))).json() as any
+    expect(inpPage).toEqual({ ok: true, url: 'https://example.com/dashboard', title: '首页' })
+
+    const inpDesk = await (await call('/api/browsers/input', json('POST', {
+      key: tabKey, mode: 'desktop', action: { type: 'key', key: 'Control+a' },
+    }))).json() as any
+    expect(inpDesk).toEqual({ ok: true })
+    expect(desktopInputs).toEqual([{ type: 'key', key: 'Control+a' }])
+
+    const ret = await (await call('/api/browsers/return', json('POST', { key: tabKey, note: '已登录完成' }))).json() as any
+    expect(ret).toEqual({ ok: true })
+    expect(controls).toEqual(['takeover', 'handback'])
+    const msgs = rt.store.db.select().from(schema.messages).all().filter(m => m.conversationId === cnv)
+    expect(msgs.at(-1)?.content).toBe('已登录完成')
+
+    // 6. Close tab
+    expect(await (await call('/api/browsers/close', json('POST', { key: tabKey }))).json()).toEqual({ ok: true })
+  })
+
+  it('handles local browser keys and rejects desktop stream when computer has no desktop', async () => {
+    const fakePng = Buffer.from([137, 80, 78, 71])
+    ;(rt.browser as any).listPages = async () => [{ id: 'web_1', url: 'https://local.example/', title: '本地页', handoff: rt.browser.handoffs.has('web_1') }]
+    ;(rt.browser as any).hasPage = (id: string) => id === 'web_1'
+    ;(rt.browser as any).state = async (id: string) => (id === 'web_1' ? { url: 'https://local.example/', title: '本地页', handoff: rt.browser.handoffs.has(id) } : null)
+    ;(rt.browser as any).screenshot = async () => fakePng
+    ;(rt.browser as any).input = async (_id: string, a: any) => ({ url: a.url ?? 'https://local.example/', title: '本地页2' })
+    let closedId = ''
+    ;(rt.browser as any).closePage = async (id: string) => { closedId = id; rt.browser.handoffs.delete(id) }
+
+    const listed = await (await call('/api/browsers')).json() as any
+    expect(listed.pages).toEqual([{
+      key: 'local:web_1', kind: 'local', browser: 'local', tab: 'web_1', title: '本地页', url: 'https://local.example/', handoff: false, hasDesktop: false,
+    }])
+    const ho = await (await call('/api/browsers/handoff', json('POST', { key: 'local:web_1' }))).json() as any
+    expect(ho).toEqual({ ok: true, url: 'https://local.example/', title: '本地页', hasDesktop: false })
+    expect(rt.browser.handoffs.has('web_1')).toBe(true)
+
+    const shot = await call('/api/browsers/screenshot?key=local%3Aweb_1')
+    expect(shot.status).toBe(200)
+    expect(shot.headers.get('content-type')).toBe('image/png')
+
+    const inp = await (await call('/api/browsers/input', json('POST', { key: 'local:web_1', action: { type: 'reload' } }))).json() as any
+    expect(inp).toEqual({ ok: true, url: 'https://local.example/', title: '本地页2' })
+
+    await call('/api/browsers/return', json('POST', { key: 'local:web_1' }))
+    expect(rt.browser.handoffs.has('web_1')).toBe(false)
+
+    await call('/api/browsers/close', json('POST', { key: 'local:web_1' }))
+    expect(closedId).toBe('web_1')
+
+    ;(rt.computers as any).list = () => [{
+      id: 'headlessbox', title: '无桌面机', pluginId: 'x',
+      capabilities: { sudo: false, docker: false, sleeps: false, dataDir: '/data', maxExecSeconds: 60 },
+      status: async () => ({ state: 'ready' as const }),
+      wake: async () => ({ state: 'ready' as const }),
+      exec: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+    }]
+    expect((await call('/api/computers/headlessbox/desktop', { method: 'POST' })).status).toBe(400)
+  })
+})

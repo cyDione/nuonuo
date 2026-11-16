@@ -50,6 +50,16 @@ export const SNAPSHOT_SCRIPT = `(() => {
   return { title: document.title, url: location.href, items, text }
 })()`
 
+export type BrowserInputAction =
+  | { type: 'click'; x: number; y: number; button?: 'left' | 'right' | 'middle'; double?: boolean }
+  | { type: 'drag'; fromX: number; fromY: number; toX: number; toY: number }
+  | { type: 'type'; text: string }
+  | { type: 'paste'; text: string }
+  | { type: 'key'; key: string }
+  | { type: 'goto'; url: string }
+  | { type: 'scroll'; dy: number; dx?: number }
+  | { type: 'reload' }
+
 export class BrowserManager {
   private context?: Promise<Context>
   private pages = new Map<string, Page>()
@@ -93,6 +103,23 @@ export class BrowserManager {
     return Boolean(page && !page.isClosed())
   }
 
+  /** Lists all open pages managed by this local browser instance (for the RightPane「浏览器」view). */
+  async listPages(): Promise<{ id: string; url: string; title: string; handoff: boolean }[]> {
+    const out: { id: string; url: string; title: string; handoff: boolean }[] = []
+    for (const [id, page] of [...this.pages.entries()]) {
+      if (page.isClosed()) {
+        this.pages.delete(id)
+        this.handoffs.delete(id)
+        continue
+      }
+      const url = page.url()
+      const handoff = this.handoffs.has(id)
+      if (url === 'about:blank' && !handoff) continue
+      out.push({ id, url, title: await page.title().catch(() => ''), handoff })
+    }
+    return out
+  }
+
   async snapshot(ticketId: string, blobs?: Blobs): Promise<string> {
     const page = await this.page(ticketId)
     const s = await page.evaluate(SNAPSHOT_SCRIPT) as { title: string; url: string; items: string[]; text: string }
@@ -104,15 +131,29 @@ export class BrowserManager {
     return (await this.page(ticketId)).screenshot({ type: 'png', fullPage: Boolean(opts.fullPage) })
   }
 
-  /** The owner's input during a handoff: a click at a point of the screenshot, typed text, a key, or a new address. */
-  async input(ticketId: string, action: { type: 'click'; x: number; y: number } | { type: 'type'; text: string } | { type: 'paste'; text: string } | { type: 'key'; key: string } | { type: 'goto'; url: string } | { type: 'scroll'; dy: number }) {
+  /** The owner's input during a handoff: pointer, keyboard, scroll, reload, or navigation. */
+  async input(ticketId: string, action: BrowserInputAction) {
     const page = await this.page(ticketId)
-    if (action.type === 'click') await page.mouse.click(action.x, action.y)
-    else if (action.type === 'type') await page.keyboard.type(action.text, { delay: 20 })
-    else if (action.type === 'paste') await page.keyboard.insertText(action.text)
-    else if (action.type === 'key') await page.keyboard.press(action.key)
-    else if (action.type === 'scroll') await page.mouse.wheel(0, action.dy)
-    else await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    if (action.type === 'click') {
+      await page.mouse.click(action.x, action.y, { button: action.button ?? 'left', clickCount: action.double ? 2 : 1 })
+    } else if (action.type === 'drag') {
+      await page.mouse.move(action.fromX, action.fromY)
+      await page.mouse.down()
+      await page.mouse.move(action.toX, action.toY, { steps: 8 })
+      await page.mouse.up()
+    } else if (action.type === 'type') {
+      await page.keyboard.type(action.text, { delay: 20 })
+    } else if (action.type === 'paste') {
+      await page.keyboard.insertText(action.text)
+    } else if (action.type === 'key') {
+      await page.keyboard.press(action.key)
+    } else if (action.type === 'scroll') {
+      await page.mouse.wheel(action.dx ?? 0, action.dy)
+    } else if (action.type === 'reload') {
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 })
+    } else {
+      await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    }
     await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {})
     return { url: page.url(), title: await page.title().catch(() => '') }
   }

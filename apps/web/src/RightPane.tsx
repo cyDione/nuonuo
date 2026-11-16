@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, Ban, Brain, CalendarDays, ChevronDown, Cloud, CreditCard, FileText, Folder, GitBranch, Globe, Image, ListChecks, Lock, Mail, Plus, ScrollText, Send, Shield, ShieldCheck, Smile, Trash2, Users, X } from 'lucide-react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { api, type AccessSettings, type AppLevel, type AuditEntry, type ExecutionSettings, type InstructionsState, type Level, type LocalApp, type Persona, type ReviewSettings, type Routine, type SourceInfo, type Ticket } from './api'
+import { BrowserPaneTab, useBrowsers } from './browser'
 import { BrowserWatch } from './watch'
 import { SkillsSection } from './skills'
 import { MoodSection } from './mood'
@@ -21,17 +22,18 @@ import { cx, IconButton, Seg } from './ui'
 import { usePresence } from './shell'
 import { locale, tx } from './i18n'
 
-export type PaneTab = 'activity' | 'who' | 'permissions'
+export type PaneTab = 'activity' | 'browser' | 'who' | 'permissions'
 let tab: PaneTab = 'activity'
 const tabListeners = new Set<() => void>()
 export function setPaneTab(next: PaneTab) { tab = next; for (const l of tabListeners) l() }
 const usePaneTab = () => useSyncExternalStore(l => { tabListeners.add(l); return () => tabListeners.delete(l) }, () => tab)
 
-const TABS: { id: PaneTab; label: React.ReactNode }[] = [
-  { id: 'activity', label: <span className="flex items-center" title={tx('活动')}><Activity size={17} aria-label={tx('活动')} /></span> },
-  { id: 'who', label: <span className="flex items-center" title={tx('它是谁')}><Smile size={17} aria-label={tx('它是谁')} /></span> },
-  { id: 'permissions', label: <span className="flex items-center" title={tx('权限')}><Shield size={17} aria-label={tx('权限')} /></span> },
-]
+const ACTIVITY_TAB = { id: 'activity' as PaneTab, label: <span className="flex items-center" title={tx('活动')}><Activity size={17} aria-label={tx('活动')} /></span> }
+const BROWSER_TAB = { id: 'browser' as PaneTab, label: <span className="flex items-center" title={tx('浏览器')}><Globe size={17} aria-label={tx('浏览器')} /></span> }
+const WHO_TAB = { id: 'who' as PaneTab, label: <span className="flex items-center" title={tx('它是谁')}><Smile size={17} aria-label={tx('它是谁')} /></span> }
+const PERMISSIONS_TAB = { id: 'permissions' as PaneTab, label: <span className="flex items-center" title={tx('权限')}><Shield size={17} aria-label={tx('权限')} /></span> }
+const BASE_TABS = [ACTIVITY_TAB, WHO_TAB, PERMISSIONS_TAB]
+const BROWSER_TABS = [ACTIVITY_TAB, BROWSER_TAB, WHO_TAB, PERMISSIONS_TAB]
 
 const hm = (at: number) => new Date(at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 const WEEK = [tx('周日'), tx('周一'), tx('周二'), tx('周三'), tx('周四'), tx('周五'), tx('周六')]
@@ -52,6 +54,13 @@ export function RightPane({ onClose }: { onClose(): void }) {
   const live = (useTickets().data?.tickets ?? []).filter(t => t.stage !== 'ended')
   const status = statusLine(live)
   const current = usePaneTab()
+  const browsers = useBrowsers(current === 'browser')
+  const hasBrowser = Boolean(browsers.data?.available)
+  useEffect(() => {
+    if (current === 'browser' && browsers.data && !browsers.data.available) setPaneTab('activity')
+  }, [current, browsers.data?.available])
+  const activeTab: PaneTab = current === 'browser' && !hasBrowser ? 'activity' : current
+  const tabs = hasBrowser ? BROWSER_TABS : BASE_TABS
   const mood = !connected ? 'sleepy' : status.tone === 'working' ? 'thinking' : status.tone
   return <div className="flex h-full flex-col">
     <div className="flex h-12 shrink-0 items-center justify-end px-3"><IconButton label={tx('关闭')} onClick={onClose}><X size={17} /></IconButton></div>
@@ -62,9 +71,9 @@ export function RightPane({ onClose }: { onClose(): void }) {
         <div className="mt-0.5 truncate text-xs text-muted">{connected ? status.text : tx('重连中…')}</div>
       </div>
     </div>
-    <div className="px-6 pt-5 pb-1"><Seg label={tx('右侧栏')} value={current} options={TABS} onChange={setPaneTab} className="[&_button]:h-8" /></div>
-    <div key={current} className="anim-fade min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-6">
-      {current === 'activity' ? <ActivityTab /> : current === 'who' ? <WhoTab /> : <PermissionsTab />}
+    <div className="px-6 pt-5 pb-1"><Seg label={tx('右侧栏')} value={activeTab} options={tabs} onChange={setPaneTab} className="[&_button]:h-8" /></div>
+    <div key={activeTab} className="anim-fade min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-6">
+      {activeTab === 'activity' ? <ActivityTab /> : activeTab === 'browser' ? <BrowserPaneTab /> : activeTab === 'who' ? <WhoTab /> : <PermissionsTab />}
     </div>
   </div>
 }

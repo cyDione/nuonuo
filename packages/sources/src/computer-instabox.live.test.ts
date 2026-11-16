@@ -15,7 +15,8 @@ describe.skipIf(!process.env.NUONUO_LIVE_INSTABOX || !key)('Instabox, live', () 
     const kind = p.computers[0]
     const ctx = { id: 'instabox', dir: '', log: console.log, state: { get: () => undefined, set: () => {} }, settings: { get: (k: string) => (k === 'apiKey' ? key : undefined) } }
     const bound: BoundComputer = { id: kind.id, title: kind.title, pluginId: 'instabox', capabilities: kind.capabilities,
-      status: () => kind.status(ctx), wake: () => kind.wake(ctx), exec: r => kind.exec(ctx, r), keepAwake: r => kind.keepAwake(ctx, r) }
+      status: () => kind.status(ctx), wake: () => kind.wake(ctx), exec: r => kind.exec(ctx, r), keepAwake: r => kind.keepAwake(ctx, r),
+      startDesktop: () => kind.startDesktop(ctx), desktopUrl: o => kind.desktopUrl(ctx, o), desktopControl: a => kind.desktopControl(ctx, a) }
     const computers = new Computers(() => [bound])
     console.log('before', await bound.status())
     let t = Date.now()

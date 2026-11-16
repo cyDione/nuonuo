@@ -46,14 +46,21 @@ describe.skipIf(!available)('BrowserManager', () => {
       await run(tools.request_handoff, { reason: '请登录' })
       expect(handoff).toBe('请登录')
       browser.handoffs.add('tkt_a')
+      expect(await browser.listPages()).toEqual([expect.objectContaining({ id: 'tkt_a', title: '另一页', handoff: true })])
       await expect(run(tools.browser_open, { url: base })).rejects.toThrow(/主人正在操作/)
-      // The owner drives the page: navigate, click the input, type, press Enter.
+      // The owner drives the page: navigate, click, scroll, reload.
       await browser.input('tkt_a', { type: 'goto', url: base })
-      await browser.input('tkt_a', { type: 'click', x: 60, y: 90 })
+      await browser.input('tkt_a', { type: 'click', x: 60, y: 90, button: 'left', double: true })
+      await browser.input('tkt_a', { type: 'drag', fromX: 20, fromY: 20, toX: 80, toY: 80 })
+      await browser.input('tkt_a', { type: 'scroll', dy: 120, dx: 0 })
+      expect(await browser.input('tkt_a', { type: 'reload' })).toMatchObject({ title: '登录测试' })
       const png = await browser.screenshot('tkt_a')
       expect(png.subarray(1, 4).toString()).toBe('PNG')
       browser.handoffs.delete('tkt_a')
+      expect(await browser.listPages()).toEqual([expect.objectContaining({ id: 'tkt_a', title: '登录测试', handoff: false })])
       expect(await browser.snapshot('tkt_a')).toContain('登录测试')
+      await browser.closePage('tkt_a')
+      expect(await browser.listPages()).toEqual([])
     } finally {
       await browser.close()
     }

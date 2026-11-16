@@ -94,8 +94,38 @@ export interface TicketDetail { ticket: Ticket; reports: (Report & { id: number;
 export interface SandboxSettings { mode: 'off' | 'external' | 'all'; image: string; network: 'bridge' | 'none' }
 export interface ExecutionSettings { maxWorkers: number; foregroundSeconds: number; timeoutMinutes: number; blockedCommands: string[]; workspaceRoots: string[]; sandbox: SandboxSettings; environment?: 'auto' | 'local' }
 export type ComputerState = 'ready' | 'asleep' | 'waking' | 'off' | 'unconfigured' | 'error'
-export interface ComputerView { id: string; title: string; pluginId: string; workspace: string; state: ComputerState; name?: string; detail?: string; retryAfterSeconds?: number }
+export interface ComputerCapabilities {
+  sudo: boolean; docker: boolean; sleeps: boolean; dataDir: string; maxExecSeconds: number
+  env?: Record<string, string>
+  desktop?: boolean | { display: string; width?: number; height?: number }
+}
+export interface ComputerView { id: string; title: string; description?: string; pluginId: string; workspace: string; state: ComputerState; name?: string; detail?: string; retryAfterSeconds?: number; capabilities: ComputerCapabilities }
 export interface ComputerBrowser { name: string; tabs: { name: string; url: string; title: string }[]; idleSeconds: number }
+export interface OpenPageItem {
+  key: string
+  kind: 'cloud' | 'local'
+  computerId?: string
+  browser: string
+  tab: string
+  title: string
+  url: string
+  handoff: boolean
+  hasDesktop: boolean
+}
+export interface BrowsersOverview {
+  available: boolean
+  computer: { id: string; title: string; state: string; hasDesktop: boolean } | null
+  pages: OpenPageItem[]
+}
+export type BrowserInputAction =
+  | { type: 'click'; x: number; y: number; button?: 'left' | 'right' | 'middle'; double?: boolean }
+  | { type: 'drag'; fromX: number; fromY: number; toX: number; toY: number }
+  | { type: 'scroll'; dy: number; dx?: number }
+  | { type: 'type'; text: string }
+  | { type: 'paste'; text: string }
+  | { type: 'key'; key: string }
+  | { type: 'goto'; url: string }
+  | { type: 'reload' }
 export type Level = 'allow' | 'review' | 'ask' | 'deny'
 export interface ReviewSettings { external: Level; destructive: Exclude<Level, 'allow'>; mode: 'model' | 'ask'; rules: string[]; allow: string[]; deny: string[] }
 export interface AuditEntry { id: number; at: number; ticketId: string | null; actor: string; action: string; tool: string | null; input: string | null; risk: string | null; decision: string; reason: string | null }

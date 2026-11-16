@@ -60,7 +60,8 @@ function Environment({ value, onChange }: { value: 'auto' | 'local'; onChange(v:
     </Row>
     <Row href="#/settings/plugins" icon={<Puzzle size={17} />} label={tx('装一个云电脑插件')} sub={<>{tx('在「插件 → 安装插件」里填')} <span className="font-mono">cyDione/nuonuo/tree/main/plugins/instabox</span></>} />
   </Section>
-  return <Section title={tx('执行环境')} foot={tx('云电脑空闲时会自己休眠，用之前糯糯会先叫醒它。API key 和用哪台机器在「插件」里对应插件的设置里改。')}>
+  const anyDesktop = computers.some(c => Boolean(c.capabilities?.desktop))
+  return <Section title={tx('执行环境')} foot={anyDesktop ? tx('云电脑空闲时会自己休眠，点「打开桌面」也会自动叫醒它。API key 在「插件」里对应插件的设置里改。') : tx('云电脑空闲时会自己休眠，用之前糯糯会先叫醒它。API key 和用哪台机器在「插件」里对应插件的设置里改。')}>
     <Row label={tx('命令在哪里跑')} sub={value === 'local' ? tx('任务的命令在你的电脑上跑；需要上网、docker 时还能用云电脑') : tx('任务的命令默认在云电脑上跑：能上网、用 docker，碰不到你的文件夹')}>
       <Choice label={tx('命令在哪里跑')} value={value} onChange={onChange} options={[{ id: 'auto', label: tx('云电脑') }, { id: 'local', label: tx('本机') }]} />
     </Row>
@@ -72,6 +73,15 @@ function Computer({ computer: c }: { computer: ComputerView }) {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const wake = useMutation({ mutationFn: () => api.post(`/computers/${encodeURIComponent(c.id)}/wake`, {}), onSettled: () => qc.invalidateQueries({ queryKey: ['computers'] }) })
+  const openDesktop = useMutation({
+    mutationFn: () => api.post<{ ok: boolean; url: string | null }>(`/computers/${encodeURIComponent(c.id)}/desktop`, { viewOnly: false }),
+    onSuccess: r => { if (r.url) window.open(r.url, '_blank', 'noopener,noreferrer') },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['computers'] })
+      void qc.invalidateQueries({ queryKey: ['browsers'] })
+    },
+  })
+  const hasDesktop = Boolean(c.capabilities?.desktop)
   const ready = c.state === 'ready'
   const browsers = useQuery({ queryKey: ['computer-browsers', c.id], queryFn: () => api.get<{ browsers: ComputerBrowser[]; asleep?: boolean }>(`/computers/${encodeURIComponent(c.id)}/browsers`), enabled: ready, refetchInterval: open ? 15_000 : false })
   const close = useMutation({ mutationFn: (name: string) => api.post(`/computers/${encodeURIComponent(c.id)}/browsers/${encodeURIComponent(name)}/close`, {}), onSettled: () => qc.invalidateQueries({ queryKey: ['computer-browsers', c.id] }) })
@@ -82,17 +92,25 @@ function Computer({ computer: c }: { computer: ComputerView }) {
     : minutes ? <Pill tone="warn">{tx('冷却中 · {0} 分钟后可用', minutes)}</Pill>
     : c.state === 'error' ? <><Pill tone="danger">{tx('连不上')}</Pill><Btn onClick={() => wake.mutate()}>{tx('重试')}</Btn></>
     : <><Pill>{c.state === 'off' ? tx('关机') : tx('休眠中')}</Pill><Btn onClick={() => wake.mutate()}>{tx('叫醒')}</Btn></>
-  const sub = c.state === 'unconfigured' || c.state === 'error' ? (wake.error as Error | null)?.message ?? c.detail ?? tx('在插件设置里填上 API key')
-    : [c.name, tx('糯糯的空间 {0}', c.workspace)].filter(Boolean).join(' · ')
+  const actionError = (openDesktop.error as Error | null)?.message ?? (wake.error as Error | null)?.message
+  const sub = c.state === 'unconfigured' || c.state === 'error' ? actionError ?? c.detail ?? tx('在插件设置里填上 API key')
+    : actionError ?? [c.name, tx('糯糯的空间 {0}', c.workspace)].filter(Boolean).join(' · ')
   const list = browsers.data?.browsers ?? []
   const tabs = list.reduce((n, b) => n + b.tabs.length, 0)
   return <>
-    <Row icon={<Cloud size={17} />} label={c.title} sub={<span className="line-clamp-1">{sub}</span>}>{status}</Row>
+    <Row icon={<Cloud size={17} />} label={c.title} sub={<span className={openDesktop.error ? 'line-clamp-1 text-danger' : 'line-clamp-1'}>{sub}</span>}>
+      {status}
+      {hasDesktop && c.state !== 'unconfigured' && (
+        <Btn onClick={() => openDesktop.mutate()} disabled={openDesktop.isPending || Boolean(minutes)}>
+          {openDesktop.isPending ? tx('正在打开…') : tx('打开桌面')}
+        </Btn>
+      )}
+    </Row>
     {c.state !== 'unconfigured' && <>
       <button type="button" onClick={() => ready && setOpen(o => !o)} aria-expanded={ready ? open : undefined} disabled={!ready}
         className="flex min-h-[52px] w-full items-center gap-3 py-2.5 text-left disabled:cursor-default">
         <span className="flex size-5 shrink-0 items-center justify-center"><Globe size={17} /></span>
-        <span className="min-w-0 flex-1"><span className="block text-sm">{tx('糯糯的浏览器')}</span><span className="mt-0.5 block text-xs text-muted">{tx('无头运行，不会出现在你的桌面上')}</span></span>
+        <span className="min-w-0 flex-1"><span className="block text-sm">{tx('糯糯的浏览器')}</span><span className="mt-0.5 block text-xs text-muted">{hasDesktop ? tx('在云电脑桌面上打开，可在右侧栏「浏览器」查看或接管') : tx('无头运行，不会出现在你的桌面上')}</span></span>
         <span className="shrink-0 text-[13px] text-muted">{!ready ? tx('机器醒着时才看得到') : browsers.isLoading ? '…' : list.length ? tx('{0} 个浏览器 · {1} 个标签页', list.length, tabs) : tx('没有开着的')}</span>
         {ready && (open ? <ChevronDown size={16} className="shrink-0 text-faint" /> : <ChevronRight size={16} className="shrink-0 text-faint" />)}
       </button>

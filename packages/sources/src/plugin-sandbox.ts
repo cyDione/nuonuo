@@ -329,7 +329,10 @@ export class PluginSandbox {
           ...(k.has.status ? { status: () => call('status') } : {}),
           ...(k.has.wake ? { wake: () => call('wake', undefined, 300_000) } : {}),
           ...(k.has.exec ? { exec: (_ctx: unknown, request: { timeoutSeconds: number }) => call('exec', request, (request.timeoutSeconds + 90) * 1000) } : {}),
-          ...(k.has.keepAwake ? { keepAwake: (_ctx: unknown, request: { key: string; seconds: number }) => call<void>('keepAwake', request) } : {}) }
+          ...(k.has.keepAwake ? { keepAwake: (_ctx: unknown, request: { key: string; seconds: number }) => call<void>('keepAwake', request) } : {}),
+          ...(k.has.startDesktop ? { startDesktop: () => call<void>('startDesktop', undefined, 300_000) } : {}),
+          ...(k.has.desktopUrl ? { desktopUrl: (_ctx: unknown, opts?: { viewOnly?: boolean }) => call<{ url: string; expiresAt?: string }>('desktopUrl', opts, 300_000) } : {}),
+          ...(k.has.desktopControl ? { desktopControl: (_ctx: unknown, action: 'takeover' | 'handback') => call<void>('desktopControl', action) } : {}) }
         return kind as ComputerKind
       }),
       ...(p.windowCalls?.length ? { windowCalls: Object.fromEntries(p.windowCalls.map(name => [name, (_ctx: unknown, input: unknown) => this.call('windowCall', { name, input })])) } : {}),

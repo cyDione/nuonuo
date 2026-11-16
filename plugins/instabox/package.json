@@ -1,7 +1,7 @@
 {
   "name": "instabox",
-  "version": "0.1.0",
-  "description": "把 Instabox 的云端 Linux 机器接成糯糯自己的云电脑：命令行、docker 和多个浏览器",
+  "version": "0.2.0",
+  "description": "把 Instabox 的云端 Linux 机器接成糯糯自己的云电脑：图形桌面、有头浏览器、命令行和 docker",
   "type": "module",
   "license": "MIT",
   "nuonuo": {

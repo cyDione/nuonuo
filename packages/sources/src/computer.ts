@@ -37,6 +37,8 @@ export interface ComputerCapabilities {
   maxExecSeconds: number
   /** Variables set for every command (e.g. to keep browsers off the owner's screen). */
   env?: Record<string, string>
+  /** Graphical X11 desktop on the machine (e.g. `{ display: ':1', width: 1280, height: 800 }`). */
+  desktop?: boolean | { display: string; width?: number; height?: number }
 }
 
 export type ComputerState = 'ready' | 'asleep' | 'waking' | 'off' | 'unconfigured' | 'error'
@@ -74,6 +76,12 @@ export interface ComputerKind<Ctx = PluginContext> {
   exec(ctx: Ctx, request: ComputerExecRequest): Promise<ComputerExecResult>
   /** Keeps it from pausing for `seconds` while a task waits on it silently (renewed while the task uses it). */
   keepAwake?(ctx: Ctx, request: { key: string; seconds: number }): Promise<void>
+  /** Starts (and installs if needed) the graphical desktop so X11 is running. */
+  startDesktop?(ctx: Ctx): Promise<void>
+  /** Returns a browser-embeddable stream URL for the graphical desktop (e.g. noVNC). */
+  desktopUrl?(ctx: Ctx, opts?: { viewOnly?: boolean }): Promise<{ url: string; expiresAt?: string }>
+  /** Notifies the provider when the owner takes over or hands back the desktop. */
+  desktopControl?(ctx: Ctx, action: 'takeover' | 'handback'): Promise<void>
 }
 
 /** Identity with checks, for plugins: `sdk.defineComputer({...})`. */
@@ -105,12 +113,27 @@ export interface BoundComputer {
   wake(): Promise<ComputerStatus>
   exec(request: ComputerExecRequest): Promise<ComputerExecResult>
   keepAwake?(request: { key: string; seconds: number }): Promise<void>
+  startDesktop?(): Promise<void>
+  desktopUrl?(opts?: { viewOnly?: boolean }): Promise<{ url: string; expiresAt?: string }>
+  desktopControl?(action: 'takeover' | 'handback'): Promise<void>
 }
+
+export type DesktopAction =
+  | { type: 'click'; x: number; y: number; button?: 'left' | 'right' | 'middle'; double?: boolean }
+  | { type: 'move'; x: number; y: number }
+  | { type: 'drag'; fromX: number; fromY: number; toX: number; toY: number }
+  | { type: 'scroll'; direction?: 'up' | 'down' | 'left' | 'right'; amount?: number; dy?: number; dx?: number }
+  | { type: 'type'; text: string }
+  | { type: 'paste'; text: string }
+  | { type: 'press'; key: string }
+  | { type: 'key'; key: string }
+  | { type: 'goto'; url: string }
+  | { type: 'reload' }
 
 // ── The shared layer ───────────────────────────────────────────────────────
 
 /** Bumped when the setup below changes, so every machine is set up again once. */
-const SETUP_REVISION = 1
+const SETUP_REVISION = 2
 const SETUP_VERSION = createHash('sha256').update(`${SETUP_REVISION}\n${BROWSERD_SOURCE}\n${BROWSER_SH}\n${SNAPSHOT_SCRIPT}`).digest('hex').slice(0, 12)
 const PLAYWRIGHT = 'playwright-core@1'
 const ACCOUNT = 'nuonuo'
@@ -128,10 +151,44 @@ export class ComputerError extends Error {}
 
 export interface ComputerView extends ComputerStatus { id: string; title: string; description?: string; pluginId: string; workspace: string; capabilities: ComputerCapabilities }
 
-export interface BrowserTab { name: string; url: string; title: string }
+export interface BrowserTab { name: string; url: string; title: string; handoff?: boolean }
 export interface BrowserInfo { name: string; tabs: BrowserTab[]; idleSeconds: number }
 
-interface Session { readyAt: number; setup?: Promise<void> }
+interface Session { readyAt: number; desktopReadyAt: number; setup?: Promise<void>; desktop?: Promise<void> }
+
+const XDO_BUTTONS = { left: 1, middle: 2, right: 3 } as const
+const XDO_WHEEL = { up: 4, down: 5, left: 6, right: 7 } as const
+const XDO_KEYS: Record<string, string> = {
+  enter: 'Return', return: 'Return', esc: 'Escape', escape: 'Escape', tab: 'Tab', space: 'space', ' ': 'space',
+  backspace: 'BackSpace', delete: 'Delete', del: 'Delete', insert: 'Insert', home: 'Home', end: 'End',
+  pageup: 'Prior', pagedown: 'Next', arrowup: 'Up', up: 'Up', arrowdown: 'Down', down: 'Down',
+  arrowleft: 'Left', left: 'Left', arrowright: 'Right', right: 'Right',
+  ctrl: 'ctrl', control: 'ctrl', alt: 'alt', option: 'alt', shift: 'shift',
+  meta: 'super', cmd: 'super', command: 'super', super: 'super', win: 'super',
+  '+': 'plus', '-': 'minus', '=': 'equal', '/': 'slash', '\\': 'backslash', '.': 'period', ',': 'comma',
+  ';': 'semicolon', ':': 'colon', "'": 'apostrophe', '"': 'quotedbl', '[': 'bracketleft', ']': 'bracketright', '`': 'grave',
+}
+
+export function mapXdoKey(raw: string): string {
+  if (raw === ' ') return 'space'
+  if (raw === '+') return 'plus'
+  const parts = raw.replace(/\+\+$/, '+plus').split('+').filter(Boolean)
+  if (!parts.length) throw new ComputerError(`无效的按键：${JSON.stringify(raw)}`)
+  const hasShift = parts.some(p => p.toLowerCase() === 'shift')
+  return parts.map(part => {
+    const lower = part.toLowerCase()
+    if (XDO_KEYS[lower]) return XDO_KEYS[lower]
+    if (/^f([1-9]|1[0-9]|2[0-4])$/.test(lower)) return lower.toUpperCase()
+    if (/\s/.test(part)) throw new ComputerError(`无效的按键：${JSON.stringify(raw)}`)
+    if (parts.length > 1 && !hasShift && /^[A-Z]$/.test(part)) return lower
+    return part
+  }).join('+')
+}
+
+function px(name: string, v: number): number {
+  if (!Number.isFinite(v)) throw new ComputerError(`无效的坐标 ${name}：${v}`)
+  return Math.max(0, Math.min(16384, Math.round(v)))
+}
 
 export class Computers {
   private sessions = new Map<string, Session>()
@@ -167,7 +224,11 @@ export class Computers {
   /** Wakes the machine if needed, checks that it answers, and sets nuonuo's space up the first time (or after an update). */
   async ready(c: BoundComputer): Promise<void> {
     const s = this.session(c)
-    if (this.now() - s.readyAt < READY_FOR_MS) return
+    if (this.now() - s.readyAt < READY_FOR_MS) {
+      if (c.capabilities.desktop) await this.ensureDesktop(c)
+      return
+    }
+    s.desktopReadyAt = 0
     let st = await c.status()
     if (st.state === 'unconfigured') throw new ComputerError(st.detail ?? `${c.title} 还没设置好：在插件设置里填好再试`)
     if (st.state !== 'ready') st = await c.wake()
@@ -182,14 +243,49 @@ export class Computers {
       await s.setup
     }
     s.readyAt = this.now()
+    if (c.capabilities.desktop) await this.ensureDesktop(c)
+  }
+
+  /** Ensures the graphical X11 desktop is running and accessible to nuonuo's account. */
+  async ensureDesktop(c: BoundComputer): Promise<void> {
+    if (!c.capabilities.desktop) return
+    const s = this.session(c)
+    if (s.desktopReadyAt > 0 && this.now() - s.desktopReadyAt < READY_FOR_MS) return
+    s.desktop ??= (async () => {
+      await c.startDesktop?.()
+      if (c.capabilities.sudo) {
+        const display = this.displayOf(c)
+        const w = this.workspace(c)
+        const xauth = posix.join(w, '.Xauthority')
+        await c.exec({
+          timeoutSeconds: 30,
+          command: [
+            `DISPLAY=${q(display)} xhost +SI:localuser:${ACCOUNT} >/dev/null 2>&1 || true`,
+            `if [ -f "$HOME/.Xauthority" ]; then sudo -n cp "$HOME/.Xauthority" ${q(xauth)} && sudo -n chown ${ACCOUNT}:${ACCOUNT} ${q(xauth)} && sudo -n chmod 600 ${q(xauth)}; fi`,
+          ].join('\n'),
+        })
+      }
+      s.desktopReadyAt = this.now()
+    })().finally(() => { s.desktop = undefined })
+    await s.desktop
   }
 
   /** Forget that the machine was ready (it went to sleep under us). */
-  stale(c: BoundComputer): void { this.session(c).readyAt = 0 }
+  stale(c: BoundComputer): void {
+    const s = this.session(c)
+    s.readyAt = 0
+    s.desktopReadyAt = 0
+  }
+
+  private displayOf(c: BoundComputer): string {
+    const d = c.capabilities.desktop
+    if (typeof d === 'object' && d?.display) return d.display
+    return c.capabilities.env?.DISPLAY || ':1'
+  }
 
   private session(c: BoundComputer): Session {
     let s = this.sessions.get(c.id)
-    if (!s) this.sessions.set(c.id, s = { readyAt: 0 })
+    if (!s) this.sessions.set(c.id, s = { readyAt: 0, desktopReadyAt: 0 })
     return s
   }
 
@@ -317,7 +413,7 @@ export class Computers {
     return data.length
   }
 
-  // ── Browsers ─────────────────────────────────────────────────────────────
+  // ── Browsers & graphical desktop ─────────────────────────────────────────
 
   async browser<T = Record<string, unknown>>(c: BoundComputer, request: Record<string, unknown>): Promise<T> {
     const install = `[ -d "$NUONUO_HOME/.computer/node_modules/playwright-core" ] || (cd "$NUONUO_HOME/.computer" && npm install ${PLAYWRIGHT} --silent --no-audit --no-fund >/dev/null 2>&1) || { echo '{"ok":false,"error":"在云电脑上安装 playwright-core 失败（没有 node/npm，或连不上 npm）"}'; exit 0; }`
@@ -326,6 +422,92 @@ export class Computers {
     try { out = JSON.parse(r.stdout.trim().split('\n').pop() || '{}') } catch { throw new ComputerError(`浏览器服务没有回应：${(r.stderr || r.stdout).slice(0, 300)}`) }
     if (!out.ok) throw new ComputerError(out.error || '浏览器出错')
     return out as T
+  }
+
+  /** Captures a PNG screenshot of the full X11 graphical desktop (`DISPLAY`). */
+  async desktopScreenshot(c: BoundComputer): Promise<Buffer> {
+    if (!c.capabilities.desktop) throw new ComputerError(`${c.title} 没有图形桌面`)
+    const id = `${this.now().toString(36)}${randomBytes(3).toString('hex')}`
+    const display = this.displayOf(c)
+    const script = [
+      'set -e',
+      `export DISPLAY=${q(display)}`,
+      `F="$NUONUO_HOME/.computer/shot-${id}.png"`,
+      'mkdir -p "$NUONUO_HOME/.computer"',
+      'trap \'rm -f "$F"\' EXIT',
+      'if command -v scrot >/dev/null 2>&1; then scrot -o "$F"; elif command -v import >/dev/null 2>&1; then import -window root "png:$F"; else echo "云电脑上没有截图工具（需要 scrot 或 ImageMagick import）" >&2; exit 127; fi',
+      'base64 < "$F" | tr -d "\\r\\n"',
+    ].join('\n')
+    const r = await this.run(c, script, { timeoutSeconds: 30 })
+    if (r.exitCode !== 0 || r.truncated) {
+      throw new ComputerError(`截取云电脑桌面失败：${(r.stderr || r.stdout).trim().slice(0, 300) || '截图输出被截断'}`)
+    }
+    return Buffer.from(r.stdout.trim(), 'base64')
+  }
+
+  /** Sends pointer or keyboard input to the X11 graphical desktop (`DISPLAY`) via `xdotool`. */
+  async desktopInput(c: BoundComputer, action: DesktopAction): Promise<void> {
+    if (!c.capabilities.desktop) throw new ComputerError(`${c.title} 没有图形桌面`)
+    const display = this.displayOf(c)
+    let cmd = ''
+    let stdin: string | undefined
+    switch (action.type) {
+      case 'click': {
+        const button = XDO_BUTTONS[action.button ?? 'left']
+        if (!button) throw new ComputerError(`不支持的鼠标按键：${String(action.button)}`)
+        const repeat = action.double ? ' --repeat 2 --delay 80' : ''
+        cmd = `xdotool mousemove ${px('x', action.x)} ${px('y', action.y)} click${repeat} ${button}`
+        break
+      }
+      case 'move':
+        cmd = `xdotool mousemove ${px('x', action.x)} ${px('y', action.y)}`
+        break
+      case 'drag':
+        cmd = `xdotool mousemove ${px('fromX', action.fromX)} ${px('fromY', action.fromY)} mousedown 1 sleep 0.1 mousemove ${px('toX', action.toX)} ${px('toY', action.toY)} sleep 0.1 mouseup 1`
+        break
+      case 'scroll': {
+        let wheel: number
+        let n: number
+        if (action.direction) {
+          wheel = XDO_WHEEL[action.direction]
+          if (!wheel) throw new ComputerError(`不支持的滚动方向：${String(action.direction)}`)
+          n = Math.max(1, Math.min(100, Math.round(action.amount ?? 3)))
+        } else {
+          const dx = Number(action.dx ?? 0)
+          const dy = Number(action.dy ?? 0)
+          if (!dx && !dy) return
+          const horiz = Math.abs(dx) > Math.abs(dy)
+          const dir = horiz ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up')
+          wheel = XDO_WHEEL[dir]
+          n = Math.max(1, Math.min(20, Math.round(Math.abs(horiz ? dx : dy) / 100) || 1))
+        }
+        cmd = `xdotool click --repeat ${n} --delay 30 ${wheel}`
+        break
+      }
+      case 'type':
+        if (!action.text) return
+        cmd = 'xdotool type --delay 12 --file -'
+        stdin = action.text
+        break
+      case 'paste':
+        if (!action.text) return
+        cmd = 'xdotool type --delay 2 --file -'
+        stdin = action.text
+        break
+      case 'press':
+      case 'key':
+        cmd = `xdotool key -- ${q(mapXdoKey(action.key))}`
+        break
+      case 'reload':
+        cmd = `xdotool key -- 'F5'`
+        break
+      case 'goto':
+        cmd = `xdotool key -- 'ctrl+l' && xdotool type --delay 8 --file - && xdotool key -- 'Return'`
+        stdin = action.url
+        break
+    }
+    const r = await this.run(c, `export DISPLAY=${q(display)}; ${cmd}`, { ...(stdin !== undefined ? { stdin } : {}), timeoutSeconds: 30 })
+    if (r.exitCode !== 0) throw new ComputerError(`云电脑桌面操作失败：${(r.stderr || r.stdout).trim().slice(0, 300)}`)
   }
 }
 
@@ -509,6 +691,70 @@ export function computerExtension(computers: Computers, opts: ComputerExtensionO
         inputSchema: z.object({ browser: where.shape.browser, tab: z.string().regex(/^[\w.-]{1,40}$/).optional() }),
         execute: async ({ browser, tab }) => (await computers.browser<{ closed: boolean }>(c(), { op: 'close', browser: browser ?? 'main', ...(tab ? { tab } : {}) })).closed ? '已关闭' : '没有这个标签页',
       }),
+      ...(computers.current()?.capabilities.desktop ? {
+        computer_desktop_screenshot: tool({
+          description: 'Capture the full graphical desktop screen (1280×800) of your cloud computer — shows headed browser windows, native file pickers/dialogs, canvas UIs, and desktop apps. With `save`, also writes a PNG under screenshots/ in the local working directory.',
+          inputSchema: z.object({ save: z.string().regex(/^[\w-]{1,40}$/).optional().describe('File name (without .png) under screenshots/') }),
+          execute: async ({ save }) => {
+            const buf = await computers.desktopScreenshot(c())
+            let saved = ''
+            if (save) { const file = local(`screenshots/${save}.png`); mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, buf); saved = file }
+            return { image: buf.toString('base64'), mediaType: 'image/png', saved }
+          },
+          toModelOutput: ({ output }) => ({ type: 'content', value: [
+            { type: 'text', text: `云电脑桌面截图${output.saved ? `（已保存 ${output.saved}）` : ''}` },
+            { type: 'image-data', data: output.image, mediaType: output.mediaType },
+          ] }),
+        }),
+        computer_desktop_click: tool({
+          description: 'Click at pixel coordinates (x, y) on the cloud computer\'s 1280×800 graphical desktop.',
+          inputSchema: z.object({ x: z.number(), y: z.number(), button: z.enum(['left', 'right', 'middle']).optional(), double: z.boolean().optional() }),
+          execute: async ({ x, y, button, double }) => {
+            await computers.desktopInput(c(), { type: 'click', x, y, ...(button ? { button } : {}), ...(double ? { double } : {}) })
+            return `已在云电脑桌面 (${Math.round(x)}, ${Math.round(y)}) 点击`
+          },
+        }),
+        computer_desktop_move: tool({
+          description: 'Move the mouse pointer to (x, y) on the cloud computer\'s 1280×800 graphical desktop.',
+          inputSchema: z.object({ x: z.number(), y: z.number() }),
+          execute: async ({ x, y }) => {
+            await computers.desktopInput(c(), { type: 'move', x, y })
+            return `已移动鼠标到 (${Math.round(x)}, ${Math.round(y)})`
+          },
+        }),
+        computer_desktop_drag: tool({
+          description: 'Drag with the left mouse button from (from_x, from_y) to (to_x, to_y) on the cloud computer\'s graphical desktop.',
+          inputSchema: z.object({ from_x: z.number(), from_y: z.number(), to_x: z.number(), to_y: z.number() }),
+          execute: async ({ from_x, from_y, to_x, to_y }) => {
+            await computers.desktopInput(c(), { type: 'drag', fromX: from_x, fromY: from_y, toX: to_x, toY: to_y })
+            return `已从 (${Math.round(from_x)}, ${Math.round(from_y)}) 拖拽到 (${Math.round(to_x)}, ${Math.round(to_y)})`
+          },
+        }),
+        computer_desktop_scroll: tool({
+          description: 'Scroll the mouse wheel on the cloud computer\'s graphical desktop (`amount` notches, default 3).',
+          inputSchema: z.object({ direction: z.enum(['up', 'down', 'left', 'right']), amount: z.number().int().min(1).max(100).optional() }),
+          execute: async ({ direction, amount }) => {
+            await computers.desktopInput(c(), { type: 'scroll', direction, ...(amount !== undefined ? { amount } : {}) })
+            return `已在桌面滚动（${direction}）`
+          },
+        }),
+        computer_desktop_type: tool({
+          description: 'Type text into the focused window on the cloud computer\'s graphical desktop. Never type the owner\'s passwords or payment details.',
+          inputSchema: z.object({ text: z.string() }),
+          execute: async ({ text }) => {
+            await computers.desktopInput(c(), { type: 'type', text })
+            return `已输入 ${text.length} 个字符`
+          },
+        }),
+        computer_desktop_press: tool({
+          description: 'Press a key or chord on the cloud computer\'s graphical desktop (e.g. "Enter", "Escape", "ctrl+l").',
+          inputSchema: z.object({ key: z.string().min(1) }),
+          execute: async ({ key }) => {
+            await computers.desktopInput(c(), { type: 'press', key })
+            return `已按键 ${key}`
+          },
+        }),
+      } : {}),
       computer_status: tool({
         description: 'Show whether the cloud computer is awake, and wake it.',
         inputSchema: z.object({}),
@@ -527,11 +773,12 @@ export function computerExtension(computers: Computers, opts: ComputerExtensionO
     if (!c) return undefined
     const def = isDefault()
     const w = computers.workspace(c)
+    const hasDesktop = Boolean(c.capabilities.desktop)
     return `## 云电脑（${c.title}）${def ? '：你的默认执行环境' : ''}
 You have a Linux computer of your own in the cloud. ${def ? '`shell` (with job_status / job_stop) runs there' : '`computer_shell` (with computer_job_status / computer_job_stop) runs there'}, ${c.capabilities.sudo ? `as the account \`${ACCOUNT}\` (no sudo)` : 'in nuonuo\'s own folder'}, home ${w}; your task folder there is ${computers.taskDir(c, ticket.id)} and commands start in it. Internet works there${c.capabilities.docker ? '; so does docker (label your containers with `--label nuonuo=1` and leave other containers alone)' : ''}. The owner also uses this machine: stay inside ${w} and never touch other accounts' files or processes. ${c.capabilities.sleeps ? 'It sleeps when idle; the tools wake it (the first call can take ~10 s).' : ''}
 - Files: read_file / write_file / edit_file / list_dir work on the LOCAL working directory ${ticket.directory}, not on the cloud computer. Move files with computer_upload / computer_download; deliverables must end up in the local folder.
 - ${def ? '`local_shell` runs on the owner\'s own machine: use it only when the work needs the owner\'s local folders, repositories or apps.' : 'Your `shell` runs on the owner\'s machine; use the cloud computer for downloads, installs, docker, long jobs and anything that needs the internet.'}
-- Browsing: computer_browser_* drive Chromium on the cloud computer. Several browsers (\`browser\`: separate profiles, each keeping its own logins) with named tabs (\`tab\`) can be open at once, so you can work on several sites side by side; by default you get your own tab in browser "main". ${def ? 'Use them for browsing by default; browser_* is the owner\'s local browser with their own logins: use it only for a site that needs the owner\'s login or a handoff.' : ''}`
+- Browsing: computer_browser_* drive ${hasDesktop ? 'headed GUI Chromium on the cloud computer\'s 1280×800 graphical desktop' : 'Chromium on the cloud computer'}. Several browsers (\`browser\`: separate profiles, each keeping its own logins) with named tabs (\`tab\`) can be open at once, so you can work on several sites side by side; by default you get your own tab in browser "main". The owner can watch your live tabs and take over directly in the web UI's「浏览器」pane when login, 2FA, captcha or payment is needed (report(waiting, human_action) to ask them to take over). ${def ? 'Use computer_browser_* for browsing by default; browser_* is the owner\'s local browser with their own logins: use it only when specifically needed on the owner\'s machine.' : ''}${hasDesktop ? '\n- Graphical desktop: computer_desktop_screenshot / _click / _move / _drag / _scroll / _type / _press let you see and control the full 1280×800 graphical desktop screen (native dialogs, file pickers, canvas UIs, and desktop apps alongside Chromium). Prefer computer_browser_* for structured web DOM actions, and use computer_desktop_* when interacting with native dialogs, canvas elements, or desktop GUI apps.' : ''}`
   }
 
   return {
@@ -539,7 +786,7 @@ You have a Linux computer of your own in the cloud. ${def ? '`shell` (with job_s
     workerPrompt: ticket => prompt(ticket),
     routerPrompt: () => {
       const c = computers.current()
-      return c ? `## 云电脑\nWorkers have a cloud computer of their own (${c.title}): internet, a shell${c.capabilities.docker ? ', docker' : ''} and several browsers at once. Requests that need browsing, downloads, installing software or long-running jobs are tasks (start_task).` : ''
+      return c ? `## 云电脑\nWorkers have a cloud computer of their own (${c.title}): internet, a shell${c.capabilities.docker ? ', docker' : ''}${c.capabilities.desktop ? ', a 1280×800 graphical desktop' : ''} and several ${c.capabilities.desktop ? 'headed GUI ' : ''}browsers at once (which the owner can view or take over from the「浏览器」pane). Requests that need browsing, downloads, installing software or long-running jobs are tasks (start_task).` : ''
     },
     shellOverride: (ticket, ctx) => isDefault() ? shellTools(ticket, ctx, '') : undefined,
   }

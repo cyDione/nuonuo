@@ -17,7 +17,8 @@ import { EventMapper } from './events'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
 import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@nuonuo/core'
 import { kvGet, kvSet, newId, schema } from '@nuonuo/db'
-import { BRIDGE_JS, ComputerError, fireRoutine, WINDOW_HEADERS } from '@nuonuo/sources'
+import { findBrowser } from '@nuonuo/agent-runtime'
+import { BRIDGE_JS, ComputerError, fireRoutine, WINDOW_HEADERS, type BrowserInfo } from '@nuonuo/sources'
 import { MOOD_PLUGIN_ID, moodView, pinDiary, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodValues } from '@nuonuo/plugins'
 import { runDoctor } from './doctor'
 import { MAX_UPLOAD, Uploads } from './uploads'
@@ -728,13 +729,30 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   }).strict()
   api.get('/settings/execution', c => c.json({ settings: rt.engine.execution(), defaults: DEFAULT_EXECUTION }))
 
-  // Cloud computers (云电脑) connected by plugins: their state, waking one, and nuonuo's browsers on it.
+  // Cloud computers (云电脑) connected by plugins: their state, waking one, desktop stream, and nuonuo's browsers on it.
   api.get('/computers', async c => c.json({ computers: await rt.computers.views(), environment: rt.engine.execution().environment }))
   api.post('/computers/:id/wake', async c => {
     const computer = rt.computers.get(c.req.param('id'))
     rt.computers.stale(computer)
     await rt.computers.ready(computer)
     return c.json({ computers: await rt.computers.views() })
+  })
+  api.post('/computers/:id/desktop', async c => {
+    const computer = rt.computers.get(c.req.param('id'))
+    if (!computer.capabilities.desktop) throw new HttpError(400, 'invalid', `${computer.title} 没有图形桌面`)
+    const input = await body(c, z.object({ viewOnly: z.boolean().optional() }).optional().default({}))
+    await rt.computers.ready(computer)
+    await rt.computers.ensureDesktop(computer)
+    if (computer.desktopUrl) {
+      const stream = await computer.desktopUrl({ viewOnly: Boolean(input.viewOnly) })
+      return c.json({ ok: true, ...stream })
+    }
+    return c.json({ ok: true, url: null })
+  })
+  api.get('/computers/:id/desktop/screenshot', async c => {
+    const computer = rt.computers.get(c.req.param('id'))
+    const buf = await rt.computers.desktopScreenshot(computer)
+    return c.body(new Uint8Array(buf), 200, { 'content-type': 'image/png', 'cache-control': 'no-store' })
   })
   api.get('/computers/:id/browsers', async c => {
     const computer = rt.computers.get(c.req.param('id'))
@@ -745,6 +763,218 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.post('/computers/:id/browsers/:name/close', async c => {
     const computer = rt.computers.get(c.req.param('id'))
     return c.json(await rt.computers.browser(computer, { op: 'close', browser: c.req.param('name') }))
+  })
+
+  // Unified RightPane「浏览器」& cloud desktop takeover surface (Figma Section 34)
+  type PageTarget =
+    | { kind: 'cloud'; computerId: string; browser: string; tab: string }
+    | { kind: 'local'; id: string }
+
+  const parsePageKey = (key: string | undefined): PageTarget => {
+    if (!key) throw new HttpError(400, 'invalid', '缺少页面标识 key')
+    if (key.startsWith('local:')) {
+      const id = key.slice('local:'.length)
+      if (!id) throw new HttpError(400, 'invalid', `无效的页面标识：${key}`)
+      return { kind: 'local', id }
+    }
+    if (key.startsWith('cloud:')) {
+      const [, computerId, browser, ...rest] = key.split(':')
+      const tab = rest.join(':')
+      if (!computerId || !browser || !tab) throw new HttpError(400, 'invalid', `无效的云端页面标识：${key}`)
+      return { kind: 'cloud', computerId, browser, tab }
+    }
+    throw new HttpError(400, 'invalid', `不认识的页面标识：${key}`)
+  }
+
+  const normalizeHttpUrl = (raw: string): string => {
+    const trimmed = raw.trim()
+    const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+    let parsed: URL
+    try { parsed = new URL(withScheme) } catch { throw new HttpError(400, 'invalid', `无效的网址：${raw}`) }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new HttpError(400, 'invalid', '只支持 http 或 https 网址')
+    return parsed.toString()
+  }
+
+  const UnifiedBrowserInput = z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('click'),
+      x: z.number().min(0).max(16384),
+      y: z.number().min(0).max(16384),
+      button: z.enum(['left', 'right', 'middle']).optional(),
+      double: z.boolean().optional(),
+    }),
+    z.object({
+      type: z.literal('drag'),
+      fromX: z.number().min(0).max(16384),
+      fromY: z.number().min(0).max(16384),
+      toX: z.number().min(0).max(16384),
+      toY: z.number().min(0).max(16384),
+    }),
+    z.object({
+      type: z.literal('scroll'),
+      dy: z.number().min(-10000).max(10000),
+      dx: z.number().min(-10000).max(10000).optional(),
+    }),
+    z.object({ type: z.literal('type'), text: z.string().max(4000) }),
+    z.object({ type: z.literal('paste'), text: z.string().max(20_000) }),
+    z.object({ type: z.literal('key'), key: z.string().min(1).max(40) }),
+    z.object({ type: z.literal('goto'), url: z.string().trim().min(1).max(2000) }),
+    z.object({ type: z.literal('reload') }),
+  ])
+
+  const resumeTicketAfterHandoff = (tabOrId: string, note?: string) => {
+    if (!tabOrId.startsWith('tkt_')) return
+    try {
+      const ticket = rt.engine.ticket(tabOrId)
+      if (ticket.ended) return
+      const conversationId = rt.engine.conversationOfThread(ticket.threadId)
+      if (conversationId) {
+        rt.engine.receiveMessage(conversationId, note?.trim() || '我已经在浏览器里操作完了，交还给你，继续吧。', { replyTo: ticket.id })
+      }
+    } catch { /* not an active ticket */ }
+  }
+
+  api.get('/browsers', async c => {
+    const allComputers = rt.computers.all()
+    const primary = rt.computers.current()
+    const localBin = await findBrowser()
+    const available = allComputers.length > 0 || Boolean(localBin)
+    let computer: { id: string; title: string; state: string; hasDesktop: boolean } | null = null
+    const pages: Array<{
+      key: string
+      kind: 'cloud' | 'local'
+      computerId?: string
+      browser: string
+      tab: string
+      title: string
+      url: string
+      handoff: boolean
+      hasDesktop: boolean
+    }> = []
+    if (primary) {
+      const st = await primary.status().catch(error => ({ state: 'error' as const, detail: (error as Error).message }))
+      const hasDesktop = Boolean(primary.capabilities.desktop)
+      computer = { id: primary.id, title: primary.title, state: st.state, hasDesktop }
+      if (st.state === 'ready') {
+        const listed = await rt.computers.browser<{ browsers: BrowserInfo[] }>(primary, { op: 'list' }).catch(() => ({ browsers: [] as BrowserInfo[] }))
+        for (const b of listed.browsers ?? []) {
+          for (const t of b.tabs ?? []) {
+            pages.push({
+              key: `cloud:${primary.id}:${b.name}:${t.name}`,
+              kind: 'cloud',
+              computerId: primary.id,
+              browser: b.name,
+              tab: t.name,
+              title: t.title || '',
+              url: t.url,
+              handoff: Boolean(t.handoff),
+              hasDesktop,
+            })
+          }
+        }
+      }
+    }
+    for (const p of await rt.browser.listPages()) {
+      pages.push({
+        key: `local:${p.id}`,
+        kind: 'local',
+        browser: 'local',
+        tab: p.id,
+        title: p.title || '',
+        url: p.url,
+        handoff: p.handoff,
+        hasDesktop: false,
+      })
+    }
+    c.header('cache-control', 'no-store')
+    return c.json({ available, computer, pages })
+  })
+
+  api.post('/browsers/open', async c => {
+    const input = await body(c, z.object({ url: z.string().trim().min(1).max(2000) }))
+    const url = normalizeHttpUrl(input.url)
+    const primary = rt.computers.current()
+    if (rt.engine.execution().environment !== 'local' && primary) {
+      await rt.computers.ready(primary)
+      const tab = `web_${Date.now().toString(36)}${randomBytes(2).toString('hex')}`
+      await rt.computers.browser(primary, { op: 'open', browser: 'main', tab, url, owner: true })
+      return c.json({ key: `cloud:${primary.id}:main:${tab}` })
+    }
+    const id = `web_${Date.now().toString(36)}${randomBytes(2).toString('hex')}`
+    const p = await rt.browser.page(id)
+    await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    return c.json({ key: `local:${id}` })
+  })
+
+  api.post('/browsers/close', async c => {
+    const input = await body(c, z.object({ key: z.string().min(1) }))
+    const target = parsePageKey(input.key)
+    if (target.kind === 'cloud') {
+      await rt.computers.browser(rt.computers.get(target.computerId), { op: 'close', browser: target.browser, tab: target.tab })
+    } else {
+      await rt.browser.closePage(target.id)
+    }
+    return c.json({ ok: true })
+  })
+
+  api.get('/browsers/screenshot', async c => {
+    const target = parsePageKey(c.req.query('key'))
+    if (target.kind === 'cloud') {
+      const r = await rt.computers.browser<{ image: string; mediaType: string }>(rt.computers.get(target.computerId), { op: 'screenshot', browser: target.browser, tab: target.tab })
+      return c.body(new Uint8Array(Buffer.from(r.image, 'base64')), 200, { 'content-type': r.mediaType || 'image/jpeg', 'cache-control': 'no-store' })
+    }
+    if (!rt.browser.hasPage(target.id)) throw new HttpError(404, 'missing', '没有打开的页面')
+    const png = await rt.browser.screenshot(target.id)
+    return c.body(new Uint8Array(png), 200, { 'content-type': 'image/png', 'cache-control': 'no-store' })
+  })
+
+  api.post('/browsers/handoff', async c => {
+    const input = await body(c, z.object({ key: z.string().min(1) }))
+    const target = parsePageKey(input.key)
+    if (target.kind === 'cloud') {
+      const comp = rt.computers.get(target.computerId)
+      const r = await rt.computers.browser<{ url: string; title: string }>(comp, { op: 'handoff', browser: target.browser, tab: target.tab })
+      await comp.desktopControl?.('takeover').catch(() => {})
+      return c.json({ ok: true, url: r.url, title: r.title, hasDesktop: Boolean(comp.capabilities.desktop), computerId: comp.id })
+    }
+    if (!rt.browser.hasPage(target.id)) throw new HttpError(409, 'conflict', '页面已关闭')
+    rt.browser.handoffs.add(target.id)
+    const st = await rt.browser.state(target.id)
+    return c.json({ ok: true, url: st?.url ?? '', title: st?.title ?? '', hasDesktop: false })
+  })
+
+  api.post('/browsers/input', async c => {
+    const input = await body(c, z.object({ key: z.string().min(1), mode: z.enum(['page', 'desktop']).optional(), action: UnifiedBrowserInput }))
+    const action = input.action.type === 'goto' ? { ...input.action, url: normalizeHttpUrl(input.action.url) } : input.action
+    if (input.mode === 'desktop' && input.key.startsWith('cloud:')) {
+      const computerId = input.key.split(':')[1]
+      if (!computerId) throw new HttpError(400, 'invalid', `无效的云端页面标识：${input.key}`)
+      await rt.computers.desktopInput(rt.computers.get(computerId), action)
+      return c.json({ ok: true })
+    }
+    const target = parsePageKey(input.key)
+    if (target.kind === 'cloud') {
+      const r = await rt.computers.browser<{ url: string; title: string }>(rt.computers.get(target.computerId), { op: 'input', browser: target.browser, tab: target.tab, action, owner: true })
+      return c.json({ ok: true, url: r.url, title: r.title })
+    }
+    if (!rt.browser.hasPage(target.id)) throw new HttpError(409, 'conflict', '页面已关闭')
+    const r = await rt.browser.input(target.id, action)
+    return c.json({ ok: true, url: r.url, title: r.title })
+  })
+
+  api.post('/browsers/return', async c => {
+    const input = await body(c, z.object({ key: z.string().min(1), note: z.string().max(1000).optional() }))
+    const target = parsePageKey(input.key)
+    if (target.kind === 'cloud') {
+      const comp = rt.computers.get(target.computerId)
+      await rt.computers.browser(comp, { op: 'release', browser: target.browser, tab: target.tab }).catch(() => {})
+      await comp.desktopControl?.('handback').catch(() => {})
+      resumeTicketAfterHandoff(target.tab, input.note)
+      return c.json({ ok: true })
+    }
+    rt.browser.handoffs.delete(target.id)
+    resumeTicketAfterHandoff(target.id, input.note)
+    return c.json({ ok: true })
   })
   api.put('/settings/execution', async c => {
     const settings = await body(c, ExecutionBody)

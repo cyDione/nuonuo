@@ -187,6 +187,9 @@ describe('cloud computers in the sandbox', () => {
     await plugins.setEnabled('box', true)
     const [box] = plugins.computers()
     expect(box).toMatchObject({ id: 'box', title: '盒子', pluginId: 'box', capabilities: { dataDir: '/data', maxExecSeconds: 300 } })
+    expect(box!.startDesktop).toBeUndefined()
+    expect(box!.desktopUrl).toBeUndefined()
+    expect(box!.desktopControl).toBeUndefined()
     expect(await box!.status()).toEqual({ state: 'unconfigured', detail: '没有令牌' })
     await plugins.saveSettings('box', { token: 't0' })
     expect(await box!.status()).toEqual({ state: 'asleep' })
@@ -196,6 +199,32 @@ describe('cloud computers in the sandbox', () => {
     expect(plugins.list().find(p => p.id === 'box')!.computers).toEqual(['盒子'])
     await plugins.setEnabled('box', false)
     expect(plugins.computers()).toEqual([])
+  })
+
+  it('proxies startDesktop, desktopUrl and desktopControl over sandbox IPC', async () => {
+    const { dir, plugins } = setup()
+    mkdirSync(join(dir, 'desk'))
+    writeFileSync(join(dir, 'desk', 'package.json'), JSON.stringify({ name: 'desk', nuonuo: { plugin: './index.mjs', settings: [{ key: 'host', label: 'H', type: 'text' }] } }))
+    writeFileSync(join(dir, 'desk', 'index.mjs'), `export default ({ definePlugin, defineComputer }) => definePlugin({ id: 'desk', computers: [defineComputer({
+  id: 'desk', title: '桌面云电脑',
+  capabilities: { sudo: true, docker: true, sleeps: false, dataDir: '/data', maxExecSeconds: 300, desktop: { display: ':1', width: 1280, height: 800 } },
+  async status() { return { state: 'ready' } },
+  async wake() { return { state: 'ready' } },
+  async exec() { return { exitCode: 0, stdout: '', stderr: '' } },
+  async startDesktop(ctx) { ctx.state.set('started', true) },
+  async desktopUrl(ctx, opts) { return { url: 'https://' + (ctx.settings.get('host') || 'desk.example') + '/vnc?ro=' + Boolean(opts?.viewOnly), expiresAt: '2099-01-01T00:00:00Z' } },
+  async desktopControl(ctx, action) { ctx.state.set('control', action) },
+})] })`)
+    await plugins.saveSettings('desk', { host: 'live.instabox.test' })
+    await plugins.setEnabled('desk', true)
+    const [desk] = plugins.computers()
+    expect(desk!.capabilities.desktop).toEqual({ display: ':1', width: 1280, height: 800 })
+    await desk!.startDesktop!()
+    await vi.waitFor(() => expect(kvGet(store, 'plugin:desk:state:started')).toBe(true))
+    expect(await desk!.desktopUrl!({ viewOnly: true })).toEqual({ url: 'https://live.instabox.test/vnc?ro=true', expiresAt: '2099-01-01T00:00:00Z' })
+    expect(await desk!.desktopUrl!({ viewOnly: false })).toEqual({ url: 'https://live.instabox.test/vnc?ro=false', expiresAt: '2099-01-01T00:00:00Z' })
+    await desk!.desktopControl!('takeover')
+    await vi.waitFor(() => expect(kvGet(store, 'plugin:desk:state:control')).toBe('takeover'))
   })
 
   it('refuses a provider without exec', async () => {
@@ -211,9 +240,63 @@ describe('cloud computers in the sandbox', () => {
     cpSync(join(process.cwd(), 'plugins', 'instabox'), join(dir, 'instabox'), { recursive: true })
     await plugins.setEnabled('instabox', true)
     const [box] = plugins.computers()
-    expect(box).toMatchObject({ id: 'instabox', capabilities: { sudo: true, docker: true, dataDir: '/data' } })
+    expect(box).toMatchObject({
+      id: 'instabox',
+      capabilities: {
+        sudo: true,
+        docker: true,
+        dataDir: '/data',
+        desktop: { display: ':1', width: 1280, height: 800 },
+        env: { DISPLAY: ':1', NUONUO_BROWSER_HEADED: '1' },
+      },
+    })
+    expect(box!.capabilities.env?.INSTABOX_HEADLESS).toBeUndefined()
+    expect(typeof box!.startDesktop).toBe('function')
+    expect(typeof box!.desktopUrl).toBe('function')
+    expect(typeof box!.desktopControl).toBe('function')
     expect(await box!.status()).toMatchObject({ state: 'unconfigured' })
     expect(plugins.settingsOf('instabox').fields.map(f => f.key)).toEqual(['apiKey', 'machine'])
+  })
+
+  it('Instabox startDesktop installs/starts X11 desktop and desktopUrl handles stream & 403 workspace key', async () => {
+    // @ts-expect-error: plain JS plugin module
+    const mod = (await import('../../../plugins/instabox/index.mjs')).default
+    const { sdk } = await import('./plugins')
+    const p = await mod(sdk)
+    const box = p.computers[0]
+    const calls: [string, string, any][] = []
+    let installed = false
+    let denyStream = false
+    const origFetch = globalThis.fetch
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined
+      calls.push([init?.method || 'GET', path, body])
+      if (path === '/v1/machines') return new Response(JSON.stringify({ machines: [{ id: 'm_1', name: 'dev', state: 'running', runtime: { ready: true } }] }))
+      if (path === '/v1/machines/m_1') return new Response(JSON.stringify({ id: 'm_1', name: 'dev', state: 'running', runtime: { ready: true } }))
+      if (path === '/v1/machines/m_1/desktop') {
+        if (body?.action === 'install') { installed = true; return new Response(JSON.stringify({ installed: true, installing: false, running: false })) }
+        if (body?.action === 'start') return new Response(JSON.stringify({ installed, installing: false, running: installed }))
+        return new Response(JSON.stringify({ installed, installing: false, running: installed }))
+      }
+      if (path === '/v1/machines/m_1/desktop/stream') {
+        if (denyStream) return new Response(JSON.stringify({ error: { code: 'permission_denied', message: 'workspace key not allowed' } }), { status: 403 })
+        return new Response(JSON.stringify({ url: `https://stream.instabox.sh/s1?ro=${body?.viewOnly}`, expiresAt: '2099-01-01T00:00:00Z' }))
+      }
+      return new Response('{}')
+    }) as any
+    try {
+      const ctx = { id: 'instabox', dir: '', log: () => {}, state: { get: () => undefined, set: () => {} }, settings: { get: (k: string) => (k === 'apiKey' ? 'ibk_test' : '') } }
+      const stream = await box.desktopUrl(ctx, { viewOnly: true })
+      expect(stream).toEqual({ url: 'https://stream.instabox.sh/s1?ro=true', expiresAt: '2099-01-01T00:00:00Z' })
+      expect(calls.filter(c => c[1] === '/v1/machines/m_1/desktop').map(c => c[2].action)).toEqual(['start', 'install', 'start'])
+      await box.desktopControl(ctx, 'takeover')
+      expect(calls.at(-1)).toEqual(['POST', '/v1/machines/m_1/desktop', { action: 'takeover' }])
+      denyStream = true
+      await expect(box.desktopUrl(ctx, { viewOnly: false })).rejects.toThrow(/团队 Workspace Key/)
+    } finally {
+      globalThis.fetch = origFetch
+    }
   })
 })
 

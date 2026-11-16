@@ -23,7 +23,26 @@ const executable = () => process.env.NUONUO_CHROMIUM || CANDIDATES.find(p => exi
 
 /** name -> { context: Promise<BrowserContext>, tabs: Map<name, Page>, used } */
 const browsers = new Map()
+/** 'browser/tab' keys currently taken over by the owner. */
+const handoffs = new Set()
 const NAME = /^[\w.-]{1,40}$/
+
+async function launchContext(path, profile) {
+  const wantHeaded = process.env.NUONUO_BROWSER_HEADED === '1' && Boolean(process.env.DISPLAY)
+  const baseArgs = ['--no-first-run', '--no-default-browser-check', '--disable-dev-shm-usage']
+  const headedArgs = baseArgs.concat(['--password-store=basic', '--window-position=0,0', '--window-size=1280,800'])
+  const launch = headed => chromium.launchPersistentContext(profile, {
+    executablePath: path, headless: !headed, viewport: { width: 1280, height: 800 }, locale: 'zh-CN',
+    args: headed ? headedArgs : baseArgs,
+  })
+  if (!wantHeaded) return launch(false)
+  try { return await launch(true) } catch { return launch(false) }
+}
+
+function clearBrowserHandoffs(bname) {
+  const prefix = bname + '/'
+  for (const k of [...handoffs]) if (k.startsWith(prefix)) handoffs.delete(k)
+}
 
 function browser(name) {
   if (!NAME.test(name)) throw new Error('浏览器名只能用字母、数字、-、_、.，最多 40 个字符')
@@ -33,11 +52,11 @@ function browser(name) {
     if (!path) throw new Error('云电脑上没有 Chromium：用 shell 装一个（例如 sudo apt-get install -y chromium），或设置 NUONUO_CHROMIUM')
     const profile = join(dir, 'browsers', name)
     mkdirSync(profile, { recursive: true })
-    b = { tabs: new Map(), used: Date.now(), context: chromium.launchPersistentContext(profile, {
-      executablePath: path, headless: process.env.NUONUO_BROWSER_HEADED !== '1', viewport: { width: 1280, height: 800 }, locale: 'zh-CN',
-      args: ['--no-first-run', '--no-default-browser-check', '--disable-dev-shm-usage'],
-    }) }
-    b.context.then(ctx => ctx.on('close', () => { if (browsers.get(name) === b) browsers.delete(name) }), () => { if (browsers.get(name) === b) browsers.delete(name) })
+    b = { tabs: new Map(), used: Date.now(), context: launchContext(path, profile) }
+    b.context.then(
+      ctx => ctx.on('close', () => { if (browsers.get(name) === b) { browsers.delete(name); clearBrowserHandoffs(name) } }),
+      () => { if (browsers.get(name) === b) { browsers.delete(name); clearBrowserHandoffs(name) } },
+    )
     browsers.set(name, b)
   }
   b.used = Date.now()
@@ -55,8 +74,14 @@ async function tab(bname, tname, create) {
   const blank = b.tabs.size === 0 ? ctx.pages().find(p => p.url() === 'about:blank' && ![...b.tabs.values()].includes(p)) : undefined
   page = blank || await ctx.newPage()
   b.tabs.set(tname, page)
-  page.on('close', () => { if (b.tabs.get(tname) === page) b.tabs.delete(tname) })
+  page.on('close', () => { if (b.tabs.get(tname) === page) { b.tabs.delete(tname); handoffs.delete(bname + '/' + tname) } })
   return page
+}
+
+function guardHandoff(r) {
+  if (!r.owner && handoffs.has(r.browser + '/' + r.tab)) {
+    throw new Error('主人正在接管这个页面，等交还后再继续')
+  }
 }
 
 async function snapshot(page) {
@@ -71,6 +96,7 @@ async function settle(page) {
 
 const ops = {
   async open(r) {
+    guardHandoff(r)
     const page = await tab(r.browser, r.tab, true)
     await page.goto(r.url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
     await settle(page)
@@ -78,12 +104,14 @@ const ops = {
   },
   async snapshot(r) { return { page: await snapshot(await tab(r.browser, r.tab, false)) } },
   async click(r) {
+    guardHandoff(r)
     const page = await tab(r.browser, r.tab, false)
     await page.click('[data-sa-ref="' + r.ref + '"]', { timeout: 10_000 })
     await settle(page)
     return { page: await snapshot(page) }
   },
   async type(r) {
+    guardHandoff(r)
     const page = await tab(r.browser, r.tab, false)
     const sel = '[data-sa-ref="' + r.ref + '"]'
     await page.fill(sel, String(r.text), { timeout: 10_000 })
@@ -91,24 +119,28 @@ const ops = {
     return { page: await snapshot(page) }
   },
   async press(r) {
+    guardHandoff(r)
     const page = await tab(r.browser, r.tab, false)
     await page.keyboard.press(String(r.key))
     await settle(page)
     return { page: await snapshot(page) }
   },
   async scroll(r) {
+    guardHandoff(r)
     const page = await tab(r.browser, r.tab, false)
     await page.mouse.wheel(0, Number(r.dy) || 600)
     await page.waitForTimeout(300)
     return { page: await snapshot(page) }
   },
   async back(r) {
+    guardHandoff(r)
     const page = await tab(r.browser, r.tab, false)
     await page.goBack({ timeout: 15_000 }).catch(() => {})
     await settle(page)
     return { page: await snapshot(page) }
   },
   async evaluate(r) {
+    guardHandoff(r)
     const page = await tab(r.browser, r.tab, false)
     const value = await page.evaluate(String(r.expression))
     let text
@@ -120,11 +152,45 @@ const ops = {
     const buf = await page.screenshot({ type: 'jpeg', quality: 70, fullPage: Boolean(r.fullPage) })
     return { image: buf.toString('base64'), mediaType: 'image/jpeg', url: page.url(), title: await page.title().catch(() => '') }
   },
+  async handoff(r) {
+    const page = await tab(r.browser, r.tab, false)
+    handoffs.add(r.browser + '/' + r.tab)
+    await page.bringToFront().catch(() => {})
+    return { url: page.url(), title: await page.title().catch(() => ''), handoff: true }
+  },
+  async release(r) {
+    handoffs.delete(r.browser + '/' + r.tab)
+    return { ok: true }
+  },
+  async input(r) {
+    const page = await tab(r.browser, r.tab, false)
+    await page.bringToFront().catch(() => {})
+    const a = r.action || {}
+    if (a.type === 'click') await page.mouse.click(Number(a.x), Number(a.y), { button: a.button || 'left', clickCount: a.double ? 2 : 1 })
+    else if (a.type === 'drag') {
+      await page.mouse.move(Number(a.fromX), Number(a.fromY))
+      await page.mouse.down()
+      await page.mouse.move(Number(a.toX), Number(a.toY), { steps: 8 })
+      await page.mouse.up()
+    } else if (a.type === 'scroll') await page.mouse.wheel(Number(a.dx) || 0, Number(a.dy) || 0)
+    else if (a.type === 'type') await page.keyboard.type(String(a.text), { delay: 15 })
+    else if (a.type === 'paste') await page.keyboard.insertText(String(a.text))
+    else if (a.type === 'key') await page.keyboard.press(String(a.key))
+    else if (a.type === 'goto') await page.goto(String(a.url), { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    else if (a.type === 'reload') await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 })
+    else throw new Error('不认识的输入操作 ' + a.type)
+    await page.waitForLoadState('domcontentloaded', { timeout: 3_000 }).catch(() => {})
+    return { url: page.url(), title: await page.title().catch(() => '') }
+  },
   async list() {
     const out = []
     for (const [name, b] of browsers) {
       const tabs = []
-      for (const [t, page] of b.tabs) if (!page.isClosed()) tabs.push({ name: t, url: page.url(), title: await page.title().catch(() => '') })
+      for (const [t, page] of b.tabs) {
+        if (!page.isClosed()) {
+          tabs.push({ name: t, url: page.url(), title: await page.title().catch(() => ''), handoff: handoffs.has(name + '/' + t) })
+        }
+      }
       out.push({ name, tabs, idleSeconds: Math.round((Date.now() - b.used) / 1000) })
     }
     return { browsers: out }
@@ -132,7 +198,14 @@ const ops = {
   async close(r) {
     const b = browsers.get(r.browser)
     if (!b) return { closed: false }
-    if (r.tab) { const page = b.tabs.get(r.tab); b.tabs.delete(r.tab); await page?.close().catch(() => {}); return { closed: Boolean(page) } }
+    if (r.tab) {
+      handoffs.delete(r.browser + '/' + r.tab)
+      const page = b.tabs.get(r.tab)
+      b.tabs.delete(r.tab)
+      await page?.close().catch(() => {})
+      return { closed: Boolean(page) }
+    }
+    clearBrowserHandoffs(r.browser)
     browsers.delete(r.browser)
     await (await b.context).close().catch(() => {})
     return { closed: true }
@@ -141,7 +214,13 @@ const ops = {
 
 // Profiles nobody used for a while are closed to give the memory back; their logins stay on disk.
 setInterval(async () => {
-  for (const [name, b] of browsers) if (Date.now() - b.used > IDLE_MS) { browsers.delete(name); (await b.context.catch(() => undefined))?.close().catch(() => {}) }
+  for (const [name, b] of browsers) {
+    const hasHandoff = [...handoffs].some(k => k.startsWith(name + '/'))
+    if (!hasHandoff && Date.now() - b.used > IDLE_MS) {
+      browsers.delete(name)
+      ;(await b.context.catch(() => undefined))?.close().catch(() => {})
+    }
+  }
 }, 60_000).unref()
 
 const server = createServer((req, res) => {
