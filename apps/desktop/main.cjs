@@ -319,6 +319,8 @@ app.whenReady().then(async () => {
     app.quit()
     return
   }
+  // Clear Chromium's HTTP disk cache before opening the window so an upgrade never serves a previous version's index.html.
+  await session.defaultSession.clearCache().catch(() => {})
   // Marks the window's requests as the desktop app's: with browser access off, the daemon serves pages only to it.
   session.defaultSession.webRequest.onBeforeSendHeaders((details, done) => {
     const headers = details.requestHeaders

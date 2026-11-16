@@ -818,6 +818,14 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
 
   if (webRoot && existsSync(webRoot)) {
     const root = relative(process.cwd(), webRoot) || '.'
+    // Hashed bundles under /assets/ never change; index.html must revalidate on every load so an app upgrade
+    // never stays stuck on the previous version's heuristically cached HTML.
+    app.use('/*', async (c, next) => {
+      await next()
+      if (c.res.status === 200 && !c.res.headers.has('cache-control')) {
+        c.res.headers.set('cache-control', c.req.path.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache')
+      }
+    })
     app.use('/*', serveStatic({ root }))
     app.get('*', serveStatic({ root, path: 'index.html' }))
   } else {
