@@ -285,6 +285,20 @@ describe('Muse features (backend)', () => {
     const done = await (await call('/api/memories/import', json('POST', { items: items.slice(0, 2) }))).json() as any
     expect(done).toEqual({ added: 2, existing: 0, skipped: 0 })
   })
+
+  it('records stopping a task as a faint mood signal when mood is on', async () => {
+    await call('/api/mood', json('PUT', { enabled: true }))
+    const before = ((await (await call('/api/mood')).json()) as any).mood
+    const cnv = rt.engine.mainConversation()
+    const trig = rt.engine.receiveMessage(cnv, '帮我查一下')
+    const ticket = rt.engine.startTask({ conversationId: cnv, triggerIds: [trig.triggerId], title: '查机票' })
+    const stopRes = await call(`/api/tickets/${ticket.id}/stop`, { method: 'POST' })
+    expect(stopRes.status).toBe(200)
+    const after = ((await (await call('/api/mood')).json()) as any).mood
+    expect(after.patience).toBe(before.patience - 2)
+    expect(after.mood).toBeLessThan(before.mood)
+    expect(after.history.at(-1)).toMatchObject({ attitude: 'stopped', note: '停下「查机票」' })
+  })
 })
 
 describe('reply streaming', () => {

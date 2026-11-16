@@ -715,11 +715,14 @@ function routerContextOf(engine: Engine): RouterContext {
  * Trust comes from code, never from the model: the router writes directly only while answering the owner's own words;
  * a worker only while its work came from the owner and no one else's words have reached it; silent work never does.
  */
-export function memoryExtension(memory: Memory, engine: Engine): AgentExtensions {
+export function memoryExtension(memory: Memory, engine: Engine, opts?: { heated?: (triggerId: string) => boolean }): AgentExtensions {
   return {
     sharedPrompt: (role, ticket) => memory.prompt(role, ticket ? engine.projectOf(ticket) : undefined),
     inlineContext: (text, scope) => memory.inline(text, scope),
-    routerTools: () => memory.tools({ by: 'router', trust: () => routerContextOf(engine).trust, scope: () => routerContextOf(engine).scope, source: () => routerContextOf(engine).source }),
+    routerTools: () => memory.tools({
+      by: 'router', trust: () => routerContextOf(engine).trust, scope: () => routerContextOf(engine).scope, source: () => routerContextOf(engine).source,
+      heated: () => { const src = routerContextOf(engine).source; return Boolean(src && opts?.heated?.(src)) },
+    }),
     workerTools: (ticket, ctx) => memory.tools({
       by: ticket.id,
       trust: () => {

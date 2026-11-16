@@ -3,9 +3,9 @@ import { ChannelApprovals } from './channel-approvals'
 import { pruneChats, pruneRuntime } from './data'
 import { appSink, channelSink, Notices } from './notices'
 import { AgentRuntime, BrowserManager, Bus, findBrowser, McpManager, workerEnv, type McpServerConfig } from '@nuonuo/agent-runtime'
-import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, calendarExtension, gatedToolsExtension, shellGateExtension, ToolGate, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@nuonuo/core'
+import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, localAppsExtension, calendarExtension, gatedToolsExtension, shellGateExtension, ToolGate, browserExtension, combineExtensions, Distiller, Feed, feedExtension, Goals, goalsExtension, Ideas, ideasContext, isHeatedText, personaPrompt, Engine, Instructions, instructionsExtension, mcpExtension, Memory, memoryExtension, proactiveExtension, proactiveTool, registerAgents, Reviewer, sandboxApplies, sandboxExtension, expandHome, Screener, StructuredCallError, Watchdog } from '@nuonuo/core'
 import { Effects, kvGet, kvSet, openStore, type Store } from '@nuonuo/db'
-import { BUILT_IN_PLUGINS } from '@nuonuo/plugins'
+import { BUILT_IN_PLUGINS, hadHeatedTurn, MOOD_PLUGIN_ID, recordMoodStop } from '@nuonuo/plugins'
 import { computerExtension, Computers, githubKind, PluginManager, Routines, routinesKind, runApproved, SourceRegistry } from '@nuonuo/sources'
 import { Devices } from './clients'
 import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@nuonuo/models'
@@ -145,7 +145,8 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     const conversationTitle = (id: string) => store.sqlite.prepare('SELECT title FROM conversations WHERE id = ?').get(id) as { title: string } | undefined
     const memory = new Memory(store, config.home, { embedder: () => hub.embeddingModel(), label: scope => (scope.startsWith('cnv_') ? conversationTitle(scope)?.title : undefined) })
     memory.importLegacy()
-    const distiller = new Distiller(store, hub, memory, cnv => engine.scopeOfThread(`webchat:${cnv}`))
+    const moodState = () => plugins.stateOf(MOOD_PLUGIN_ID)
+    const distiller = new Distiller(store, hub, memory, cnv => engine.scopeOfThread(`webchat:${cnv}`), (from, to) => hadHeatedTurn(moodState(), from, to))
     effects.handle<{ conversationId: string }>('memory.distill', async ({ conversationId }) => {
       try { await distiller.distill(conversationId) } catch (error) {
         // Not configured, out of budget, or an unreadable reply: retrying the same transcript would fail (and bill) again.
@@ -182,7 +183,12 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     reviewer.registerExecutor('computer', input => runApproved(computers, input))
     registerAgents(store, agents, engine, combineExtensions(
       gatedToolsExtension(combineExtensions(sources.agentExtensions(), plugins.agentExtensions()), gate),
-      memoryExtension(memory, engine),
+      memoryExtension(memory, engine, {
+        heated: triggerId => {
+          const trg = store.sqlite.prepare('SELECT at, text FROM triggers WHERE id = ?').get(triggerId) as { at: number; text: string } | undefined
+          return Boolean(trg && (isHeatedText(trg.text) || hadHeatedTurn(moodState(), trg.at)))
+        },
+      }),
       { routerPrompt: () => personaPrompt(store) },
       instructionsExtension(instructions),
       goalsExtension(goals),
@@ -204,10 +210,19 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
       shellGateExtension(gate),
     ))
     watchdog.register()
-    // A task that ended gives its browser tab back.
+    // A task that ended gives its browser tab back; a manual stop is also recorded as a faint mood signal.
+    const countedStops = new Set<string>()
     bus.on(event => {
       if (event.type !== 'ticket.updated') return
-      try { if (engine.ticket(String(event.ticketId)).ended) void browser.closePage(String(event.ticketId)) } catch { /* deleted */ }
+      const id = String(event.ticketId)
+      try {
+        const t = engine.ticket(id)
+        if (t.ended) void browser.closePage(id)
+        if (t.ended?.outcome === 'stopped' && t.ended.by === 'person' && t.ended.reason !== '对话已删除' && t.ended.reason !== '聊天记录已清除' && !countedStops.has(id)) {
+          countedStops.add(id)
+          recordMoodStop(moodState(), t.title ? `停下「${t.title.slice(0, 24)}」` : '中途停下')
+        }
+      } catch { /* deleted */ }
     })
     const notices = new Notices(store, bus, {
       feed, ideas, reviewer,

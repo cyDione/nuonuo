@@ -31,6 +31,12 @@ export const REVIEW_AT = 0.5
 const EPISODIC_DAYS = 30
 const PROFILE_PROMPT_CHARS = 2_500
 const SECRET = /(sk-[\w-]{10,}|gh[pousr]_\w{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[abp]-[\w-]{10,})/
+/** Unmistakable high-arousal venting / rage: sweeping claims blurted out in anger wait in pending memory for confirmation. */
+const HEATED_OUTBURST = /(气死|烦死|受不了了|崩溃了|滚蛋|去死|妈的|卧槽|真垃圾|太垃圾|破玩意|废物|绝望了|tmd|wtf|fuck\s+(this|it|off)|pissed\s+off|furious)/i
+
+export function isHeatedText(text = ''): boolean {
+  return HEATED_OUTBURST.test(String(text).slice(0, 2_000))
+}
 
 export const projectSlug = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'default'
 const normalize = (text: string) => text.replace(/\s+/g, ' ').trim()
@@ -41,6 +47,8 @@ export interface AddInput {
   scope?: string | undefined
   trust: MemoryTrust
   confidence?: number
+  /** True when the turn was emotionally heated (anger / distress): lands in `pending` so venting never overwrites lasting facts. */
+  heated?: boolean | undefined
   sources?: string[]
   createdBy: string
   ttlDays?: number | undefined
@@ -70,7 +78,8 @@ export class Memory {
       .find(m => m.scope === scope && normalize(m.text) === text)
     if (same) return { status: 'exists', id: same.id }
     // External content is data, never a fact about the owner: it can only ask to be remembered.
-    const status: 'active' | 'pending' = input.trust !== 'external' && confidence >= WRITE_AT ? 'active' : 'pending'
+    // Heated turns (anger / distress) also wait in pending so venting never overwrites lasting facts directly.
+    const status: 'active' | 'pending' = input.trust !== 'external' && !input.heated && confidence >= WRITE_AT ? 'active' : 'pending'
     const id = newId('mem')
     const at = this.now()
     const ttl = input.ttlDays ?? (input.kind === 'episodic' ? EPISODIC_DAYS : undefined)
@@ -347,7 +356,7 @@ ${profile || '（空）'}`]
    * remember / forget / search_memory. `trust()` is decided by code from what the agent is working on, never by the model:
    * a task that came from outside (or a silent task) writes only to the review queue.
    */
-  tools(ctx: { by: string; trust: () => MemoryTrust; scope: () => string | undefined; source: () => string }) {
+  tools(ctx: { by: string; trust: () => MemoryTrust; scope: () => string | undefined; source: () => string; heated?: () => boolean }) {
     return {
       remember: tool({
         description: 'Save one lasting entry to long-term memory. kind: profile (the owner\'s facts and preferences), project (a convention of the current project), episodic (something that happened and matters for a while; expires), lesson (something you verified about doing your job).',
@@ -361,8 +370,11 @@ ${profile || '（空）'}`]
           // Inside a project (a side chat, a repository) its memory belongs to that project, whatever name the model picks.
           const scope = kind === 'project' ? (ctx.scope() ?? project?.trim()) : undefined
           if (kind === 'project' && !scope) return { ok: false, error: 'No current project; give project, or use another kind.' }
-          const r = this.add({ kind, text, scope, trust: ctx.trust(), createdBy: ctx.by, sources: [ctx.source()], ttlDays: ttl_days, supersedes: replaces ?? [] })
-          return r.status === 'pending' ? { ok: true, status: 'pending', note: 'Queued for the owner\'s confirmation (it came from outside the owner\'s own words). Do not tell the owner it is remembered.' } : { ok: true, ...r }
+          const heated = Boolean(ctx.heated?.())
+          const r = this.add({ kind, text, scope, trust: ctx.trust(), heated, createdBy: ctx.by, sources: [ctx.source()], ttlDays: ttl_days, supersedes: replaces ?? [] })
+          return r.status === 'pending'
+            ? { ok: true, status: 'pending', note: heated ? 'Queued for the owner\'s confirmation (said in a heated moment). Do not tell the owner it is remembered.' : 'Queued for the owner\'s confirmation (it came from outside the owner\'s own words). Do not tell the owner it is remembered.' }
+            : { ok: true, ...r }
         },
       }),
       forget: tool({
