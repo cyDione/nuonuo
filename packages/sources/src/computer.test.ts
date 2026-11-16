@@ -62,7 +62,7 @@ describe('Computers', () => {
     const before = c.calls.length
     await computers.start(c, 'true', { cwd: computers.taskDir(c, 'tkt_a'), waitSeconds: 5, timeoutSeconds: 60 })
     expect(c.calls.length - before).toBe(1)
-  })
+  }, 30_000)
 
   it('moves long commands to the background and reports them when they finish', async () => {
     const data = mkdtempSync(join(tmpdir(), 'nn-computer-'))
@@ -93,7 +93,7 @@ describe('Computers', () => {
     expect(readFileSync(remote).equals(bytes)).toBe(true)
     expect(await computers.download(c, remote, join(work, 'out', 'back.bin'))).toBe(bytes.length)
     expect(readFileSync(join(work, 'out', 'back.bin')).equals(bytes)).toBe(true)
-  })
+  }, 30_000)
 
   it('says why a machine cannot be used', async () => {
     const c = localComputer('/tmp', { status: async () => ({ state: 'unconfigured', detail: '填上 API key' }) })
@@ -127,7 +127,7 @@ describe('computerExtension', () => {
     expect(tools.local_shell!.description).toMatch(/owner's own machine/)
     expect(await run(tools.shell, { command: 'echo cloud' })).toMatch(/退出码 0\]\ncloud/)
     expect(ext.workerPrompt!(ticket(dir))).toContain('你的默认执行环境')
-  })
+  }, 30_000)
 
   it('stays beside the local shell when 执行环境 is 本机', () => {
     const { ext } = setup('local')

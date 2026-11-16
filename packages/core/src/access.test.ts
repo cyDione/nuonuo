@@ -1,5 +1,5 @@
 import { openStore, type Store } from '@nuonuo/db'
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fsTools } from '@nuonuo/agent-runtime'
@@ -11,7 +11,7 @@ let home: string
 let access: LocalAccess
 beforeEach(() => {
   store = openStore(':memory:')
-  home = mkdtempSync(join(tmpdir(), 'sa-access-'))
+  home = realpathSync(mkdtempSync(join(tmpdir(), 'sa-access-')))
   access = new LocalAccess(store, () => home)
 })
 afterEach(() => store.close())

@@ -175,7 +175,7 @@ P="$NUONUO_BROWSER_PORT"; [ -z "$P" ] && P=47831
 up() { curl -sf -m 2 -H "x-token: $T" "http://127.0.0.1:$P/health" >/dev/null 2>&1; }
 if ! up; then
   # Everything the service inherits points at its log, so the caller's output closes when this script ends.
-  (cd "$D" && exec setsid nohup node browserd.mjs) >>"$D/browserd.log" 2>&1 < /dev/null &
+  (cd "$D" && if command -v setsid >/dev/null 2>&1; then exec setsid nohup node browserd.mjs; else exec perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' -- nohup node browserd.mjs; fi) >>"$D/browserd.log" 2>&1 < /dev/null &
   for i in $(seq 1 75); do up && break; sleep 0.2; done
 fi
 curl -s -m 170 -H "x-token: $T" -H 'content-type: application/json' --data-binary @- "http://127.0.0.1:$P/act"
