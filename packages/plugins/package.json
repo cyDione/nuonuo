@@ -1,6 +1,6 @@
 {
   "name": "@nuonuo/plugins",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "license": "MIT",
   "private": true,
   "description": "First-party plugins: Telegram, Feishu, Discord, WeCom, DingTalk, Slack and Gmail",

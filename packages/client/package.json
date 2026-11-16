@@ -1,6 +1,6 @@
 {
   "name": "@nuonuo/client",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "license": "MIT",
   "description": "Client SDK for the Nuonuo client protocol: connect any device (phone, watch, speaker, car, script) to your Nuonuo",
   "type": "module",
