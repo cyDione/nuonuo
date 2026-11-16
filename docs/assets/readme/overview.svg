@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">糯糯的四个核心设计</title>
+  <desc id="desc">四格概览：01 对话只留人话，执行收进侧栏；02 平时替你盯着，两级过滤掉噪音；03 边界写死在代码里，不靠提示词自觉；04 透明的本地 Markdown 记忆与双层心境。</desc>
+  <defs>
+    <style>
+      @media (prefers-color-scheme: dark) {
+        .c-canvas { fill: #0B0B0E; }
+        .c-panel { fill: #121217; }
+        .c-card { fill: #17171D; }
+        .c-sunken { fill: #1A1A22; }
+        .c-bubble { fill: #1F1F27; }
+        .c-fg { fill: #F2F2F5; }
+        .c-body { fill: #C2C2CC; }
+        .c-muted { fill: #9494A0; }
+        .c-faint { fill: #686874; }
+        .c-berry { fill: #DC4A78; }
+        .c-berry-soft { fill: #28131B; }
+        .c-ok { fill: #67C995; }
+        .c-ok-soft { fill: #12291E; }
+        .c-ink-btn { fill: #F2F2F5; }
+        .c-ink-btn-fg { fill: #141416; }
+        .s-line { stroke: #262630; }
+        .s-line-strong { stroke: #363644; }
+        .s-faint { stroke: #686874; }
+        .s-muted { stroke: #9494A0; }
+        .s-fg { stroke: #F2F2F5; }
+        .s-berry { stroke: #DC4A78; }
+        .s-berry-border { stroke: #612539; }
+        .s-ok { stroke: #67C995; }
+      }
+    </style>
+  </defs>
+
+  <rect class="c-canvas" width="1200" height="520" rx="24" fill="#FFFFFF"/>
+  <rect class="s-line" x="0.5" y="0.5" width="1199" height="519" rx="23.5" fill="none" stroke="#E6E6EA"/>
+
+  <line class="s-line" x1="600" y1="28" x2="600" y2="492" stroke="#E6E6EA"/>
+  <line class="s-line" x1="32" y1="260" x2="1168" y2="260" stroke="#E6E6EA"/>
+
+  <!-- Cell 01 -->
+  <g id="cell-chat">
+    <text class="c-berry" x="40" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#D43D6D">01</text>
+    <text class="c-fg" x="76" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="700" fill="#141416">对话只留人话，执行收进侧栏</text>
+    <text class="c-muted" x="40" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#6E6E77">聊天不被工具日志刷屏；做出来的网页和文档点开就看</text>
+
+    <rect class="c-panel s-line" x="40" y="98" width="520" height="136" rx="16" fill="#FAFAFA" stroke="#E6E6EA"/>
+    <line class="s-line" x1="332" y1="110" x2="332" y2="222" stroke="#E6E6EA"/>
+
+    <text class="c-muted" x="58" y="124" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#6E6E77">主聊</text>
+    <rect class="c-bubble" x="58" y="134" width="218" height="34" rx="17" fill="#F1F1F3"/>
+    <text class="c-fg" x="76" y="157" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#141416">排好了，直接打开看。</text>
+
+    <rect class="c-card s-line-strong" x="58" y="176" width="256" height="44" rx="11" fill="#FFFFFF" stroke="#D4D4DA"/>
+    <rect class="c-berry-soft" x="70" y="186" width="24" height="24" rx="6" fill="#FCEEF3"/>
+    <path class="s-berry" d="M78 193 h8 m-8 5 h8 m-8 5 h5" stroke="#D43D6D" stroke-width="1.8" stroke-linecap="round"/>
+    <text class="c-fg" x="104" y="204" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" font-weight="600" fill="#141416">hangzhou.html</text>
+    <text class="c-berry" x="300" y="204" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#D43D6D">预览</text>
+
+    <text class="c-muted" x="350" y="124" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#6E6E77">活动 · 侧栏</text>
+    <text class="c-fg" x="350" y="154" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" font-weight="600" fill="#141416">比对三款耳机续航</text>
+    <rect class="c-sunken" x="350" y="164" width="190" height="6" rx="3" fill="#F2F2F4"/>
+    <rect class="c-berry" x="350" y="164" width="136" height="6" rx="3" fill="#D43D6D"/>
+
+    <text class="c-fg" x="350" y="198" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" font-weight="600" fill="#141416">整理周五团队周报</text>
+    <rect class="c-sunken" x="350" y="208" width="190" height="6" rx="3" fill="#F2F2F4"/>
+    <rect class="c-berry" x="350" y="208" width="78" height="6" rx="3" fill="#D43D6D"/>
+  </g>
+
+  <!-- Cell 02 -->
+  <g id="cell-proactive">
+    <text class="c-berry" x="640" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#D43D6D">02</text>
+    <text class="c-fg" x="676" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="700" fill="#141416">平时替你盯着，没大事不吭声</text>
+    <text class="c-muted" x="640" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#6E6E77">外部消息先过两道筛，真有变化才放进动态或主动开口</text>
+
+    <rect class="c-panel s-line" x="640" y="98" width="520" height="136" rx="16" fill="#FAFAFA" stroke="#E6E6EA"/>
+
+    <rect class="c-card s-line" x="656" y="114" width="122" height="30" rx="8" fill="#FFFFFF" stroke="#E6E6EA"/>
+    <text class="c-body" x="717" y="135" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#484850">GitHub · 邮件</text>
+    <rect class="c-card s-line" x="656" y="151" width="122" height="30" rx="8" fill="#FFFFFF" stroke="#E6E6EA"/>
+    <text class="c-body" x="717" y="172" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#484850">日历 · 定时</text>
+    <rect class="c-card s-line" x="656" y="188" width="122" height="30" rx="8" fill="#FFFFFF" stroke="#E6E6EA"/>
+    <text class="c-body" x="717" y="209" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#484850">网页与价格</text>
+
+    <path class="s-faint" d="M784 166 H806 m-5 -5 l5 5 l-5 5" stroke="#9A9AA2" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <rect class="c-card s-line-strong" x="812" y="114" width="144" height="104" rx="12" fill="#FFFFFF" stroke="#D4D4DA" stroke-dasharray="5 4"/>
+    <text class="c-fg" x="884" y="144" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="700" fill="#141416">两级过滤</text>
+    <text class="c-muted" x="884" y="170" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#6E6E77">规则 → 小模型</text>
+    <text class="c-faint" x="884" y="198" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#9A9AA2">噪音静默拦下</text>
+
+    <path class="s-berry" d="M962 166 H984 m-5 -5 l5 5 l-5 5" stroke="#D43D6D" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <rect class="c-berry-soft s-berry-border" x="990" y="116" width="154" height="46" rx="10" fill="#FCEEF3" stroke="#F2BDCE"/>
+    <text class="c-berry" x="1004" y="145" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#D43D6D">动态 · CI 挂了</text>
+
+    <rect class="c-card s-line-strong" x="990" y="172" width="154" height="46" rx="10" fill="#FFFFFF" stroke="#D4D4DA"/>
+    <text class="c-fg" x="1004" y="201" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#141416">目标 · 后台推进</text>
+  </g>
+
+  <!-- Cell 03 -->
+  <g id="cell-boundary">
+    <text class="c-berry" x="40" y="308" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#D43D6D">03</text>
+    <text class="c-fg" x="76" y="308" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="700" fill="#141416">边界写死在代码里，不靠提示词自觉</text>
+    <text class="c-muted" x="40" y="338" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#6E6E77">主 Agent 无 Shell；目录、凭据与风险动作由运行时把关</text>
+
+    <rect class="c-panel s-line" x="40" y="358" width="520" height="134" rx="16" fill="#FAFAFA" stroke="#E6E6EA"/>
+
+    <text class="c-fg" x="60" y="389" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#141416">~/Documents/work</text>
+    <rect class="c-ok-soft" x="442" y="370" width="98" height="28" rx="14" fill="#EAF6F0"/>
+    <text class="c-ok" x="491" y="389" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#257953">允许读写</text>
+
+    <line class="s-line" x1="60" y1="405" x2="540" y2="405" stroke="#E6E6EA"/>
+
+    <text class="c-fg" x="60" y="432" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#141416">~/.ssh · 系统钥匙串</text>
+    <rect class="c-sunken s-line-strong" x="442" y="413" width="98" height="28" rx="14" fill="#F2F2F4" stroke="#D4D4DA"/>
+    <text class="c-muted" x="491" y="432" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#6E6E77">默认禁入</text>
+
+    <line class="s-line" x1="60" y1="448" x2="540" y2="448" stroke="#E6E6EA"/>
+
+    <text class="c-fg" x="60" y="476" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#141416">付款 · 删除 · 往外发消息</text>
+    <rect class="c-berry-soft s-berry-border" x="426" y="457" width="114" height="28" rx="14" fill="#FCEEF3" stroke="#F2BDCE"/>
+    <text class="c-berry" x="483" y="476" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#D43D6D">每次先问你</text>
+  </g>
+
+  <!-- Cell 04 -->
+  <g id="cell-soul">
+    <text class="c-berry" x="640" y="308" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#D43D6D">04</text>
+    <text class="c-fg" x="676" y="308" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="700" fill="#141416">透明的本地记忆，有分寸的性格</text>
+    <text class="c-muted" x="640" y="338" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#6E6E77">人设与记忆都是本地 Markdown；心境只改语气，不耽误干活</text>
+
+    <rect class="c-panel s-line" x="640" y="358" width="520" height="134" rx="16" fill="#FAFAFA" stroke="#E6E6EA"/>
+    <line class="s-line" x1="896" y1="372" x2="896" y2="478" stroke="#E6E6EA"/>
+
+    <rect class="c-card s-line-strong" x="658" y="374" width="104" height="36" rx="9" fill="#FFFFFF" stroke="#D4D4DA"/>
+    <text class="c-fg" x="710" y="398" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" font-weight="600" fill="#141416">SOUL.md</text>
+
+    <rect class="c-card s-line-strong" x="770" y="374" width="112" height="36" rx="9" fill="#FFFFFF" stroke="#D4D4DA"/>
+    <text class="c-fg" x="826" y="398" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" font-weight="600" fill="#141416">MEMORY.md</text>
+
+    <g transform="translate(656 422) scale(0.48)"><ellipse class="c-fg" cx="50" cy="93" rx="26" ry="3.2" fill="#141416" opacity="0.08"/><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><rect x="35.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><rect x="56.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><path d="M74 9 C75.6 16.4 75.6 16.4 83 18 C75.6 19.6 75.6 19.6 74 27 C72.4 19.6 72.4 19.6 65 18 C72.4 16.4 72.4 16.4 74 9 Z" fill="#FFC23D"/></g>
+    <g transform="translate(714 422) scale(0.48)"><ellipse class="c-fg" cx="50" cy="93" rx="26" ry="3.2" fill="#141416" opacity="0.08"/><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><g transform="translate(2.2 -2.4)"><rect x="35.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><rect x="56.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/></g><circle class="c-muted" cx="76" cy="28" r="2.4" fill="#6E6E77"/><circle class="c-muted" cx="82" cy="22" r="3.2" fill="#6E6E77"/><circle class="c-muted" cx="89" cy="15" r="4.0" fill="#6E6E77"/></g>
+    <g transform="translate(772 422) scale(0.48)"><ellipse class="c-fg" cx="50" cy="93" rx="26" ry="3.2" fill="#141416" opacity="0.08"/><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><rect x="35.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><rect x="56.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><circle cx="80" cy="20" r="9.5" fill="#FFC23D"/><path d="M80 15 L80 21" stroke="#14152B" stroke-width="2.8" stroke-linecap="round"/><circle cx="80" cy="24.8" r="1.6" fill="#14152B"/></g>
+    <g transform="translate(830 422) scale(0.48)"><ellipse class="c-fg" cx="50" cy="93" rx="26" ry="3.2" fill="#141416" opacity="0.08"/><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><path d="M35 56 Q39.5 49.4 44 56 M56 56 Q60.5 49.4 65 56" stroke="#FFFFFF" stroke-width="3.6" stroke-linecap="round" fill="none"/><path d="M74 9 C75.6 16.4 75.6 16.4 83 18 C75.6 19.6 75.6 19.6 74 27 C72.4 19.6 72.4 19.6 65 18 C72.4 16.4 72.4 16.4 74 9 Z" fill="#FFC23D"/></g>
+
+    <circle class="c-berry" cx="918" cy="388" r="4.5" fill="#D43D6D"/>
+    <text class="c-fg" x="930" y="394" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" font-weight="700" fill="#141416">老友互怼</text>
+    <text class="c-muted" x="1142" y="394" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#6E6E77">四维心境</text>
+
+    <text class="c-muted" x="914" y="428" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#6E6E77">心情</text>
+    <rect class="c-sunken" x="954" y="418" width="64" height="7" rx="3.5" fill="#F2F2F4"/>
+    <line class="s-faint" x1="986" y1="415" x2="986" y2="428" stroke="#9A9AA2" stroke-width="1.2"/>
+    <rect class="c-berry" x="986" y="418" width="24" height="7" rx="3.5" fill="#D43D6D"/>
+
+    <text class="c-muted" x="1032" y="428" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#6E6E77">精力</text>
+    <rect class="c-sunken" x="1072" y="418" width="68" height="7" rx="3.5" fill="#F2F2F4"/>
+    <rect class="c-fg" x="1072" y="418" width="48" height="7" rx="3.5" fill="#141416"/>
+
+    <text class="c-muted" x="914" y="464" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#6E6E77">耐心</text>
+    <rect class="c-sunken" x="954" y="454" width="64" height="7" rx="3.5" fill="#F2F2F4"/>
+    <rect class="c-fg" x="954" y="454" width="50" height="7" rx="3.5" fill="#141416"/>
+
+    <text class="c-muted" x="1032" y="464" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#6E6E77">信任</text>
+    <rect class="c-sunken" x="1072" y="454" width="68" height="7" rx="3.5" fill="#F2F2F4"/>
+    <rect class="c-ok" x="1072" y="454" width="52" height="7" rx="3.5" fill="#257953"/>
+  </g>
+</svg>

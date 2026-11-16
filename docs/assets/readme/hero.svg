@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="410" viewBox="0 0 1200 410" role="img" aria-labelledby="title desc">
+  <title id="title">糯糯 Nuonuo — 跑在本机的个人助理</title>
+  <desc id="desc">跑在本机的个人助理：交代的事放后台办，平时替你留意消息与动静；涉及花钱或外发先问你，做完只给结果。右侧为盯耳机降价并在付款前弹出确认卡片的界面切片。</desc>
+  <defs>
+    <style>
+      @media (prefers-color-scheme: dark) {
+        .c-canvas { fill: #0B0B0E; }
+        .c-panel { fill: #121217; }
+        .c-card { fill: #17171D; }
+        .c-sunken { fill: #1A1A22; }
+        .c-bubble { fill: #1F1F27; }
+        .c-fg { fill: #F2F2F5; }
+        .c-body { fill: #C2C2CC; }
+        .c-muted { fill: #9494A0; }
+        .c-faint { fill: #686874; }
+        .c-berry { fill: #DC4A78; }
+        .c-berry-soft { fill: #28131B; }
+        .c-ok { fill: #67C995; }
+        .c-ok-soft { fill: #12291E; }
+        .c-ink-btn { fill: #F2F2F5; }
+        .c-ink-btn-fg { fill: #141416; }
+        .s-line { stroke: #262630; }
+        .s-line-strong { stroke: #363644; }
+        .s-faint { stroke: #686874; }
+        .s-muted { stroke: #9494A0; }
+        .s-fg { stroke: #F2F2F5; }
+        .s-berry { stroke: #DC4A78; }
+        .s-berry-border { stroke: #612539; }
+        .s-ok { stroke: #67C995; }
+      }
+    </style>
+  </defs>
+
+  <rect class="c-canvas" width="1200" height="410" rx="24" fill="#FFFFFF"/>
+  <rect class="s-line" x="0.5" y="0.5" width="1199" height="409" rx="23.5" fill="none" stroke="#E6E6EA"/>
+
+  <g id="title-block">
+    <g transform="translate(52 40) scale(0.48)"><ellipse class="c-fg" cx="50" cy="93" rx="26" ry="3.2" fill="#141416" opacity="0.08"/><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><rect x="35.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><rect x="56.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><path d="M74 9 C75.6 16.4 75.6 16.4 83 18 C75.6 19.6 75.6 19.6 74 27 C72.4 19.6 72.4 19.6 65 18 C72.4 16.4 72.4 16.4 74 9 Z" fill="#FFC23D"/></g>
+    <text class="c-muted" x="108" y="71" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" font-weight="600" letter-spacing="1.2" fill="#6E6E77">LOCAL-FIRST PERSONAL ASSISTANT</text>
+
+    <text class="c-fg" x="56" y="162" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="76" font-weight="800" letter-spacing="1" fill="#141416">糯糯</text>
+    <text class="c-faint" x="224" y="160" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="34" font-weight="500" fill="#9A9AA2">Nuonuo</text>
+
+    <text class="c-fg" x="56" y="218" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#141416">跑在本机的个人助理。</text>
+    <text class="c-body" x="56" y="256" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" fill="#484850">交代的事放后台办，平时替你留意消息与动静；</text>
+    <text class="c-body" x="56" y="292" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" fill="#484850">涉及花钱、外发先问你，做完只给结果。</text>
+
+    <line class="s-line" x1="56" y1="332" x2="544" y2="332" stroke="#E6E6EA" stroke-width="1"/>
+
+    <circle class="c-berry" cx="64" cy="361" r="4" fill="#D43D6D"/>
+    <text class="c-muted" x="78" y="367" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#6E6E77">本机服务 · 单 SQLite</text>
+    <text class="c-faint" x="260" y="367" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#9A9AA2">·</text>
+    <text class="c-muted" x="276" y="367" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#6E6E77">自有 API Key</text>
+    <text class="c-faint" x="396" y="367" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#9A9AA2">·</text>
+    <text class="c-muted" x="412" y="367" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#6E6E77">多端共享记忆</text>
+  </g>
+
+  <g id="window-specimen">
+    <rect class="c-panel s-line" x="596" y="32" width="564" height="346" rx="20" fill="#FAFAFA" stroke="#E6E6EA"/>
+    <line class="s-line" x1="596" y1="74" x2="1160" y2="74" stroke="#E6E6EA"/>
+
+    <text class="c-fg" x="622" y="59" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" font-weight="600" fill="#141416">主聊</text>
+    <circle class="c-ok" cx="994" cy="53" r="4" fill="#257953"/>
+    <text class="c-muted" x="1136" y="59" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#6E6E77">后台 2 件事并行中</text>
+
+    <rect class="c-berry" x="794" y="90" width="342" height="40" rx="20" fill="#D43D6D"/>
+    <text x="965" y="116" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500" fill="#FFFFFF">帮我盯着 XM6，降到 2000 以内叫我</text>
+
+    <g transform="translate(618 141) scale(0.3)"><ellipse class="c-fg" cx="50" cy="93" rx="26" ry="3.2" fill="#141416" opacity="0.08"/><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><rect x="35.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><rect x="56.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><path d="M74 9 C75.6 16.4 75.6 16.4 83 18 C75.6 19.6 75.6 19.6 74 27 C72.4 19.6 72.4 19.6 65 18 C72.4 16.4 72.4 16.4 74 9 Z" fill="#FFC23D"/></g>
+    <rect class="c-bubble" x="656" y="140" width="256" height="38" rx="19" fill="#F1F1F3"/>
+    <text class="c-fg" x="676" y="165" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#141416">记下了，每天早上看一眼。</text>
+
+    <line class="s-line" x1="656" y1="198" x2="728" y2="198" stroke="#E6E6EA"/>
+    <text class="c-faint" x="896" y="203" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#9A9AA2">3 天后 · 期间 5 次检查无变化，未打扰</text>
+    <line class="s-line" x1="1064" y1="198" x2="1136" y2="198" stroke="#E6E6EA"/>
+
+    <g transform="translate(618 222) scale(0.3)"><ellipse class="c-fg" cx="50" cy="93" rx="26" ry="3.2" fill="#141416" opacity="0.08"/><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><rect x="35.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><rect x="56.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><circle cx="80" cy="20" r="9.5" fill="#FFC23D"/><path d="M80 15 L80 21" stroke="#14152B" stroke-width="2.8" stroke-linecap="round"/><circle cx="80" cy="24.8" r="1.6" fill="#14152B"/></g>
+    <rect class="c-card s-line-strong" x="656" y="218" width="480" height="142" rx="16" fill="#FFFFFF" stroke="#D4D4DA"/>
+
+    <circle class="c-berry" cx="680" cy="243" r="4" fill="#D43D6D"/>
+    <text class="c-fg" x="694" y="249" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="700" fill="#141416">下单前确认</text>
+    <text class="c-muted" x="1116" y="248" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#6E6E77">涉及付款 · 每次必问</text>
+
+    <line class="s-line" x1="676" y1="262" x2="1116" y2="262" stroke="#E6E6EA"/>
+
+    <text class="c-body" x="676" y="292" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#484850">Sony WH-1000XM6 · 京东自营</text>
+    <text class="c-faint" x="1030" y="292" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#9A9AA2">¥2,299</text>
+    <line class="s-faint" x1="976" y1="287" x2="1031" y2="287" stroke="#9A9AA2" stroke-width="1.3"/>
+    <text class="c-berry" x="1116" y="293" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="700" fill="#D43D6D">¥1,999</text>
+
+    <rect class="c-ink-btn" x="676" y="310" width="110" height="34" rx="17" fill="#141416"/>
+    <text class="c-ink-btn-fg" x="731" y="333" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#FFFFFF">确认下单</text>
+
+    <rect class="s-line-strong" x="796" y="310" width="92" height="34" rx="17" fill="none" stroke="#D4D4DA"/>
+    <text class="c-muted" x="842" y="333" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#6E6E77">先算了</text>
+
+    <text class="c-muted" x="1116" y="333" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#6E6E77">较上周降了 ¥300</text>
+  </g>
+</svg>
