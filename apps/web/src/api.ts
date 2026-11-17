@@ -39,14 +39,16 @@ export async function upload(file: File, conversationId?: string): Promise<Uploa
 export type ProviderKind = 'anthropic' | 'openai' | 'google' | 'deepseek' | 'openai-compatible' | 'typesafe'
 export interface Preset { id: string; kind: ProviderKind; label: string; name?: string; baseUrl?: string; keyRequired: boolean; suggestedModels: string[]; docsUrl?: string; keyHint?: string; firstRun?: true }
 export type RoleId = 'router' | 'worker' | 'subagent' | 'filter' | 'reviewer' | 'watchdog' | 'summarizer' | 'embedding' | 'vision' | 'transcribe' | 'speech'
-export interface RoleSpec { id: RoleId; label: string; duty: string; advice: string; inherits?: RoleId; optional?: boolean; kind: 'language' | 'embedding' | 'transcription' | 'speech' }
-export interface Catalog { presets: Preset[]; kinds: Record<ProviderKind, { label: string }>; roles: RoleSpec[]; reasoningLevels: string[] }
+export type ReasoningLevel = 'auto' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'provider-default'
+export interface ModelReasoningInfo { supported: boolean; fixedById: boolean; canDisable: boolean; levels: ReasoningLevel[] }
+export interface RoleSpec { id: RoleId; label: string; duty: string; advice: string; inherits?: RoleId; optional?: boolean; kind: 'language' | 'embedding' | 'transcription' | 'speech'; defaultReasoning?: ReasoningLevel }
+export interface Catalog { presets: Preset[]; kinds: Record<ProviderKind, { label: string }>; roles: RoleSpec[]; reasoningLevels: ReasoningLevel[] }
 export interface Provider { id: string; kind: ProviderKind; name: string; baseUrl: string | null; options: { prices?: Record<string, Price>; decisionsUrl?: string }; hasKey: boolean; keyHint?: string; keyEnv?: string }
 export interface Price { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
 export interface ModelRef { providerId: string; model: string }
-export interface RoleConfig { chain: ModelRef[]; enabled: boolean; reasoning?: string; temperature?: number; maxOutputTokens?: number; dailyTokenLimit?: number; dailyCostLimitUsd?: number }
-export interface Resolved { source: RoleId; model: ModelRef; today: { tokens: number; costUsd: number } }
-export interface RolesResponse { configs: Partial<Record<RoleId, RoleConfig>>; resolved: Record<RoleId, Resolved | null> }
+export interface RoleConfig { chain: ModelRef[]; enabled: boolean; reasoning?: ReasoningLevel; temperature?: number; maxOutputTokens?: number; dailyTokenLimit?: number; dailyCostLimitUsd?: number }
+export interface Resolved { source: RoleId; model: ModelRef; effectiveReasoning?: ReasoningLevel; defaultReasoning?: ReasoningLevel; reasoningInfo?: ModelReasoningInfo; today: { tokens: number; costUsd: number } }
+export interface RolesResponse { configs: Partial<Record<RoleId, RoleConfig>>; defaults?: Partial<Record<RoleId, ReasoningLevel>>; resolved: Record<RoleId, Resolved | null> }
 export interface Conversation { id: string; title: string; pinned: boolean; archived: boolean; createdAt: number; updatedAt: number; lastMessage?: string | null
   source: string; origin: 'owner' | 'agent'; threadId: string | null; meta: { url?: string; [k: string]: unknown }; unread?: number; lastReadAt?: number }
 export interface Message { id: string; conversationId: string; role: 'user' | 'assistant' | 'system' | 'event'; content: string; meta: Record<string, any>; ticketId: string | null; triggerId: string | null; createdAt: number }

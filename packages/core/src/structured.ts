@@ -6,7 +6,7 @@
  * where it exists, and the reply is parsed tolerantly. Failures say what actually went wrong: no model configured, budget,
  * a failed call, or a reply that could not be read.
  */
-import type { ModelHub, RoleId } from '@nuonuo/models'
+import type { CallIntent, ModelHub, RoleId } from '@nuonuo/models'
 import { describeError, ModelError, roleSpec } from '@nuonuo/models'
 import { APICallError, generateText, NoObjectGeneratedError, Output, RetryError } from 'ai'
 import type { z } from 'zod'
@@ -26,6 +26,7 @@ export interface StructuredRequest<T> {
   /** A valid answer, shown to the model as the shape to follow. */
   example: T
   ref?: string
+  intent?: CallIntent
   /** Used when neither the layer nor the layer it inherits from sets a limit. */
   maxOutputTokens?: number
 }
@@ -48,7 +49,7 @@ ${JSON.stringify(example)}`
  */
 export async function generateStructured<T>(hub: ModelHub, role: RoleId, request: StructuredRequest<T>): Promise<T> {
   let model
-  try { model = hub.model(role, { ref: request.ref }) } catch (error) { throw toStructuredError(error, role) }
+  try { model = hub.model(role, { ref: request.ref, ...(request.intent ? { intent: request.intent } : {}) }) } catch (error) { throw toStructuredError(error, role) }
   const own = hub.roleConfigs()[role]
   const resolved = hub.resolve(role)
   const settings: { reasoning?: 'low'; maxOutputTokens?: number } = {}

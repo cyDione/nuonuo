@@ -5,11 +5,11 @@
  * lives only in the right pane's 权限.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Copy, ExternalLink, RefreshCw } from 'lucide-react'
+import { Check, ChevronLeft, Copy, ExternalLink, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type FieldSpec, type ProactiveSettings, type SourceAction, type SourceInfo } from '../api'
 import { SourceIcon } from '../icons'
-import { Area, Block, Btn, Foot, NumberInput, Page, Pill, Row, SaveBar, Section, SelectInput, TextInput, Toggle } from './kit'
+import { Area, Block, Btn, Foot, NumberInput, Page, Row, SaveBar, Section, SelectInput, TextInput, Toggle } from './kit'
 import { locale, tx } from '../i18n'
 
 /** 「刚刚同步」, 「2 分钟前同步」, 「出错」…: how syncing goes, said in a few words. */
@@ -27,8 +27,13 @@ const HEALTH: Record<SourceInfo['health']['status'], { tone: 'neutral' | 'ok' | 
 
 export function Sources({ item }: { item?: string }) {
   const sources = useQuery({ queryKey: ['sources'], queryFn: () => api.get<{ sources: SourceInfo[] }>('/sources'), refetchInterval: 10_000 })
-  const list = sources.data?.sources ?? []
+  if (!sources.data) return <Page title={tx('来源')}><div /></Page>
+  const list = sources.data.sources
   const open = item ? list.find(x => x.id === item) : undefined
+  if (item) return <div className="space-y-4">
+    <a href="#/settings/sources" className="inline-flex items-center gap-0.5 text-[13px] text-muted hover:text-fg"><ChevronLeft size={15} />{tx('来源')}</a>
+    {open ? <SourceDetail key={open.id} s={open} /> : <Page title={tx('来源')}><Foot>{tx('找不到来源「{0}」。', item)}</Foot></Page>}
+  </div>
   const on = list.filter(s => s.enabled), off = list.filter(s => !s.enabled)
   const href = (s: SourceInfo) => `#/settings/sources/${encodeURIComponent(s.id)}`
   return <Page title={tx('来源')}>
@@ -39,12 +44,10 @@ export function Sources({ item }: { item?: string }) {
       </Row>)}
     </Section>}
     {off.length > 0 && <Section title={on.length ? tx('还能连') : undefined} foot={tx('连上以后，每个账号能做到哪一步（只能看 / 能操作）在右侧栏「权限」里改。')}>
-      {off.map(s => <Row key={s.id} icon={<SourceIcon source={s.id} size={18} />} label={s.title} sub={<span className="line-clamp-1">{s.description}</span>}>
-        <a href={href(s)} className="inline-flex h-[28px] shrink-0 items-center rounded-full border border-line bg-card px-4 text-[13px] font-medium hover:border-faint">{tx('连接')}</a>
+      {off.map(s => <Row key={s.id} href={href(s)} icon={<SourceIcon source={s.id} size={18} />} label={s.title} sub={<span className="line-clamp-1">{s.description}</span>}>
+        <span className="inline-flex h-[28px] shrink-0 items-center rounded-full border border-line bg-card px-4 text-[13px] font-medium">{tx('连接')}</span>
       </Row>)}
     </Section>}
-    {item && sources.isSuccess && !open && <Foot>{tx('找不到来源「{0}」。', item)}</Foot>}
-    {open && <SourceDetail key={open.id} s={open} />}
   </Page>
 }
 
@@ -82,8 +85,9 @@ function SourceDetail({ s }: { s: SourceInfo }) {
   const more = s.fields.filter(f => f.advanced)
   const other = s.authorized === undefined ? s.actions : []
   const facts = Object.entries(s.facts).filter(([k]) => k !== '账号').map(([k, v]) => `${k}：${v}`)
-  return <>
-    <Section title={s.title} foot={s.description}>
+  return <Page title={s.title}>
+    <p className="-mt-3 text-[13px] text-muted">{s.description}</p>
+    <Section>
       <Row label={tx('启用')}><Toggle label={tx('启用')} checked={s.enabled} disabled={save.isPending} onChange={enabled => save.mutate({ enabled, config: s.config })} /></Row>
       {s.id !== 'cron' && proactive && <Row label={tx('主动留意这里')} sub={tx('没人找它的事件，也按你的主动策略判断要不要做')}>
         <Toggle label={tx('主动留意这里')} checked={watching} disabled={watch.isPending} onChange={on => watch.mutate(on)} />
@@ -103,7 +107,7 @@ function SourceDetail({ s }: { s: SourceInfo }) {
       </Row>}
     </Section>
     <SaveBar dirty={dirty} pending={save.isPending} error={save.error ?? poll.error} onReset={() => setConfig(s.config)} onSave={() => save.mutate({ enabled: s.enabled, config })} />
-  </>
+  </Page>
 }
 
 /** Calls an action endpoint; alerts and returns undefined on an error. */

@@ -1,11 +1,11 @@
 /**
- * 分层模型 (Figma 21 · 09, folded in §28): the main agent's model up front; every other layer follows it unless set under 高级选项.
- * Opening a layer sets its backup models, reasoning, temperature, output and daily token and cost limits.
+ * 分层模型 (Figma 21 · 09, folded in §28 & §35): the main agent's model and thinking effort up front; every other layer
+ * follows its model and uses its own role-matched thinking effort unless set under 高级选项.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, Plus, Settings2, Trash2, Undo2, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api, type ModelRef, type Provider, type RoleConfig, type RoleSpec, type RolesResponse } from '../api'
+import { api, type ModelReasoningInfo, type ModelRef, type Provider, type ReasoningLevel, type RoleConfig, type RoleId, type RoleSpec, type RolesResponse } from '../api'
 import { fmtNum, fmtUsd } from '../ui'
 import { Block, Btn, Foot, NumberInput, Page, Row, SaveBar, Section, SelectInput, Toggle } from './kit'
 import { modelTag, useCatalog, useModelOptions, useProviders } from './hooks'
@@ -14,6 +14,109 @@ import { tx } from '../i18n'
 
 const EMPTY: RoleConfig = { chain: [], enabled: true }
 type Resolved = RolesResponse['resolved'][keyof RolesResponse['resolved']]
+const UI_LEVELS: ReasoningLevel[] = ['auto', 'none', 'low', 'medium', 'high', 'xhigh', 'provider-default']
+
+function normalizeReasoning(r?: string): ReasoningLevel | undefined {
+  if (!r) return undefined
+  if (r === 'minimal') return 'low'
+  if (r === 'max') return 'xhigh'
+  return r as ReasoningLevel
+}
+
+function allowedLevels(info?: ModelReasoningInfo): ReasoningLevel[] {
+  if (!info) return ['auto', 'none', 'low', 'medium', 'high', 'provider-default']
+  const allowed = new Set(info.levels.map(l => normalizeReasoning(l) ?? l))
+  return UI_LEVELS.filter(l => (l === 'none' ? info.canDisable && allowed.has('none') : allowed.has(l)))
+}
+
+function reasoningLabel(level: ReasoningLevel, isDefaultAuto = false): string {
+  switch (normalizeReasoning(level) ?? level) {
+    case 'auto': return isDefaultAuto ? tx('自动（默认）') : tx('自动')
+    case 'none': return tx('不思考')
+    case 'low': return tx('轻度')
+    case 'medium': return tx('标准')
+    case 'high': return tx('深度')
+    case 'xhigh': return tx('超高')
+    case 'provider-default': return tx('供应商默认')
+    default: return level
+  }
+}
+
+function reasoningDesc(level: ReasoningLevel): string {
+  switch (normalizeReasoning(level) ?? level) {
+    case 'auto': return tx('闲聊与派单直接秒回，复杂分析时自动开启思考')
+    case 'none': return tx('直接回答，最快最省 token')
+    case 'low': return tx('简短思考，适合日常快答与轻量判断')
+    case 'medium': return tx('平衡思考深度与响应速度')
+    case 'high': return tx('充分推演复杂逻辑、代码实现与多步规划')
+    case 'xhigh': return tx('全力深度推理')
+    case 'provider-default': return tx('不传思考参数，交由模型默认行为决定')
+    default: return ''
+  }
+}
+
+function roleDefaultOptionLabel(id: RoleId): string {
+  switch (id) {
+    case 'router': return tx('默认（自动）')
+    case 'worker':
+    case 'subagent': return tx('默认（深度思考）')
+    case 'reviewer':
+    case 'watchdog':
+    case 'vision': return tx('默认（轻度思考）')
+    case 'summarizer': return tx('默认（自动按任务）')
+    case 'filter': return tx('默认（不思考）')
+    default: return tx('默认')
+  }
+}
+
+function roleDefaultDesc(id: RoleId): string {
+  switch (id) {
+    case 'router': return tx('闲聊与派单直接秒回，复杂分析时自动开启思考')
+    case 'worker': return tx('后台执行具体任务，默认全力深度思考减少重试')
+    case 'subagent': return tx('Worker 派生的子任务，默认延续深度推理')
+    case 'reviewer':
+    case 'watchdog':
+    case 'vision': return tx('简短思考，适合日常快答与轻量判断')
+    case 'summarizer': return tx('上下文压缩不思考，长记忆提炼轻度思考，点子与目标标准思考')
+    case 'filter': return tx('直接回答，最快最省 token')
+    default: return ''
+  }
+}
+
+function roleThinkingTag(s: RoleSpec, config: RoleConfig): string {
+  const custom = normalizeReasoning(config.reasoning)
+  if (custom) {
+    switch (custom) {
+      case 'auto': return tx('自动')
+      case 'none': return tx('不思考')
+      case 'low': return tx('轻度思考')
+      case 'medium': return tx('标准思考')
+      case 'high': return tx('深度思考')
+      case 'xhigh': return tx('超高思考')
+      case 'provider-default': return tx('供应商默认')
+    }
+  }
+  switch (s.id) {
+    case 'worker':
+    case 'subagent': return tx('深度思考')
+    case 'reviewer':
+    case 'watchdog':
+    case 'vision': return tx('轻度思考')
+    case 'summarizer': return tx('自动按任务')
+    case 'filter': return tx('不思考')
+    default: return tx('自动')
+  }
+}
+
+function roleSubFallback(id: RoleId): string {
+  switch (id) {
+    case 'worker': return tx('后台干真活默认全力深想，减少翻车重试')
+    case 'subagent': return tx('延续深度推理')
+    case 'watchdog': return tx('快速巡检不阻塞主流程')
+    case 'summarizer': return tx('上下文压缩不思考，长记忆提炼轻度思考')
+    default: return ''
+  }
+}
 
 export function Roles({ item }: { item?: string }) {
   const catalog = useCatalog()
@@ -27,7 +130,7 @@ export function Roles({ item }: { item?: string }) {
   const spec = item ? specs.find(s => s.id === item) : undefined
   if (spec) return <div className="space-y-4">
     <a href="#/settings/roles" className="inline-flex items-center gap-0.5 text-[13px] text-muted hover:text-fg"><ChevronLeft size={15} />{tx('分层模型')}</a>
-    <RoleDetail key={spec.id} spec={spec} labelOf={labelOf} levels={catalog.data.reasoningLevels} config={roles.data.configs[spec.id] ?? EMPTY} resolved={roles.data.resolved[spec.id]} providers={usable(spec)} />
+    <RoleDetail key={spec.id} spec={spec} labelOf={labelOf} config={roles.data.configs[spec.id] ?? EMPTY} resolved={roles.data.resolved[spec.id]} providers={usable(spec)} />
   </div>
   return <RoleList specs={specs} labelOf={labelOf} roles={roles.data} providers={usable(specs.find(s => s.id === 'router')!)} />
 }
@@ -37,8 +140,8 @@ const readAdvanced = () => { try { return localStorage.getItem(ADVANCED_KEY) ===
 const short = (label: string) => label.replace(/[（(].*[）)]$/, '').trim()
 
 /**
- * Figma §28: only the main agent's model is shown; every other layer follows it unless set under 高级选项, which opens
- * in place (no motion on settings pages) and is remembered. Closed, it still names the layers that have their own model.
+ * Figma §28 & §35: the main agent's model and thinking effort are shown up front; every other layer follows its model and
+ * uses its own default thinking strategy unless set under 高级选项, which opens in place (no motion) and is remembered.
  */
 function RoleList({ specs, labelOf, roles, providers }: { specs: RoleSpec[]; labelOf(id: string): string; roles: RolesResponse; providers: Provider[] }) {
   const qc = useQueryClient()
@@ -55,28 +158,61 @@ function RoleList({ specs, labelOf, roles, providers }: { specs: RoleSpec[]; lab
     onSettled: () => qc.invalidateQueries({ queryKey: ['roles'] }),
   })
   const routerConfig = configOf('router')
+  const routerResolved = roles.resolved.router
+  const routerInfo = routerResolved?.reasoningInfo
+  const routerLevels = allowedLevels(routerInfo)
+  const rawRouterReasoning = normalizeReasoning(routerConfig.reasoning) ?? 'auto'
+  const curRouterReasoning = routerLevels.includes(rawRouterReasoning) ? rawRouterReasoning : 'auto'
+  const saveRouterReasoning = useMutation({
+    mutationFn: (reasoning: ReasoningLevel) => api.put('/roles/router', clean({ ...routerConfig, reasoning })),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['roles'] }),
+  })
   const extras = [
     routerConfig.chain.length > 1 && tx('备用 {0} 个', routerConfig.chain.length - 1),
-    routerConfig.reasoning && tx('推理 {0}', routerConfig.reasoning),
+    routerConfig.temperature !== undefined && tx('温度 {0}', routerConfig.temperature),
     (routerConfig.dailyTokenLimit || routerConfig.dailyCostLimitUsd) && tx('有上限'),
   ].filter(Boolean).join(' · ')
 
   const valueOf = (s: RoleSpec) => {
     const config = configOf(s.id)
     const resolved = roles.resolved[s.id]
-    const model = config.chain[0]?.model
-    if (s.optional && !config.enabled) return <span className="text-[13px] text-faint">{tx('已关闭')}</span>
-    if (model) return <span className="font-mono text-[13px] font-medium">{model}{config.chain.length > 1 ? <span className="font-sans font-normal text-faint"> +{config.chain.length - 1}</span> : null}</span>
-    if (resolved) return <span className="text-[13px] text-faint">{resolved.source === 'router' ? tx('跟主 Agent') : tx('跟{0}', short(labelOf(resolved.source)))}</span>
-    if (s.optional && s.kind === 'language') return <span className="text-[13px] text-faint">{tx('主 Agent 兼做')}</span>
+    const model = config.enabled ? config.chain[0]?.model : undefined
+    const thinking = s.kind === 'language' ? roleThinkingTag(s, config) : ''
+    if (s.optional && s.kind !== 'language' && !config.enabled) return <span className="text-[13px] text-faint">{tx('已关闭')}</span>
+    if (model) {
+      if (s.kind === 'language') {
+        return <span className="text-[13px] text-faint"><span className="font-mono font-medium text-fg">{model}</span>{config.chain.length > 1 ? ` +${config.chain.length - 1}` : ''} · {thinking}</span>
+      }
+      return <span className="font-mono text-[13px] font-medium">{model}{config.chain.length > 1 ? <span className="font-sans font-normal text-faint"> +{config.chain.length - 1}</span> : null}</span>
+    }
+    if (s.optional && s.kind === 'language') return <span className="text-[13px] text-faint">{`${tx('主 Agent 兼做')} · ${thinking}`}</span>
+    if (resolved) {
+      const followId = s.inherits ?? resolved.source
+      const base = followId === 'router' ? tx('跟主 Agent') : tx('跟{0}', short(labelOf(followId)))
+      return <span className="text-[13px] text-faint">{s.kind === 'language' ? `${base} · ${thinking}` : base}</span>
+    }
     return <span className="text-[13px] text-faint">{s.optional ? tx('没开') : tx('还没选')}</span>
   }
-  const layerRow = (s: RoleSpec) => <Row key={s.id} href={`#/settings/roles/${s.id}`} label={s.label} sub={<span className="line-clamp-1">{s.duty}{s.advice ? ` · ${s.advice}` : ''}</span>}>{valueOf(s)}</Row>
+  const layerSub = (s: RoleSpec) => {
+    const advice = s.advice || (!s.duty.includes('思考') ? roleSubFallback(s.id) : '')
+    return <span className="line-clamp-1">{s.duty}{advice ? ` · ${advice}` : ''}</span>
+  }
+  const layerRow = (s: RoleSpec) => <Row key={s.id} href={`#/settings/roles/${s.id}`} label={s.label} sub={layerSub(s)}>{valueOf(s)}</Row>
 
   return <Page title={tx('分层模型')}>
-    <Section title={tx('主 Agent')} foot={tx('所有层默认都用这个模型。')}>
+    <Section title={tx('主 Agent')} foot={tx('所有层默认都用这个模型，思考强度按各层职责自动匹配。')}>
       <MainModel config={routerConfig} providers={providers} />
-      <Row href="#/settings/roles/router" label={tx('备用模型、推理强度、每天上限')} sub={tx('主模型出错时换备用的；不设就不限')}>
+      {routerConfig.chain.length > 0 && (routerInfo && !routerInfo.supported
+        ? <Row label={tx('思考强度')} sub={tx('当前模型不支持调节思考强度')}>
+          <span className="text-[13px] text-faint">{tx('由模型本身决定')}</span>
+        </Row>
+        : <Row label={tx('思考强度')} sub={reasoningDesc(curRouterReasoning)}>
+          <SelectInput aria-label={tx('思考强度')} value={curRouterReasoning} disabled={saveRouterReasoning.isPending}
+            onChange={e => saveRouterReasoning.mutate(e.target.value as ReasoningLevel)}>
+            {routerLevels.map(l => <option key={l} value={l}>{reasoningLabel(l, true)}</option>)}
+          </SelectInput>
+        </Row>)}
+      <Row href="#/settings/roles/router" label={tx('备用模型、温度、每天上限')} sub={tx('主模型出错时换备用的；不设就不限')}>
         <span className="text-[13px] text-faint">{extras || tx('没设')}</span>
       </Row>
     </Section>
@@ -107,7 +243,7 @@ function RoleList({ specs, labelOf, roles, providers }: { specs: RoleSpec[]; lab
             <Undo2 size={13} />{tx('全部改回跟随主 Agent')}</button>}
         </div>
         <div className="rounded-2xl bg-sunken px-4 [&>*+*]:border-t [&>*+*]:border-line">{language.map(layerRow)}</div>
-        <Foot>{tx('点进一层可以单独选模型，也能设备用模型、推理强度、温度、每天上限。')}</Foot>
+        <Foot>{tx('点进一层可以单独选模型，也能改思考强度、备用模型、温度、每天上限。')}</Foot>
       </section>
       {special.length > 0 && <Section title={tx('要专门模型的层')} foot={tx('主 Agent 的聊天模型做不了这几件事，选上对应的模型才会开启。')}>{special.map(layerRow)}</Section>}
     </>}
@@ -149,13 +285,22 @@ function MainModel({ config, providers }: { config: RoleConfig; providers: Provi
   </Block>
 }
 
-function RoleDetail({ spec, labelOf, levels, config, resolved, providers }: { spec: RoleSpec; labelOf(id: string): string; levels: string[]; config: RoleConfig; resolved: Resolved; providers: Provider[] }) {
+function RoleDetail({ spec, labelOf, config, resolved, providers }: { spec: RoleSpec; labelOf(id: string): string; config: RoleConfig; resolved: Resolved; providers: Provider[] }) {
   const qc = useQueryClient()
   const [draft, setDraft] = useState<RoleConfig>(config)
   useEffect(() => setDraft(config), [JSON.stringify(config)])
   const dirty = JSON.stringify(draft) !== JSON.stringify(config)
   const save = useMutation({ mutationFn: () => api.put(`/roles/${spec.id}`, clean(draft)), onSuccess: () => qc.invalidateQueries({ queryKey: ['roles'] }) })
   const setChain = (chain: ModelRef[]) => setDraft(d => ({ ...d, chain }))
+  const activeRef = (draft.chain[0]?.model.trim() ? draft.chain[0] : undefined) ?? resolved?.model
+  const reasoningQuery = useQuery({
+    queryKey: ['reasoning-info', activeRef?.providerId, activeRef?.model.trim()],
+    queryFn: () => api.get<ModelReasoningInfo>(`/models/reasoning-info?providerId=${encodeURIComponent(activeRef!.providerId)}&model=${encodeURIComponent(activeRef!.model.trim())}`),
+    enabled: spec.kind === 'language' && Boolean(activeRef?.providerId && activeRef?.model.trim()),
+  })
+  const info = reasoningQuery.data ?? (!draft.chain[0]?.model.trim() ? resolved?.reasoningInfo : undefined)
+  const detailLevels = allowedLevels(info)
+  const curReasoning = normalizeReasoning(draft.reasoning)
   const optNum = (k: 'temperature' | 'maxOutputTokens' | 'dailyTokenLimit' | 'dailyCostLimitUsd') => ({
     value: draft[k] ?? '', placeholder: k === 'temperature' || k === 'maxOutputTokens' ? tx('默认') : tx('不限'),
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setDraft(d => ({ ...d, [k]: e.target.value === '' ? undefined : Number(e.target.value) })),
@@ -166,14 +311,25 @@ function RoleDetail({ spec, labelOf, levels, config, resolved, providers }: { sp
     <Section title={tx('模型')} foot={draft.chain.length > 1 ? tx('主模型出错或超出上限时，按顺序换备用的。') : undefined}>
       {draft.chain.map((ref, i) => <ChainRow key={i} index={i} value={ref} role={spec.id} kind={spec.kind} providers={providers}
         onChange={v => setChain(draft.chain.map((r, j) => (j === i ? v : r)))} onRemove={() => setChain(draft.chain.filter((_, j) => j !== i))} />)}
-      {!draft.chain.length && <Row label={spec.inherits && !spec.optional ? tx('跟{0}一样', labelOf(spec.inherits)) : tx('还没选模型')} sub={spec.optional ? tx('配上模型才会启用这一层') : tx('想单独用一个模型就在下面选')} />}
+      {!draft.chain.length && <Row label={spec.inherits && !spec.optional ? tx('跟{0}一样', labelOf(spec.inherits)) : tx('还没选模型')} sub={spec.optional ? tx('配上模型才会启用这一层') : tx('想单独用一个模型就在下面选')}>
+        {!spec.optional && resolved?.model.model && <span className="font-mono text-[13px] font-medium">{resolved.model.model}</span>}
+      </Row>}
       {draft.chain.length < 5 && providers.length > 0 && <button type="button" onClick={() => setChain([...draft.chain, { providerId: providers[0]!.id, model: '' }])}
         className="flex min-h-[44px] w-full items-center gap-2 text-left text-sm text-muted hover:text-fg"><Plus size={16} />{draft.chain.length ? tx('加一个备用模型') : tx('选一个模型')}</button>}
     </Section>
-    <Section title={tx('参数和上限')}>
+    <Section title={tx('参数和上限')} foot={spec.kind === 'language' && spec.id !== 'router' ? tx('未单独选模型时继承主 Agent 模型，但思考强度按本层职责默认使用「{0}」；也可手动固定为自动 / 不思考 / 轻度 / 标准 / 深度 / 超高。', roleThinkingTag(spec, EMPTY)) : undefined}>
       {spec.kind === 'language' && <>
-        <Row label={tx('推理强度')}><SelectInput value={draft.reasoning ?? ''} onChange={e => setDraft(d => ({ ...d, reasoning: e.target.value || undefined }))}>
-          <option value="">{tx('默认')}</option>{levels.map(l => <option key={l} value={l}>{l}</option>)}</SelectInput></Row>
+        {info && !info.supported
+          ? <Row label={tx('思考强度')} sub={tx('当前模型不支持调节思考强度')}>
+            <span className="text-[13px] text-faint">{tx('由模型本身决定')}</span>
+          </Row>
+          : <Row label={tx('思考强度')} sub={curReasoning ? reasoningDesc(curReasoning) : roleDefaultDesc(spec.id)}>
+            <SelectInput aria-label={tx('思考强度')} className="w-[160px]" value={curReasoning ?? ''}
+              onChange={e => setDraft(d => ({ ...d, reasoning: (e.target.value || undefined) as ReasoningLevel | undefined }))}>
+              <option value="">{roleDefaultOptionLabel(spec.id)}</option>
+              {detailLevels.map(l => <option key={l} value={l}>{reasoningLabel(l, false)}</option>)}
+            </SelectInput>
+          </Row>}
         <Row label={tx('温度')}><NumberInput min={0} max={2} step={0.1} {...optNum('temperature')} aria-label={tx('温度')} /></Row>
         <Row label={tx('单次最大输出')} sub="token"><NumberInput min={1} className="w-[100px]" {...optNum('maxOutputTokens')} aria-label={tx('单次最大输出')} /></Row>
       </>}

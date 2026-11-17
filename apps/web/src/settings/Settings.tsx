@@ -67,17 +67,18 @@ export function Settings({ tab, item }: { tab: SettingsTab; item?: string }) {
     return GROUPS.map(g => ({ ...g, tabs: g.tabs.filter(t => `${g.title} ${t.label} ${t.words}`.toLowerCase().includes(term)) })).filter(g => g.tabs.length)
   }, [q])
 
-  // Esc goes back to the chat, unless it is closing something first (a field you are typing in, a dialog).
+  // Esc goes back to the parent settings list when an item is open, or back to the chat otherwise.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('[role="dialog"]')) return
       const el = document.activeElement as HTMLElement | null
       if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) { el.blur(); return }
+      if (item) { location.hash = `#/settings/${tab}`; return }
       leaveSettings()
     }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
-  }, [])
+  }, [tab, item])
   useEffect(() => { document.getElementById('settings-main')?.scrollTo(0, 0) }, [tab, item])
 
   return <div className="settings-static flex h-dvh bg-bg">

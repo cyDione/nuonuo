@@ -41,7 +41,28 @@ export const roleSpec = (id: RoleId): RoleSpec => ROLES.find(r => r.id === id)!
 export const ModelRefSchema = z.object({ providerId: z.string().min(1), model: z.string().trim().min(1) }).strict()
 export type ModelRef = z.infer<typeof ModelRefSchema>
 
-export const REASONING_LEVELS = ['provider-default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+export const REASONING_LEVELS = ['auto', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'provider-default'] as const
+export type ReasoningLevel = typeof REASONING_LEVELS[number]
+export type ConcreteReasoning = Exclude<ReasoningLevel, 'auto'>
+
+const DEFAULT_REASONING: Readonly<Record<RoleId, ReasoningLevel>> = {
+  router: 'auto',
+  worker: 'high',
+  subagent: 'high',
+  reviewer: 'low',
+  watchdog: 'low',
+  summarizer: 'auto',
+  filter: 'none',
+  vision: 'low',
+  embedding: 'none',
+  transcribe: 'none',
+  speech: 'none',
+}
+
+/** The default reasoning strategy for a layer when the owner has not overridden it. */
+export function defaultReasoningOf(role: RoleId): ReasoningLevel {
+  return DEFAULT_REASONING[role]
+}
 
 export const RoleConfigSchema = z.object({
   /** The models to try in order: the first is primary, the rest are fallbacks on retryable failures. Empty = inherit. */
@@ -63,7 +84,7 @@ export interface ResolvedRole {
   config: RoleConfig
 }
 
-/** Follows `inherits` until a layer with a chain; settings such as limits stay those of the asked layer when it has its own. */
+/** Follows `inherits` until a layer with a chain; settings such as limits stay those of the asked layer when it has its own, and reasoning always defaults to the asked layer's duty rather than inheriting another layer's mode. */
 export function resolveRole(role: RoleId, configs: Partial<Record<RoleId, RoleConfig>>): ResolvedRole | undefined {
   const own = configs[role]
   const spec = roleSpec(role)
@@ -74,7 +95,8 @@ export function resolveRole(role: RoleId, configs: Partial<Record<RoleId, RoleCo
     seen.add(current)
     const config = configs[current]
     if (config && config.enabled && config.chain.length > 0) {
-      return { role, source: current, config: current === role ? config : { ...config, ...pickLimits(own) } }
+      const merged = current === role ? config : { ...config, ...pickLimits(own) }
+      return { role, source: current, config: { ...merged, reasoning: own?.reasoning ?? defaultReasoningOf(role) } }
     }
     const next: RoleSpec = roleSpec(current)
     if (next.optional && current !== role) return undefined

@@ -154,7 +154,7 @@ export async function suggestSteps(hub: ModelHub, goal: Goal, existing: Goal[]):
   const role = hub.resolve('summarizer') ? 'summarizer' : 'router'
   const { steps } = await generateStructured(hub, role, {
     system: 'You help a person break a long-running goal into 2–4 concrete, measurable steps they can track. Titles are short and in the goal\'s language. Do not repeat steps that exist.',
-    schema: StepsSchema, ref: goal.id, maxOutputTokens: 1_024,
+    schema: StepsSchema, ref: goal.id, intent: 'goals', maxOutputTokens: 1_024,
     fields: 'steps: array of { title (≤ 40 chars), target (number), unit (optional, e.g. 次, 本, 元), style ("amount" or "days") }',
     example: { steps: [{ title: '每周跑三次', target: 12, unit: '次', style: 'amount' }, { title: '连续早睡 21 天', target: 21, style: 'days' }] },
     prompt: `Goal: ${goal.title} (${goal.current} / ${goal.target}${goal.unit})${goal.note ? `\nNote: ${goal.note}` : ''}\nExisting steps: ${existing.map(e => e.title).join('、') || 'none'}`,

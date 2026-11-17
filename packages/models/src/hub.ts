@@ -12,9 +12,9 @@ import { DECISION_KINDS, DECISION_MODEL_SUGGESTIONS, isDecisionModel, presetOf, 
 import type { EmbeddingModelV4 } from '@ai-sdk/provider'
 import { defaultFactory, listProviderModels, type ModelFactory, type ProviderOptions, type ProviderRecord } from './factory'
 import { ENV_PROVIDERS, ENV_REF, envVarOf } from './env'
-import { DECISION_ROLES, resolveRole, roleSpec, ROLE_IDS, RoleConfigSchema, type ModelRef, type ResolvedRole, type RoleConfig, type RoleId, type RoleKind } from './roles'
+import { DECISION_ROLES, defaultReasoningOf, resolveRole, roleSpec, ROLE_IDS, RoleConfigSchema, type ConcreteReasoning, type ModelRef, type ReasoningLevel, type ResolvedRole, type RoleConfig, type RoleId, type RoleKind } from './roles'
 import type { SecretStore } from './secrets'
-import { mergeCatalogs, MODEL_TYPES, pickDefaultModel, typeFromId, type ModelInfo, type ModelPrice, type ModelType } from './discovery'
+import { mergeCatalogs, MODEL_TYPES, pickDefaultModel, reasoningInfoOf, typeFromId, type LearnedReasoningCaps, type ModelInfo, type ModelPrice, type ModelReasoningInfo, type ModelType } from './discovery'
 import { decisionEndpoints, systemOneClient, type SystemOneRequest, type SystemOneResponse } from './systemone'
 
 export class ModelError extends Error {
@@ -35,7 +35,8 @@ export interface ProviderView extends Omit<ProviderRecord, 'secretRef'> { hasKey
 export interface UsageSummaryRow { role: string; providerId: string; model: string; calls: number; failures: number
   inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number; costUsd: number | null }
 
-export interface CallContext { ref?: string }
+export type CallIntent = 'chat' | 'task' | 'triage' | 'distill' | 'ideas' | 'goals' | 'title' | 'compact' | 'filter' | 'review' | 'watchdog' | 'vision'
+export interface CallContext { ref?: string; intent?: CallIntent }
 
 const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504, 529])
 export function isRetryable(error: unknown): boolean {
@@ -45,8 +46,106 @@ export function isRetryable(error: unknown): boolean {
     || (error instanceof Error && error.name === 'TimeoutError')
 }
 
+const REASONING_ERROR_FIELD = /reasoning_effort|reasoning|thinking|thinkingBudget|thinking_budget|budget_tokens|effort/i
+const REASONING_ERROR_VALUE = /invalid.*value.*(none|minimal|xhigh|max)|unsupported.*parameter|unknown.*(field|parameter)|unrecognized.*argument|extra_forbidden/i
+const RESPONSE_FORMAT_ERROR = /response_format|json_schema|json_object|structured output|responseMimeType|response_schema/i
+
+export function isReasoningParamError(error: unknown): boolean {
+  if (!APICallError.isInstance(error) || error.statusCode !== 400) return false
+  const body = typeof error.responseBody === 'string' ? error.responseBody : ''
+  const text = `${error.message} ${body}`
+  if (RESPONSE_FORMAT_ERROR.test(text) && !REASONING_ERROR_FIELD.test(text)) return false
+  return REASONING_ERROR_FIELD.test(text) || REASONING_ERROR_VALUE.test(text)
+}
+
+const DEEP_ANALYSIS_RE = /为什么|原理|对比|权衡|架构|方案|规划|排查|根因|设计|重构|优缺点|利弊|怎么选|深入|\b(why|trade-?off|architect|root cause|compare|design|analyze)\b/gi
+const HIGH_COMPLEXITY_RE = /架构|根因|重构|权衡|排查|深入|\b(trade-?off|architect|root cause)\b/i
+const CONDITIONAL_TIME_RE = /(?:如果|要是|假如|除非).*(?:就|那|否则|还是)|每隔|倒推|推算|时差|换算|下周[一二三四五六日天].*(?:之前|之后|前|后)/i
+
+function extractLastUserText(options: LanguageModelV4CallOptions): string {
+  const prompt = options.prompt
+  if (!Array.isArray(prompt)) return ''
+  for (let i = prompt.length - 1; i >= 0; i--) {
+    const msg = prompt[i]
+    if (!msg || msg.role !== 'user') continue
+    if (typeof (msg as { content?: unknown }).content === 'string') return (msg as unknown as { content: string }).content
+    if (Array.isArray(msg.content)) {
+      return msg.content.map(p => (p && typeof p === 'object' && 'text' in p && typeof p.text === 'string' ? p.text : '')).filter(Boolean).join('\n')
+    }
+  }
+  return ''
+}
+
+/**
+ * Maps `'auto'` reasoning to a concrete level in `< 1ms`: background calls use their explicit `context.intent`, while the
+ * main `router` conversation classifies the latest user input / inbox batch locally with zero extra model calls.
+ */
+export function resolveAutoReasoning(role: RoleId, options: LanguageModelV4CallOptions, context: CallContext = {}): ConcreteReasoning {
+  switch (context.intent) {
+    case 'triage':
+    case 'title':
+    case 'compact':
+    case 'filter':
+      return 'none'
+    case 'distill':
+    case 'review':
+    case 'watchdog':
+    case 'vision':
+      return 'low'
+    case 'ideas':
+    case 'goals':
+      return 'medium'
+    case 'task':
+      return 'high'
+    case 'chat':
+    case undefined:
+      break
+  }
+
+  if (role === 'worker' || role === 'subagent') return 'high'
+  if (role === 'reviewer' || role === 'watchdog' || role === 'vision') return 'low'
+  if (role === 'filter' || role === 'embedding' || role === 'transcribe' || role === 'speech') return 'none'
+
+  const raw = extractLastUserText(options).replace(/\n*<now>[\s\S]*?<\/now>\s*$/i, '').trim()
+  if (!raw) return 'none'
+
+  const failedReports = (raw.match(/<report\b[^>]*\bstatus="(?:failed|blocked)"/gi) ?? []).length
+    + (raw.match(/\bstatus:\s*(?:failed|blocked)\b/gi) ?? []).length
+  if (failedReports >= 2) return 'high'
+
+  let userText = raw
+  if (/<(?:message|handback|proactive)\b/i.test(raw)) {
+    const blocks = [...raw.matchAll(/<(?:message|handback|proactive)\b[^>]*>[\s\S]*?\ntext:\n([\s\S]*?)<\/(?:message|handback|proactive)>/gi)]
+    userText = blocks.length ? blocks.map(m => m[1]!.trim()).join('\n') : raw
+  } else if (/<(?:report|task_ended|recovery|retry|unsent|approval)\b/i.test(raw)) {
+    if (failedReports === 1 || /<approval\b/i.test(raw)) return 'low'
+    return 'none'
+  }
+
+  const cleaned = userText.replace(/\n*\[附件\][\s\S]*$/, '').trim()
+  const withoutQuote = cleaned.replace(/^(?:>\s*.*\n?)+/, '').trim()
+  const len = withoutQuote.length
+
+  if (cleaned.includes('```') || len > 350) return 'high'
+
+  const deepMatches = withoutQuote.match(DEEP_ANALYSIS_RE)
+  if (deepMatches && len >= 14) {
+    if (len > 40 || deepMatches.length >= 2 || HIGH_COMPLEXITY_RE.test(withoutQuote)) return 'high'
+    return 'medium'
+  }
+
+  const hasQuoteCorrection = /^>\s+/m.test(cleaned) || /<(?:owner_recalled|regenerate)\b/i.test(raw)
+  const openTasks = (raw.match(/^\s*-\s+tkt_[a-z0-9]+\b(?!.*\bended:)/gm) ?? []).length
+  if (hasQuoteCorrection || openTasks >= 2 || (len >= 80 && len <= 350) || (len >= 12 && CONDITIONAL_TIME_RE.test(withoutQuote))) {
+    return 'low'
+  }
+
+  return 'none'
+}
+
 interface CachedModels { at: number; models: ModelInfo[] }
 const modelsKey = (providerId: string) => `models:${providerId}`
+const reasoningCapsKey = (providerId: string, modelId: string) => `reasoning_caps:${providerId}:${modelId}`
 const CATALOG_MAX_AGE = 24 * 3_600_000
 
 const startOfDay = (now: number) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime() }
@@ -313,34 +412,100 @@ export class ModelHub {
     return resolveRole(role, this.roleConfigs())
   }
 
+  /** Reasoning capability descriptor for a provider/model pair (or the generic default when `ref` is omitted). */
+  reasoningInfo(ref?: ModelRef): ModelReasoningInfo {
+    if (!ref || !ref.providerId || !ref.model) return reasoningInfoOf()
+    let kind: ProviderKind | undefined
+    try { kind = this.getProvider(ref.providerId).kind } catch { /* unknown provider */ }
+    const listed = this.modelInfo(ref)
+    const learned = this.learnedReasoningCaps(ref)
+    return reasoningInfoOf(kind, ref.model, listed, learned)
+  }
+
+  private learnedReasoningCaps(ref: ModelRef): LearnedReasoningCaps | undefined {
+    return kvGet<LearnedReasoningCaps>(this.store, reasoningCapsKey(ref.providerId, ref.model))
+  }
+
+  private updateLearnedReasoningCaps(ref: ModelRef, patch: Partial<LearnedReasoningCaps>): LearnedReasoningCaps {
+    const next: LearnedReasoningCaps = { ...(this.learnedReasoningCaps(ref) ?? {}), ...patch }
+    kvSet(this.store, reasoningCapsKey(ref.providerId, ref.model), next)
+    return next
+  }
+
   /**
    * The model for a layer. It applies the layer's reasoning/temperature/max tokens unless the call sets them, refuses calls
    * past the daily budget, tries the chain in order on retryable failures (for streams, only before the first chunk),
-   * and writes one ledger row per attempt.
+   * self-heals on 400 reasoning parameter rejections (caching learned limits in SQLite), and writes one ledger row per attempt.
    */
   model(role: RoleId, context: CallContext = {}): LanguageModelV4 {
     const resolved = this.resolve(role)
     if (!resolved) throw new ModelError('no_model', `layer ${role} has no model configured`)
     const hub = this
     const first = resolved.config.chain[0]!
-    const applyDefaults = (options: LanguageModelV4CallOptions): LanguageModelV4CallOptions => ({
-      ...options,
-      ...(options.maxOutputTokens === undefined && resolved.config.maxOutputTokens ? { maxOutputTokens: resolved.config.maxOutputTokens } : {}),
-      ...(options.temperature === undefined && resolved.config.temperature !== undefined ? { temperature: resolved.config.temperature } : {}),
-      ...(options.reasoning === undefined && resolved.config.reasoning ? { reasoning: resolved.config.reasoning } : {}),
-    })
 
-    async function attempt<T>(run: (model: LanguageModelV4, ref: ModelRef) => Promise<T>): Promise<T> {
+    const resolveCallReasoning = (ref: ModelRef, options: LanguageModelV4CallOptions): ConcreteReasoning | undefined => {
+      const raw = (options.reasoning as ReasoningLevel | undefined) ?? resolved.config.reasoning ?? defaultReasoningOf(role)
+      if (!raw || raw === 'provider-default') return undefined
+      const info = hub.reasoningInfo(ref)
+      if (!info.supported) return undefined
+      let concrete: ConcreteReasoning = raw === 'auto' ? resolveAutoReasoning(role, options, context) : raw
+      if (concrete === 'provider-default') return undefined
+      if (concrete === 'minimal') concrete = 'low'
+      if (concrete === 'none' && !info.canDisable) concrete = 'low'
+      if ((concrete === 'xhigh' || concrete === 'max') && !info.levels.includes('xhigh')) concrete = 'high'
+      return concrete
+    }
+
+    const buildOptions = (p: ProviderRecord, options: LanguageModelV4CallOptions, reasoning: ConcreteReasoning | undefined): LanguageModelV4CallOptions => {
+      const maxOutputTokens = options.maxOutputTokens ?? resolved.config.maxOutputTokens
+      const temperature = options.temperature ?? resolved.config.temperature
+      const activeThinking = reasoning !== undefined && reasoning !== 'none'
+      const omitTemp = p.kind === 'anthropic' && activeThinking
+      const out: LanguageModelV4CallOptions = { ...options }
+      if (maxOutputTokens !== undefined) out.maxOutputTokens = maxOutputTokens
+      if (omitTemp) delete out.temperature
+      else if (temperature !== undefined) out.temperature = temperature
+      if (reasoning !== undefined) out.reasoning = reasoning as any
+      else delete out.reasoning
+      return out
+    }
+
+    const callWithHealing = async <T>(p: ProviderRecord, ref: ModelRef, options: LanguageModelV4CallOptions, invoke: (opts: LanguageModelV4CallOptions) => PromiseLike<T>): Promise<T> => {
+      let opts = buildOptions(p, options, resolveCallReasoning(ref, options))
+      for (;;) {
+        try {
+          return await invoke(opts)
+        } catch (error) {
+          const sentReasoning = opts.reasoning as string | undefined
+          if (!sentReasoning || !isReasoningParamError(error)) throw error
+          if (sentReasoning === 'none') {
+            hub.updateLearnedReasoningCaps(ref, { minLevel: 'low' })
+            opts = buildOptions(p, options, 'low')
+            continue
+          }
+          if (sentReasoning === 'xhigh' || sentReasoning === 'max') {
+            hub.updateLearnedReasoningCaps(ref, { maxLevel: 'high' })
+            opts = buildOptions(p, options, 'high')
+            continue
+          }
+          hub.updateLearnedReasoningCaps(ref, { unsupported: true })
+          opts = buildOptions(p, options, undefined)
+        }
+      }
+    }
+
+    async function attempt<T>(run: (model: LanguageModelV4, ref: ModelRef, p: ProviderRecord) => Promise<T>): Promise<T> {
       hub.checkBudget(role, resolved!.config)
       let lastError: unknown
       for (const [index, ref] of resolved!.config.chain.entries()) {
         let model: LanguageModelV4
+        let p: ProviderRecord
         try {
-          const p = hub.getProvider(ref.providerId)
+          p = hub.getProvider(ref.providerId)
           model = hub.factory.language(p, hub.key(p), ref.model)
         } catch (error) { lastError = error; continue }
         try {
-          return await run(model, ref)
+          return await run(model, ref, p)
         } catch (error) {
           lastError = error
           hub.record(role, ref, undefined, context, error)
@@ -356,13 +521,13 @@ export class ModelHub {
       provider: `nuonuo.${role}`,
       modelId: first.model,
       supportedUrls: {},
-      doGenerate: options => attempt(async (model, ref) => {
-        const result = await model.doGenerate(applyDefaults(options))
+      doGenerate: options => attempt(async (model, ref, p) => {
+        const result = await callWithHealing(p, ref, options, opts => model.doGenerate(opts))
         hub.record(role, ref, result.usage, context)
         return result
       }),
-      doStream: options => attempt(async (model, ref) => {
-        const result = await model.doStream(applyDefaults(options))
+      doStream: options => attempt(async (model, ref, p) => {
+        const result = await callWithHealing(p, ref, options, opts => model.doStream(opts))
         let recorded = false
         const stream = result.stream.pipeThrough(new TransformStream<LanguageModelV4StreamPart, LanguageModelV4StreamPart>({
           transform(part, controller) {

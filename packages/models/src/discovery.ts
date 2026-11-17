@@ -5,6 +5,7 @@
  * with what it is for, from the list's own metadata where it has some and from the id where it does not.
  */
 import { isDecisionModel, type ProviderKind } from './catalog'
+import type { ReasoningLevel } from './roles'
 
 export type ModelType = 'chat' | 'embedding' | 'rerank' | 'decision' | 'image' | 'audio' | 'video'
 export const MODEL_TYPES: readonly ModelType[] = ['chat', 'embedding', 'rerank', 'decision', 'image', 'audio', 'video']
@@ -14,13 +15,27 @@ export interface ModelPrice { input?: number; output?: number; cacheRead?: numbe
 
 /**
  * `created` is when the provider released the model (ms since epoch). `context` (tokens the model reads), `maxOutput`,
- * `vision` (takes images) and `price` come from the list's own metadata where the provider gives them (OpenRouter, Gemini,
- * most gateways); each is left out when the list says nothing, so callers fall back rather than guess.
+ * `vision` (takes images), `reasoning` (accepts reasoning/thinking parameters) and `price` come from the list's own metadata
+ * where the provider gives them (OpenRouter, Gemini, most gateways); each is left out when the list says nothing, so callers
+ * fall back rather than guess.
  */
-export interface ModelInfo { id: string; type: ModelType; created?: number; context?: number; maxOutput?: number; vision?: boolean; price?: ModelPrice }
+export interface ModelInfo { id: string; type: ModelType; created?: number; context?: number; maxOutput?: number; vision?: boolean; reasoning?: boolean; price?: ModelPrice }
 
 /** The capabilities part of a {@link ModelInfo}. */
-export type ModelCaps = Pick<ModelInfo, 'context' | 'maxOutput' | 'vision' | 'price'>
+export type ModelCaps = Pick<ModelInfo, 'context' | 'maxOutput' | 'vision' | 'reasoning' | 'price'>
+
+export interface LearnedReasoningCaps {
+  unsupported?: boolean
+  minLevel?: 'low'
+  maxLevel?: 'high'
+}
+
+export interface ModelReasoningInfo {
+  supported: boolean
+  fixedById: boolean
+  canDisable: boolean
+  levels: ReasoningLevel[]
+}
 
 const RERANK = /rerank/i
 const EMBEDDING = /embed|(^|[/_.:-])(bge|e5|gte|m3e|bce)([-_.:]|$)/i
@@ -119,6 +134,14 @@ export function capsOf(o: Record<string, unknown>): ModelCaps {
   else if (typeof caps?.vision === 'boolean') out.vision = caps.vision
   else if (typeof o.vision === 'boolean') out.vision = o.vision
   else if (typeof o.supports_vision === 'boolean') out.vision = o.supports_vision
+  const supportedParams = Array.isArray(o.supported_parameters) ? o.supported_parameters
+    : Array.isArray(top?.supported_parameters) ? top.supported_parameters : undefined
+  if (supportedParams && supportedParams.length > 0) {
+    out.reasoning = supportedParams.some(p => typeof p === 'string' && /^(reasoning|reasoning_effort|thinking|include_reasoning|thinking_budget)$/i.test(p))
+  } else if (typeof caps?.reasoning === 'boolean') out.reasoning = caps.reasoning
+  else if (typeof caps?.thinking === 'boolean') out.reasoning = caps.thinking
+  else if (typeof o.thinking === 'boolean') out.reasoning = o.thinking
+  else if (typeof o.supports_reasoning === 'boolean') out.reasoning = o.supports_reasoning
   const pricing = obj(o.pricing)
   if (pricing) {
     // OpenRouter and gateways copying it: strings in USD per token. A `per_million` variant is taken as it is.
@@ -220,4 +243,51 @@ export function mergeCatalogs(...lists: ModelInfo[][]): ModelInfo[] {
 export function jevIdsIn(text: string): string[] {
   const ids = text.match(/[\w.-]+(?:\/[\w.-]+)*\/jev[\w.:@-]*|(?<![\w/.-])jev-[\w.:@-]+/gi) ?? []
   return [...new Set(ids.map(id => id.replace(/[.:,;]+$/, '')).filter(id => isDecisionModel('openai-compatible', id)))]
+}
+
+const FIXED_REASONING_SUFFIX = /-(low|medium|high|xhigh|max|nothinking|no-thinking)$/i
+const KNOWN_REASONING_MODEL = /^(o[134]([-_.]|$)|deepseek-reasoner|deepseek-r1|qwq|gemini-(2\.5|3|4)|claude-(3-7|sonnet-4|opus-4|haiku-4|[45])|gpt-5|grok-(3-mini|4)|glm-4\.5|qwen3)/i
+const TRADITIONAL_NON_REASONING = /^(gpt-4o|gpt-4-turbo|gpt-4($|-\d)|gpt-3\.5|claude-3[-.](?!7)|claude-2|deepseek-chat|deepseek-coder|deepseek-v2|deepseek-v3(?!.*thinking)|llama-3|mistral-|mixtral-|qwen-?(2|2\.5|turbo|plus|max)(?!.*thinking)|yi-|moonshot-v1)/i
+const ALWAYS_REASONING_MODEL = /^(o[134]([-_.]|$)|deepseek-reasoner$|deepseek-r1([-_.]|$)|qwq([-_.]|$)|gemini-2\.5-pro)/i
+const XHIGH_REASONING_MODEL = /^(gpt-5\.([2-9]|\d{2})|gpt-[6-9]|claude-(opus|sonnet)-(4-[5-9]|[5-9])|claude-[5-9]|gemini-[4-9])/i
+
+/**
+ * First-layer capability check for a model's reasoning/thinking controls, combining model-id conventions, `/models`
+ * metadata (`supported_parameters` / `capabilities.reasoning`), and runtime-learned limits from 400 responses.
+ */
+export function reasoningInfoOf(
+  providerKind?: ProviderKind,
+  modelId?: string,
+  listedModelInfo?: ModelInfo,
+  learnedCaps?: LearnedReasoningCaps,
+): ModelReasoningInfo {
+  if (!modelId || !modelId.trim()) {
+    return { supported: true, fixedById: false, canDisable: true, levels: ['auto', 'none', 'low', 'medium', 'high', 'provider-default'] }
+  }
+  const trimmed = modelId.trim()
+  const bare = trimmed.replace(/^.*\/+/, '')
+
+  if (FIXED_REASONING_SUFFIX.test(trimmed) || ((providerKind === 'openai-compatible' || !providerKind) && /-thinking$/i.test(trimmed))) {
+    return { supported: false, fixedById: true, canDisable: false, levels: [] }
+  }
+
+  if (typeFromId(trimmed, providerKind ?? 'openai-compatible') !== 'chat'
+    || learnedCaps?.unsupported === true
+    || (TRADITIONAL_NON_REASONING.test(bare) && listedModelInfo?.reasoning !== true)
+    || (listedModelInfo?.reasoning === false && !KNOWN_REASONING_MODEL.test(bare))) {
+    return { supported: false, fixedById: false, canDisable: true, levels: [] }
+  }
+
+  const canDisable = !ALWAYS_REASONING_MODEL.test(bare) && learnedCaps?.minLevel !== 'low'
+  const supportsXhigh = XHIGH_REASONING_MODEL.test(bare) && learnedCaps?.maxLevel !== 'high'
+  const levels: ReasoningLevel[] = [
+    'auto',
+    ...(canDisable ? (['none'] as const) : []),
+    'low',
+    'medium',
+    'high',
+    ...(supportsXhigh ? (['xhigh'] as const) : []),
+    'provider-default',
+  ]
+  return { supported: true, fixedById: false, canDisable, levels }
 }

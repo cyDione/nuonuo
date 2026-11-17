@@ -91,8 +91,12 @@ describe('providers and layers', () => {
     const put = await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: created.provider.id, model: 'claude-sonnet-5-5' }] }) })
     expect(put.status).toBe(200)
     const roles = await (await call('/api/roles')).json() as any
-    expect(roles.resolved.worker).toMatchObject({ source: 'router', model: { model: 'claude-sonnet-5-5' } })
+    expect(roles.defaults).toMatchObject({ router: 'auto', worker: 'high', subagent: 'high', reviewer: 'low', watchdog: 'low', summarizer: 'auto', filter: 'none' })
+    expect(roles.resolved.router).toMatchObject({ source: 'router', effectiveReasoning: 'auto', defaultReasoning: 'auto', reasoningInfo: { supported: true, canDisable: true } })
+    expect(roles.resolved.worker).toMatchObject({ source: 'router', model: { model: 'claude-sonnet-5-5' }, effectiveReasoning: 'high', defaultReasoning: 'high' })
     expect(roles.resolved.filter).toBeNull()
+    const rInfo = await (await call(`/api/models/reasoning-info?providerId=${created.provider.id}&model=gemini-4-argon-high`)).json() as any
+    expect(rInfo).toEqual({ supported: false, fixedById: true, canDisable: false, levels: [] })
     expect((await call('/api/roles/nope', { method: 'PUT', body: '{}' })).status).toBe(404)
   })
   it('lists a provider\'s models for a layer without caching, and keeps the suggestions when the list fails', async () => {

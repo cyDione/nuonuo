@@ -79,7 +79,7 @@ export class Ideas {
     const counts = this.putAway()
     const avoid = Object.entries(counts).filter(([, n]) => n >= 2).map(([k, n]) => `${k} (put away ${n} times this month)`)
     const out = await generateStructured(this.hub, role, {
-      system: PROMPT, schema: Output, fields: FIELDS, example: EXAMPLE, ref: 'ideas', maxOutputTokens: 2_048,
+      system: PROMPT, schema: Output, fields: FIELDS, example: EXAMPLE, ref: 'ideas', intent: 'ideas', maxOutputTokens: 2_048,
       prompt: `${this.context()}\n\n## Kinds the owner keeps putting away (suggest fewer of these)\n${avoid.join('\n') || '（无）'}`,
     })
     const batch: IdeaBatch = { at: this.now(), cards: out.cards.map(c => ({ ...c, id: newId('ida') })), more: out.more.map(m => ({ ...m, id: newId('idm') })) }

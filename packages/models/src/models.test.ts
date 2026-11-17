@@ -473,3 +473,145 @@ describe('Jev through a multi-provider gateway', () => {
     expect(parseModelList({ error: 'nope' })).toEqual([])
   })
 })
+
+describe('reasoning defaults, auto intent, capabilities and 400 self-healing', () => {
+  it('assigns per-layer default reasoning without polluting inherited layers, and maps background intents accurately', async () => {
+    const { defaultReasoningOf } = await import('./roles')
+    expect(defaultReasoningOf('router')).toBe('auto')
+    expect(defaultReasoningOf('worker')).toBe('high')
+    expect(defaultReasoningOf('subagent')).toBe('high')
+    expect(defaultReasoningOf('reviewer')).toBe('low')
+    expect(defaultReasoningOf('watchdog')).toBe('low')
+    expect(defaultReasoningOf('summarizer')).toBe('auto')
+    expect(defaultReasoningOf('filter')).toBe('none')
+    expect(defaultReasoningOf('vision')).toBe('low')
+
+    const mock = new MockLanguageModelV4({ doGenerate: textResult('ok') })
+    const { hub } = setup({ 'claude-sonnet-4-6': mock })
+    const p = hub.createProvider({ kind: 'anthropic', name: 'Anthropic', apiKey: 'k' })
+    // Even if router is set to 'low' or left as default 'auto', worker/subagent inheriting router's model keep 'high'.
+    hub.saveRole('router', { chain: [{ providerId: p.id, model: 'claude-sonnet-4-6' }], temperature: 0.4 })
+    expect(hub.resolve('router')?.config.reasoning).toBe('auto')
+    expect(hub.resolve('worker')?.config.reasoning).toBe('high')
+    expect(hub.resolve('subagent')?.config.reasoning).toBe('high')
+    expect(hub.resolve('reviewer')?.config.reasoning).toBe('low')
+    expect(hub.resolve('summarizer')?.config.reasoning).toBe('auto')
+
+    await generateText({ model: hub.model('worker'), prompt: 'implement feature' })
+    // Worker defaults to 'high'; on Anthropic, active thinking strips temperature to avoid 400 conflicts.
+    expect(mock.doGenerateCalls.at(-1)?.reasoning).toBe('high')
+    expect(mock.doGenerateCalls.at(-1)?.temperature).toBeUndefined()
+
+    const intents = [
+      ['triage', 'none'],
+      ['distill', 'low'],
+      ['ideas', 'medium'],
+      ['goals', 'medium'],
+      ['title', 'none'],
+      ['compact', 'none'],
+    ] as const
+    for (const [intent, expected] of intents) {
+      await generateText({ model: hub.model('summarizer', { intent }), prompt: 'background job' })
+      expect(mock.doGenerateCalls.at(-1)?.reasoning, intent).toBe(expected)
+    }
+  })
+
+  it('evaluates router auto reasoning in <1ms: none for casual/dispatch, low for medium/disambiguation, high for deep architecture analysis', async () => {
+    const mock = new MockLanguageModelV4({ doGenerate: textResult('ok') })
+    const { hub } = setup({ 'gpt-5.2': mock })
+    const p = hub.createProvider({ kind: 'openai', name: 'OpenAI', apiKey: 'k' })
+    hub.saveRole('router', { chain: [{ providerId: p.id, model: 'gpt-5.2' }] })
+
+    for (const casual of ['早', '在吗', '好，开始吧', '帮我打开百度查一下天气', '<report ticket_id="tkt_1" status="ready">任务已完成</report>']) {
+      await generateText({ model: hub.model('router'), prompt: casual })
+      expect(mock.doGenerateCalls.at(-1)?.reasoning, casual).toBe('none')
+    }
+
+    for (const deep of [
+      '请深入对比这两个微服务架构方案的优缺点，并给出根因排查与重构设计规划',
+      '<message trigger_id="trg_1" source="webchat">\ntext:\n为什么这里的分布式锁在高并发下会出现死锁？请分析原理并对比权衡方案\n</message>\n<now>2026-11-17</now>',
+      '<report ticket_id="tkt_1" status="failed">err 1</report>\n<report ticket_id="tkt_2" status="blocked">err 2</report>',
+    ]) {
+      await generateText({ model: hub.model('router'), prompt: deep })
+      expect(mock.doGenerateCalls.at(-1)?.reasoning, deep).toBe('high')
+    }
+  })
+
+  it('aligns model capabilities: fixed -high suffix omits reasoning, and pure reasoning models clamp none to low', async () => {
+    const fixedMock = new MockLanguageModelV4({ doGenerate: textResult('ok') })
+    const o3Mock = new MockLanguageModelV4({ doGenerate: textResult('ok') })
+    const r1Mock = new MockLanguageModelV4({ doGenerate: textResult('ok') })
+    const { hub } = setup({ 'gemini-4-argon-high': fixedMock, o3: o3Mock, 'deepseek-reasoner': r1Mock })
+    const gw = hub.createProvider({ kind: 'openai-compatible', name: 'GW', baseUrl: 'https://gw.example/v1', apiKey: 'k' })
+
+    const fixedRef = { providerId: gw.id, model: 'gemini-4-argon-high' }
+    expect(hub.reasoningInfo(fixedRef)).toEqual({ supported: false, fixedById: true, canDisable: false, levels: [] })
+    hub.saveRole('worker', { chain: [fixedRef], reasoning: 'high' })
+    await generateText({ model: hub.model('worker'), prompt: 'run' })
+    expect(fixedMock.doGenerateCalls[0]?.reasoning).toBeUndefined()
+
+    for (const [modelId, mock] of [['o3', o3Mock], ['deepseek-reasoner', r1Mock]] as const) {
+      const ref = { providerId: gw.id, model: modelId }
+      const info = hub.reasoningInfo(ref)
+      expect(info.supported).toBe(true)
+      expect(info.canDisable).toBe(false)
+      expect(info.levels).not.toContain('none')
+      hub.saveRole('router', { chain: [ref], reasoning: 'none' })
+      await generateText({ model: hub.model('router'), prompt: '在吗' })
+      expect(mock.doGenerateCalls.at(-1)?.reasoning, modelId).toBe('low')
+    }
+  })
+
+  it('self-heals on 400 reasoning errors (downgrading none -> low or stripping unsupported reasoning) and caches in SQLite KV', async () => {
+    const minLowCalls: (string | undefined)[] = []
+    const unsupportedCalls: (string | undefined)[] = []
+    const minLowModel = new MockLanguageModelV4({
+      doGenerate: async opts => {
+        minLowCalls.push(opts.reasoning as string | undefined)
+        if (opts.reasoning === 'none') {
+          throw new APICallError({ message: "Invalid value: 'none'. Supported values are: 'low', 'medium', 'high'.", url: 'x', requestBodyValues: {}, statusCode: 400, isRetryable: false })
+        }
+        return textResult('healed-low')
+      },
+    })
+    const legacyModel = new MockLanguageModelV4({
+      doGenerate: async opts => {
+        unsupportedCalls.push(opts.reasoning as string | undefined)
+        if (opts.reasoning !== undefined) {
+          throw new APICallError({ message: 'Unknown parameter: reasoning_effort', url: 'x', requestBodyValues: {}, statusCode: 400, isRetryable: false })
+        }
+        return textResult('healed-strip')
+      },
+    })
+
+    const { hub } = setup({ 'custom-reasoner': minLowModel, 'custom-legacy': legacyModel })
+    const gw = hub.createProvider({ kind: 'openai-compatible', name: 'GW', baseUrl: 'https://gw.example/v1', apiKey: 'k' })
+
+    // 1. 400 Invalid value: 'none' -> auto-upgrades to 'low', succeeds without recording a failure, and caches minLevel: 'low'
+    const reasonerRef = { providerId: gw.id, model: 'custom-reasoner' }
+    hub.saveRole('router', { chain: [reasonerRef], reasoning: 'none' })
+    const r1 = await generateText({ model: hub.model('router'), prompt: 'hi', maxRetries: 0 })
+    expect(r1.text).toBe('healed-low')
+    expect(minLowCalls).toEqual(['none', 'low'])
+    expect(hub.reasoningInfo(reasonerRef).canDisable).toBe(false)
+    expect(hub.reasoningInfo(reasonerRef).levels).not.toContain('none')
+    expect(hub.usageSince(0).find(u => u.model === 'custom-reasoner')).toMatchObject({ calls: 1, failures: 0 })
+
+    // Next call uses cached minLevel: 'low' directly without sending 'none'
+    await generateText({ model: hub.model('router'), prompt: 'hi again', maxRetries: 0 })
+    expect(minLowCalls).toEqual(['none', 'low', 'low'])
+
+    // 2. 400 Unknown parameter: reasoning_effort -> strips reasoning, succeeds, and permanently caches unsupported: true
+    const legacyRef = { providerId: gw.id, model: 'custom-legacy' }
+    hub.saveRole('worker', { chain: [legacyRef], reasoning: 'high' })
+    const r2 = await generateText({ model: hub.model('worker'), prompt: 'work', maxRetries: 0 })
+    expect(r2.text).toBe('healed-strip')
+    expect(unsupportedCalls).toEqual(['high', undefined])
+    expect(hub.reasoningInfo(legacyRef)).toEqual({ supported: false, fixedById: false, canDisable: true, levels: [] })
+    expect(hub.usageSince(0).find(u => u.model === 'custom-legacy')).toMatchObject({ calls: 1, failures: 0 })
+
+    // Next call skips reasoning parameter altogether
+    await generateText({ model: hub.model('worker'), prompt: 'work again', maxRetries: 0 })
+    expect(unsupportedCalls).toEqual(['high', undefined, undefined])
+  })
+})

@@ -392,7 +392,7 @@ export class Reviewer {
     const role = this.hub.resolve('reviewer') && !this.hub.usesDecisionModel('reviewer') ? 'reviewer' : this.hub.resolve('router') ? 'router' : null
     if (!role) return
     try {
-      const card = await generateStructured(this.hub, role, { system: CARD_PROMPT, schema: ApprovalCardSchema, fields: CARD_FIELDS, example: CARD_EXAMPLE, ref: ticket.id, maxOutputTokens: 1_024,
+      const card = await generateStructured(this.hub, role, { system: CARD_PROMPT, schema: ApprovalCardSchema, fields: CARD_FIELDS, example: CARD_EXAMPLE, ref: ticket.id, intent: 'review', maxOutputTokens: 1_024,
         prompt: `Task: ${ticket.title}\nWhy it needs a yes: ${reason}\nAction:\n${display.slice(0, 3_000)}` })
       const row = this.get(id)
       if (!row || row.status !== 'pending') return
@@ -475,7 +475,7 @@ export class Reviewer {
 
   private languageVerdict(role: 'reviewer' | 'router', ref: string, prompt: string): Promise<Verdict> {
     return generateStructured(this.hub, role, { system: REVIEWER_PROMPT, prompt: `${prompt}\n\nDecide, and answer in the JSON format described above.`,
-      schema: VerdictSchema, fields: VERDICT_FIELDS, example: VERDICT_EXAMPLE, ref, maxOutputTokens: 2_048 })
+      schema: VerdictSchema, fields: VERDICT_FIELDS, example: VERDICT_EXAMPLE, ref, intent: 'review', maxOutputTokens: 2_048 })
   }
 
   /**

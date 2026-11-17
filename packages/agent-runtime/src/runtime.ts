@@ -227,7 +227,7 @@ export class AgentRuntime {
   imageReader(role: RoleId, ref?: string): ((data: string, mediaType: string) => Promise<string>) | undefined {
     if (this.hub.acceptsImages(role) !== false || !this.hub.resolve('vision') || this.hub.acceptsImages('vision') === false) return undefined
     return async (data, mediaType) => {
-      const result = await generateText({ model: this.hub.model('vision', ref ? { ref } : {}), maxOutputTokens: 2_000,
+      const result = await generateText({ model: this.hub.model('vision', { ...(ref ? { ref } : {}), intent: 'vision' }), maxOutputTokens: 2_000,
         messages: [{ role: 'user', content: [
           { type: 'text', text: 'Describe this image for someone who cannot see it: every piece of visible text verbatim, the layout, and anything notable. Plain text, no preamble.' },
           { type: 'image', image: data, mediaType },
@@ -458,7 +458,7 @@ export class AgentRuntime {
     const transcript = older.map(r => renderForSummary(r.payload as ModelMessage)).join('\n\n').slice(-400_000)
     const previous = last ? `此前的摘要：\n${last.payload.summary}\n\n` : ''
     const { text } = await generateText({
-      model: this.hub.model('summarizer', { ref: session.ticketId ?? session.id }),
+      model: this.hub.model('summarizer', { ref: session.ticketId ?? session.id, intent: 'compact' }),
       prompt: `${previous}请把下面这段 Agent 会话压缩成一份供它自己继续工作的摘要（中文，保留：目标、已做的决定与原因、已完成的步骤与结果、关键文件路径/ID/命令、未完成事项与下一步、用户的明确要求与禁忌）。不要编造。\n\n${transcript}`,
       maxOutputTokens: 4_000,
     })

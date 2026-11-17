@@ -112,7 +112,7 @@ export class Screener {
     ].filter(Boolean).join('\n\n')
     // The filter layer is optional; without it the main agent's model screens (roles.ts: "关闭时由主 Agent 兼做").
     const output = await generateStructured(this.hub, this.hub.resolve('filter') ? 'filter' : 'router', { system: FILTER_PROMPT, prompt, schema: FilterVerdict,
-      ref: triggerId, maxOutputTokens: 2_048, fields: FILTER_FIELDS, example: { act: false, reason: '机器人的例行通知，按策略不用管。' } })
+      ref: triggerId, intent: 'filter', maxOutputTokens: 2_048, fields: FILTER_FIELDS, example: { act: false, reason: '机器人的例行通知，按策略不用管。' } })
     this.engine.proactiveDecision(triggerId, output, settings.mode)
     return output
   }

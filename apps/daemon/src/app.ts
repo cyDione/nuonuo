@@ -1,6 +1,6 @@
 /** HTTP surface of the daemon: the JSON API under /api, the login link under /auth, and the web UI's static files. */
 import { serveStatic } from '@hono/node-server/serve-static'
-import { describeError, KINDS, ModelError, PROVIDER_KINDS, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type RoleId } from '@nuonuo/models'
+import { defaultReasoningOf, describeError, KINDS, ModelError, PROVIDER_KINDS, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type RoleId } from '@nuonuo/models'
 import { Hono, type Context } from 'hono'
 import { setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
@@ -167,15 +167,28 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const { kind, ...ref } = await body(c, z.object({ providerId: z.string(), model: z.string().trim().min(1), kind: z.enum(['language', 'embedding', 'transcription', 'speech']).optional() }))
     return c.json(await rt.hub.testModel(ref, kind))
   })
+  api.get('/models/reasoning-info', c => {
+    const providerId = c.req.query('providerId')?.trim()
+    const model = c.req.query('model')?.trim()
+    return c.json(providerId && model ? rt.hub.reasoningInfo({ providerId, model }) : rt.hub.reasoningInfo())
+  })
 
   // Layers
   api.get('/roles', c => {
     const configs = rt.hub.roleConfigs()
+    const defaults = Object.fromEntries(ROLE_IDS.map(role => [role, defaultReasoningOf(role)]))
     const resolved = Object.fromEntries(ROLE_IDS.map(role => {
       const r = rt.hub.resolve(role)
-      return [role, r ? { source: r.source, model: r.config.chain[0], today: rt.hub.usageToday(role) } : null]
+      return [role, r ? {
+        source: r.source,
+        model: r.config.chain[0],
+        effectiveReasoning: r.config.reasoning ?? defaultReasoningOf(role),
+        defaultReasoning: defaultReasoningOf(role),
+        reasoningInfo: rt.hub.reasoningInfo(r.config.chain[0]),
+        today: rt.hub.usageToday(role),
+      } : null]
     }))
-    return c.json({ configs, resolved })
+    return c.json({ configs, defaults, resolved })
   })
   api.put('/roles/:role', async c => {
     const role = c.req.param('role') as RoleId

@@ -65,12 +65,12 @@ export class Distiller {
     const transcript = rows.map(m => `[${m.id}] ${owner(m) ? 'owner' : m.role === 'assistant' ? 'assistant' : `${(m.meta as { actor?: string }).actor ?? 'someone'} (not the owner)`}: ${m.content.replace(/\s+/g, ' ').slice(0, 800)}`).join('\n').slice(-8_000)
 
     const triage = await generateStructured(this.hub, this.role('filter'), { system: TRIAGE_PROMPT, prompt: transcript, schema: Triage,
-      fields: TRIAGE_FIELDS, example: { decision: 'drop', confidence: 0.2 }, ref: conversationId, maxOutputTokens: 1_024 })
+      fields: TRIAGE_FIELDS, example: { decision: 'drop', confidence: 0.2 }, ref: conversationId, intent: 'triage', maxOutputTokens: 1_024 })
     if (triage.decision === 'drop' || triage.confidence < 0.3) { kvSet(this.store, cursorKey, last); return { triage: triage.decision, added: [] } }
 
     const scope = this.scopeOf(conversationId)
     const existing = await this.memory.recall(transcript, { scope, k: 12 })
-    const output = await generateStructured(this.hub, this.role('summarizer'), { system: DISTILL_PROMPT, ref: conversationId, maxOutputTokens: 4_096,
+    const output = await generateStructured(this.hub, this.role('summarizer'), { system: DISTILL_PROMPT, ref: conversationId, intent: 'distill', maxOutputTokens: 4_096,
       prompt: `Existing entries:\n${existing.map(m => `- [${m.id} ${m.kind}] ${m.text}`).join('\n') || '（无）'}\n\nConversation${scope ? ` (project ${this.memory.scopeName(scope)})` : ''}:\n${transcript}`,
       schema: Distilled, fields: DISTILL_FIELDS, example: { entries: [{ text: '主人习惯用中文交流，回复要简洁', kind: 'profile', confidence: 0.9 }] } })
     // What the owner said is theirs; anything an outsider said in the thread can only ask to be remembered.

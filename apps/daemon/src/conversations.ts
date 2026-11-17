@@ -65,7 +65,7 @@ export class Conversations {
     if (!first) return false
     let title = first.content.split('\n')[0]!.slice(0, 24)
     try {
-      const result = await generateText({ model: this.hub.model('summarizer', { ref: conversationId }), maxOutputTokens: 400,
+      const result = await generateText({ model: this.hub.model('summarizer', { ref: conversationId, intent: 'title' }), maxOutputTokens: 400,
         prompt: `为下面这条请求起一个不超过 14 个字的对话标题，只输出标题本身，不要标点和引号：\n\n${first.content.slice(0, 2000)}` })
       const named = result.text.trim().replace(/^["'“”「」《》]+|["'“”「」《》。.]+$/g, '').split('\n')[0]!.slice(0, 30)
       if (named) title = named
