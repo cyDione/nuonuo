@@ -345,7 +345,7 @@ export function BrowserPaneTab() {
 
   // Board A1 & A2: Active state
   const activeTitle = cleanTitle(active)
-  const activeDomain = domainOf(active.url)
+  const activeDomain = domainOf(active.url) || (active.kind === 'cloud' ? (computer?.title || tx('云电脑桌面')) : tx('已打开'))
   const showPagesList = pages.length > 1 || Boolean(computer?.hasDesktop)
 
   const openActiveTakeover = () => {

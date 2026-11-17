@@ -327,17 +327,20 @@ describe('reply streaming', () => {
 describe('unified browsers & cloud desktop endpoints', () => {
   const json = (method: string, b: unknown) => ({ method, body: JSON.stringify(b) })
 
-  it('drives cloud browsers, desktop stream, screenshots, takeover input, and ticket resume on return', async () => {
+  it('drives native cloud desktop Chromium Web Browser, desktop stream, screenshots, takeover input, and ticket resume on return', async () => {
     const controls: string[] = []
     const browserCalls: Record<string, unknown>[] = []
+    const openDesktopCalls: Array<{ url?: string; owner?: boolean }> = []
     const desktopInputs: unknown[] = []
+    let desktopRunning = true
+    let desktopTitle = '登录页'
+    let desktopUrl = 'https://example.com/login'
     let handoffActive = false
     const fakePng = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
-    const fakeJpg = Buffer.from([255, 216, 255, 224])
 
     const cnv = rt.engine.mainConversation()
     const trig = rt.engine.receiveMessage(cnv, '登录后台看看')
-    const ticket = rt.engine.startTask({ conversationId: cnv, triggerIds: [trig.triggerId], title: '查看后台' })
+    rt.engine.startTask({ conversationId: cnv, triggerIds: [trig.triggerId], title: '查看后台' })
 
     const fakeComp = {
       id: 'instabox',
@@ -368,25 +371,34 @@ describe('unified browsers & cloud desktop endpoints', () => {
     ;(rt.computers as any).list = () => [fakeComp]
     ;(rt.computers as any).ready = async () => {}
     ;(rt.computers as any).ensureDesktop = async () => {}
+    ;(rt.computers as any).focusBrowserWindow = async () => {}
+    ;(rt.computers as any).setDesktopHandoff = (_c: unknown, active: boolean) => { handoffActive = active }
+    ;(rt.computers as any).desktopBrowserStatus = async () => ({
+      running: desktopRunning,
+      title: desktopRunning ? desktopTitle : '',
+      url: desktopRunning ? desktopUrl : '',
+      handoff: handoffActive,
+    })
+    ;(rt.computers as any).openDesktopBrowser = async (_c: unknown, url?: string, opts?: { owner?: boolean }) => {
+      openDesktopCalls.push({ ...(url !== undefined ? { url } : {}), ...(opts?.owner !== undefined ? { owner: opts.owner } : {}) })
+      desktopRunning = true
+      if (url && url !== 'about:blank') {
+        desktopUrl = url
+        desktopTitle = 'Opened'
+      }
+      return { running: true, title: desktopTitle, url: desktopUrl }
+    }
+    ;(rt.computers as any).closeDesktopBrowser = async () => {
+      desktopRunning = false
+      desktopTitle = ''
+      desktopUrl = ''
+      handoffActive = false
+      return true
+    }
     ;(rt.computers as any).desktopScreenshot = async () => fakePng
     ;(rt.computers as any).desktopInput = async (_c: unknown, action: unknown) => { desktopInputs.push(action) }
     ;(rt.computers as any).browser = async (_c: unknown, req: Record<string, any>) => {
       browserCalls.push(req)
-      if (req.op === 'list') {
-        return {
-          browsers: [{
-            name: 'main',
-            idleSeconds: 2,
-            tabs: [{ name: ticket.id, url: 'https://example.com/login', title: '登录页', handoff: handoffActive }],
-          }],
-        }
-      }
-      if (req.op === 'open') return { page: { title: 'Opened', url: req.url, items: [], text: '' } }
-      if (req.op === 'screenshot') return { image: fakeJpg.toString('base64'), mediaType: 'image/jpeg', url: 'https://example.com/login', title: '登录页' }
-      if (req.op === 'handoff') { handoffActive = true; return { url: 'https://example.com/login', title: '登录页', handoff: true } }
-      if (req.op === 'input') return { url: req.action?.url || 'https://example.com/home', title: '首页' }
-      if (req.op === 'release') { handoffActive = false; return { ok: true } }
-      if (req.op === 'close') return { closed: true }
       return {}
     }
 
@@ -398,9 +410,9 @@ describe('unified browsers & cloud desktop endpoints', () => {
     expect(deskShot.headers.get('content-type')).toBe('image/png')
     expect(Buffer.from(await deskShot.arrayBuffer()).equals(fakePng)).toBe(true)
 
-    // 2. List browsers
+    // 2. List browsers (via native desktopBrowserStatus, never calling browserd)
     const listed = await (await call('/api/browsers')).json() as any
-    const tabKey = `cloud:instabox:main:${ticket.id}`
+    const tabKey = 'cloud:instabox:desktop:browser'
     expect(listed).toEqual({
       available: true,
       computer: { id: 'instabox', title: 'Instabox 云电脑', state: 'ready', hasDesktop: true },
@@ -408,59 +420,64 @@ describe('unified browsers & cloud desktop endpoints', () => {
         key: tabKey,
         kind: 'cloud',
         computerId: 'instabox',
-        browser: 'main',
-        tab: ticket.id,
+        browser: 'desktop',
+        tab: 'browser',
         title: '登录页',
         url: 'https://example.com/login',
         handoff: false,
         hasDesktop: true,
       }],
     })
+    const compBrowsers = await (await call('/api/computers/instabox/browsers')).json() as any
+    expect(compBrowsers).toEqual({
+      asleep: false,
+      browsers: [{ name: 'desktop', idleSeconds: 0, tabs: [{ name: 'browser', title: '登录页', url: 'https://example.com/login', handoff: false }] }],
+    })
+    expect(browserCalls).toEqual([])
 
     // 3. Open URL (auto-prepending https://) and blank default browser activation
     const openedBlank = await (await call('/api/browsers/open', json('POST', {}))).json() as any
     expect(openedBlank).toEqual({
-      key: 'cloud:instabox:main:main',
-      url: 'about:blank',
+      key: tabKey,
+      url: '',
       hasDesktop: true,
       computerId: 'instabox',
     })
-    expect(browserCalls.at(-1)).toMatchObject({ op: 'open', browser: 'main', tab: 'main', url: 'about:blank', owner: true })
+    expect(openDesktopCalls.at(-1)).toEqual({ owner: true })
 
     const opened = await (await call('/api/browsers/open', json('POST', { url: 'example.org/path' }))).json() as any
-    expect(opened.key).toMatch(/^cloud:instabox:main:web_/)
-    expect(opened).toMatchObject({ url: 'https://example.org/path', hasDesktop: true, computerId: 'instabox' })
-    expect(browserCalls.at(-1)).toMatchObject({ op: 'open', url: 'https://example.org/path', owner: true })
+    expect(opened).toEqual({
+      key: tabKey,
+      url: 'https://example.org/path',
+      hasDesktop: true,
+      computerId: 'instabox',
+    })
+    expect(openDesktopCalls.at(-1)).toEqual({ url: 'https://example.org/path', owner: true })
 
-    // 4. Page screenshot
+    // 4. Page screenshot returns desktop PNG screenshot
     const pageShot = await call(`/api/browsers/screenshot?key=${encodeURIComponent(tabKey)}`)
     expect(pageShot.status).toBe(200)
-    expect(pageShot.headers.get('content-type')).toBe('image/jpeg')
-    expect(Buffer.from(await pageShot.arrayBuffer()).equals(fakeJpg)).toBe(true)
+    expect(pageShot.headers.get('content-type')).toBe('image/png')
+    expect(Buffer.from(await pageShot.arrayBuffer()).equals(fakePng)).toBe(true)
 
     // 5. Handoff -> page input & desktop input -> return (resumes ticket!)
     const ho = await (await call('/api/browsers/handoff', json('POST', { key: tabKey }))).json() as any
-    expect(ho).toEqual({ ok: true, url: 'https://example.com/login', title: '登录页', hasDesktop: true, computerId: 'instabox' })
+    expect(ho).toEqual({ ok: true, url: 'https://example.org/path', title: 'Opened', hasDesktop: true, computerId: 'instabox' })
+    expect(handoffActive).toBe(true)
     expect(controls).toEqual(['takeover'])
 
     const inpPage = await (await call('/api/browsers/input', json('POST', {
       key: tabKey, mode: 'page', action: { type: 'goto', url: 'example.com/dashboard' },
     }))).json() as any
-    expect(inpPage).toEqual({ ok: true, url: 'https://example.com/dashboard', title: '首页' })
+    expect(inpPage).toEqual({ ok: true, url: 'https://example.com/dashboard', title: 'Opened', key: tabKey })
 
-    // goto in desktop mode on a cloud tab still drives the browser tab directly
-    const inpDeskGoto = await (await call('/api/browsers/input', json('POST', {
-      key: tabKey, mode: 'desktop', action: { type: 'goto', url: 'example.com/desk-nav' },
-    }))).json() as any
-    expect(inpDeskGoto).toEqual({ ok: true, url: 'https://example.com/desk-nav', title: '首页' })
-
-    // desktop:root handoff, goto (opens main:main in headed browser), and return
+    // desktop:root handoff, goto (opens native desktop browser), and return
     const hoRoot = await (await call('/api/browsers/handoff', json('POST', { key: 'cloud:instabox:desktop:root' }))).json() as any
     expect(hoRoot).toEqual({ ok: true, url: '', title: 'Instabox 云电脑', hasDesktop: true, computerId: 'instabox' })
     const gotoRoot = await (await call('/api/browsers/input', json('POST', {
       key: 'cloud:instabox:desktop:root', mode: 'desktop', action: { type: 'goto', url: 'baidu.com' },
     }))).json() as any
-    expect(gotoRoot).toEqual({ ok: true, url: 'https://baidu.com/', title: 'Opened', key: 'cloud:instabox:main:main' })
+    expect(gotoRoot).toEqual({ ok: true, url: 'https://baidu.com/', title: 'Opened', key: tabKey })
     const retRoot = await (await call('/api/browsers/return', json('POST', { key: 'cloud:instabox:desktop:root' }))).json() as any
     expect(retRoot).toEqual({ ok: true })
 
@@ -472,12 +489,15 @@ describe('unified browsers & cloud desktop endpoints', () => {
 
     const ret = await (await call('/api/browsers/return', json('POST', { key: tabKey, note: '已登录完成' }))).json() as any
     expect(ret).toEqual({ ok: true })
+    expect(handoffActive).toBe(false)
     expect(controls).toEqual(['takeover', 'takeover', 'handback', 'handback'])
     const msgs = rt.store.db.select().from(schema.messages).all().filter(m => m.conversationId === cnv)
     expect(msgs.at(-1)?.content).toBe('已登录完成')
 
-    // 6. Close tab
+    // 6. Close native desktop browser
     expect(await (await call('/api/browsers/close', json('POST', { key: tabKey }))).json()).toEqual({ ok: true })
+    expect(desktopRunning).toBe(false)
+    expect(browserCalls).toEqual([])
   })
 
   it('handles local browser keys and rejects desktop stream when computer has no desktop', async () => {

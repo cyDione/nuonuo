@@ -5,7 +5,9 @@ export function HandoffModal({ ticketId, reason, onClose }: { ticketId: string; 
   const browsers = useBrowsers(true)
   if (browsers.isPending) return null
   const pages = browsers.data?.pages ?? []
-  const cloudMatch = pages.find(p => p.kind === 'cloud' && (p.tab === ticketId || p.key.endsWith(`:${ticketId}`)))
+  const computer = browsers.data?.computer ?? null
+  const cloudMatch = pages.find(p => p.kind === 'cloud' && (p.tab === ticketId || p.key.endsWith(`:${ticketId}`) || p.browser === 'desktop'))
   const anyMatch = cloudMatch ?? pages.find(p => p.tab === ticketId || p.key === `local:${ticketId}` || p.key.endsWith(`:${ticketId}`))
-  return <BrowserTakeoverModal targetKey={anyMatch?.key ?? `local:${ticketId}`} reason={reason} onClose={onClose} />
+  const fallbackKey = computer?.hasDesktop ? `cloud:${computer.id}:desktop:browser` : `local:${ticketId}`
+  return <BrowserTakeoverModal targetKey={anyMatch?.key ?? fallbackKey} reason={reason} onClose={onClose} />
 }

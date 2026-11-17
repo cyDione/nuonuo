@@ -195,11 +195,25 @@ function px(name: string, v: number): number {
   return Math.max(0, Math.min(16384, Math.round(v)))
 }
 
+const cleanBrowserTitle = (raw: string): string =>
+  raw.trim().replace(/\s*-\s*(Chromium(\s+Web\s+Browser)?|Google\s+Chrome)\s*$/i, '').trim()
+
 export class Computers {
   private sessions = new Map<string, Session>()
   private leases = new Map<string, number>()
+  private desktopHandoffs = new Set<string>()
+  private lastDesktopUrls = new Map<string, string>()
 
   constructor(private list: () => BoundComputer[], private now: () => number = Date.now) {}
+
+  setDesktopHandoff(c: BoundComputer, active: boolean): void {
+    if (active) this.desktopHandoffs.add(c.id)
+    else this.desktopHandoffs.delete(c.id)
+  }
+
+  hasDesktopHandoff(c: BoundComputer): boolean {
+    return this.desktopHandoffs.has(c.id)
+  }
 
   all(): BoundComputer[] {
     const seen = new Set<string>()
@@ -271,12 +285,43 @@ export class Computers {
           command: [
             `DISPLAY=${q(display)} xhost +SI:localuser:${ACCOUNT} >/dev/null 2>&1 || true`,
             `if [ -f "$HOME/.Xauthority" ]; then sudo -n cp "$HOME/.Xauthority" ${q(xauth)} && sudo -n chown ${ACCOUNT}:${ACCOUNT} ${q(xauth)} && sudo -n chmod 600 ${q(xauth)}; fi`,
+            `sudo -n pkill -u ${ACCOUNT} -f "browserd.mjs|remote-debugging-pipe" >/dev/null 2>&1 || pkill -u ${ACCOUNT} -f "browserd.mjs|remote-debugging-pipe" >/dev/null 2>&1 || true`,
           ].join('\n'),
+        })
+      } else {
+        await c.exec({
+          timeoutSeconds: 15,
+          command: `pkill -u "$(id -u)" -f "browserd.mjs|remote-debugging-pipe" >/dev/null 2>&1 || true`,
         })
       }
       s.desktopReadyAt = this.now()
     })().finally(() => { s.desktop = undefined })
     await s.desktop
+  }
+
+  private desktopEnv(c: BoundComputer): string {
+    return `export DISPLAY=${q(this.displayOf(c))}; U="$(id -u)"; [ -d "/run/user/$U" ] && export XDG_RUNTIME_DIR="/run/user/$U"; [ -S "/run/user/$U/bus" ] && export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$U/bus"`
+  }
+
+  /** Runs a script on the graphical desktop as the desktop login user once ready; one retry if it went to sleep in between. */
+  private async execDesktop(c: BoundComputer, script: string, opts: { stdin?: string; timeoutSeconds: number }): Promise<ComputerExecResult> {
+    await this.ready(c)
+    await this.ensureDesktop(c)
+    const timeoutSeconds = Math.min(opts.timeoutSeconds, c.capabilities.maxExecSeconds)
+    const req: ComputerExecRequest = {
+      command: `${this.desktopEnv(c)}; ${script}`,
+      ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}),
+      timeoutSeconds,
+    }
+    try {
+      return await c.exec(req)
+    } catch (error) {
+      if (!/not.?running|asleep|suspend|waking|409/i.test((error as Error).message)) throw error
+      this.stale(c)
+      await this.ready(c)
+      await this.ensureDesktop(c)
+      return c.exec(req)
+    }
   }
 
   /** Forget that the machine was ready (it went to sleep under us). */
@@ -426,8 +471,78 @@ export class Computers {
 
   async focusBrowserWindow(c: BoundComputer): Promise<void> {
     if (!c.capabilities.desktop) return
-    const display = this.displayOf(c)
-    await this.run(c, `export DISPLAY=${q(display)}; xdotool search --onlyvisible --class "chromium|chrome" windowactivate >/dev/null 2>&1 || true`, { timeoutSeconds: 10 }).catch(() => {})
+    await this.execDesktop(c, 'W=$(xdotool search --onlyvisible --class "chromium|chrome" 2>/dev/null | tail -1); [ -n "$W" ] && xdotool windowactivate "$W" >/dev/null 2>&1 || true', { timeoutSeconds: 10 }).catch(() => {})
+  }
+
+  /**
+   * Opens or focuses the native desktop `Chromium Web Browser` on `DISPLAY` as the desktop login user (zero Playwright/CDP/WebDriver flags,
+   * sharing the desktop session's SingletonLock, DBus bus, and `/data/home/.config/chromium` profile).
+   */
+  async openDesktopBrowser(c: BoundComputer, url?: string, opts?: { owner?: boolean }): Promise<{ running: boolean; title: string; url: string }> {
+    if (!c.capabilities.desktop) throw new ComputerError(`${c.title} 没有图形桌面`)
+    if (!opts?.owner && this.desktopHandoffs.has(c.id)) {
+      throw new ComputerError('主人正在接管浏览器，等交还后再继续')
+    }
+    const hasUrl = Boolean(url && url !== 'about:blank')
+    if (hasUrl) this.lastDesktopUrls.set(c.id, url!)
+    const launch = hasUrl
+      ? `setsid nohup "$B" -- ${q(url!)} >/dev/null 2>&1 < /dev/null &`
+      : 'W=$(xdotool search --onlyvisible --class "chromium|chrome" 2>/dev/null | tail -1); [ -n "$W" ] || (setsid nohup "$B" >/dev/null 2>&1 < /dev/null &)'
+    const script = [
+      'B=$(command -v chromium || command -v chromium-browser || command -v google-chrome || command -v google-chrome-stable || true)',
+      '[ -n "$B" ] || { echo __NO_BROWSER__; exit 0; }',
+      launch,
+      'for i in $(seq 1 16); do W=$(xdotool search --onlyvisible --class "chromium|chrome" 2>/dev/null | tail -1); [ -n "$W" ] && break; sleep 0.25; done',
+      'if [ -n "$W" ]; then xdotool windowactivate "$W" >/dev/null 2>&1 || true; xdotool getwindowname "$W" 2>/dev/null || true; fi',
+    ].join('\n')
+    const r = await this.execDesktop(c, script, { timeoutSeconds: 30 })
+    if (r.stdout.includes('__NO_BROWSER__')) {
+      throw new ComputerError(`${c.title} 上没有找到原生 Chromium 或 Chrome 浏览器`)
+    }
+    const rawTitle = r.stdout.trim().split('\n').pop() ?? ''
+    const title = cleanBrowserTitle(rawTitle) || 'Chromium Web Browser'
+    return {
+      running: true,
+      title,
+      url: hasUrl ? url! : (this.lastDesktopUrls.get(c.id) ?? ''),
+    }
+  }
+
+  /** Queries whether a native Chromium/Chrome window is visible on `DISPLAY`, without waking a sleeping machine. */
+  async desktopBrowserStatus(c: BoundComputer): Promise<{ running: boolean; title: string; url: string; handoff: boolean }> {
+    const handoff = this.desktopHandoffs.has(c.id)
+    if (!c.capabilities.desktop) return { running: false, title: '', url: '', handoff }
+    const script = [
+      this.desktopEnv(c),
+      'W=$(xdotool search --onlyvisible --class "chromium|chrome" 2>/dev/null | tail -1)',
+      'if [ -z "$W" ]; then echo __CLOSED__; exit 0; fi',
+      'echo __OPEN__',
+      'xdotool getwindowname "$W" 2>/dev/null || true',
+    ].join('\n')
+    const r = await c.exec({ command: script, timeoutSeconds: 15 }).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))
+    const lines = r.stdout.trim().split('\n')
+    if (r.exitCode !== 0 || lines[0]?.trim() !== '__OPEN__') {
+      this.lastDesktopUrls.delete(c.id)
+      return { running: false, title: '', url: '', handoff }
+    }
+    const rawTitle = lines.slice(1).join(' ').trim()
+    const title = cleanBrowserTitle(rawTitle) || 'Chromium Web Browser'
+    return { running: true, title, url: this.lastDesktopUrls.get(c.id) ?? '', handoff }
+  }
+
+  /** Closes the native Chromium/Chrome windows on `DISPLAY` and clears handoff/URL state. */
+  async closeDesktopBrowser(c: BoundComputer): Promise<boolean> {
+    this.desktopHandoffs.delete(c.id)
+    this.lastDesktopUrls.delete(c.id)
+    if (!c.capabilities.desktop) return false
+    const script = [
+      'WS=$(xdotool search --onlyvisible --class "chromium|chrome" 2>/dev/null || true)',
+      'for W in $WS; do xdotool windowclose "$W" >/dev/null 2>&1 || true; done',
+      'sleep 0.5',
+      'pkill -u "$(id -u)" -TERM -f "/usr/lib/chromium|/usr/bin/chromium|google-chrome" >/dev/null 2>&1 || true',
+    ].join('\n')
+    const r = await this.execDesktop(c, script, { timeoutSeconds: 20 })
+    return r.exitCode === 0
   }
 
   async browser<T = Record<string, unknown>>(c: BoundComputer, request: Record<string, unknown>): Promise<T> {
@@ -443,17 +558,14 @@ export class Computers {
   async desktopScreenshot(c: BoundComputer): Promise<Buffer> {
     if (!c.capabilities.desktop) throw new ComputerError(`${c.title} 没有图形桌面`)
     const id = `${this.now().toString(36)}${randomBytes(3).toString('hex')}`
-    const display = this.displayOf(c)
     const script = [
       'set -e',
-      `export DISPLAY=${q(display)}`,
-      `F="$NUONUO_HOME/.computer/shot-${id}.png"`,
-      'mkdir -p "$NUONUO_HOME/.computer"',
+      `F="/tmp/nuonuo-shot-${id}.png"`,
       'trap \'rm -f "$F"\' EXIT',
       'if command -v scrot >/dev/null 2>&1; then scrot -o "$F"; elif command -v import >/dev/null 2>&1; then import -window root "png:$F"; else echo "云电脑上没有截图工具（需要 scrot 或 ImageMagick import）" >&2; exit 127; fi',
       'base64 < "$F" | tr -d "\\r\\n"',
     ].join('\n')
-    const r = await this.run(c, script, { timeoutSeconds: 30 })
+    const r = await this.execDesktop(c, script, { timeoutSeconds: 30 })
     if (r.exitCode !== 0 || r.truncated) {
       throw new ComputerError(`截取云电脑桌面失败：${(r.stderr || r.stdout).trim().slice(0, 300) || '截图输出被截断'}`)
     }
@@ -461,9 +573,15 @@ export class Computers {
   }
 
   /** Sends pointer or keyboard input to the X11 graphical desktop (`DISPLAY`) via `xdotool`. */
-  async desktopInput(c: BoundComputer, action: DesktopAction): Promise<void> {
+  async desktopInput(c: BoundComputer, action: DesktopAction, opts?: { owner?: boolean }): Promise<void> {
     if (!c.capabilities.desktop) throw new ComputerError(`${c.title} 没有图形桌面`)
-    const display = this.displayOf(c)
+    if (!opts?.owner && this.desktopHandoffs.has(c.id)) {
+      throw new ComputerError('主人正在接管云电脑桌面，等交还后再继续')
+    }
+    if (action.type === 'goto') {
+      await this.openDesktopBrowser(c, action.url, opts)
+      return
+    }
     let cmd = ''
     let stdin: string | undefined
     switch (action.type) {
@@ -500,15 +618,16 @@ export class Computers {
         break
       }
       case 'type':
+      case 'paste': {
         if (!action.text) return
-        cmd = 'xdotool type --delay 12 --file -'
+        const delay = action.type === 'paste' ? 2 : 12
+        const nonAscii = /[^\x20-\x7e\t\n\r]/.test(action.text)
+        cmd = nonAscii || action.type === 'paste'
+          ? `if command -v xclip >/dev/null 2>&1; then xclip -selection clipboard -i >/dev/null 2>&1 && sleep 0.05 && xdotool key --clearmodifiers ctrl+v; elif command -v xsel >/dev/null 2>&1; then xsel --clipboard --input >/dev/null 2>&1 && sleep 0.05 && xdotool key --clearmodifiers ctrl+v; else xdotool type --delay ${delay} --file -; fi`
+          : `xdotool type --delay ${delay} --file -`
         stdin = action.text
         break
-      case 'paste':
-        if (!action.text) return
-        cmd = 'xdotool type --delay 2 --file -'
-        stdin = action.text
-        break
+      }
       case 'press':
       case 'key':
         cmd = `xdotool key -- ${q(mapXdoKey(action.key))}`
@@ -516,12 +635,8 @@ export class Computers {
       case 'reload':
         cmd = `xdotool key -- 'F5'`
         break
-      case 'goto':
-        cmd = `xdotool key -- 'ctrl+l' && xdotool type --delay 8 --file - && xdotool key -- 'Return'`
-        stdin = action.url
-        break
     }
-    const r = await this.run(c, `export DISPLAY=${q(display)}; ${cmd}`, { ...(stdin !== undefined ? { stdin } : {}), timeoutSeconds: 30 })
+    const r = await this.execDesktop(c, cmd, { ...(stdin !== undefined ? { stdin } : {}), timeoutSeconds: 30 })
     if (r.exitCode !== 0) throw new ComputerError(`云电脑桌面操作失败：${(r.stderr || r.stdout).trim().slice(0, 300)}`)
   }
 }
@@ -655,6 +770,7 @@ export function computerExtension(computers: Computers, opts: ComputerExtensionO
         return page(await computers.browser<{ page: PageView }>(c(), { ...input, ...t, op }), t)
       },
     })
+    const hasDesktop = Boolean(computers.current()?.capabilities.desktop)
     return {
       computer_upload: tool({
         description: 'Copy a file from your local working directory to the cloud computer (to your task folder there unless `to` says otherwise).',
@@ -666,49 +782,47 @@ export function computerExtension(computers: Computers, opts: ComputerExtensionO
         inputSchema: z.object({ path: z.string().describe('Path on the cloud computer (relative to your task folder there)'), to: z.string().optional().describe('Path in the local working directory') }),
         execute: async ({ path, to }) => { const x = c(); const dest = local(to ?? posix.basename(path)); const n = await computers.download(x, remote(x, path), dest); return `已下载 ${n} 字节到 ${dest}` },
       }),
-      computer_browser_open: act('open', z.object({ url: z.string().url() }), 'Open a URL in a browser on your cloud computer. Returns the page text and its interactive elements with refs. Several browsers (separate logins) and tabs can be open at once.'),
-      computer_browser_snapshot: act('snapshot', z.object({}), 'Read a cloud browser tab again: text and interactive elements with refs.'),
-      computer_browser_click: act('click', z.object({ ref: z.string().regex(/^e\d+$/) }), 'Click an element by its ref from the latest snapshot of that tab.'),
-      computer_browser_type: act('type', z.object({ ref: z.string().regex(/^e\d+$/), text: z.string(), submit: z.boolean().optional() }), 'Type into an input by its ref (replacing its value); submit presses Enter afterwards. Never type the owner\'s passwords or payment details.'),
-      computer_browser_press: act('press', z.object({ key: z.string().min(1).describe('e.g. Enter, Escape, PageDown, Control+A') }), 'Press a key in a cloud browser tab.'),
-      computer_browser_scroll: act('scroll', z.object({ dy: z.number().optional().describe('Pixels down (negative: up); default 600') }), 'Scroll a cloud browser tab.'),
-      computer_browser_back: act('back', z.object({}), 'Go back in a cloud browser tab.'),
-      computer_browser_eval: tool({
-        description: 'Run a JavaScript expression in a cloud browser tab and return its value as text (to extract data from a page).',
-        inputSchema: z.object({ expression: z.string().min(1) }).extend(where.shape),
-        execute: async input => { const t = target(input); const r = await computers.browser<{ value: string }>(c(), { ...input, ...t, op: 'evaluate' }); return opts.blobs.spill('page-eval', r.value, 12_000) },
-      }),
-      computer_browser_screenshot: tool({
-        description: 'Look at a cloud browser tab: returns a screenshot you can see. With save, it is also stored in the local working directory (for reports).',
-        inputSchema: z.object({ full_page: z.boolean().optional(), save: z.string().regex(/^[\w-]{1,40}$/).optional().describe('File name (without .jpg) under screenshots/') }).extend(where.shape),
-        execute: async input => {
-          const t = target(input)
-          const r = await computers.browser<{ image: string; mediaType: string; url: string; title: string }>(c(), { ...t, fullPage: Boolean(input.full_page), op: 'screenshot' })
-          let saved = ''
-          if (input.save) { const file = local(`screenshots/${input.save}.jpg`); mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, Buffer.from(r.image, 'base64')); saved = file }
-          return { ...r, saved }
-        },
-        toModelOutput: ({ output }) => ({ type: 'content', value: [
-          { type: 'text', text: `${output.title} ${output.url}${output.saved ? `（已保存 ${output.saved}）` : ''}` },
-          { type: 'image-data', data: output.image, mediaType: output.mediaType },
-        ] }),
-      }),
-      computer_browser_tabs: tool({
-        description: 'List the browsers open on the cloud computer and their tabs.',
-        inputSchema: z.object({}),
-        execute: async () => {
-          const r = await computers.browser<{ browsers: BrowserInfo[] }>(c(), { op: 'list' })
-          return r.browsers.length ? r.browsers.map(b => `${b.name}：\n${b.tabs.map(t => `  - ${t.name}: ${t.title} ${t.url}`).join('\n') || '  （没有标签页）'}`).join('\n') : '（没有打开的浏览器）'
-        },
-      }),
-      computer_browser_close: tool({
-        description: 'Close a tab (or, without tab, a whole browser) on the cloud computer. Logins stay saved.',
-        inputSchema: z.object({ browser: where.shape.browser, tab: z.string().regex(/^[\w.-]{1,40}$/).optional() }),
-        execute: async ({ browser, tab }) => (await computers.browser<{ closed: boolean }>(c(), { op: 'close', browser: browser ?? 'main', ...(tab ? { tab } : {}) })).closed ? '已关闭' : '没有这个标签页',
-      }),
-      ...(computers.current()?.capabilities.desktop ? {
+      ...(hasDesktop ? {
+        computer_browser_open: tool({
+          description: 'Open a URL in the native Chromium Web Browser on your cloud computer\'s 1280×800 graphical desktop (sharing logins with the owner, zero automation flags) and return a live screenshot of the desktop.',
+          inputSchema: z.object({ url: z.string().url() }),
+          execute: async ({ url }) => {
+            const x = c()
+            const opened = await computers.openDesktopBrowser(x, url)
+            await new Promise(r => setTimeout(r, 1200))
+            const buf = await computers.desktopScreenshot(x)
+            return {
+              title: opened.title || 'Chromium Web Browser',
+              url: opened.url || url,
+              image: buf.toString('base64'),
+              mediaType: 'image/png',
+            }
+          },
+          toModelOutput: ({ output }) => ({
+            type: 'content',
+            value: [
+              { type: 'text', text: `已在云电脑原生 Chromium Web Browser 打开：${output.title} (${output.url})。请根据下方 1280×800 桌面截图，使用 computer_desktop_click / _type / _press / _scroll / _screenshot 操控页面。` },
+              { type: 'image-data', data: output.image, mediaType: output.mediaType },
+            ],
+          }),
+        }),
+        computer_browser_tabs: tool({
+          description: 'Check whether the native Chromium Web Browser is open on the cloud computer\'s graphical desktop and show its window title and URL.',
+          inputSchema: z.object({}),
+          execute: async () => {
+            const x = c()
+            await computers.ready(x)
+            const s = await computers.desktopBrowserStatus(x)
+            return s.running ? `desktop：\n  - browser: ${s.title}${s.url ? ` ${s.url}` : ''}` : '（没有打开的浏览器）'
+          },
+        }),
+        computer_browser_close: tool({
+          description: 'Close the native Chromium Web Browser on the cloud computer\'s graphical desktop. Logins stay saved.',
+          inputSchema: z.object({}),
+          execute: async () => (await computers.closeDesktopBrowser(c()) ? '已关闭' : '没有打开的浏览器'),
+        }),
         computer_desktop_screenshot: tool({
-          description: 'Capture the full graphical desktop screen (1280×800) of your cloud computer — shows headed browser windows, native file pickers/dialogs, canvas UIs, and desktop apps. With `save`, also writes a PNG under screenshots/ in the local working directory.',
+          description: 'Capture the full graphical desktop screen (1280×800) of your cloud computer — shows the native Chromium Web Browser, file pickers/dialogs, canvas UIs, and desktop apps. With `save`, also writes a PNG under screenshots/ in the local working directory.',
           inputSchema: z.object({ save: z.string().regex(/^[\w-]{1,40}$/).optional().describe('File name (without .png) under screenshots/') }),
           execute: async ({ save }) => {
             const buf = await computers.desktopScreenshot(c())
@@ -769,7 +883,48 @@ export function computerExtension(computers: Computers, opts: ComputerExtensionO
             return `已按键 ${key}`
           },
         }),
-      } : {}),
+      } : {
+        computer_browser_open: act('open', z.object({ url: z.string().url() }), 'Open a URL in a browser on your cloud computer. Returns the page text and its interactive elements with refs. Several browsers (separate logins) and tabs can be open at once.'),
+        computer_browser_snapshot: act('snapshot', z.object({}), 'Read a cloud browser tab again: text and interactive elements with refs.'),
+        computer_browser_click: act('click', z.object({ ref: z.string().regex(/^e\d+$/) }), 'Click an element by its ref from the latest snapshot of that tab.'),
+        computer_browser_type: act('type', z.object({ ref: z.string().regex(/^e\d+$/), text: z.string(), submit: z.boolean().optional() }), 'Type into an input by its ref (replacing its value); submit presses Enter afterwards. Never type the owner\'s passwords or payment details.'),
+        computer_browser_press: act('press', z.object({ key: z.string().min(1).describe('e.g. Enter, Escape, PageDown, Control+A') }), 'Press a key in a cloud browser tab.'),
+        computer_browser_scroll: act('scroll', z.object({ dy: z.number().optional().describe('Pixels down (negative: up); default 600') }), 'Scroll a cloud browser tab.'),
+        computer_browser_back: act('back', z.object({}), 'Go back in a cloud browser tab.'),
+        computer_browser_eval: tool({
+          description: 'Run a JavaScript expression in a cloud browser tab and return its value as text (to extract data from a page).',
+          inputSchema: z.object({ expression: z.string().min(1) }).extend(where.shape),
+          execute: async input => { const t = target(input); const r = await computers.browser<{ value: string }>(c(), { ...input, ...t, op: 'evaluate' }); return opts.blobs.spill('page-eval', r.value, 12_000) },
+        }),
+        computer_browser_screenshot: tool({
+          description: 'Look at a cloud browser tab: returns a screenshot you can see. With save, it is also stored in the local working directory (for reports).',
+          inputSchema: z.object({ full_page: z.boolean().optional(), save: z.string().regex(/^[\w-]{1,40}$/).optional().describe('File name (without .jpg) under screenshots/') }).extend(where.shape),
+          execute: async input => {
+            const t = target(input)
+            const r = await computers.browser<{ image: string; mediaType: string; url: string; title: string }>(c(), { ...t, fullPage: Boolean(input.full_page), op: 'screenshot' })
+            let saved = ''
+            if (input.save) { const file = local(`screenshots/${input.save}.jpg`); mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, Buffer.from(r.image, 'base64')); saved = file }
+            return { ...r, saved }
+          },
+          toModelOutput: ({ output }) => ({ type: 'content', value: [
+            { type: 'text', text: `${output.title} ${output.url}${output.saved ? `（已保存 ${output.saved}）` : ''}` },
+            { type: 'image-data', data: output.image, mediaType: output.mediaType },
+          ] }),
+        }),
+        computer_browser_tabs: tool({
+          description: 'List the browsers open on the cloud computer and their tabs.',
+          inputSchema: z.object({}),
+          execute: async () => {
+            const r = await computers.browser<{ browsers: BrowserInfo[] }>(c(), { op: 'list' })
+            return r.browsers.length ? r.browsers.map(b => `${b.name}：\n${b.tabs.map(t => `  - ${t.name}: ${t.title} ${t.url}`).join('\n') || '  （没有标签页）'}`).join('\n') : '（没有打开的浏览器）'
+          },
+        }),
+        computer_browser_close: tool({
+          description: 'Close a tab (or, without tab, a whole browser) on the cloud computer. Logins stay saved.',
+          inputSchema: z.object({ browser: where.shape.browser, tab: z.string().regex(/^[\w.-]{1,40}$/).optional() }),
+          execute: async ({ browser, tab }) => (await computers.browser<{ closed: boolean }>(c(), { op: 'close', browser: browser ?? 'main', ...(tab ? { tab } : {}) })).closed ? '已关闭' : '没有这个标签页',
+        }),
+      }),
       computer_status: tool({
         description: 'Show whether the cloud computer is awake, and wake it.',
         inputSchema: z.object({}),
@@ -793,7 +948,9 @@ export function computerExtension(computers: Computers, opts: ComputerExtensionO
 You have a Linux computer of your own in the cloud. ${def ? '`shell` (with job_status / job_stop) runs there' : '`computer_shell` (with computer_job_status / computer_job_stop) runs there'}, ${c.capabilities.sudo ? `as the account \`${ACCOUNT}\` (no sudo)` : 'in nuonuo\'s own folder'}, home ${w}; your task folder there is ${computers.taskDir(c, ticket.id)} and commands start in it. Internet works there${c.capabilities.docker ? '; so does docker (label your containers with `--label nuonuo=1` and leave other containers alone)' : ''}. The owner also uses this machine: stay inside ${w} and never touch other accounts' files or processes. ${c.capabilities.sleeps ? 'It sleeps when idle; the tools wake it (the first call can take ~10 s).' : ''}
 - Files: read_file / write_file / edit_file / list_dir work on the LOCAL working directory ${ticket.directory}, not on the cloud computer. Move files with computer_upload / computer_download; deliverables must end up in the local folder.
 - ${def ? '`local_shell` runs on the owner\'s own machine: use it only when the work needs the owner\'s local folders, repositories or apps.' : 'Your `shell` runs on the owner\'s machine; use the cloud computer for downloads, installs, docker, long jobs and anything that needs the internet.'}
-- Browsing: computer_browser_* drive ${hasDesktop ? 'headed GUI Chromium on the cloud computer\'s 1280×800 graphical desktop' : 'Chromium on the cloud computer'}. Several browsers (\`browser\`: separate profiles, each keeping its own logins) with named tabs (\`tab\`) can be open at once, so you can work on several sites side by side; by default you get your own tab in browser "main". The owner can watch your live tabs and take over directly in the web UI's「浏览器」pane when login, 2FA, captcha or payment is needed (report(waiting, human_action) to ask them to take over). ${def ? 'Use computer_browser_* for browsing by default; browser_* is the owner\'s local browser with their own logins: use it only when specifically needed on the owner\'s machine.' : ''}${hasDesktop ? '\n- Graphical desktop: computer_desktop_screenshot / _click / _move / _drag / _scroll / _type / _press let you see and control the full 1280×800 graphical desktop screen (native dialogs, file pickers, canvas UIs, and desktop apps alongside Chromium). Prefer computer_browser_* for structured web DOM actions, and use computer_desktop_* when interacting with native dialogs, canvas elements, or desktop GUI apps.' : ''}`
+${hasDesktop
+  ? `- Browsing & Graphical desktop (1280×800): Your cloud computer runs the native desktop \`Chromium Web Browser\` (zero automation flags, sharing logins and cookies with the owner). Use \`computer_browser_open\` to open a URL in the native \`Chromium Web Browser\` and see the screen immediately, then use \`computer_desktop_screenshot\`, \`computer_desktop_click\`, \`computer_desktop_type\`, \`computer_desktop_press\`, \`computer_desktop_scroll\`, \`computer_desktop_move\`, and \`computer_desktop_drag\` to look at the 1280×800 screen and interact like a human (clicking coordinates, typing text, pressing shortcuts like \`ctrl+l\`, \`ctrl+t\`, \`ctrl+w\`, \`Enter\`). When login, 2FA, captcha or payment is needed, call \`report(waiting, human_action)\` so the owner can take over the live desktop browser in the web UI's「浏览器」pane.${def ? ' Use `computer_browser_open` and `computer_desktop_*` by default; `browser_*` is the owner\'s local browser with their own logins: use it only when specifically needed on the owner\'s machine.' : ''}`
+  : `- Browsing: computer_browser_* drive Chromium on the cloud computer. Several browsers (\`browser\`: separate profiles, each keeping its own logins) with named tabs (\`tab\`) can be open at once, so you can work on several sites side by side; by default you get your own tab in browser "main". The owner can watch your live tabs and take over directly in the web UI's「浏览器」pane when login, 2FA, captcha or payment is needed (report(waiting, human_action) to ask them to take over). ${def ? 'Use computer_browser_* for browsing by default; browser_* is the owner\'s local browser with their own logins: use it only when specifically needed on the owner\'s machine.' : ''}`}`
   }
 
   return {
@@ -801,7 +958,9 @@ You have a Linux computer of your own in the cloud. ${def ? '`shell` (with job_s
     workerPrompt: ticket => prompt(ticket),
     routerPrompt: () => {
       const c = computers.current()
-      return c ? `## 云电脑\nWorkers have a cloud computer of their own (${c.title}): internet, a shell${c.capabilities.docker ? ', docker' : ''}${c.capabilities.desktop ? ', a 1280×800 graphical desktop' : ''} and several ${c.capabilities.desktop ? 'headed GUI ' : ''}browsers at once (which the owner can view or take over from the「浏览器」pane). Requests that need browsing, downloads, installing software or long-running jobs are tasks (start_task).` : ''
+      if (!c) return ''
+      const hasDesktop = Boolean(c.capabilities.desktop)
+      return `## 云电脑\nWorkers have a cloud computer of their own (${c.title}): internet, a shell${c.capabilities.docker ? ', docker' : ''}${hasDesktop ? ', a 1280×800 graphical desktop running the native desktop Chromium Web Browser (zero automation flags, sharing logins with the owner, which the owner can view or take over in real time from the「浏览器」pane)' : ' and several browsers at once (which the owner can view or take over from the「浏览器」pane)'}. Requests that need browsing, downloads, installing software or long-running jobs are tasks (start_task).`
     },
     shellOverride: (ticket, ctx) => isDefault() ? shellTools(ticket, ctx, '') : undefined,
   }

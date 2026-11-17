@@ -110,8 +110,10 @@ describe('Computers', () => {
     expect(BROWSERD_SOURCE).not.toContain('${')
   })
 
-  it('starts the graphical desktop and grants nuonuo X11 access when desktop capability is enabled', async () => {
+  it('starts the graphical desktop, cleans up legacy browserd, and drives native Chromium Web Browser + desktop GUI tools when desktop capability is enabled', async () => {
     let desktopStarts = 0
+    let browserWindowOpen = false
+    let browserWindowTitle = 'Sign in - Google Accounts - Chromium'
     const execs: { command: string; stdin?: string }[] = []
     let version = ''
     const c: BoundComputer = {
@@ -137,14 +139,23 @@ describe('Computers', () => {
         }
         const m = /echo ([0-9a-f]{12}) > "\$D\/version"/.exec(req.stdin ?? '')
         if (m) version = m[1]!
-        // Mock scrot base64 output if desktopScreenshot runs
-        if (req.command.includes('sudo -n -u nuonuo') && req.command.includes('bash -lc')) {
-          const b64Part = /printf %s ([A-Za-z0-9+/=]+) \| base64 -d/.exec(req.command)?.[1]
-          const decoded = b64Part ? Buffer.from(b64Part, 'base64').toString('utf8') : ''
-          execs[execs.length - 1]!.command = decoded
-          if (decoded.includes('scrot -o')) {
-            return { exitCode: 0, stdout: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64'), stderr: '' }
+        if (req.command.includes('scrot -o')) {
+          return { exitCode: 0, stdout: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64'), stderr: '' }
+        }
+        if (req.command.includes('__NO_BROWSER__')) {
+          browserWindowOpen = true
+          return { exitCode: 0, stdout: `${browserWindowTitle}\n`, stderr: '' }
+        }
+        if (req.command.includes('__OPEN__')) {
+          return {
+            exitCode: 0,
+            stdout: browserWindowOpen ? `__OPEN__\n${browserWindowTitle}\n` : '__CLOSED__\n',
+            stderr: '',
           }
+        }
+        if (req.command.includes('windowclose')) {
+          browserWindowOpen = false
+          return { exitCode: 0, stdout: '', stderr: '' }
         }
         return { exitCode: 0, stdout: '', stderr: '' }
       },
@@ -152,7 +163,11 @@ describe('Computers', () => {
     const computers = new Computers(() => [c])
     await computers.ready(c)
     expect(desktopStarts).toBe(1)
-    expect(execs.some(e => e.command.includes("DISPLAY=':1' xhost +SI:localuser:nuonuo") && e.command.includes("'/data/nuonuo/.Xauthority'"))).toBe(true)
+    expect(execs.some(e =>
+      e.command.includes("DISPLAY=':1' xhost +SI:localuser:nuonuo") &&
+      e.command.includes("'/data/nuonuo/.Xauthority'") &&
+      e.command.includes('browserd.mjs|remote-debugging-pipe'),
+    )).toBe(true)
 
     // Subsequent ensureDesktop within READY_FOR_MS does not re-run startDesktop; stale() resets it.
     await computers.ensureDesktop(c)
@@ -161,11 +176,14 @@ describe('Computers', () => {
     await computers.ready(c)
     expect(desktopStarts).toBe(2)
 
-    // Test desktopScreenshot and desktopInput xdotool generation + computer_desktop_* tools
+    // Test Worker toolset when hasDesktop is true: no Playwright browser_snapshot/click/type/eval exposed!
     const ext = computerExtension(computers, { blobs, mode: () => 'auto', limits: () => ({ foregroundSeconds: 5, timeoutMinutes: 5 }), push: () => {} })
     const dir = mkdtempSync(join(tmpdir(), 'nn-work-'))
     const tools = ext.workerTools!(ticket(dir), ctx)
     expect(Object.keys(tools)).toEqual(expect.arrayContaining([
+      'computer_browser_open',
+      'computer_browser_tabs',
+      'computer_browser_close',
       'computer_desktop_screenshot',
       'computer_desktop_click',
       'computer_desktop_move',
@@ -174,18 +192,48 @@ describe('Computers', () => {
       'computer_desktop_type',
       'computer_desktop_press',
     ]))
+    expect(tools.computer_browser_snapshot).toBeUndefined()
+    expect(tools.computer_browser_click).toBeUndefined()
+    expect(tools.computer_browser_type).toBeUndefined()
+    expect(tools.computer_browser_eval).toBeUndefined()
+    expect(ext.workerPrompt!(ticket(dir))).toContain('Chromium Web Browser')
     expect(ext.workerPrompt!(ticket(dir))).toContain('computer_desktop_screenshot')
     expect(ext.routerPrompt!()).toContain('graphical desktop')
+
+    // Native openDesktopBrowser, desktopBrowserStatus, handoff lock, and closeDesktopBrowser
+    expect(await computers.desktopBrowserStatus(c)).toEqual({ running: false, title: '', url: '', handoff: false })
+    const opened = await computers.openDesktopBrowser(c, 'https://accounts.google.com')
+    expect(opened).toEqual({ running: true, title: 'Sign in - Google Accounts', url: 'https://accounts.google.com' })
+    expect(execs.at(-1)!.command).not.toContain('sudo -n -u nuonuo')
+    expect(execs.at(-1)!.command).toContain("setsid nohup \"$B\" -- 'https://accounts.google.com'")
+    expect(await computers.desktopBrowserStatus(c)).toEqual({
+      running: true,
+      title: 'Sign in - Google Accounts',
+      url: 'https://accounts.google.com',
+      handoff: false,
+    })
+    expect(await run(tools.computer_browser_tabs, {})).toContain('Sign in - Google Accounts https://accounts.google.com')
+
+    // Handoff mutex blocks AI openDesktopBrowser and desktopInput, while allowing owner actions
+    computers.setDesktopHandoff(c, true)
+    expect(computers.hasDesktopHandoff(c)).toBe(true)
+    await expect(computers.openDesktopBrowser(c, 'https://example.com')).rejects.toThrow(/主人正在接管/)
+    await expect(run(tools.computer_desktop_click, { x: 10, y: 10 })).rejects.toThrow(/主人正在接管/)
+    await computers.openDesktopBrowser(c, 'https://example.com/owner', { owner: true })
+    computers.setDesktopHandoff(c, false)
+
+    expect(await run(tools.computer_browser_close, {})).toBe('已关闭')
+    expect(await computers.desktopBrowserStatus(c)).toEqual({ running: false, title: '', url: '', handoff: false })
 
     const shot = await run(tools.computer_desktop_screenshot, { save: 'desk1' })
     expect(shot.mediaType).toBe('image/png')
     expect(readFileSync(join(dir, 'screenshots', 'desk1.png')).subarray(0, 4).toString('latin1')).toBe('\x89PNG')
 
     await run(tools.computer_desktop_click, { x: 320, y: 240, button: 'right', double: true })
-    expect(execs.at(-1)!.command).toContain("export DISPLAY=':1'; xdotool mousemove 320 240 click --repeat 2 --delay 80 3")
+    expect(execs.at(-1)!.command).toContain('xdotool mousemove 320 240 click --repeat 2 --delay 80 3')
 
     await run(tools.computer_desktop_move, { x: 100, y: 150 })
-    expect(execs.at(-1)!.command).toContain("xdotool mousemove 100 150")
+    expect(execs.at(-1)!.command).toContain('xdotool mousemove 100 150')
 
     await run(tools.computer_desktop_drag, { from_x: 10, from_y: 20, to_x: 300, to_y: 400 })
     expect(execs.at(-1)!.command).toContain('xdotool mousemove 10 20 mousedown 1 sleep 0.1 mousemove 300 400 sleep 0.1 mouseup 1')
@@ -197,6 +245,7 @@ describe('Computers', () => {
 
     await run(tools.computer_desktop_type, { text: '你好 world' })
     expect(execs.at(-1)).toMatchObject({ stdin: '你好 world' })
+    expect(execs.at(-1)!.command).toContain('xclip -selection clipboard')
     expect(execs.at(-1)!.command).toContain('xdotool type --delay 12 --file -')
 
     await run(tools.computer_desktop_press, { key: 'Control+l' })
