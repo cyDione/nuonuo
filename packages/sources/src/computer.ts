@@ -134,7 +134,12 @@ export type DesktopAction =
 
 /** Bumped when the setup below changes, so every machine is set up again once. */
 const SETUP_REVISION = 2
-const SETUP_VERSION = createHash('sha256').update(`${SETUP_REVISION}\n${BROWSERD_SOURCE}\n${BROWSER_SH}\n${SNAPSHOT_SCRIPT}`).digest('hex').slice(0, 12)
+export function setupVersionOf(c: Pick<BoundComputer, 'capabilities'>): string {
+  return createHash('sha256')
+    .update(`${SETUP_REVISION}\n${BROWSERD_SOURCE}\n${BROWSER_SH}\n${SNAPSHOT_SCRIPT}\n${JSON.stringify(c.capabilities.env ?? {})}\n${JSON.stringify(c.capabilities.desktop ?? null)}`)
+    .digest('hex')
+    .slice(0, 12)
+}
 const PLAYWRIGHT = 'playwright-core@1'
 const ACCOUNT = 'nuonuo'
 /** Re-probe a machine after this long without a successful command. */
@@ -154,7 +159,7 @@ export interface ComputerView extends ComputerStatus { id: string; title: string
 export interface BrowserTab { name: string; url: string; title: string; handoff?: boolean }
 export interface BrowserInfo { name: string; tabs: BrowserTab[]; idleSeconds: number }
 
-interface Session { readyAt: number; desktopReadyAt: number; setup?: Promise<void>; desktop?: Promise<void> }
+interface Session { readyAt: number; desktopReadyAt: number; readyPromise?: Promise<void>; setup?: Promise<void>; desktop?: Promise<void> }
 
 const XDO_BUTTONS = { left: 1, middle: 2, right: 3 } as const
 const XDO_WHEEL = { up: 4, down: 5, left: 6, right: 7 } as const
@@ -228,22 +233,26 @@ export class Computers {
       if (c.capabilities.desktop) await this.ensureDesktop(c)
       return
     }
-    s.desktopReadyAt = 0
-    let st = await c.status()
-    if (st.state === 'unconfigured') throw new ComputerError(st.detail ?? `${c.title} 还没设置好：在插件设置里填好再试`)
-    if (st.state !== 'ready') st = await c.wake()
-    if (st.state !== 'ready') {
-      const wait = st.retryAfterSeconds ? `，大约 ${Math.ceil(st.retryAfterSeconds / 60)} 分钟后再试` : ''
-      throw new ComputerError(`${c.title} 现在用不了（${st.detail ?? st.state}）${wait}`)
-    }
-    const probe = await c.exec({ command: `echo __nuonuo_ok__; cat ${q(`${this.workspace(c)}/.computer/version`)} 2>/dev/null`, timeoutSeconds: 30 })
-    if (!probe.stdout.includes('__nuonuo_ok__')) throw new ComputerError(`${c.title} 没有回应：${(probe.stderr || probe.stdout).slice(0, 200)}`)
-    if (probe.stdout.split('\n')[1]?.trim() !== SETUP_VERSION) {
-      s.setup ??= this.setup(c).finally(() => { s.setup = undefined })
-      await s.setup
-    }
-    s.readyAt = this.now()
-    if (c.capabilities.desktop) await this.ensureDesktop(c)
+    s.readyPromise ??= (async () => {
+      s.desktopReadyAt = 0
+      let st = await c.status()
+      if (st.state === 'unconfigured') throw new ComputerError(st.detail ?? `${c.title} 还没设置好：在插件设置里填好再试`)
+      if (st.state !== 'ready') st = await c.wake()
+      if (st.state !== 'ready') {
+        const wait = st.retryAfterSeconds ? `，大约 ${Math.ceil(st.retryAfterSeconds / 60)} 分钟后再试` : ''
+        throw new ComputerError(`${c.title} 现在用不了（${st.detail ?? st.state}）${wait}`)
+      }
+      const as = c.capabilities.sudo ? `sudo -n -u ${ACCOUNT} ` : ''
+      const probe = await c.exec({ command: `echo __nuonuo_ok__; ${as}cat ${q(`${this.workspace(c)}/.computer/version`)} 2>/dev/null`, timeoutSeconds: 30 })
+      if (!probe.stdout.includes('__nuonuo_ok__')) throw new ComputerError(`${c.title} 没有回应：${(probe.stderr || probe.stdout).slice(0, 200)}`)
+      if (probe.stdout.split('\n')[1]?.trim() !== setupVersionOf(c)) {
+        s.setup ??= this.setup(c).finally(() => { s.setup = undefined })
+        await s.setup
+      }
+      if (c.capabilities.desktop) await this.ensureDesktop(c)
+      s.readyAt = this.now()
+    })().finally(() => { s.readyPromise = undefined })
+    await s.readyPromise
   }
 
   /** Ensures the graphical X11 desktop is running and accessible to nuonuo's account. */
@@ -310,7 +319,7 @@ export class Computers {
       '[ -s "$D/token" ] || (head -c 32 /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c 32 > "$D/token")', 'chmod 600 "$D/token"',
       // A browser service started by the previous version keeps its old code: stop it; the next call starts the new one.
       'pkill -u "$(id -u)" -f "node browserd.mjs" >/dev/null 2>&1 || true',
-      `echo ${SETUP_VERSION} > "$D/version"`,
+      `echo ${setupVersionOf(c)} > "$D/version"`,
     ].join('\n')
     const r = await this.raw(c, script, { timeoutSeconds: 60, viaStdin: true })
     if (r.exitCode !== 0) throw new ComputerError(`在 ${c.title} 上准备 nuonuo 的空间失败：${(r.stderr || r.stdout).slice(0, 300)}`)
@@ -414,6 +423,12 @@ export class Computers {
   }
 
   // ── Browsers & graphical desktop ─────────────────────────────────────────
+
+  async focusBrowserWindow(c: BoundComputer): Promise<void> {
+    if (!c.capabilities.desktop) return
+    const display = this.displayOf(c)
+    await this.run(c, `export DISPLAY=${q(display)}; xdotool search --onlyvisible --class "chromium|chrome" windowactivate >/dev/null 2>&1 || true`, { timeoutSeconds: 10 }).catch(() => {})
+  }
 
   async browser<T = Record<string, unknown>>(c: BoundComputer, request: Record<string, unknown>): Promise<T> {
     const install = `[ -d "$NUONUO_HOME/.computer/node_modules/playwright-core" ] || (cd "$NUONUO_HOME/.computer" && npm install ${PLAYWRIGHT} --silent --no-audit --no-fund >/dev/null 2>&1) || { echo '{"ok":false,"error":"在云电脑上安装 playwright-core 失败（没有 node/npm，或连不上 npm）"}'; exit 0; }`

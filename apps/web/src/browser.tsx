@@ -1,16 +1,24 @@
 /**
- * 右侧栏「浏览器」与极简接管窗口 (Figma section 34, 219:3084):
- * - Board A: live 16:10 page preview (silent look, never interrupts 糯糯), open pages switcher, URL input to sign in ahead of time,
- *   and one-tap cloud desktop entry when a graphical cloud computer is connected.
- * - Board B: single-header 780px takeover window with direct mouse click/drag/scroll/IME/paste on the 1280×800 page, plus
- *   seamless 网页 | 桌面 switching when the cloud computer has a desktop.
+ * 右侧栏「浏览器」与 60fps 实时交互流窗口 (Figma section 34 v3, 219:3084):
+ * - Board A: default 16:10 concentric browser card (idle unactivated state & in-place activating loader), live 16:10 page preview
+ *   when active, open pages switcher, URL input bar, and one-tap cloud desktop stream entry.
+ * - Board B: single-header 780px takeover window with 60fps WebSocket live stream (<iframe>) for cloud desktop browsers,
+ *   automatic fallback to LiveScreenshot canvas for local headless pages, and unified editable address bar.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpRight, Globe, LoaderCircle, Lock, Monitor, RotateCw, X } from 'lucide-react'
+import { ArrowUpRight, Globe, LoaderCircle, Lock, RotateCw, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { api, type BrowserInputAction, type BrowsersOverview, type OpenPageItem } from './api'
-import { lang, tx } from './i18n'
-import { cx, Seg } from './ui'
+import {
+  api,
+  type BrowserHandoffResult,
+  type BrowserInputAction,
+  type BrowserInputResult,
+  type BrowserOpenResult,
+  type BrowsersOverview,
+  type OpenPageItem,
+} from './api'
+import { tx } from './i18n'
+import { cx } from './ui'
 
 const VIEWPORT_W = 1280
 const VIEWPORT_H = 800
@@ -168,18 +176,29 @@ export function BrowserPaneTab() {
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [urlInput, setUrlInput] = useState('')
-  const [takeover, setTakeover] = useState<{ key: string; mode?: 'page' | 'desktop'; desktopUrl?: string | null } | null>(null)
+  const [takeover, setTakeover] = useState<{
+    key: string
+    initialUrl?: string
+    initialHasDesktop?: boolean
+    initialComputerId?: string
+    initialDesktopUrl?: string | null
+  } | null>(null)
   const [desktopError, setDesktopError] = useState<string | null>(null)
 
   const active = pages.find(p => p.key === selectedKey) ?? pages[0] ?? null
 
   const openPage = useMutation({
-    mutationFn: (url: string) => api.post<{ key: string }>('/browsers/open', { url }),
+    mutationFn: (url: string) => api.post<BrowserOpenResult>('/browsers/open', { url }),
     onSuccess: res => {
       setDesktopError(null)
       setUrlInput('')
       setSelectedKey(res.key)
-      setTakeover({ key: res.key, mode: 'page' })
+      setTakeover({
+        key: res.key,
+        initialUrl: res.url,
+        initialHasDesktop: res.hasDesktop,
+        initialComputerId: res.computerId,
+      })
       void qc.invalidateQueries({ queryKey: ['browsers'] })
     },
   })
@@ -189,26 +208,19 @@ export function BrowserPaneTab() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['browsers'] }),
   })
 
-  const openDesktop = useMutation({
-    mutationFn: async (computerId: string) => {
-      setDesktopError(null)
-      const r = await requestCloudDesktop(computerId, false)
-      void qc.invalidateQueries({ queryKey: ['computers'] })
-      void qc.invalidateQueries({ queryKey: ['browsers'] })
-      if (r.url) {
-        const win = window.open(r.url, '_blank', 'noopener,noreferrer')
-        if (win) return
-      }
-      // Fallback when X11 desktop has no external URL (or popup was blocked after wake): open inside takeover modal.
-      const existing = pages.find(p => p.computerId === computerId) ?? pages[0]
-      setTakeover({
-        key: existing ? existing.key : `cloud:${computerId}:desktop:root`,
-        mode: 'desktop',
-        desktopUrl: r.url,
-      })
-    },
-    onError: e => setDesktopError((e as Error).message),
-  })
+  const activateDefaultBrowser = () => {
+    if (openPage.isPending) return
+    openPage.mutate('')
+  }
+
+  const openCloudDesktopModal = (computerId: string) => {
+    setDesktopError(null)
+    setTakeover({
+      key: `cloud:${computerId}:desktop:root`,
+      initialHasDesktop: true,
+      initialComputerId: computerId,
+    })
+  }
 
   const submitUrl = (e: React.FormEvent) => {
     e.preventDefault()
@@ -220,24 +232,85 @@ export function BrowserPaneTab() {
   const inlineError = (openPage.error as Error | null)?.message ?? desktopError
 
   if (!active) {
-    // Board A3: Empty state
+    // Board A0 & A0-Activating: Default Concentric Browser Card (16 = 8 + 8)
     return (
       <div>
-        <div className="flex flex-col items-center pt-10 pb-6 text-center">
-          <Globe size={20} className="text-faint" />
-          <p className="mt-2.5 text-[13px] text-muted">{tx('现在没有打开的页面')}</p>
-          <p className={cx('mt-1 text-xs leading-relaxed text-pretty text-faint', lang === 'en' ? 'max-w-[240px]' : 'max-w-[156px]')}>
-            {tx('输入网址提前登录常用网站，糯糯之后就能直接复用')}
-          </p>
+        <div className="rounded-2xl bg-sunken p-2">
+          <button
+            type="button"
+            onClick={activateDefaultBrowser}
+            disabled={openPage.isPending}
+            aria-label={tx('点击激活浏览器')}
+            className={cx(
+              'relative flex aspect-[16/10] w-full cursor-pointer flex-col overflow-hidden rounded-lg bg-card text-center transition-colors duration-150 disabled:cursor-default',
+              'ring-1 ring-inset',
+              dark ? 'ring-white/[0.10]' : 'ring-black/[0.08] dark:ring-white/[0.10]',
+            )}
+          >
+            {/* Minimal quiet browser top bar indicator */}
+            <div className="flex h-6 w-full shrink-0 items-center border-b border-line/60 bg-sunken/50 px-2.5">
+              <span className="h-2.5 w-20 rounded-full bg-line/70" />
+            </div>
+
+            {/* Viewport body */}
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4">
+              {openPage.isPending ? (
+                <>
+                  <LoaderCircle size={18} className="animate-spin text-muted" />
+                  <span className="mt-2.5 text-[13px] font-medium text-fg">
+                    {computer ? tx('正在唤醒云电脑并打开浏览器…') : tx('正在打开浏览器…')}
+                  </span>
+                  <span className="mt-1 text-[11px] text-faint">
+                    {tx('就绪后直接进入实时交互画面并聚焦地址栏')}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="flex size-8 items-center justify-center rounded-lg bg-sunken">
+                    <Globe size={15} className="text-muted" />
+                  </span>
+                  <span className="mt-2 text-[13px] font-medium text-fg">
+                    {tx('点击激活浏览器')}
+                  </span>
+                  <span className="mt-0.5 text-[11px] text-faint">
+                    {computer ? tx('在云电脑中打开，登录状态自动留存') : tx('在本机打开，登录状态自动留存')}
+                  </span>
+                </>
+              )}
+            </div>
+          </button>
+
+          <div className="mt-2 flex items-center gap-3 px-1.5 pb-0.5">
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium text-fg">{tx('浏览器')}</span>
+              <span className="block truncate text-[11px] text-muted">
+                {openPage.isPending ? tx('正在启动…') : tx('未激活 · 点击打开')}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={activateDefaultBrowser}
+              disabled={openPage.isPending}
+              className={cx(
+                'h-[30px] shrink-0 rounded-lg px-3 text-xs font-medium transition-transform duration-150',
+                openPage.isPending
+                  ? 'cursor-default bg-card text-muted'
+                  : 'press bg-ink text-ink-fg active:scale-[0.96]',
+              )}
+            >
+              {openPage.isPending ? tx('打开中…') : tx('打开')}
+            </button>
+          </div>
         </div>
-        <form onSubmit={submitUrl} className="flex h-9 items-center gap-2 rounded-xl bg-sunken px-3 focus-within:ring-1 focus-within:ring-line">
+
+        <form onSubmit={submitUrl} className="mt-3 flex h-9 items-center gap-2 rounded-xl bg-sunken px-3 focus-within:ring-1 focus-within:ring-line">
           <Globe size={14} className="shrink-0 text-faint" />
           <input
             value={urlInput}
             onChange={e => setUrlInput(e.target.value)}
             disabled={openPage.isPending}
             aria-label={tx('打开网页')}
-            placeholder={tx('打开网页…')}
+            placeholder={tx('输入网址直接打开…')}
             className="min-w-0 flex-1 bg-transparent text-[13px] text-fg outline-none placeholder:text-faint disabled:opacity-60"
           />
           {openPage.isPending
@@ -248,19 +321,21 @@ export function BrowserPaneTab() {
         {computer?.hasDesktop && (
           <button
             type="button"
-            onClick={() => openDesktop.mutate(computer.id)}
-            disabled={openDesktop.isPending}
+            onClick={() => openCloudDesktopModal(computer.id)}
+            disabled={openPage.isPending}
             className="mx-auto mt-3 flex items-center gap-1 text-xs text-muted transition-colors duration-150 hover:text-fg disabled:opacity-50"
           >
-            {openDesktop.isPending ? tx('正在打开…') : tx('打开云电脑桌面')}
+            {tx('打开云电脑桌面')}
             <ArrowUpRight size={12} />
           </button>
         )}
         {takeover && (
           <BrowserTakeoverModal
             targetKey={takeover.key}
-            initialMode={takeover.mode}
-            initialDesktopUrl={takeover.desktopUrl}
+            initialUrl={takeover.initialUrl}
+            initialHasDesktop={takeover.initialHasDesktop}
+            initialComputerId={takeover.initialComputerId}
+            initialDesktopUrl={takeover.initialDesktopUrl}
             onClose={() => setTakeover(null)}
           />
         )}
@@ -273,13 +348,22 @@ export function BrowserPaneTab() {
   const activeDomain = domainOf(active.url)
   const showPagesList = pages.length > 1 || Boolean(computer?.hasDesktop)
 
+  const openActiveTakeover = () => {
+    setTakeover({
+      key: active.key,
+      initialUrl: active.url,
+      initialHasDesktop: active.hasDesktop,
+      initialComputerId: active.computerId,
+    })
+  }
+
   return (
     <div>
       {/* Concentric card: outer rounded-2xl (16px) = inner rounded-lg (8px) + p-2 (8px) */}
       <div className="rounded-2xl bg-sunken p-2">
         <button
           type="button"
-          onClick={() => setTakeover({ key: active.key, mode: 'page' })}
+          onClick={openActiveTakeover}
           aria-label={tx('接管 {0}', activeTitle)}
           className={cx(
             'relative block aspect-[16/10] w-full cursor-pointer overflow-hidden rounded-lg bg-card text-left',
@@ -301,7 +385,7 @@ export function BrowserPaneTab() {
           </div>
           <button
             type="button"
-            onClick={() => setTakeover({ key: active.key, mode: 'page' })}
+            onClick={openActiveTakeover}
             className="press h-[30px] shrink-0 rounded-lg bg-ink px-3 text-xs font-medium text-ink-fg transition-transform duration-150 active:scale-[0.96]"
           >
             {tx('接管')}
@@ -318,11 +402,10 @@ export function BrowserPaneTab() {
             {computer?.hasDesktop && (
               <button
                 type="button"
-                onClick={() => openDesktop.mutate(computer.id)}
-                disabled={openDesktop.isPending}
-                className="text-xs text-muted transition-colors duration-150 hover:text-fg disabled:opacity-50"
+                onClick={() => openCloudDesktopModal(computer.id)}
+                className="text-xs text-muted transition-colors duration-150 hover:text-fg"
               >
-                {openDesktop.isPending ? tx('正在打开…') : tx('打开桌面')}
+                {tx('打开桌面')}
               </button>
             )}
           </div>
@@ -382,8 +465,10 @@ export function BrowserPaneTab() {
       {takeover && (
         <BrowserTakeoverModal
           targetKey={takeover.key}
-          initialMode={takeover.mode}
-          initialDesktopUrl={takeover.desktopUrl}
+          initialUrl={takeover.initialUrl}
+          initialHasDesktop={takeover.initialHasDesktop}
+          initialComputerId={takeover.initialComputerId}
+          initialDesktopUrl={takeover.initialDesktopUrl}
           onClose={() => setTakeover(null)}
         />
       )}
@@ -391,11 +476,14 @@ export function BrowserPaneTab() {
   )
 }
 
-// ── Board B: Sleek Single-Header Takeover Modal ──────────────────────────────
+// ── Board B: 60fps Live Interactive Stream Takeover Modal ────────────────────
 
 export interface BrowserTakeoverModalProps {
   targetKey: string
   reason?: string
+  initialUrl?: string
+  initialHasDesktop?: boolean
+  initialComputerId?: string
   initialMode?: 'page' | 'desktop'
   initialDesktopUrl?: string | null
   onClose(): void
@@ -404,24 +492,65 @@ export interface BrowserTakeoverModalProps {
 export function BrowserTakeoverModal({
   targetKey,
   reason,
-  initialMode = 'page',
+  initialUrl,
+  initialHasDesktop,
+  initialComputerId,
+  initialMode,
   initialDesktopUrl,
   onClose,
 }: BrowserTakeoverModalProps) {
   const qc = useQueryClient()
-  const dark = useIsDark()
   const cached = qc.getQueryData<BrowsersOverview>(['browsers'])
-  const cachedPage = cached?.pages.find(p => p.key === targetKey)
 
-  const desktopOnly = targetKey.endsWith(':desktop:root')
-  const parsedComputerId = targetKey.startsWith('cloud:') ? targetKey.split(':')[1] : undefined
+  const [activeKey, setActiveKey] = useState(targetKey)
+  const activeKeyRef = useRef(activeKey)
+  activeKeyRef.current = activeKey
+
+  useEffect(() => {
+    setActiveKey(targetKey)
+    updateDraftDirty(false)
+  }, [targetKey])
+
+  const cachedPage = cached?.pages.find(p => p.key === activeKey) ?? cached?.pages.find(p => p.key === targetKey)
+  const isDesktopRoot = activeKey.endsWith(':desktop:root')
+  const isCloudKey = activeKey.startsWith('cloud:')
+  const parsedComputerId = isCloudKey ? activeKey.split(':')[1] : undefined
+
+  const initialPageUrl = initialUrl ?? cachedPage?.url ?? ''
+  const isBlankInitial = !initialPageUrl || initialPageUrl === 'about:blank' || targetKey.endsWith(':desktop:root')
+
   const [leaving, setLeaving] = useState(false)
-  const [mode, setMode] = useState<'page' | 'desktop'>(desktopOnly ? 'desktop' : initialMode)
-  const [currentUrl, setCurrentUrl] = useState(cachedPage?.url ?? '')
-  const [urlDraft, setUrlDraft] = useState(cachedPage?.url ?? '')
+  const [currentUrl, setCurrentUrl] = useState(initialPageUrl)
+  const currentUrlRef = useRef(currentUrl)
+  currentUrlRef.current = currentUrl
+
+  const [urlDraft, setUrlDraft] = useState(initialPageUrl === 'about:blank' ? '' : initialPageUrl)
   const [urlFocused, setUrlFocused] = useState(false)
-  const [hasDesktop, setHasDesktop] = useState(Boolean(cachedPage?.hasDesktop || initialMode === 'desktop' || desktopOnly))
-  const [computerId, setComputerId] = useState<string | undefined>(cachedPage?.computerId ?? parsedComputerId ?? cached?.computer?.id)
+  const urlFocusedRef = useRef(false)
+  const [draftDirty, setDraftDirty] = useState(false)
+  const draftDirtyRef = useRef(false)
+
+  const updateUrlFocused = (v: boolean) => {
+    urlFocusedRef.current = v
+    setUrlFocused(v)
+  }
+
+  const updateDraftDirty = (v: boolean) => {
+    draftDirtyRef.current = v
+    setDraftDirty(v)
+  }
+
+  const [hasDesktop, setHasDesktop] = useState<boolean>(() =>
+    Boolean(
+      initialHasDesktop ??
+      cachedPage?.hasDesktop ??
+      (isCloudKey ? cached?.computer?.hasDesktop : false) ??
+      (initialMode === 'desktop' || targetKey.endsWith(':desktop:root')),
+    ),
+  )
+  const [computerId, setComputerId] = useState<string | undefined>(() =>
+    initialComputerId ?? cachedPage?.computerId ?? parsedComputerId ?? (isCloudKey ? cached?.computer?.id : undefined),
+  )
   const [desktopStreamUrl, setDesktopStreamUrl] = useState<string | null | undefined>(initialDesktopUrl)
   const [iframeKey, setIframeKey] = useState(0)
   const [refreshSeq, setRefreshSeq] = useState(0)
@@ -445,43 +574,48 @@ export function BrowserTakeoverModal({
     lastAt: 0,
   })
 
-  const computerTitle = cached?.computer?.id && (!computerId || cached.computer.id === computerId)
-    ? cached.computer.title
-    : undefined
-
-  // Start handoff on open so 糯糯 pauses acting on this page.
+  // Auto-focus top address bar when opening a blank browser or desktop:root (Board B0).
   useEffect(() => {
-    if (desktopOnly) {
-      setReady(true)
-      return
+    if (isBlankInitial) {
+      urlInputRef.current?.focus({ preventScroll: true })
     }
+  }, [])
+
+  // Start handoff on open so 糯糯 pauses acting on this page (runs in parallel with requestCloudDesktop).
+  useEffect(() => {
     let cancelled = false
-    setReady(false)
     setError(null)
-    api.post<{ ok: boolean; url: string; title: string; hasDesktop: boolean; computerId?: string }>(
+    api.post<BrowserHandoffResult>(
       '/browsers/handoff',
-      { key: targetKey },
+      { key: activeKey },
     ).then(res => {
       if (cancelled) return
       if (res.url) {
         setCurrentUrl(res.url)
-        setUrlDraft(res.url)
+        currentUrlRef.current = res.url
+        if (!urlFocusedRef.current && !draftDirtyRef.current && document.activeElement !== urlInputRef.current) {
+          setUrlDraft(res.url === 'about:blank' ? '' : res.url)
+        }
       }
-      setHasDesktop(Boolean(res.hasDesktop))
+      if (res.hasDesktop !== undefined) setHasDesktop(Boolean(res.hasDesktop))
       if (res.computerId) setComputerId(res.computerId)
       setReady(true)
       setRefreshSeq(n => n + 1)
       void qc.invalidateQueries({ queryKey: ['browsers'] })
     }).catch(e => {
       if (cancelled) return
-      setError((e as Error).message)
+      if (activeKey.endsWith(':desktop:root')) {
+        setReady(true)
+      } else {
+        setError((e as Error).message)
+      }
     })
     return () => { cancelled = true }
-  }, [targetKey, desktopOnly, qc])
+  }, [activeKey, qc])
 
-  // Request live VNC desktop stream URL when switching to 'desktop' mode.
+  // Request live 60fps WebSocket desktop stream URL in parallel whenever hasDesktop && computerId.
   useEffect(() => {
-    if (mode !== 'desktop' || !computerId || desktopStreamUrl !== undefined) return
+    if (!hasDesktop || !computerId || desktopStreamUrl !== undefined) return
     let cancelled = false
     requestCloudDesktop(computerId, false)
       .then(res => {
@@ -493,15 +627,25 @@ export function BrowserTakeoverModal({
         if (!cancelled) setDesktopStreamUrl(null)
       })
     return () => { cancelled = true }
-  }, [mode, computerId, desktopStreamUrl, qc])
+  }, [hasDesktop, computerId, desktopStreamUrl, qc])
 
-  // Auto-focus interactive surface so typing works immediately without extra input boxes.
-  const useStreamIframe = mode === 'desktop' && Boolean(desktopStreamUrl)
+  const useStreamIframe = hasDesktop && Boolean(desktopStreamUrl)
+  const connectingStream = hasDesktop && desktopStreamUrl === undefined
+
+  // In fallback canvas mode only: focus hidden textarea when a non-blank URL is open and focus is not in urlInputRef.
   useEffect(() => {
-    if (!useStreamIframe) {
+    const hasRealUrl = Boolean(currentUrl && currentUrl !== 'about:blank')
+    if (
+      !useStreamIframe &&
+      !hasDesktop &&
+      hasRealUrl &&
+      !urlFocusedRef.current &&
+      !draftDirtyRef.current &&
+      document.activeElement !== urlInputRef.current
+    ) {
       viewportInputRef.current?.focus({ preventScroll: true })
     }
-  }, [useStreamIframe, ready, mode])
+  }, [useStreamIframe, hasDesktop, ready, currentUrl])
 
   const finishClose = () => {
     const done = () => {
@@ -518,9 +662,9 @@ export function BrowserTakeoverModal({
 
   // Closing via × or backdrop: if opened ad-hoc from 浏览器 tab (no task NeedsYou reason), release handoff automatically.
   const dismissModal = () => {
-    if (!desktopOnly && !returnedRef.current && !reason) {
+    if (!returnedRef.current && !reason) {
       returnedRef.current = true
-      void api.post('/browsers/return', { key: targetKey })
+      void api.post('/browsers/return', { key: activeKeyRef.current })
         .catch(() => {})
         .finally(() => { void qc.invalidateQueries({ queryKey: ['browsers'] }) })
     }
@@ -528,16 +672,12 @@ export function BrowserTakeoverModal({
   }
 
   const handleReturn = async () => {
-    if (desktopOnly) {
-      finishClose()
-      return
-    }
     if (returning) return
     setReturning(true)
     setError(null)
     try {
       returnedRef.current = true
-      await api.post('/browsers/return', { key: targetKey })
+      await api.post('/browsers/return', { key: activeKeyRef.current })
       void qc.invalidateQueries({ queryKey: ['browsers'] })
       void qc.invalidateQueries({ queryKey: ['tickets'] })
       finishClose()
@@ -548,48 +688,59 @@ export function BrowserTakeoverModal({
     }
   }
 
-  // Escape closes the modal only when focus is outside the interactive page surface.
+  // Escape closes the modal only when focus is outside the interactive page surface and URL bar.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      if (document.activeElement === viewportInputRef.current) return
+      if (document.activeElement === viewportInputRef.current || document.activeElement === urlInputRef.current) return
       e.preventDefault()
       dismissModal()
     }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
-  }, [targetKey, reason, desktopOnly])
+  }, [reason])
 
   // Cleanup pending wheel timer on unmount, and release ad-hoc handoff if unmounted abruptly.
   useEffect(() => {
     return () => {
       clearTimeout(wheelRef.current.timer)
-      if (!desktopOnly && !returnedRef.current && !reason) {
+      if (!returnedRef.current && !reason) {
         returnedRef.current = true
-        void api.post('/browsers/return', { key: targetKey }).catch(() => {})
+        void api.post('/browsers/return', { key: activeKeyRef.current }).catch(() => {})
       }
     }
-  }, [targetKey, reason, desktopOnly])
+  }, [reason])
 
   const sendAction = async (action: BrowserInputAction) => {
     try {
       setError(null)
-      const res = await api.post<{ ok: boolean; url?: string; title?: string }>(
+      const res = await api.post<BrowserInputResult>(
         '/browsers/input',
-        { key: targetKey, mode, action },
+        { key: activeKeyRef.current, mode: 'page', action },
       )
+      if (res.key && res.key !== activeKeyRef.current) {
+        activeKeyRef.current = res.key
+        setActiveKey(res.key)
+        updateDraftDirty(false)
+      }
       if (res.url) {
         setCurrentUrl(res.url)
-        if (!urlFocused) setUrlDraft(res.url)
+        currentUrlRef.current = res.url
+        if (!urlFocusedRef.current && !draftDirtyRef.current && document.activeElement !== urlInputRef.current) {
+          setUrlDraft(res.url === 'about:blank' ? '' : res.url)
+        }
       }
       setRefreshSeq(n => n + 1)
+      if (action.type === 'goto' || action.type === 'reload') {
+        void qc.invalidateQueries({ queryKey: ['browsers'] })
+      }
     } catch (e) {
       setError((e as Error).message)
     }
   }
 
   const handleReload = async () => {
-    if (mode === 'desktop') {
+    if (activeKeyRef.current.endsWith(':desktop:root')) {
       if (desktopStreamUrl) setIframeKey(k => k + 1)
       else setRefreshSeq(n => n + 1)
       return
@@ -597,7 +748,9 @@ export function BrowserTakeoverModal({
     setReloading(true)
     await sendAction({ type: 'reload' })
     setReloading(false)
-    viewportInputRef.current?.focus({ preventScroll: true })
+    if (!useStreamIframe && !hasDesktop && document.activeElement !== urlInputRef.current) {
+      viewportInputRef.current?.focus({ preventScroll: true })
+    }
   }
 
   const handleGoto = (e: React.FormEvent) => {
@@ -605,10 +758,15 @@ export function BrowserTakeoverModal({
     const next = normalizeUrl(urlDraft)
     if (!next) return
     setCurrentUrl(next)
-    setUrlFocused(false)
+    currentUrlRef.current = next
+    setUrlDraft(next)
+    updateDraftDirty(false)
+    updateUrlFocused(false)
     urlInputRef.current?.blur()
     void sendAction({ type: 'goto', url: next })
-    viewportInputRef.current?.focus({ preventScroll: true })
+    if (!useStreamIframe && !hasDesktop) {
+      viewportInputRef.current?.focus({ preventScroll: true })
+    }
   }
 
   const toCoords = (el: HTMLElement, clientX: number, clientY: number) => {
@@ -688,7 +846,7 @@ export function BrowserTakeoverModal({
       if (lower === 'a' || lower === 'z' || lower === 'x' || lower === 'c') {
         e.preventDefault()
         e.stopPropagation()
-        const prefix = targetKey.startsWith('cloud:') || !/Mac|iPhone|iPad/.test(navigator.platform) ? 'Control' : 'Meta'
+        const prefix = activeKeyRef.current.startsWith('cloud:') || !/Mac|iPhone|iPad/.test(navigator.platform) ? 'Control' : 'Meta'
         const chord = e.shiftKey ? `${prefix}+Shift+${lower.toUpperCase()}` : `${prefix}+${lower}`
         void sendAction({ type: 'key', key: chord })
         return
@@ -708,9 +866,9 @@ export function BrowserTakeoverModal({
     }
   }
 
-  const screenshotBase = mode === 'desktop' && computerId
+  const screenshotBase = isDesktopRoot && computerId
     ? `/api/computers/${encodeURIComponent(computerId)}/desktop/screenshot`
-    : `/api/browsers/screenshot?key=${encodeURIComponent(targetKey)}`
+    : `/api/browsers/screenshot?key=${encodeURIComponent(activeKey)}`
 
   return (
     <div
@@ -742,66 +900,64 @@ export function BrowserTakeoverModal({
             <RotateCw size={15} className={cx(reloading && 'animate-spin')} />
           </button>
 
-          {mode === 'page' ? (
-            <form
-              onSubmit={handleGoto}
-              className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg bg-sunken px-3 focus-within:ring-1 focus-within:ring-line"
-            >
-              {currentUrl.startsWith('https://')
-                ? <Lock size={13} className="shrink-0 text-faint" />
-                : <Globe size={13} className="shrink-0 text-faint" />}
-              <input
-                ref={urlInputRef}
-                value={urlFocused ? urlDraft : displayUrl(currentUrl)}
-                onFocus={e => {
-                  setUrlDraft(currentUrl === 'about:blank' ? '' : currentUrl)
-                  setUrlFocused(true)
-                  const el = e.currentTarget
-                  requestAnimationFrame(() => el.select())
-                }}
-                onBlur={() => setUrlFocused(false)}
-                onChange={e => setUrlDraft(e.target.value)}
-                placeholder={tx('输入网址…')}
-                aria-label={tx('网页地址')}
-                className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint"
-              />
-            </form>
-          ) : (
-            <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg bg-sunken px-3">
-              <Monitor size={13} className="shrink-0 text-faint" />
-              <span className="min-w-0 flex-1 truncate text-xs text-muted">
-                {computerTitle ? `${tx('云电脑桌面')} · ${computerTitle}` : tx('云电脑桌面')}
-              </span>
-              {desktopStreamUrl && (
+          <form
+            onSubmit={handleGoto}
+            className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg bg-sunken px-3 focus-within:ring-1 focus-within:ring-line"
+          >
+            {currentUrl.startsWith('https://') && !urlFocused && !draftDirty
+              ? <Lock size={13} className="shrink-0 text-faint" />
+              : <Globe size={13} className="shrink-0 text-faint" />}
+            <input
+              ref={urlInputRef}
+              autoFocus={isBlankInitial}
+              value={(urlFocused || draftDirty) ? urlDraft : displayUrl(currentUrl)}
+              onFocus={e => {
+                if (!draftDirtyRef.current) {
+                  setUrlDraft(currentUrlRef.current === 'about:blank' ? '' : currentUrlRef.current)
+                }
+                updateUrlFocused(true)
+                const el = e.currentTarget
+                if (!draftDirtyRef.current && el.value) {
+                  requestAnimationFrame(() => {
+                    if (!draftDirtyRef.current && document.activeElement === el) el.select()
+                  })
+                }
+              }}
+              onBlur={() => updateUrlFocused(false)}
+              onChange={e => {
+                updateDraftDirty(true)
+                setUrlDraft(e.target.value)
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  updateDraftDirty(false)
+                  setUrlDraft(currentUrlRef.current === 'about:blank' ? '' : currentUrlRef.current)
+                  e.currentTarget.blur()
+                }
+              }}
+              placeholder={isDesktopRoot ? tx('输入网址在云电脑浏览器中打开…') : tx('输入网址或粘贴链接回车打开…')}
+              aria-label={tx('网页地址')}
+              className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint"
+            />
+            <span aria-hidden className="shrink-0 text-xs text-faint">↵</span>
+            {desktopStreamUrl && (
+              <>
+                <span aria-hidden className="h-3 w-px shrink-0 bg-line" />
                 <a
                   href={desktopStreamUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex shrink-0 items-center gap-0.5 text-[11px] text-faint transition-colors duration-150 hover:text-fg"
+                  onClick={e => e.stopPropagation()}
+                  className="flex shrink-0 items-center gap-0.5 text-[11px] text-muted transition-colors duration-150 hover:text-fg"
                 >
-                  {tx('在新窗口打开')}
+                  {tx('新窗口')}
                   <ArrowUpRight size={11} />
                 </a>
-              )}
-            </div>
-          )}
-
-          {hasDesktop && !desktopOnly && (
-            <Seg
-              label={tx('画面模式')}
-              value={mode}
-              onChange={m => setMode(m)}
-              options={[
-                { id: 'page', label: tx('网页') },
-                { id: 'desktop', label: tx('桌面') },
-              ]}
-              className={cx(
-                'shrink-0 !rounded-lg [&_button]:!h-[26px] [&_button]:!rounded-[5px] [&_button]:px-2.5 [&_button]:text-xs [&_button]:whitespace-nowrap [&_.seg-thumb]:!rounded-[5px]',
-                dark ? '[&_.seg-thumb]:!bg-hero-2' : '[&_.seg-thumb]:!bg-card',
-                lang === 'en' ? 'w-[152px]' : 'w-[104px]',
-              )}
-            />
-          )}
+              </>
+            )}
+          </form>
 
           <button
             type="button"
@@ -833,6 +989,11 @@ export function BrowserTakeoverModal({
               className="block size-full border-0"
               allow="clipboard-read; clipboard-write"
             />
+          ) : connectingStream ? (
+            <div className="flex size-full items-center justify-center gap-2 text-xs text-faint">
+              <LoaderCircle size={15} className="animate-spin text-muted" />
+              <span>{tx('正在连接实时画面…')}</span>
+            </div>
           ) : (
             <div
               onContextMenu={e => e.preventDefault()}
@@ -871,13 +1032,13 @@ export function BrowserTakeoverModal({
                 onKeyDown={onViewportKeyDown}
                 className="pointer-events-none absolute top-0 left-0 size-px text-base opacity-0"
               />
-              {ready || mode === 'desktop' ? (
+              {ready || isDesktopRoot ? (
                 <LiveScreenshot
                   srcBase={screenshotBase}
                   intervalMs={800}
                   refreshKey={refreshSeq}
-                  alt={mode === 'desktop' ? tx('云电脑桌面') : tx('浏览器画面')}
-                  emptyLabel={mode === 'desktop' ? tx('正在连接桌面…') : tx('正在连接浏览器…')}
+                  alt={isDesktopRoot ? tx('云电脑桌面') : tx('浏览器画面')}
+                  emptyLabel={isDesktopRoot ? tx('正在连接桌面…') : tx('正在连接浏览器…')}
                   className="pointer-events-none block size-full object-fill select-none"
                 />
               ) : (
@@ -891,8 +1052,14 @@ export function BrowserTakeoverModal({
 
         {/* Quiet 32px Bottom Status Strip */}
         <footer className="flex h-8 shrink-0 items-center gap-2 border-t border-line bg-sunken/50 px-4 text-[11px] text-muted">
+          <span
+            aria-hidden
+            className={cx('size-1.5 shrink-0 rounded-full', useStreamIframe ? 'bg-emerald-500' : 'bg-faint')}
+          />
           <span className="min-w-0 flex-1 truncate">
-            {reason || tx('糯糯已暂停操作这一页 · 登录状态会自动留存')}
+            {reason || (useStreamIframe
+              ? tx('实时交互连接 · 糯糯已暂停操作这一页，登录状态会自动留存')
+              : tx('糯糯已暂停操作这一页 · 登录状态会自动留存'))}
           </span>
           {error && <span className="max-w-[45%] shrink-0 truncate text-danger">{error}</span>}
         </footer>

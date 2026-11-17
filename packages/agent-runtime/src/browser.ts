@@ -65,10 +65,16 @@ export class BrowserManager {
   private pages = new Map<string, Page>()
   /** Tasks whose page the owner is operating right now. */
   readonly handoffs = new Set<string>()
+  /** Pages explicitly opened/activated by the owner (kept in listPages even at about:blank until closed). */
+  readonly ownerPages = new Set<string>()
   /** What each task did in its tab, with a small picture after each step (活动 shows them). Last 30 per task. */
   private stepLog = new Map<string, { at: number; action: string; url: string; title: string; shot?: Buffer }[]>()
 
   constructor(private profileDir: string, private executablePath?: () => Promise<string | undefined>) {}
+
+  markOwnerPage(id: string): void {
+    this.ownerPages.add(id)
+  }
 
   private async ctx(): Promise<Context> {
     if (!this.context) {
@@ -81,7 +87,7 @@ export class BrowserManager {
           executablePath, headless: true, viewport: { width: 1280, height: 800 }, locale: 'zh-CN',
           args: ['--no-first-run', '--no-default-browser-check'],
         })
-        context.on('close', () => { this.context = undefined; this.pages.clear() })
+        context.on('close', () => { this.context = undefined; this.pages.clear(); this.ownerPages.clear() })
         return context
       })()
       this.context.catch(() => { this.context = undefined })
@@ -94,7 +100,7 @@ export class BrowserManager {
     if (existing && !existing.isClosed()) return existing
     const page = await (await this.ctx()).newPage()
     this.pages.set(ticketId, page)
-    page.on('close', () => { if (this.pages.get(ticketId) === page) this.pages.delete(ticketId) })
+    page.on('close', () => { if (this.pages.get(ticketId) === page) { this.pages.delete(ticketId); this.ownerPages.delete(ticketId) } })
     return page
   }
 
@@ -110,11 +116,12 @@ export class BrowserManager {
       if (page.isClosed()) {
         this.pages.delete(id)
         this.handoffs.delete(id)
+        this.ownerPages.delete(id)
         continue
       }
       const url = page.url()
       const handoff = this.handoffs.has(id)
-      if (url === 'about:blank' && !handoff) continue
+      if (url === 'about:blank' && !handoff && !this.ownerPages.has(id)) continue
       out.push({ id, url, title: await page.title().catch(() => ''), handoff })
     }
     return out
@@ -162,6 +169,7 @@ export class BrowserManager {
     await this.pages.get(ticketId)?.close().catch(() => {})
     this.pages.delete(ticketId)
     this.handoffs.delete(ticketId)
+    this.ownerPages.delete(ticketId)
   }
 
   /** Records a step the agent took, with a small JPEG of the page after it. */
@@ -191,6 +199,7 @@ export class BrowserManager {
     const context = this.context
     this.context = undefined
     this.pages.clear()
+    this.ownerPages.clear()
     if (context) await (await context).close().catch(() => {})
   }
 

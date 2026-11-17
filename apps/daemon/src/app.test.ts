@@ -417,9 +417,19 @@ describe('unified browsers & cloud desktop endpoints', () => {
       }],
     })
 
-    // 3. Open URL (auto-prepending https://)
+    // 3. Open URL (auto-prepending https://) and blank default browser activation
+    const openedBlank = await (await call('/api/browsers/open', json('POST', {}))).json() as any
+    expect(openedBlank).toEqual({
+      key: 'cloud:instabox:main:main',
+      url: 'about:blank',
+      hasDesktop: true,
+      computerId: 'instabox',
+    })
+    expect(browserCalls.at(-1)).toMatchObject({ op: 'open', browser: 'main', tab: 'main', url: 'about:blank', owner: true })
+
     const opened = await (await call('/api/browsers/open', json('POST', { url: 'example.org/path' }))).json() as any
     expect(opened.key).toMatch(/^cloud:instabox:main:web_/)
+    expect(opened).toMatchObject({ url: 'https://example.org/path', hasDesktop: true, computerId: 'instabox' })
     expect(browserCalls.at(-1)).toMatchObject({ op: 'open', url: 'https://example.org/path', owner: true })
 
     // 4. Page screenshot
@@ -438,6 +448,22 @@ describe('unified browsers & cloud desktop endpoints', () => {
     }))).json() as any
     expect(inpPage).toEqual({ ok: true, url: 'https://example.com/dashboard', title: '首页' })
 
+    // goto in desktop mode on a cloud tab still drives the browser tab directly
+    const inpDeskGoto = await (await call('/api/browsers/input', json('POST', {
+      key: tabKey, mode: 'desktop', action: { type: 'goto', url: 'example.com/desk-nav' },
+    }))).json() as any
+    expect(inpDeskGoto).toEqual({ ok: true, url: 'https://example.com/desk-nav', title: '首页' })
+
+    // desktop:root handoff, goto (opens main:main in headed browser), and return
+    const hoRoot = await (await call('/api/browsers/handoff', json('POST', { key: 'cloud:instabox:desktop:root' }))).json() as any
+    expect(hoRoot).toEqual({ ok: true, url: '', title: 'Instabox 云电脑', hasDesktop: true, computerId: 'instabox' })
+    const gotoRoot = await (await call('/api/browsers/input', json('POST', {
+      key: 'cloud:instabox:desktop:root', mode: 'desktop', action: { type: 'goto', url: 'baidu.com' },
+    }))).json() as any
+    expect(gotoRoot).toEqual({ ok: true, url: 'https://baidu.com/', title: 'Opened', key: 'cloud:instabox:main:main' })
+    const retRoot = await (await call('/api/browsers/return', json('POST', { key: 'cloud:instabox:desktop:root' }))).json() as any
+    expect(retRoot).toEqual({ ok: true })
+
     const inpDesk = await (await call('/api/browsers/input', json('POST', {
       key: tabKey, mode: 'desktop', action: { type: 'key', key: 'Control+a' },
     }))).json() as any
@@ -446,7 +472,7 @@ describe('unified browsers & cloud desktop endpoints', () => {
 
     const ret = await (await call('/api/browsers/return', json('POST', { key: tabKey, note: '已登录完成' }))).json() as any
     expect(ret).toEqual({ ok: true })
-    expect(controls).toEqual(['takeover', 'handback'])
+    expect(controls).toEqual(['takeover', 'takeover', 'handback', 'handback'])
     const msgs = rt.store.db.select().from(schema.messages).all().filter(m => m.conversationId === cnv)
     expect(msgs.at(-1)?.content).toBe('已登录完成')
 

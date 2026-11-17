@@ -205,6 +205,75 @@ describe('Computers', () => {
     expect(mapXdoKey('Backspace')).toBe('BackSpace')
     expect(mapXdoKey('ArrowDown')).toBe('Down')
   })
+
+  it('probes .computer/version via sudo -n -u nuonuo so chmod 750 never re-runs setup after 60s, deduplicates concurrent ready(), and updates when capabilities.env changes', async () => {
+    let clock = 1_000_000
+    let version = ''
+    let setupRuns = 0
+    let probeRuns = 0
+    const c: BoundComputer = {
+      id: 'instabox',
+      title: 'Instabox 云电脑',
+      pluginId: 'instabox',
+      capabilities: {
+        sudo: true,
+        docker: true,
+        sleeps: true,
+        dataDir: '/data',
+        maxExecSeconds: 600,
+        env: { INSTABOX_HEADLESS: '1' },
+      },
+      status: async () => ({ state: 'ready' }),
+      wake: async () => ({ state: 'ready' }),
+      exec: async req => {
+        if (req.command.includes('__nuonuo_ok__')) {
+          probeRuns++
+          await new Promise(r => setTimeout(r, 15))
+          // Simulate /data/nuonuo being 0750 nuonuo:nuonuo: only sudo -n -u nuonuo can read .computer/version!
+          const canRead = req.command.includes('sudo -n -u nuonuo cat')
+          return { exitCode: 0, stdout: `__nuonuo_ok__\n${canRead ? version : ''}\n`, stderr: '' }
+        }
+        const m = /echo ([0-9a-f]{12}) > "\$D\/version"/.exec(req.stdin ?? '')
+        if (m) {
+          setupRuns++
+          version = m[1]!
+        }
+        return { exitCode: 0, stdout: '', stderr: '' }
+      },
+    }
+    const computers = new Computers(() => [c], () => clock)
+
+    // 1. Concurrent ready() calls share one probe + one setup
+    await Promise.all([computers.ready(c), computers.ready(c), computers.ready(c)])
+    expect(probeRuns).toBe(1)
+    expect(setupRuns).toBe(1)
+    expect(version).toMatch(/^[0-9a-f]{12}$/)
+
+    // 2. After 60s (READY_FOR_MS), concurrent ready() re-probes with sudo -n -u nuonuo and does NOT re-run setup or pkill browserd!
+    clock += 65_000
+    await Promise.all([computers.ready(c), computers.ready(c)])
+    expect(probeRuns).toBe(2)
+    expect(setupRuns).toBe(1)
+
+    // 3. When plugin upgrades capabilities.env / capabilities.desktop (0.1.0 -> 0.2.0), setupVersionOf(c) changes and triggers setup once
+    c.capabilities = {
+      ...c.capabilities,
+      desktop: { display: ':1', width: 1280, height: 800 },
+      env: { DISPLAY: ':1', NUONUO_BROWSER_HEADED: '1' },
+    }
+    clock += 65_000
+    const prevVersion = version
+    await computers.ready(c)
+    expect(probeRuns).toBe(3)
+    expect(setupRuns).toBe(2)
+    expect(version).not.toBe(prevVersion)
+
+    // 4. Subsequent 60s expiry with same 0.2.0 capabilities does not re-run setup
+    clock += 65_000
+    await computers.ready(c)
+    expect(probeRuns).toBe(4)
+    expect(setupRuns).toBe(2)
+  })
 })
 
 describe('computerExtension', () => {
@@ -331,6 +400,19 @@ describe.skipIf(!chromium)('the browser service', () => {
       expect(await run(tools.computer_browser_back, {})).toContain('按钮')
 
       expect(await run(tools.computer_browser_close, { browser: 'work' })).toBe('已关闭')
+
+      // Snapshot on a non-existent browser does not spawn an empty browser instance
+      await expect(computers.browser(c, { op: 'snapshot', browser: 'ghost', tab: 't1' })).rejects.toThrow(/没有标签页/)
+      const afterGhost = await computers.browser<{ browsers: any[] }>(c, { op: 'list' })
+      expect(afterGhost.browsers.map(x => x.name)).toEqual(['main'])
+
+      // Blank open & input(goto) on a fresh tab create/activate smoothly
+      const blankOpen = await computers.browser<{ page: { url: string } }>(c, { op: 'open', browser: 'main', tab: 'main', url: 'about:blank', owner: true })
+      expect(blankOpen.page.url).toBe('about:blank')
+      const gotoFresh = await computers.browser<{ url: string; title: string }>(c, {
+        op: 'input', browser: 'main', tab: 'fresh_tab', owner: true, action: { type: 'goto', url: `${base}/b` },
+      })
+      expect(gotoFresh.title).toBe('第二页')
     } finally {
       await computers.run(c, 'pkill -f "node browserd.mjs" || true', { timeoutSeconds: 10 })
     }

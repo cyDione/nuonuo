@@ -8,6 +8,7 @@
  * No backticks or `${` inside, so the string stays literal.
  */
 export const BROWSERD_SOURCE = String.raw`// nuonuo browser service: written by nuonuo, replaced when nuonuo updates it.
+import { execFile } from 'node:child_process'
 import { createServer } from 'node:http'
 import { existsSync, readFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -26,17 +27,34 @@ const browsers = new Map()
 /** 'browser/tab' keys currently taken over by the owner. */
 const handoffs = new Set()
 const NAME = /^[\w.-]{1,40}$/
+const wantHeaded = () => process.env.NUONUO_BROWSER_HEADED === '1' && Boolean(process.env.DISPLAY)
+
+function focusWindow() {
+  if (!wantHeaded()) return
+  try {
+    execFile('sh', ['-c', 'xdotool search --onlyvisible --class "chromium|chrome" windowactivate >/dev/null 2>&1 || true'], { timeout: 3000 }, () => {})
+  } catch {}
+}
 
 async function launchContext(path, profile) {
-  const wantHeaded = process.env.NUONUO_BROWSER_HEADED === '1' && Boolean(process.env.DISPLAY)
-  const baseArgs = ['--no-first-run', '--no-default-browser-check', '--disable-dev-shm-usage']
+  const baseArgs = ['--no-sandbox', '--no-first-run', '--no-default-browser-check', '--disable-dev-shm-usage']
   const headedArgs = baseArgs.concat(['--password-store=basic', '--window-position=0,0', '--window-size=1280,800'])
   const launch = headed => chromium.launchPersistentContext(profile, {
     executablePath: path, headless: !headed, viewport: { width: 1280, height: 800 }, locale: 'zh-CN',
     args: headed ? headedArgs : baseArgs,
   })
-  if (!wantHeaded) return launch(false)
-  try { return await launch(true) } catch { return launch(false) }
+  const launchHeadless = async () => {
+    const prev = process.env.INSTABOX_HEADLESS
+    process.env.INSTABOX_HEADLESS = '1'
+    try {
+      return await launch(false)
+    } finally {
+      if (prev === undefined) delete process.env.INSTABOX_HEADLESS
+      else process.env.INSTABOX_HEADLESS = prev
+    }
+  }
+  if (!wantHeaded()) return launchHeadless()
+  try { return await launch(true) } catch { return launchHeadless() }
 }
 
 function clearBrowserHandoffs(bname) {
@@ -64,12 +82,20 @@ function browser(name) {
 }
 
 async function tab(bname, tname, create) {
+  if (!NAME.test(bname)) throw new Error('浏览器名只能用字母、数字、-、_、.，最多 40 个字符')
   if (!NAME.test(tname)) throw new Error('标签页名只能用字母、数字、-、_、.，最多 40 个字符')
+  if (!create) {
+    const existing = browsers.get(bname)
+    if (!existing || !existing.tabs.get(tname) || existing.tabs.get(tname).isClosed()) {
+      throw new Error('浏览器 ' + bname + ' 里没有标签页 ' + tname + '，先用 browser_open 打开')
+    }
+    existing.used = Date.now()
+    return existing.tabs.get(tname)
+  }
   const b = browser(bname)
   const ctx = await b.context
   let page = b.tabs.get(tname)
   if (page && !page.isClosed()) return page
-  if (!create) throw new Error('浏览器 ' + bname + ' 里没有标签页 ' + tname + '，先用 browser_open 打开')
   // A fresh profile opens with one blank page: use it for the first tab instead of leaving it around.
   const blank = b.tabs.size === 0 ? ctx.pages().find(p => p.url() === 'about:blank' && ![...b.tabs.values()].includes(p)) : undefined
   page = blank || await ctx.newPage()
@@ -98,6 +124,14 @@ const ops = {
   async open(r) {
     guardHandoff(r)
     const page = await tab(r.browser, r.tab, true)
+    await page.bringToFront().catch(() => {})
+    focusWindow()
+    if (!r.url || r.url === 'about:blank') {
+      if (r.url === 'about:blank' && page.url() !== 'about:blank') {
+        await page.goto('about:blank')
+      }
+      return { page: await snapshot(page) }
+    }
     await page.goto(r.url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
     await settle(page)
     return { page: await snapshot(page) }
@@ -153,9 +187,10 @@ const ops = {
     return { image: buf.toString('base64'), mediaType: 'image/jpeg', url: page.url(), title: await page.title().catch(() => '') }
   },
   async handoff(r) {
-    const page = await tab(r.browser, r.tab, false)
+    const page = await tab(r.browser, r.tab, r.tab === 'main')
     handoffs.add(r.browser + '/' + r.tab)
     await page.bringToFront().catch(() => {})
+    focusWindow()
     return { url: page.url(), title: await page.title().catch(() => ''), handoff: true }
   },
   async release(r) {
@@ -163,9 +198,10 @@ const ops = {
     return { ok: true }
   },
   async input(r) {
-    const page = await tab(r.browser, r.tab, false)
-    await page.bringToFront().catch(() => {})
     const a = r.action || {}
+    const page = await tab(r.browser, r.tab, a.type === 'goto')
+    await page.bringToFront().catch(() => {})
+    if (a.type === 'goto') focusWindow()
     if (a.type === 'click') await page.mouse.click(Number(a.x), Number(a.y), { button: a.button || 'left', clickCount: a.double ? 2 : 1 })
     else if (a.type === 'drag') {
       await page.mouse.move(Number(a.fromX), Number(a.fromY))

@@ -117,6 +117,25 @@ export interface BrowsersOverview {
   computer: { id: string; title: string; state: string; hasDesktop: boolean } | null
   pages: OpenPageItem[]
 }
+export interface BrowserOpenResult {
+  key: string
+  url?: string
+  hasDesktop?: boolean
+  computerId?: string
+}
+export interface BrowserHandoffResult {
+  ok: boolean
+  url: string
+  title: string
+  hasDesktop: boolean
+  computerId?: string
+}
+export interface BrowserInputResult {
+  ok: boolean
+  url?: string
+  title?: string
+  key?: string
+}
 export type BrowserInputAction =
   | { type: 'click'; x: number; y: number; button?: 'left' | 'right' | 'middle'; double?: boolean }
   | { type: 'drag'; fromX: number; fromY: number; toX: number; toY: number }

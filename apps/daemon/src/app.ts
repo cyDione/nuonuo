@@ -891,19 +891,43 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   })
 
   api.post('/browsers/open', async c => {
-    const input = await body(c, z.object({ url: z.string().trim().min(1).max(2000) }))
-    const url = normalizeHttpUrl(input.url)
+    const input = await body(c, z.object({ url: z.string().trim().max(2000).optional() }).optional().default({}))
+    const isBlank = !input.url || input.url === 'about:blank'
+    const targetUrl = isBlank ? 'about:blank' : normalizeHttpUrl(input.url!)
     const primary = rt.computers.current()
     if (rt.engine.execution().environment !== 'local' && primary) {
       await rt.computers.ready(primary)
-      const tab = `web_${Date.now().toString(36)}${randomBytes(2).toString('hex')}`
-      await rt.computers.browser(primary, { op: 'open', browser: 'main', tab, url, owner: true })
-      return c.json({ key: `cloud:${primary.id}:main:${tab}` })
+      let tab = 'main'
+      if (!isBlank) {
+        const listed = await rt.computers.browser<{ browsers?: BrowserInfo[] }>(primary, { op: 'list' }).catch(() => ({ browsers: [] as BrowserInfo[] }))
+        const allTabs = (listed.browsers ?? []).flatMap(b => b.tabs ?? [])
+        const mainTab = (listed.browsers ?? []).find(b => b.name === 'main')?.tabs?.find(t => t.name === 'main')
+        if (allTabs.length > 0 && mainTab?.url !== 'about:blank') {
+          tab = `web_${Date.now().toString(36)}${randomBytes(2).toString('hex')}`
+        }
+      }
+      await rt.computers.browser(primary, { op: 'open', browser: 'main', tab, url: targetUrl, owner: true })
+      return c.json({
+        key: `cloud:${primary.id}:main:${tab}`,
+        url: targetUrl,
+        hasDesktop: Boolean(primary.capabilities.desktop),
+        computerId: primary.id,
+      })
     }
-    const id = `web_${Date.now().toString(36)}${randomBytes(2).toString('hex')}`
+    let id = 'main'
+    if (!isBlank) {
+      const localPages = await rt.browser.listPages().catch(() => [])
+      const mainPage = localPages.find(p => p.id === 'main')
+      if (localPages.length > 0 && mainPage?.url !== 'about:blank') {
+        id = `web_${Date.now().toString(36)}${randomBytes(2).toString('hex')}`
+      }
+    }
     const p = await rt.browser.page(id)
-    await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    return c.json({ key: `local:${id}` })
+    rt.browser.markOwnerPage(id)
+    if (targetUrl !== 'about:blank') {
+      await p.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    }
+    return c.json({ key: `local:${id}`, url: p.url(), hasDesktop: false })
   })
 
   api.post('/browsers/close', async c => {
@@ -933,6 +957,12 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const target = parsePageKey(input.key)
     if (target.kind === 'cloud') {
       const comp = rt.computers.get(target.computerId)
+      if (target.browser === 'desktop' && target.tab === 'root') {
+        await rt.computers.ready(comp)
+        await rt.computers.ensureDesktop(comp)
+        await comp.desktopControl?.('takeover').catch(() => {})
+        return c.json({ ok: true, url: '', title: comp.title, hasDesktop: Boolean(comp.capabilities.desktop), computerId: comp.id })
+      }
       const r = await rt.computers.browser<{ url: string; title: string }>(comp, { op: 'handoff', browser: target.browser, tab: target.tab })
       await comp.desktopControl?.('takeover').catch(() => {})
       return c.json({ ok: true, url: r.url, title: r.title, hasDesktop: Boolean(comp.capabilities.desktop), computerId: comp.id })
@@ -946,15 +976,24 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.post('/browsers/input', async c => {
     const input = await body(c, z.object({ key: z.string().min(1), mode: z.enum(['page', 'desktop']).optional(), action: UnifiedBrowserInput }))
     const action = input.action.type === 'goto' ? { ...input.action, url: normalizeHttpUrl(input.action.url) } : input.action
-    if (input.mode === 'desktop' && input.key.startsWith('cloud:')) {
-      const computerId = input.key.split(':')[1]
-      if (!computerId) throw new HttpError(400, 'invalid', `无效的云端页面标识：${input.key}`)
-      await rt.computers.desktopInput(rt.computers.get(computerId), action)
-      return c.json({ ok: true })
-    }
     const target = parsePageKey(input.key)
     if (target.kind === 'cloud') {
-      const r = await rt.computers.browser<{ url: string; title: string }>(rt.computers.get(target.computerId), { op: 'input', browser: target.browser, tab: target.tab, action, owner: true })
+      const comp = rt.computers.get(target.computerId)
+      if (target.browser === 'desktop' && target.tab === 'root') {
+        if (action.type === 'goto') {
+          const r = await rt.computers.browser<{ page: { url: string; title: string } }>(comp, {
+            op: 'open', browser: 'main', tab: 'main', url: action.url, owner: true,
+          })
+          return c.json({ ok: true, url: r.page.url, title: r.page.title, key: `cloud:${comp.id}:main:main` })
+        }
+        await rt.computers.desktopInput(comp, action)
+        return c.json({ ok: true })
+      }
+      if (input.mode === 'desktop' && action.type !== 'goto' && action.type !== 'reload') {
+        await rt.computers.desktopInput(comp, action)
+        return c.json({ ok: true })
+      }
+      const r = await rt.computers.browser<{ url: string; title: string }>(comp, { op: 'input', browser: target.browser, tab: target.tab, action, owner: true })
       return c.json({ ok: true, url: r.url, title: r.title })
     }
     if (!rt.browser.hasPage(target.id)) throw new HttpError(409, 'conflict', '页面已关闭')
@@ -967,6 +1006,10 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const target = parsePageKey(input.key)
     if (target.kind === 'cloud') {
       const comp = rt.computers.get(target.computerId)
+      if (target.browser === 'desktop' && target.tab === 'root') {
+        await comp.desktopControl?.('handback').catch(() => {})
+        return c.json({ ok: true })
+      }
       await rt.computers.browser(comp, { op: 'release', browser: target.browser, tab: target.tab }).catch(() => {})
       await comp.desktopControl?.('handback').catch(() => {})
       resumeTicketAfterHandoff(target.tab, input.note)

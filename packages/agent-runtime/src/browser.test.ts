@@ -61,6 +61,14 @@ describe.skipIf(!available)('BrowserManager', () => {
       expect(await browser.snapshot('tkt_a')).toContain('登录测试')
       await browser.closePage('tkt_a')
       expect(await browser.listPages()).toEqual([])
+
+      // Owner-activated blank page stays visible in listPages even when handoff is false, until closed
+      await browser.page('main')
+      expect(await browser.listPages()).toEqual([])
+      browser.markOwnerPage('main')
+      expect(await browser.listPages()).toEqual([expect.objectContaining({ id: 'main', url: 'about:blank', handoff: false })])
+      await browser.closePage('main')
+      expect(await browser.listPages()).toEqual([])
     } finally {
       await browser.close()
     }
