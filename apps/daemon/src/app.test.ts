@@ -308,19 +308,36 @@ describe('Muse features (backend)', () => {
   })
 })
 
-describe('reply streaming', () => {
+describe('non-streaming complete replies', () => {
   it('reads partial JSON strings', () => {
     expect(partialString('{"conversation_id":"cnv_1","text":"你好\\n世', 'text')).toBe('你好\n世')
     expect(partialString('{"conversation_id":"cnv_1","text":"a\\u4e16b"}', 'text')).toBe('a世b')
     expect(partialString('{"conversation_id":"cn', 'text')).toBeUndefined()
   })
-  it('turns the router reply tool input into reply.delta events', () => {
+  it('does not emit reply.delta events while the router streams reply tool input, showing only complete saved replies', () => {
     const mapper = new EventMapper()
     const part = (p: any) => mapper.map({ type: 'session.part', role: 'router', sessionId: 's', part: p } as any)
     expect(part({ kind: 'tool-input-start', id: 'c1', tool: 'reply' })).toEqual([])
     expect(part({ kind: 'tool-input-delta', id: 'c1', delta: '{"conversation_id":"cnv_a' })).toEqual([])
-    expect(part({ kind: 'tool-input-delta', id: 'c1', delta: '","text":"Hel' })).toEqual([{ type: 'reply.delta', conversationId: 'cnv_a', callId: 'c1', text: 'Hel' }])
-    expect(part({ kind: 'tool-input-delta', id: 'c1', delta: 'lo"}' })[0]).toMatchObject({ text: 'Hello' })
+    expect(part({ kind: 'tool-input-delta', id: 'c1', delta: '","text":"Hel' })).toEqual([])
+    expect(part({ kind: 'tool-input-delta', id: 'c1', delta: 'lo"}' })).toEqual([])
+    expect(mapper.map({ type: 'session.state', role: 'router', sessionId: 's', ticketId: null, state: 'running' })).toEqual([
+      { type: 'session.state', role: 'router', sessionId: 's', ticketId: null, state: 'running' },
+    ])
+    expect(mapper.map({ type: 'message.created', conversationId: 'cnv_a', messageId: 'msg_1' })).toEqual([
+      { type: 'message.created', conversationId: 'cnv_a', messageId: 'msg_1' },
+    ])
+  })
+  it('returns strictly one complete reply without duplicate bubbles for the 13:42 更新情况 scenario', async () => {
+    const cnv = rt.engine.mainConversation()
+    const finalText = 'nuonuo 两天连发 5 版，重心全在「浏览器 + 图形云电脑」：\n\n- **v0.3.4**（今天 12:24）：切到原生桌面 Chromium。'
+    const id1 = rt.engine.reply({ conversationId: cnv, text: finalText, callId: 'chatcmpl-tool-910cd5b7241f962a' })
+    const id2 = rt.engine.reply({ conversationId: cnv, text: finalText, callId: 'chatcmpl-tool-910cd5b7241f962a' })
+    const id3 = rt.engine.reply({ conversationId: cnv, text: finalText, callId: 'chatcmpl-tool-another' })
+    expect(id2).toBe(id1)
+    expect(id3).toBe(id1)
+    const { messages } = await (await call(`/api/conversations/${cnv}/messages`)).json() as any
+    expect(messages.filter((m: any) => m.role === 'assistant' && m.content === finalText)).toHaveLength(1)
   })
 })
 

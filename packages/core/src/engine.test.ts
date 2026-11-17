@@ -190,3 +190,37 @@ describe('full duplex', () => {
     expect(runtime.jobs.running(ticket!.sessionId)).toEqual([])
   })
 })
+
+describe('reply deduplication (13:42 更新情况 regression)', () => {
+  it('stores and emits only one reply when a router turn retries after CHAT_LIMIT or repeats the same reply/report', async () => {
+    const { engine, conversation } = await setup()
+    const cnv = conversation()
+    const finalText = 'nuonuo 两天连发 5 版，重心全在「浏览器 + 图形云电脑」：\n\n- **v0.3.4**（今天 12:24）：切到原生桌面 Chromium。'
+
+    const { triggerId } = engine.receiveMessage(cnv, '更新情况')
+    const ticket = engine.startTask({
+      conversationId: cnv,
+      triggerIds: [triggerId],
+      title: '查 nuonuo 仓库更新情况',
+      ack: '好，我去看看 nuonuo 最近更新到哪了。',
+      callId: 'chatcmpl-tool-bd9e3cbc4d284ec0',
+    })
+    await settle()
+
+    // Duplicate ready report with identical summary is deduplicated.
+    engine.report(ticket.id, { status: 'ready', summary: '已用 GitHub REST API 查完更新。' })
+    engine.report(ticket.id, { status: 'ready', summary: '已用 GitHub REST API 查完更新。' })
+    const reports = store.db.select().from(schema.reports).all().filter(r => r.ticketId === ticket.id && r.status === 'ready')
+    expect(reports.filter(r => r.summary === '已用 GitHub REST API 查完更新。')).toHaveLength(1)
+
+    // Same callId or consecutive identical assistant text produces strictly one message row.
+    const m1 = engine.reply({ conversationId: cnv, text: finalText, ticketId: ticket.id, callId: 'chatcmpl-tool-910cd5b7241f962a' })
+    const m2 = engine.reply({ conversationId: cnv, text: finalText, ticketId: ticket.id, callId: 'chatcmpl-tool-910cd5b7241f962a' })
+    const m3 = engine.reply({ conversationId: cnv, text: finalText, ticketId: ticket.id, callId: 'chatcmpl-tool-duplicate-call' })
+    expect(m2).toBe(m1)
+    expect(m3).toBe(m1)
+
+    const matching = messages(cnv).filter(m => m.role === 'assistant' && m.content === finalText)
+    expect(matching).toHaveLength(1)
+  })
+})

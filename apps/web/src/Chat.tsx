@@ -45,7 +45,6 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const tickets = useTickets()
   const current = list.data?.conversations.find(c => c.id === id)
   const title = current?.title ?? thread.data?.conversation.title
-  const draft = useLive(s => (id ? s.drafts[id] : undefined))
   const routerBusy = useLive(s => s.routerState === 'running')
   const [error, setError] = useState<string | null>(null)
   const [text, setText] = useState('')
@@ -64,21 +63,42 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const onboarding = useOnboarding()
 
   // Edited messages give way to the corrected one; answers asked again give way to the new answer.
-  const messages = (thread.data?.messages ?? []).filter(m => (m.role === 'user' && !m.meta.edited) || (m.role === 'assistant' && !m.meta.superseded) || (m.role === 'system' && m.meta.kind === 'compacted'))
+  const rawMessages = (thread.data?.messages ?? []).filter(m => (m.role === 'user' && !m.meta.edited) || (m.role === 'assistant' && !m.meta.superseded) || (m.role === 'system' && m.meta.kind === 'compacted'))
+  const seenCallIds = new Set<string>()
+  const messages = rawMessages.filter((m, idx) => {
+    if (m.role === 'assistant' && m.meta?.callId) {
+      if (seenCallIds.has(m.meta.callId)) return false
+      seenCallIds.add(m.meta.callId)
+    }
+    const prev = idx > 0 ? rawMessages[idx - 1] : undefined
+    if (
+      prev &&
+      prev.role === 'assistant' &&
+      m.role === 'assistant' &&
+      prev.content.trim() === m.content.trim() &&
+      (!m.ticketId || !prev.ticketId || prev.ticketId === m.ticketId) &&
+      Math.abs(m.createdAt - prev.createdAt) < 60_000
+    ) {
+      return false
+    }
+    return true
+  })
   const said = messages.filter(m => m.role !== 'system')
-  const mine = (tickets.data?.tickets ?? []).filter(t => t.conversationId === id && t.stage !== 'ended')
+  const all = (tickets.data?.tickets ?? []).filter(t => t.conversationId === id)
+  const mine = all.filter(t => t.stage !== 'ended')
   const asks = mine.filter(needsOwner)
   const working = mine.filter(t => t.stage === 'working' || t.stage === 'queued')
   const last = said.at(-1)
-  const thinking = routerBusy && last?.role === 'user' && !draft
-  // While it works, only the typing bubble shows (never a status line).
-  const busy = !draft && (thinking || working.length > 0)
+  const awaitingDelivery = all.some(t => t.ended && Date.now() - t.ended.at < 60_000 && !messages.some(m => (m.ticketId === t.id && m.meta?.result) || m.meta?.result?.ticketId === t.id))
+  const thinking = routerBusy && (last?.role === 'user' || awaitingDelivery)
+  // While it works, only the typing bubble shows (never a status line or partial streaming bubble).
+  const busy = thinking || working.length > 0
 
   // Follows new messages while you are at the bottom; if you scrolled up to read, a 新消息 button appears instead.
   const atBottom = useRef(true)
   const [behind, setBehind] = useState(false)
   const toBottom = (smooth?: boolean) => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' }); setBehind(false) }
-  useLayoutEffect(() => { if (atBottom.current || last?.role === 'user') toBottom(); else setBehind(true) }, [messages.length, draft?.text, busy, asks.length])
+  useLayoutEffect(() => { if (atBottom.current || last?.role === 'user') toBottom(); else setBehind(true) }, [messages.length, busy, asks.length])
   useEffect(() => { atBottom.current = true; toBottom() }, [id])
   const onScroll = () => { const el = scrollRef.current; if (!el) return; atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; if (atBottom.current) setBehind(false) }
 
@@ -177,7 +197,6 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   }, [id])
 
   const empty = !id || (thread.isSuccess && said.length === 0)
-  const all = (tickets.data?.tickets ?? []).filter(t => t.conversationId === id)
   const ended = all.filter(t => t.stage === 'ended').sort((a, b) => (b.ended?.at ?? 0) - (a.ended?.at ?? 0))[0]
   const sideStatus = asks.length ? tx('等你点头') : working.length ? tx('在做') : ended?.ended ? tx('{0}.{1} 做完', new Date(ended.ended.at).getMonth() + 1, new Date(ended.ended.at).getDate()) : ''
   const artifacts = useQuery({ queryKey: ['artifacts'], queryFn: () => api.get<{ artifacts: Artifact[] }>('/artifacts'), enabled: Boolean(id) && !main }).data?.artifacts ?? []
@@ -226,7 +245,6 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
                 canReedit: recalled.current.has(m.id),
               }} />}
           </div>)}
-          {draft && <div className="mt-1.5"><Bubble fresh><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.text}</ReactMarkdown><span className="caret" /></div></Bubble></div>}
           {busy && <div className="mt-4"><Bubble fresh><Typing /></Bubble></div>}
           {learned.map(l => <div key={l.id} className="anim-rise mt-2"><LearnedNote l={l} name={persona.name} onUndone={() => setLearned(v => v.filter(x => x.id !== l.id))} /></div>)}
           {asks.map(t => <div key={t.id} className="anim-rise mt-2 max-w-[440px]"><NeedsYou t={t} onLearned={l => setLearned(v => [...v, l])} onAnswer={(text, ticketId) => send(text, ticketId)} onEdit={v => { setText(v); requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(v.length, v.length) } }) }} /></div>)}

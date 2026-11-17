@@ -459,6 +459,25 @@ export class Engine {
     if (!conversationId) throw new DomainError('invalid', 'reply 需要 conversation_id 或 ticket_id')
     const conversation = this.store.db.select().from(schema.conversations).where(eq(schema.conversations.id, conversationId)).get()
     if (!conversation) throw new DomainError('missing', `没有对话 ${conversationId}`)
+    const recent = this.store.db.select().from(schema.messages)
+      .where(eq(schema.messages.conversationId, conversationId))
+      .orderBy(desc(schema.messages.createdAt), desc(schema.messages.id))
+      .limit(10).all()
+      .filter(m => !(m.meta as { superseded?: boolean })?.superseded)
+    if (input.callId) {
+      const byCall = recent.find(m => m.role === 'assistant' && (m.meta as { callId?: string })?.callId === input.callId)
+      if (byCall) return byCall.id
+    }
+    const last = recent[0]
+    if (
+      last &&
+      last.role === 'assistant' &&
+      last.content.trim() === input.text.trim() &&
+      (!input.ticketId || !last.ticketId || last.ticketId === input.ticketId) &&
+      this.now() - last.createdAt < 60_000
+    ) {
+      return last.id
+    }
     const id = newId('msg')
     const at = this.stamp()
     const via = this.replySource(input.replyTo, input.ticketId)
@@ -744,6 +763,9 @@ export class Engine {
   report(ticketId: string, input: { status: ReportStatus; summary: string; humanAction?: HumanAction; files?: string[] }): { rejectedFiles: string[] } {
     const ticket = this.ticket(ticketId)
     if (ticket.ended && ticket.ended.by === 'person') return { rejectedFiles: [] }
+    if (ticket.ended && (input.status === 'ready' || input.status === 'dropped') && ticket.latestReport?.status === input.status && ticket.latestReport?.summary.trim() === input.summary.trim()) {
+      return { rejectedFiles: [] }
+    }
     const at = this.now()
     const { accepted, rejected } = input.files?.length ? this.registerFiles(ticket, input.files) : { accepted: [], rejected: [] }
     const report: Report = { status: input.status, summary: input.summary, ...(input.humanAction ? { humanAction: input.humanAction } : {}), ...(accepted.length ? { files: accepted } : {}), at }

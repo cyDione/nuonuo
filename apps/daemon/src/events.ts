@@ -43,8 +43,6 @@ export function partialString(json: string, field: string): string | undefined {
 }
 
 export class EventMapper {
-  private replies = new Map<string, string>()
-
   map(event: BusEvent): ClientEvent[] {
     const e = event as any
     switch (event.type) {
@@ -64,25 +62,9 @@ export class EventMapper {
       case 'session.state': return e.role === 'subagent' ? [] : [{ type: 'session.state', role: e.role, sessionId: e.sessionId, ticketId: e.ticketId, state: e.state }]
       case 'session.part': {
         const part = e.part
-        if (e.role === 'router') {
-          if (part.kind === 'tool-input-start' && part.tool === 'reply') { this.replies.set(part.id, ''); return [] }
-          if (part.kind === 'tool-input-delta' && this.replies.has(part.id)) {
-            const json = this.replies.get(part.id)! + part.delta
-            this.replies.set(part.id, json)
-            const conversationId = partialString(json, 'conversation_id')
-            const text = partialString(json, 'text')
-            // Only once the conversation id is complete (the text field follows it, or it closed).
-            if (conversationId && text !== undefined && /"conversation_id"\s*:\s*"[^"]*"/.test(json)) {
-              return [{ type: 'reply.delta', conversationId, callId: part.id, text }]
-            }
-            return []
-          }
-          if (part.kind === 'tool-call' || part.kind === 'tool-result') this.replies.delete(part.id)
-          return []
-        }
+        // Router and watchdog replies are shown only as complete messages once saved (message.created), never streamed as partial bubbles.
+        if (e.role === 'router' || e.role === 'watchdog') return []
         if (e.ticketId && e.role === 'worker') return [{ type: 'worker.part', ticketId: e.ticketId, part }]
-        // The watchdog's notify_owner streams like the router's reply.
-        if (e.role === 'watchdog') return []
         return []
       }
       default: return []

@@ -9,7 +9,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, type Conversation, type Message, type Routine } from './api'
-import { useLive } from './live'
 import { Avatar, usePersona } from './persona'
 import { MOD } from './prefs'
 import { desktop } from './shell'
@@ -33,7 +32,6 @@ export function QuickAsk() {
 
   const main = useQuery({ queryKey: ['main-conversation'], queryFn: () => api.get<{ id: string }>('/conversations/main'), staleTime: Infinity }).data?.id
   const thread = useQuery({ queryKey: ['messages', main], enabled: Boolean(main && sentAt), queryFn: () => api.get<{ messages: Message[] }>(`/conversations/${main}/messages`) }).data
-  const draft = useLive(s => (main ? s.drafts[main] : undefined))
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: () => api.get<{ conversations: Conversation[] }>('/conversations') }).data?.conversations ?? []
   const routines = useQuery({ queryKey: ['routines'], queryFn: () => api.get<{ routines: Routine[] }>('/routines') }).data?.routines ?? []
   const waiting = (useTickets().data?.tickets ?? []).filter(needsOwner)
@@ -71,7 +69,7 @@ export function QuickAsk() {
     else if (e.key === 'ArrowUp') { e.preventDefault(); setSel(i => Math.max(0, i - 1)) }
   }
 
-  const answer = draft?.text ?? reply?.content
+  const answer = reply?.content
   return <div className="flex h-dvh items-start justify-center p-3">
     <div className="w-full max-w-[600px] overflow-hidden rounded-[22px] border border-line bg-panel/95 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.45)] backdrop-blur-xl" onKeyDown={onKey}>
       <div className="drag flex items-center gap-3 px-4 py-3.5">
@@ -82,7 +80,7 @@ export function QuickAsk() {
           className={cx('press no-drag flex size-9 shrink-0 items-center justify-center rounded-full transition-colors', text.trim() ? 'bg-accent text-accent-fg' : 'bg-sunken text-faint')}><ArrowUp size={17} /></button>
       </div>
       {sentAt ? <div className="anim-rise max-h-[50vh] overflow-y-auto border-t border-line px-5 py-4 text-[14px]">
-        {answer ? <div className="prose-chat selectable"><ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown>{draft && <span className="caret" />}</div>
+        {answer ? <div className="prose-chat selectable"><ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown></div>
           : <span className="flex items-center gap-2 text-faint">{tx('已交给{0}，它在想…', persona.name)}</span>}
       </div> : picks.length > 0 && <div className="border-t border-line px-2 pt-2 pb-1.5">
         <div className="px-2.5 pb-1 text-[11px] font-medium text-faint">{tx('接着聊')}</div>

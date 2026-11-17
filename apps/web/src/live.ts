@@ -104,8 +104,9 @@ export function useLiveEvents() {
     const handle = (e: ServerEvent) => {
       switch (e.type) {
         case 'message.created':
+          clearDraft(e.conversationId)
           void readAloud(e.conversationId, e.messageId)
-          void qc.invalidateQueries({ queryKey: ['messages', e.conversationId] }).then(() => clearDraftAfterMessage(e.conversationId))
+          void qc.invalidateQueries({ queryKey: ['messages', e.conversationId] }).then(() => clearDraft(e.conversationId))
           soon('conversations', () => qc.invalidateQueries({ queryKey: ['conversations'] }))
           break
         case 'message.updated':
@@ -133,7 +134,7 @@ export function useLiveEvents() {
           soon('activity', () => qc.invalidateQueries({ queryKey: ['activity'] }), 500)
           break
         case 'reply.delta':
-          set(s => ({ drafts: { ...s.drafts, [e.conversationId]: { callId: e.callId, text: e.text } } }))
+          // Streaming partial chat bubbles are disabled; replies appear only once saved (message.created).
           break
         case 'ticket.updated':
           soon(`ticket:${e.ticketId}`, () => {
@@ -146,7 +147,7 @@ export function useLiveEvents() {
           }, 150)
           break
         case 'session.state':
-          if (e.role === 'router') set({ routerState: e.state })
+          if (e.role === 'router') set({ routerState: e.state, ...(e.state !== 'running' ? { drafts: {} } : {}) })
           else if (e.ticketId) {
             set(s => ({ workerState: { ...s.workerState, [e.ticketId!]: e.state }, ...(e.state !== 'running' ? { workerText: { ...s.workerText, [e.ticketId!]: '' } } : {}) }))
             soon(`ticket:${e.ticketId}`, () => { qc.invalidateQueries({ queryKey: ['tickets'] }); qc.invalidateQueries({ queryKey: ['ticket', e.ticketId] }) }, 150)
@@ -160,12 +161,6 @@ export function useLiveEvents() {
           break
         }
       }
-    }
-    const clearDraftAfterMessage = (conversationId: string) => {
-      const draft = state.drafts[conversationId]
-      if (!draft) return
-      const data = qc.getQueryData<{ messages: { meta: Record<string, any> }[] }>(['messages', conversationId])
-      if (data?.messages.some(m => m.meta?.callId === draft.callId)) clearDraft(conversationId)
     }
     connect()
     return () => { source?.close(); clearTimeout(retry); for (const t of timers.values()) clearTimeout(t) }
