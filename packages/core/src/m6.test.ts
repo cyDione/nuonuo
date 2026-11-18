@@ -102,6 +102,9 @@ describe('main conversation (Muse)', () => {
     expect(assistant(main)).toContain('提醒一下：明天上午有个会。')
     expect(routerSystem).toContain('Your name is 阿青')
     expect(routerSystem).toContain('说话直接')
+    expect(routerSystem).toContain('严禁演人设 / 严禁自我标榜')
+    expect(routerSystem).toContain('话量对等（Mirror Length）')
+    expect(routerSystem).toContain('封杀四大 AI 腔与网文腔顽疾')
   })
 })
 

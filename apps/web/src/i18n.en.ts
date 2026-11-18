@@ -1351,4 +1351,10 @@ export const EN: Record<string, string> = {
   "拖到哪就按哪种口气接话": "Drag anywhere to set how it replies",
   "日常说话的语气偏向，松手即生效": "Everyday tone of voice; applies as soon as you let go",
   "聊几轮后出现曲线": "Curve appears after a few turns",
+  "纯感性口语续写，不开启思考推理以保证秒回与自然语感": "Expressive spoken continuation; thinking stays off for instant, natural replies",
+  "零思考秒出，可单配高语感模型": "Instant replies with thinking off; can use a dedicated expressive model",
+  "开启这一层": "Enable this tier",
+  "关闭后跳过独立声带渲染，由主 Agent 直接发消息": "When off, skips the voice tier and the main agent replies directly",
+  "跟主 Agent 一样": "Same as Main agent",
+  "默认微高温度（0.88）让语气更灵动自然": "Slightly higher default temperature (0.88) for a livelier, more natural tone",
 }

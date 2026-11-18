@@ -58,6 +58,7 @@ function reasoningDesc(level: ReasoningLevel): string {
 function roleDefaultOptionLabel(id: RoleId): string {
   switch (id) {
     case 'router': return tx('默认（自动）')
+    case 'voice': return tx('默认（不思考）')
     case 'worker':
     case 'subagent': return tx('默认（深度思考）')
     case 'reviewer':
@@ -72,6 +73,7 @@ function roleDefaultOptionLabel(id: RoleId): string {
 function roleDefaultDesc(id: RoleId): string {
   switch (id) {
     case 'router': return tx('闲聊与派单直接秒回，复杂分析时自动开启思考')
+    case 'voice': return tx('纯感性口语续写，不开启思考推理以保证秒回与自然语感')
     case 'worker': return tx('后台执行具体任务，默认全力深度思考减少重试')
     case 'subagent': return tx('Worker 派生的子任务，默认延续深度推理')
     case 'reviewer':
@@ -97,6 +99,7 @@ function roleThinkingTag(s: RoleSpec, config: RoleConfig): string {
     }
   }
   switch (s.id) {
+    case 'voice': return tx('不思考')
     case 'worker':
     case 'subagent': return tx('深度思考')
     case 'reviewer':
@@ -110,6 +113,7 @@ function roleThinkingTag(s: RoleSpec, config: RoleConfig): string {
 
 function roleSubFallback(id: RoleId): string {
   switch (id) {
+    case 'voice': return tx('零思考秒出，可单配高语感模型')
     case 'worker': return tx('后台干真活默认全力深想，减少翻车重试')
     case 'subagent': return tx('延续深度推理')
     case 'watchdog': return tx('快速巡检不阻塞主流程')
@@ -178,14 +182,14 @@ function RoleList({ specs, labelOf, roles, providers }: { specs: RoleSpec[]; lab
     const resolved = roles.resolved[s.id]
     const model = config.enabled ? config.chain[0]?.model : undefined
     const thinking = s.kind === 'language' ? roleThinkingTag(s, config) : ''
-    if (s.optional && s.kind !== 'language' && !config.enabled) return <span className="text-[13px] text-faint">{tx('已关闭')}</span>
+    if (s.optional && (s.kind !== 'language' || s.id === 'voice') && !config.enabled) return <span className="text-[13px] text-faint">{tx('已关闭')}</span>
     if (model) {
       if (s.kind === 'language') {
         return <span className="text-[13px] text-faint"><span className="font-mono font-medium text-fg">{model}</span>{config.chain.length > 1 ? ` +${config.chain.length - 1}` : ''} · {thinking}</span>
       }
       return <span className="font-mono text-[13px] font-medium">{model}{config.chain.length > 1 ? <span className="font-sans font-normal text-faint"> +{config.chain.length - 1}</span> : null}</span>
     }
-    if (s.optional && s.kind === 'language') return <span className="text-[13px] text-faint">{`${tx('主 Agent 兼做')} · ${thinking}`}</span>
+    if (s.optional && !s.inherits && s.kind === 'language') return <span className="text-[13px] text-faint">{`${tx('主 Agent 兼做')} · ${thinking}`}</span>
     if (resolved) {
       const followId = s.inherits ?? resolved.source
       const base = followId === 'router' ? tx('跟主 Agent') : tx('跟{0}', short(labelOf(followId)))
@@ -194,7 +198,7 @@ function RoleList({ specs, labelOf, roles, providers }: { specs: RoleSpec[]; lab
     return <span className="text-[13px] text-faint">{s.optional ? tx('没开') : tx('还没选')}</span>
   }
   const layerSub = (s: RoleSpec) => {
-    const advice = s.advice || (!s.duty.includes('思考') ? roleSubFallback(s.id) : '')
+    const advice = (s.id === 'voice' ? roleSubFallback('voice') : s.advice) || (!s.duty.includes('思考') ? roleSubFallback(s.id) : '')
     return <span className="line-clamp-1">{s.duty}{advice ? ` · ${advice}` : ''}</span>
   }
   const layerRow = (s: RoleSpec) => <Row key={s.id} href={`#/settings/roles/${s.id}`} label={s.label} sub={layerSub(s)}>{valueOf(s)}</Row>
@@ -302,17 +306,17 @@ function RoleDetail({ spec, labelOf, config, resolved, providers }: { spec: Role
   const detailLevels = allowedLevels(info)
   const curReasoning = normalizeReasoning(draft.reasoning)
   const optNum = (k: 'temperature' | 'maxOutputTokens' | 'dailyTokenLimit' | 'dailyCostLimitUsd') => ({
-    value: draft[k] ?? '', placeholder: k === 'temperature' || k === 'maxOutputTokens' ? tx('默认') : tx('不限'),
+    value: draft[k] ?? '', placeholder: k === 'temperature' ? (spec.id === 'voice' ? '0.88' : tx('默认')) : k === 'maxOutputTokens' ? tx('默认') : tx('不限'),
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setDraft(d => ({ ...d, [k]: e.target.value === '' ? undefined : Number(e.target.value) })),
   })
   return <Page title={spec.label}>
     <p className="-mt-3 text-[13px] text-muted">{spec.duty}{spec.advice ? ` · ${spec.advice}` : ''}{resolved && resolved.today.tokens > 0 ? tx(' · 今天 {0} tokens{1}', fmtNum(resolved.today.tokens), resolved.today.costUsd ? `，${fmtUsd(resolved.today.costUsd)}` : '') : ''}</p>
-    {spec.optional && <Section><Row label={tx('启用这一层')}><Toggle label={tx('启用这一层')} checked={draft.enabled} onChange={enabled => setDraft(d => ({ ...d, enabled }))} /></Row></Section>}
+    {spec.optional && <Section><Row label={spec.id === 'voice' ? tx('开启这一层') : tx('启用这一层')} sub={spec.id === 'voice' ? tx('关闭后跳过独立声带渲染，由主 Agent 直接发消息') : undefined}><Toggle label={spec.id === 'voice' ? tx('开启这一层') : tx('启用这一层')} checked={draft.enabled} onChange={enabled => setDraft(d => ({ ...d, enabled }))} /></Row></Section>}
     <Section title={tx('模型')} foot={draft.chain.length > 1 ? tx('主模型出错或超出上限时，按顺序换备用的。') : undefined}>
       {draft.chain.map((ref, i) => <ChainRow key={i} index={i} value={ref} role={spec.id} kind={spec.kind} providers={providers}
         onChange={v => setChain(draft.chain.map((r, j) => (j === i ? v : r)))} onRemove={() => setChain(draft.chain.filter((_, j) => j !== i))} />)}
-      {!draft.chain.length && <Row label={spec.inherits && !spec.optional ? tx('跟{0}一样', labelOf(spec.inherits)) : tx('还没选模型')} sub={spec.optional ? tx('配上模型才会启用这一层') : tx('想单独用一个模型就在下面选')}>
-        {!spec.optional && resolved?.model.model && <span className="font-mono text-[13px] font-medium">{resolved.model.model}</span>}
+      {!draft.chain.length && <Row label={spec.inherits ? (spec.inherits === 'router' && spec.id === 'voice' ? tx('跟主 Agent 一样') : tx('跟{0}一样', labelOf(spec.inherits))) : tx('还没选模型')} sub={spec.optional && !spec.inherits ? tx('配上模型才会启用这一层') : tx('想单独用一个模型就在下面选')}>
+        {(spec.inherits || !spec.optional) && resolved?.model.model && <span className="font-mono text-[13px] font-medium">{resolved.model.model}</span>}
       </Row>}
       {draft.chain.length < 5 && providers.length > 0 && <button type="button" onClick={() => setChain([...draft.chain, { providerId: providers[0]!.id, model: '' }])}
         className="flex min-h-[44px] w-full items-center gap-2 text-left text-sm text-muted hover:text-fg"><Plus size={16} />{draft.chain.length ? tx('加一个备用模型') : tx('选一个模型')}</button>}
@@ -330,7 +334,7 @@ function RoleDetail({ spec, labelOf, config, resolved, providers }: { spec: Role
               {detailLevels.map(l => <option key={l} value={l}>{reasoningLabel(l, false)}</option>)}
             </SelectInput>
           </Row>}
-        <Row label={tx('温度')}><NumberInput min={0} max={2} step={0.1} {...optNum('temperature')} aria-label={tx('温度')} /></Row>
+        <Row label={tx('温度')} sub={spec.id === 'voice' ? tx('默认微高温度（0.88）让语气更灵动自然') : undefined}><NumberInput min={0} max={2} step={0.1} {...optNum('temperature')} aria-label={tx('温度')} /></Row>
         <Row label={tx('单次最大输出')} sub="token"><NumberInput min={1} className="w-[100px]" {...optNum('maxOutputTokens')} aria-label={tx('单次最大输出')} /></Row>
       </>}
       <Row label={tx('每天的 token 上限')}><NumberInput min={1} className="w-[120px]" {...optNum('dailyTokenLimit')} aria-label={tx('每天的 token 上限')} /></Row>

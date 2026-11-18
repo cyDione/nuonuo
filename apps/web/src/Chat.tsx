@@ -235,6 +235,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
             <When m={m} prev={messages[i - 1]} name={persona.name} />
             {editing === m.id ? <EditBox m={m} onCancel={() => setEditing(null)} onSave={content => { setEditing(null); void act(`/messages/${m.id}/edit`, { content }) }} />
               : <Item m={m} fresh={m.createdAt > mountedAt} name={persona.name}
+              onBubbleStep={() => { if (atBottom.current) toBottom(true) }}
               tapback={m.role !== 'user' || m.meta.source && m.meta.source !== 'webchat' ? undefined : m.meta.tapback}
               actions={{
                 quote: () => { setQuote(m); inputRef.current?.focus() },
@@ -318,8 +319,48 @@ function Bubble({ fresh, aside, children }: { fresh?: boolean; aside?: React.Rea
 
 type Actions = { quote(): void; edit(): void; recall(): void; regenerate(): void; reedit(): void; canReedit: boolean }
 const RECALL_MS = 10 * 60_000
+/** Remembers multi-bubble assistant messages that have already appeared or finished their staggered typing sequence so re-renders never replay the animation. */
+const staggeredDoneIds = new Set<string>()
+const isReducedMotion = () =>
+  (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) ||
+  getPrefs().reduceMotion
 
-function Item({ m, fresh, tapback, name, actions }: { m: Message; fresh: boolean; tapback?: string | undefined; name: string; actions: Actions }) {
+function Item({ m, fresh, tapback, name, actions, onBubbleStep }: { m: Message; fresh: boolean; tapback?: string | undefined; name: string; actions: Actions; onBubbleStep?: (() => void) | undefined }) {
+  const bubbles = m.role === 'assistant' && Array.isArray(m.meta.bubbles)
+    ? m.meta.bubbles.filter((b): b is string => typeof b === 'string' && b.trim().length > 0)
+    : []
+  const [visibleCount, setVisibleCount] = useState(() => {
+    if (!fresh || bubbles.length <= 1 || isReducedMotion() || staggeredDoneIds.has(m.id)) {
+      if (bubbles.length > 1) staggeredDoneIds.add(m.id)
+      return Math.max(1, bubbles.length)
+    }
+    return 1
+  })
+  useEffect(() => {
+    if (bubbles.length <= 1) return
+    if (!fresh || isReducedMotion() || staggeredDoneIds.has(m.id)) {
+      staggeredDoneIds.add(m.id)
+      if (visibleCount < bubbles.length) setVisibleCount(bubbles.length)
+      return
+    }
+    if (visibleCount >= bubbles.length) {
+      staggeredDoneIds.add(m.id)
+      return
+    }
+    const delayMs = Math.min(780, Math.max(320, Array.from(bubbles[visibleCount]!).length * 38))
+    const timer = setTimeout(() => {
+      setVisibleCount(c => {
+        const next = Math.min(bubbles.length, c + 1)
+        if (next >= bubbles.length) staggeredDoneIds.add(m.id)
+        return next
+      })
+    }, delayMs)
+    return () => clearTimeout(timer)
+  }, [m.id, fresh, bubbles.length, visibleCount])
+  useLayoutEffect(() => {
+    if (bubbles.length > 1 && visibleCount > 1 && fresh && !isReducedMotion()) onBubbleStep?.()
+  }, [visibleCount, bubbles.length, fresh])
+
   const external = m.role === 'user' && m.meta.source && m.meta.source !== 'webchat'
   // A routine firing is the owner's own standing request: a quiet line, not a message from someone.
   if (external && m.meta.source === 'cron') return <div className={cx('flex items-center gap-3 py-2 text-xs text-faint', fresh && 'anim-fade')}>
@@ -350,10 +391,10 @@ function Item({ m, fresh, tapback, name, actions }: { m: Message; fresh: boolean
       </div>
     </div>}
   </div>
-  const bubbles = Array.isArray(m.meta.bubbles) ? m.meta.bubbles.filter((b): b is string => typeof b === 'string' && b.trim().length > 0) : []
   return <div className="msg space-y-1.5">
     {bubbles.length > 1 ? <div className="space-y-1.5">
-      {bubbles.map((b, idx) => <Bubble key={idx} fresh={fresh} aside={idx === bubbles.length - 1 ? <MsgActions m={m} actions={actions} /> : undefined}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{b}</ReactMarkdown></div></Bubble>)}
+      {bubbles.slice(0, visibleCount).map((b, idx) => <Bubble key={idx} fresh={fresh} aside={visibleCount >= bubbles.length && idx === bubbles.length - 1 ? <MsgActions m={m} actions={actions} /> : undefined}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{b}</ReactMarkdown></div></Bubble>)}
+      {visibleCount < bubbles.length && <div className="mt-1.5"><Bubble><Typing /></Bubble></div>}
     </div> : <Bubble fresh={fresh} aside={<MsgActions m={m} actions={actions} />}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div></Bubble>}
     {m.meta.card && <div className={cx(fresh && 'anim-rise')}><ChatCard card={m.meta.card} /></div>}
     {m.meta.open && <OpenChip open={m.meta.open} />}

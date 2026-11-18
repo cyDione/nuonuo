@@ -196,26 +196,31 @@ describe('心境 built in', () => {
     // Four corners: 左上 (-1, +1) 温和, 右上 (+1, +1) 风趣, 左下 (-1, -1) 沉静, 右下 (+1, -1) 犀利
     setMoodTone(state, { x: -0.8, y: 0.6 })
     expect(moodView(state).tone).toEqual({ x: -0.8, y: 0.6, id: 'warm', label: '温和', strength: 100 })
-    expect(await ext.inlineContext!('烦死了，又报错了', undefined)).toContain('["先别急，歇口气", "剩下的交给我收尾就行"]')
+    const warmCtx = await ext.inlineContext!('烦死了，今天累死了', undefined)
+    expect(warmCtx).toContain('["呜，快过来让我抱抱嘛", "今天被折腾坏了吧", "快去洗个热水澡钻进被窝，我陪着你"]')
+    expect(warmCtx).not.toMatch(/咋了|好嘞|瘫会儿/)
 
     setMoodTone(state, { x: 0.8, y: 0.6 })
     expect(moodView(state).tone).toEqual({ x: 0.8, y: 0.6, id: 'witty', label: '风趣', strength: 100 })
-    expect(await ext.inlineContext!('今天好累', undefined)).toContain('["看出来了，今天脑细胞已经打卡下班了", "发过来吧，最后这点我替你收了"]')
+    expect(await ext.inlineContext!('今天好累', undefined)).toContain('["哟，大忙人终于舍得下班啦，怎么搞得这么惨呀", "是不是被老板欺负了，才跑来找我求安慰的"]')
 
     setMoodTone(state, { x: -0.8, y: -0.6 })
     expect(moodView(state).tone).toEqual({ x: -0.8, y: -0.6, id: 'calm', label: '沉静', strength: 100 })
-    expect(await ext.inlineContext!('在吗', undefined)).toContain('["嗯，先放着吧", "我在，有急事替你盯着"]')
+    expect(await ext.inlineContext!('在吗', undefined)).toContain('["嗯"]')
 
     setMoodTone(state, { x: 0.8, y: -0.6 })
     expect(moodView(state).tone).toEqual({ x: 0.8, y: -0.6, id: 'sharp', label: '犀利', strength: 100 })
-    expect(await ext.inlineContext!('接口报错 500', undefined)).toContain('["这报错写得挺直白，配置漏了一行", "交给我改吧，两分钟的事"]')
+    const sharpBlock = await ext.inlineContext!('接口报错 500', undefined)
+    expect(sharpBlock).toContain('["改完了，测试全过"]')
+    expect(sharpBlock).toContain('严禁装酷端架子或标榜自己说话直')
+    expect(sharpBlock).not.toContain('交给我改吧')
 
     // Even when dynamic mood shifts are disabled, off-center tone pad still injects <mood> tone guidance
     setMoodEnabled(state, false)
     const toneOnly = await ext.inlineContext!('帮我看看配置', undefined)
     expect(toneOnly).toContain('<mood>')
     expect(toneOnly).toContain('犀利')
-    expect(toneOnly).toContain('["这报错写得挺直白，配置漏了一行", "交给我改吧，两分钟的事"]')
+    expect(toneOnly).toContain('["改完了，测试全过"]')
 
     // Snapping back to origin (< 0.06) returns to 自然 and stays silent when mood is disabled
     setMoodTone(state, { x: 0.02, y: -0.03 })

@@ -35,7 +35,7 @@ export interface ProviderView extends Omit<ProviderRecord, 'secretRef'> { hasKey
 export interface UsageSummaryRow { role: string; providerId: string; model: string; calls: number; failures: number
   inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number; costUsd: number | null }
 
-export type CallIntent = 'chat' | 'task' | 'triage' | 'distill' | 'ideas' | 'goals' | 'title' | 'compact' | 'filter' | 'review' | 'watchdog' | 'vision'
+export type CallIntent = 'chat' | 'voice' | 'task' | 'triage' | 'distill' | 'ideas' | 'goals' | 'title' | 'compact' | 'filter' | 'review' | 'watchdog' | 'vision'
 export interface CallContext { ref?: string; intent?: CallIntent }
 
 const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504, 529])
@@ -82,6 +82,7 @@ function extractLastUserText(options: LanguageModelV4CallOptions): string {
  */
 export function resolveAutoReasoning(role: RoleId, options: LanguageModelV4CallOptions, context: CallContext = {}): ConcreteReasoning {
   switch (context.intent) {
+    case 'voice':
     case 'triage':
     case 'title':
     case 'compact':
@@ -104,7 +105,7 @@ export function resolveAutoReasoning(role: RoleId, options: LanguageModelV4CallO
 
   if (role === 'worker' || role === 'subagent') return 'high'
   if (role === 'reviewer' || role === 'watchdog' || role === 'vision') return 'low'
-  if (role === 'filter' || role === 'embedding' || role === 'transcribe' || role === 'speech') return 'none'
+  if (role === 'voice' || role === 'filter' || role === 'embedding' || role === 'transcribe' || role === 'speech') return 'none'
 
   const raw = extractLastUserText(options).replace(/\n*<now>[\s\S]*?<\/now>\s*$/i, '').trim()
   if (!raw) return 'none'

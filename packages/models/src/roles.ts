@@ -1,7 +1,7 @@
 /** The execution layers of the system and the per-layer model configuration a person sets in Settings → Models. */
 import { z } from 'zod'
 
-export const ROLE_IDS = ['router', 'worker', 'subagent', 'filter', 'reviewer', 'watchdog', 'summarizer', 'embedding', 'vision', 'transcribe', 'speech'] as const
+export const ROLE_IDS = ['router', 'voice', 'worker', 'subagent', 'filter', 'reviewer', 'watchdog', 'summarizer', 'embedding', 'vision', 'transcribe', 'speech'] as const
 export type RoleId = typeof ROLE_IDS[number]
 
 export type RoleKind = 'language' | 'embedding' | 'transcription' | 'speech'
@@ -21,6 +21,7 @@ export interface RoleSpec {
 
 export const ROLES: readonly RoleSpec[] = [
   { id: 'router', label: '主 Agent（Router）', duty: '路由、批量决策、对话回复', advice: '中等、快、缓存友好；不执行具体任务', kind: 'language' },
+  { id: 'voice', label: '声带（Voice）', duty: '把回复草稿转译为鲜活口语短气泡', advice: '零思考秒出，可单配高语感对话模型；为空时跟主 Agent，关闭时不走声带层', inherits: 'router', optional: true, kind: 'language' },
   { id: 'worker', label: '执行（Worker）', duty: '执行具体任务（编码、调研、操作）', advice: '最强的模型', inherits: 'router', kind: 'language' },
   { id: 'subagent', label: '子任务（Subagent）', duty: 'Worker 内部派生的子任务', advice: '默认继承 Worker', inherits: 'worker', kind: 'language' },
   { id: 'filter', label: '过滤（Filter）', duty: 'Slow Path：外部事件是否值得处理', advice: '最便宜，可用本地模型；关闭时由主 Agent 兼做', optional: true, kind: 'language' },
@@ -47,6 +48,7 @@ export type ConcreteReasoning = Exclude<ReasoningLevel, 'auto'>
 
 const DEFAULT_REASONING: Readonly<Record<RoleId, ReasoningLevel>> = {
   router: 'auto',
+  voice: 'none',
   worker: 'high',
   subagent: 'high',
   reviewer: 'low',

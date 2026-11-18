@@ -45,10 +45,21 @@ describe('resolveRole', () => {
     expect(resolveRole('subagent', configs)).toMatchObject({ source: 'router', config: { temperature: 0.2, dailyTokenLimit: 100 } })
     expect(resolveRole('worker', configs)?.source).toBe('router')
   })
-  it('leaves optional layers off without their own model', () => {
+  it('leaves optional layers off without their own model, while voice inherits router by default and can be switched off', () => {
     expect(resolveRole('filter', { router: cfg('p', 'small') })).toBeUndefined()
     expect(resolveRole('embedding', { router: cfg('p', 'small') })).toBeUndefined()
     expect(resolveRole('filter', { filter: cfg('p', 'tiny', { enabled: false }) })).toBeUndefined()
+    expect(resolveRole('voice', { router: cfg('p', 'small') })).toMatchObject({
+      role: 'voice',
+      source: 'router',
+      config: { chain: [{ providerId: 'p', model: 'small' }], reasoning: 'none' },
+    })
+    expect(resolveRole('voice', { router: cfg('p', 'small'), voice: cfg('p', 'vivid', { temperature: 0.88 }) })).toMatchObject({
+      role: 'voice',
+      source: 'voice',
+      config: { chain: [{ providerId: 'p', model: 'vivid' }], reasoning: 'none', temperature: 0.88 },
+    })
+    expect(resolveRole('voice', { router: cfg('p', 'small'), voice: RoleConfigSchema.parse({ enabled: false }) })).toBeUndefined()
   })
 })
 
@@ -478,6 +489,7 @@ describe('reasoning defaults, auto intent, capabilities and 400 self-healing', (
   it('assigns per-layer default reasoning without polluting inherited layers, and maps background intents accurately', async () => {
     const { defaultReasoningOf } = await import('./roles')
     expect(defaultReasoningOf('router')).toBe('auto')
+    expect(defaultReasoningOf('voice')).toBe('none')
     expect(defaultReasoningOf('worker')).toBe('high')
     expect(defaultReasoningOf('subagent')).toBe('high')
     expect(defaultReasoningOf('reviewer')).toBe('low')

@@ -91,8 +91,9 @@ describe('providers and layers', () => {
     const put = await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: created.provider.id, model: 'claude-sonnet-5-5' }] }) })
     expect(put.status).toBe(200)
     const roles = await (await call('/api/roles')).json() as any
-    expect(roles.defaults).toMatchObject({ router: 'auto', worker: 'high', subagent: 'high', reviewer: 'low', watchdog: 'low', summarizer: 'auto', filter: 'none' })
+    expect(roles.defaults).toMatchObject({ router: 'auto', voice: 'none', worker: 'high', subagent: 'high', reviewer: 'low', watchdog: 'low', summarizer: 'auto', filter: 'none' })
     expect(roles.resolved.router).toMatchObject({ source: 'router', effectiveReasoning: 'auto', defaultReasoning: 'auto', reasoningInfo: { supported: true, canDisable: true } })
+    expect(roles.resolved.voice).toMatchObject({ source: 'router', model: { model: 'claude-sonnet-5-5' }, effectiveReasoning: 'none', defaultReasoning: 'none' })
     expect(roles.resolved.worker).toMatchObject({ source: 'router', model: { model: 'claude-sonnet-5-5' }, effectiveReasoning: 'high', defaultReasoning: 'high' })
     expect(roles.resolved.filter).toBeNull()
     const rInfo = await (await call(`/api/models/reasoning-info?providerId=${created.provider.id}&model=gemini-4-argon-high`)).json() as any

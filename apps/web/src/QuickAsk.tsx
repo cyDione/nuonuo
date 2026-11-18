@@ -70,6 +70,7 @@ export function QuickAsk() {
   }
 
   const answer = reply?.content
+  const bubbles = Array.isArray(reply?.meta?.bubbles) ? reply.meta.bubbles.filter((b): b is string => typeof b === 'string' && b.trim().length > 0) : []
   return <div className="flex h-dvh items-start justify-center p-3">
     <div className="w-full max-w-[600px] overflow-hidden rounded-[22px] border border-line bg-panel/95 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.45)] backdrop-blur-xl" onKeyDown={onKey}>
       <div className="drag flex items-center gap-3 px-4 py-3.5">
@@ -80,7 +81,8 @@ export function QuickAsk() {
           className={cx('press no-drag flex size-9 shrink-0 items-center justify-center rounded-full transition-colors', text.trim() ? 'bg-accent text-accent-fg' : 'bg-sunken text-faint')}><ArrowUp size={17} /></button>
       </div>
       {sentAt ? <div className="anim-rise max-h-[50vh] overflow-y-auto border-t border-line px-5 py-4 text-[14px]">
-        {answer ? <div className="prose-chat selectable"><ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown></div>
+        {bubbles.length > 1 ? <div className="space-y-1.5">{bubbles.map((b, i) => <div key={i} className="prose-chat selectable"><ReactMarkdown remarkPlugins={[remarkGfm]}>{b}</ReactMarkdown></div>)}</div>
+          : answer ? <div className="prose-chat selectable"><ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown></div>
           : <span className="flex items-center gap-2 text-faint">{tx('已交给{0}，它在想…', persona.name)}</span>}
       </div> : picks.length > 0 && <div className="border-t border-line px-2 pt-2 pb-1.5">
         <div className="px-2.5 pb-1 text-[11px] font-medium text-faint">{tx('接着聊')}</div>
