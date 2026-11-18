@@ -104,6 +104,7 @@ describe('main conversation (Muse)', () => {
     expect(routerSystem).toContain('说话直接')
     expect(routerSystem).toContain('严禁演人设 / 严禁自我标榜')
     expect(routerSystem).toContain('话量对等（Mirror Length）')
+    expect(routerSystem).toContain('1 个完整清晰的单气泡')
     expect(routerSystem).toContain('封杀四大 AI 腔与网文腔顽疾')
   })
 })

@@ -16,7 +16,7 @@ import { proactiveSettings, saveProactiveSettings } from './proactive'
 import type { Memory, MemoryTrust } from './memory'
 import { sandboxApplies, sandboxCommand, type SandboxMount } from './sandbox'
 import type { Reviewer } from './review'
-import { VoiceRenderer } from './voice'
+import { shouldBypassVoice, VoiceRenderer } from './voice'
 
 const CONTEXT_MESSAGES = 6
 /** Retries of a failed router turn, the first after routerRetryMs(), then doubling. */
@@ -233,11 +233,11 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     tools: () => wrapSpeaking({
       ...(ext.routerTools?.() ?? {}),
       reply: tool({
-        description: 'Post a message to the owner — the only way to speak. Prefer `bubbles` (2–4 short spoken bubbles for chatting/venting/reporting, or 1 bubble for a closing ack) for chat; use `text` for a single block or structured markdown. It also goes out to the source (e.g. a GitHub comment) when reply_to is a message from that source, or ticket_id is work that came from it; otherwise it stays in the web. The owner sees only your text: the full result and files stay in the work\'s details.',
+        description: 'Post a message to the owner — the only way to speak. For casual daily chat/venting, prefer `bubbles` (1–3 short spoken bubbles, or 1 bubble for a closing ack); when reporting on a task (`ticket_id` is set) or sending any structured result (lists, code blocks, tables, headings, or detailed explanations), ALWAYS use `text` to send 1 complete, single bubble (never split into `bubbles`). It also goes out to the source (e.g. a GitHub comment) when reply_to is a message from that source, or ticket_id is work that came from it; otherwise it stays in the web. The owner sees only your text: the full result and files stay in the work\'s details.',
         inputSchema: z.object({
           conversation_id: z.string().optional().describe('Required unless ticket_id is given'),
-          bubbles: z.array(z.string().trim().min(1)).min(1).max(4).optional().describe('1–4 short spoken chat bubbles (4–18 chars each, no trailing period) for natural WeChat replies'),
-          text: z.string().optional().describe('Single-bubble reply text (use when sending one block or structured markdown)'),
+          bubbles: z.array(z.string().trim().min(1)).min(1).max(4).optional().describe('1–3 short spoken chat bubbles (4–18 chars each, no trailing period) ONLY for casual daily chat; do NOT use for task reports (`ticket_id`) or structured content (lists/code/tables/headings)'),
+          text: z.string().optional().describe('Single-bubble complete reply text (ALWAYS use this when `ticket_id` is set or when sending lists, code blocks, tables, headings, or detailed results)'),
           reply_to: z.string().optional().describe('trigger_id of the message you answer'),
           ticket_id: z.string().optional().describe('The work this message is about'),
           detailed: z.boolean().optional().describe('Only when the owner explicitly asked for a long, detailed answer in chat'),
@@ -257,21 +257,34 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
           if (isChat && length > limit) {
             return { ok: false, error: `Not sent: about ${length} words; chat replies must stay under ${limit}. Say only the outcome and key facts${ticket_id ? ' — the full result stays in the work\'s details' : ''}, then call reply again.` }
           }
+          const forceSingleBubble =
+            Boolean(ticket_id) ||
+            Boolean(detailed) ||
+            shouldBypassVoice({
+              draftText: bodyText,
+              isChatSource: isChat,
+              detailed,
+              ticketId: ticket_id,
+            })
           let finalText = bodyText
-          let finalBubbles = cleanedBubbles
+          let finalBubbles = forceSingleBubble ? undefined : cleanedBubbles
           if (isChat && !detailed) {
             const rendered = await voiceRenderer.render({
               conversationId,
-              draftBubbles: cleanedBubbles,
+              draftBubbles: forceSingleBubble ? undefined : cleanedBubbles,
               draftText: bodyText,
               replyTo: reply_to,
+              ticketId: ticket_id,
               isChatSource: isChat,
               detailed,
             })
-            if (!rendered.bypassed && rendered.bubbles.length) {
+            if (!forceSingleBubble && !rendered.bypassed && rendered.bubbles.length) {
               finalBubbles = rendered.bubbles
               finalText = rendered.text
             }
+          }
+          if (forceSingleBubble) {
+            finalBubbles = undefined
           }
           return { ok: true, message_id: engine.reply({ conversationId, text: finalText, ...(finalBubbles ? { bubbles: finalBubbles } : {}), callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}),
             ...(open || card ? { extra: { ...(open ? { open } : {}), ...(card ? { card } : {}) } } : {}) }) }

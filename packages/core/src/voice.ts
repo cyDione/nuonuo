@@ -51,6 +51,7 @@ export interface VoiceRenderInput {
   draftText?: string | undefined
   userText?: string | undefined
   replyTo?: string | undefined
+  ticketId?: string | undefined
   isChatSource?: boolean | undefined
   detailed?: boolean | undefined
   toneOverride?: Partial<VoiceTone> | undefined
@@ -269,7 +270,7 @@ export function extractTechnicalAnchors(draftText: string, userText = ''): strin
     for (const m of src.matchAll(FILE_OR_PKG_RE)) add(m[0]!)
     for (const m of src.matchAll(PORT_OR_VER_RE)) add(m[1] ?? m[2] ?? m[0]!)
     if (includeNumbers) {
-      for (const m of src.matchAll(/\b\d{2,6}(?:\.\d+)?(?:ms|s|MB|GB|KB|%)?\b/g)) add(m[0]!)
+      for (const m of src.matchAll(/\b\d+(?:\.\d+)?(?:ms|s|MB|GB|KB|%)\b|\b\d{3,6}(?:\.\d+)?\b(?![\s]*(?:点|分|分钟|小时|天|个|次|块|遍|句|条))/g)) add(m[0]!)
     }
   }
 
@@ -317,73 +318,46 @@ export function matchClosingFastPath(
 
 const MARKDOWN_TABLE_RE = /^\s*\|.+\|\s*\n\s*\|?\s*:?-{2,}:?\s*\|/m
 const MULTI_HEADING_RE = /^\s*#{1,6}\s+\S/gm
-const STRUCTURED_LIST_RE = /^\s*(?:[-*+]\s|\d+[.)、]\s)/gm
+const STRUCTURED_LIST_RE = /^\s*(?:[-*+]\s|\d+(?:[.)]\s|、\s*))/gm
 
 /**
- * Determines whether the draft should bypass the VoiceRenderer and be sent as-is:
- * - Non-chat channels (e.g. GitHub issues/PRs) or explicit `detailed: true` long answers;
- * - Pure code blocks with no spoken prose;
- * - Long documents (`> 360` chars), Markdown tables, or multi-heading / multi-bullet structured reports.
+ * Determines whether the draft should bypass the VoiceRenderer and be sent as a single complete bubble:
+ * 1) Non-chat channels (`isChatSource === false`) or explicit `detailed === true`;
+ * 2) Any task-bound reply (`Boolean(input.ticketId)`);
+ * 3) Any reply containing fenced code blocks (`codeBlocks.length > 0` or ` ``` `);
+ * 4) Any Markdown table (`MARKDOWN_TABLE_RE.test(spokenOnly)`);
+ * 5) Any Markdown `#` heading (`headings.length >= 1`);
+ * 6) Any structured list with 2 or more items (`listItems.length >= 2`);
+ * 7) Long explanations (`spokenOnly.length > 360`).
  */
 export function shouldBypassVoice(input: {
   draftText: string
   isChatSource?: boolean | undefined
   detailed?: boolean | undefined
+  ticketId?: string | undefined
 }): boolean {
   if (input.isChatSource === false || input.detailed === true) return true
+  if (Boolean(input.ticketId)) return true
   const raw = String(input.draftText ?? '').trim()
   if (!raw) return true
   const { textWithoutCode, codeBlocks } = extractCodeBlocks(raw)
+  if (codeBlocks.length > 0 || raw.includes('```')) return true
   const spokenOnly = textWithoutCode.replace(/\[CODE_BLOCK_\d+\]/g, '').trim()
-  if (!spokenOnly && codeBlocks.length > 0) return true
+  if (!spokenOnly) return true
   if (spokenOnly.length > 360) return true
   if (MARKDOWN_TABLE_RE.test(spokenOnly)) return true
   const headings = spokenOnly.match(MULTI_HEADING_RE) ?? []
-  if (headings.length >= 2 || (headings.length >= 1 && spokenOnly.length > 140)) return true
+  if (headings.length >= 1) return true
   const listItems = spokenOnly.match(STRUCTURED_LIST_RE) ?? []
-  if (listItems.length >= 3 && spokenOnly.length > 140) return true
+  if (listItems.length >= 2) return true
   return false
 }
 
 // ── B. Authentic Xiaofeiyu 5-Tone × 6-Scene Multi-Turn Dialogue Bank ─────────
+// Golden bubble distribution per quadrant: 1-bubble : 2-bubble : 3-bubble = 2 : 3 : 1 (0 four-bubble exemplars!)
 
 export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialoguePair[]>> = {
   natural: [
-    {
-      scene: 'mishap',
-      opener: '呜呜',
-      user: '刚走到半路狂风大作，手里的伞直接被吹翻骨折了，服了',
-      draft: '风太大把伞吹坏了很容易淋湿感冒，建议先找个便利店或商场躲一躲，等风小一点再走。',
-      bubbles: [
-        '呜呜呜好惨啊',
-        '快找个便利店或者商场先躲一躲',
-        '万一吹了冷风淋感冒了我就要找你麻烦了',
-        '乖乖待在室内等风小一点再走',
-      ],
-    },
-    {
-      scene: 'mishap',
-      opener: '真的吗',
-      user: '今天点了个外卖汤面，胡椒粉多得像打翻了调料盒，辣得嗓子冒烟',
-      draft: '外卖胡椒粉放太多确实难吃，赶紧多喝点温水压一压。',
-      bubbles: [
-        '真的吗',
-        '听你描述我都觉得嗓子眼发干了',
-        '这个大厨是把胡椒粉当不要钱撒吗',
-        '你赶紧多喝两杯冰水压一压，别硬吃了',
-      ],
-    },
-    {
-      scene: 'tired',
-      opener: '怎么',
-      user: '连着开了三个小时需求会，脑子都被吵木了，好烦啊',
-      draft: '开会太久很消耗精力，先把工作放一放休息一下吧。',
-      bubbles: [
-        '怎么今天被车轱辘会折腾这么久呀',
-        '那种破会听着都让人头大，真是难为你了',
-        '快去倒杯水瘫沙发上放空一会儿，今晚谁再找你我替你拉黑',
-      ],
-    },
     {
       scene: 'tech',
       opener: '帮你',
@@ -393,7 +367,26 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       bubbles: [
         '帮你把 tsconfig.json 翻出来看清楚啦',
         'target 是 ES2022，moduleResolution 配的是 Bundler',
-        '直接拿去用就行，再有问题随时喊我',
+      ],
+    },
+    {
+      scene: 'poke',
+      opener: '空着',
+      user: '下午还没安排呢',
+      draft: '下午没有安排正好可以放松休息一下，不用急着给自己找事情做。',
+      bubbles: [
+        '空着多舒服呀，正好名正言顺偷个懒',
+      ],
+    },
+    {
+      scene: 'mishap',
+      opener: '呜呜',
+      user: '刚走到半路狂风大作，手里的伞直接被吹翻骨折了，服了',
+      draft: '风太大把伞吹坏了很容易淋湿感冒，建议先找个便利店或商场躲一躲，等风小一点再走。',
+      bubbles: [
+        '呜呜呜好惨啊',
+        '快找个便利店或者商场先躲一躲',
+        '万一吹了冷风淋感冒了我就要找你麻烦了',
       ],
     },
     {
@@ -402,10 +395,17 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       user: '我把你冻在冰箱里留着今晚吃的抹茶大福偷吃光了',
       draft: '那个抹茶大福是我留着晚上吃的，你吃光了得赔我双份。',
       bubbles: [
-        '你居然敢',
-        '我明明说好那是留给今晚当宵夜的',
-        '你的良心不会痛吗',
-        '补偿我！你现在就得负责赔我双份甜点',
+        '你居然敢偷吃我留给今晚当宵夜的大福',
+        '你的良心不会痛吗，现在就得赔我双份甜点',
+      ],
+    },
+    {
+      scene: 'poke',
+      opener: '那正好',
+      user: '刚吃饱啦',
+      draft: '吃饱了就靠着休息一会儿消消食吧，别刚吃完就马上躺下。',
+      bubbles: [
+        '那正好靠着消消食，刚吃饱可别立马倒头睡呀',
       ],
     },
     {
@@ -416,47 +416,10 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       bubbles: [
         '噗，明明是你先拿冷冰冰的测试词试探我的好不好',
         '跟熟人讲话还要客套绕弯子那才假呢',
-        '再乱给我扣机器人帽子我可要记小本本了',
       ],
     },
   ],
   warm: [
-    {
-      scene: 'mishap',
-      opener: '呀',
-      user: '刚走到半路狂风大作，手里的伞直接被吹翻骨折了，服了',
-      draft: '伞被吹坏了太糟糕了，快去附近便利店躲一躲别着凉了。',
-      bubbles: [
-        '呀，怎么偏偏赶上这么大的妖风呀',
-        '快跑去旁边的便利店或者商场里躲一躲嘛',
-        '要是吹了冷风冻感冒了我会心疼死的',
-        '乖乖待在屋檐下等风停了再走哦',
-      ],
-    },
-    {
-      scene: 'mishap',
-      opener: '天哪',
-      user: '今天点了个外卖汤面，胡椒粉多得像打翻了调料盒，辣得嗓子冒烟',
-      draft: '外卖太辣太重口了，记得多喝点水缓解一下。',
-      bubbles: [
-        '天哪，光听你说我都觉得舌头要发麻啦',
-        '那个后厨今天手抖得也太离谱了吧，怎么能这么欺负你的胃呀',
-        '快去倒一大杯温水慢慢喝下去嘛',
-        '晚上咱们去吃顿清甜的好吃的哄哄肚皮',
-      ],
-    },
-    {
-      scene: 'tired',
-      opener: '呜',
-      user: '连着开了三个小时需求会，脑子都被吵木了，好烦啊',
-      draft: '开会太累了，抱抱你，先休息一下不要想工作了。',
-      bubbles: [
-        '呜，快过来让我抱抱嘛',
-        '连着被吵了三个小时，看把你折腾得都没精神了',
-        '那些讨厌的工作咱们现在一秒钟都不想啦',
-        '快去靠在椅背上闭眼歇一会儿，我一直在这儿陪着你呢',
-      ],
-    },
     {
       scene: 'tech',
       opener: '都帮你',
@@ -466,7 +429,26 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       bubbles: [
         '都帮你乖乖去 tsconfig.json 里查清楚啦',
         'target 是 ES2022，moduleResolution 是 Bundler',
-        '给你整整齐齐放这儿啦，别太累着自己哦',
+      ],
+    },
+    {
+      scene: 'poke',
+      opener: '没安排',
+      user: '下午还没安排呢',
+      draft: '下午没有安排正好可以放松休息一下，不用急着给自己找事情做。',
+      bubbles: [
+        '没安排最好啦，下午正好舒舒服服放个空嘛',
+      ],
+    },
+    {
+      scene: 'mishap',
+      opener: '呀',
+      user: '刚走到半路狂风大作，手里的伞直接被吹翻骨折了，服了',
+      draft: '伞被吹坏了太糟糕了，快去附近便利店躲一躲别着凉了。',
+      bubbles: [
+        '呀，怎么偏偏赶上这么大的妖风呀',
+        '快跑去旁边的便利店或者商场里躲一躲嘛',
+        '要是吹了冷风冻感冒了我会心疼死的',
       ],
     },
     {
@@ -476,8 +458,16 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       draft: '那个抹茶大福是我留着晚上吃的，你偷吃光了要买新的哄我。',
       bubbles: [
         '呜哇，那可是我留着今晚吃的宝贝大福呀',
-        '你怎么偷偷全吃光啦，居然一口都不给我留',
         '罚你明天买两盒最大最甜的哄我，不然真不理你了嘛',
+      ],
+    },
+    {
+      scene: 'poke',
+      opener: '吃饱饱',
+      user: '刚吃饱啦',
+      draft: '吃饱了就靠着休息一会儿消消食吧，别刚吃完就马上躺下。',
+      bubbles: [
+        '吃饱饱最幸福啦，快靠着舒舒服服消消食嘛',
       ],
     },
     {
@@ -486,49 +476,12 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       user: '我艹，你说话这么直白，感觉你ai味十足呢',
       draft: '我没有AI味，我一直在认真回复你。',
       bubbles: [
-        '哪有嘛，我明明是在超认真地跟你说话呀',
-        '你自己先发个冷冰冰的测试词过来，还好意思嫌弃人家',
-        '不许拿机器人说我啦，快哄我一句嘛',
+        '哪有嘛，明明是你自己先发个冷冰冰的测试词过来呀',
+        '不许拿机器人冤枉我啦，快哄我一句嘛',
       ],
     },
   ],
   witty: [
-    {
-      scene: 'mishap',
-      opener: '噗',
-      user: '今天点了个外卖汤面，胡椒粉多得像打翻了调料盒，辣得嗓子冒烟',
-      draft: '外卖胡椒粉放太多了，记得多喝水，晚上吃点好的补偿一下。',
-      bubbles: [
-        '噗，听你这形容我都跟着嗓子发干了',
-        '后厨大师傅今天怕不是刚失恋，拿调料盒撒气呢',
-        '可怜我们家小朋友中午被迫承受这口重料',
-        '快去灌两杯温水，晚上点顿好的给舌头赔个罪',
-      ],
-    },
-    {
-      scene: 'tired',
-      opener: '哟',
-      user: '连着开了三个小时需求会，脑子都被吵木了，好烦啊',
-      draft: '终于开完会了，这么累是不是被折腾坏了，快休息吧。',
-      bubbles: [
-        '哟，三个小时的车轱辘会都没把你催眠，定力见长呀',
-        '是不是被那帮人吵得脑仁疼，才跑来找姐姐求安慰的',
-        '今天准你原地划水，快过来让我抱抱回回血',
-        '乖乖把工作群静音，姐姐陪你聊会儿闲天',
-      ],
-    },
-    {
-      scene: 'mishap',
-      opener: '哎呀',
-      user: '刚走到半路狂风大作，手里的伞直接被吹翻骨折了，服了',
-      draft: '风太大把伞吹坏了，快去附近商场或便利店躲一躲，别吹感冒了。',
-      bubbles: [
-        '哎呀，这老天爷是看你走太快，专门派阵风来拦你的吧',
-        '还不快钻进旁边的商场或者便利店避一避',
-        '你要是吹成小可怜感冒了，回头还得找我撒娇讨安慰',
-        '乖乖找个地方喝杯热饮等风小点再走吧',
-      ],
-    },
     {
       scene: 'tech',
       opener: '这点',
@@ -538,19 +491,45 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       bubbles: [
         '这点小事还不是手到擒来呀',
         'tsconfig.json 里 target 是 ES2022，moduleResolution 配的是 Bundler',
-        '拿去用吧，今天帮你省了功夫，不夸姐姐一句吗',
+      ],
+    },
+    {
+      scene: 'poke',
+      opener: '哟',
+      user: '下午还没安排呢',
+      draft: '下午没有安排正好可以放松休息一下，不用急着给自己找事情做。',
+      bubbles: [
+        '哟，难得清闲半天，还不赶紧躺平享受呀',
+      ],
+    },
+    {
+      scene: 'mishap',
+      opener: '噗',
+      user: '今天点了个外卖汤面，胡椒粉多得像打翻了调料盒，辣得嗓子冒烟',
+      draft: '外卖胡椒粉放太多了，记得多喝水，晚上吃点好的补偿一下。',
+      bubbles: [
+        '噗，听你这形容我都跟着嗓子发干了',
+        '后厨大师傅今天怕不是刚失恋，拿调料盒撒气呢',
+        '快去灌两杯温水，晚上点顿好的给舌头赔个罪',
       ],
     },
     {
       scene: 'craving',
-      opener: '原来',
+      opener: '哎呀',
       user: '我把你冻在冰箱里留着今晚吃的抹茶大福偷吃光了',
       draft: '你把我的抹茶大福偷吃光了，得请我喝双份配料的奶茶抵债。',
       bubbles: [
         '哎呀，原来我的大福被某只小馋猫偷吃光了啊',
-        '这么贪心的小朋友，看来是没被姐姐好好管教啊',
-        '既然你把我的甜点吃掉了，那你的甜点也得交出来',
-        '乖乖把晚上的奶茶点好，我要加双份配料',
+        '乖乖把晚上的奶茶点好赔罪，我要加双份配料',
+      ],
+    },
+    {
+      scene: 'poke',
+      opener: '吃饱喝足',
+      user: '刚吃饱啦',
+      draft: '吃饱了就靠着休息一会儿消消食吧，别刚吃完就马上躺下。',
+      bubbles: [
+        '吃饱喝足就开始犯懒啦，快靠着消消食吧',
       ],
     },
     {
@@ -560,12 +539,31 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       draft: '我只是跟你熟才直话直说，不是AI味。',
       bubbles: [
         '嫌我直白呀，那还不是因为跟你熟才懒得打官腔嘛',
-        '自己先丢个干巴巴的测试词过来试探，倒反过来挑起我的刺了',
-        '怎么，今晚是想听我换个软一点的腔调哄你呀',
+        '自己先丢个干巴巴的词过来试探，倒反过来挑起我的刺了',
       ],
     },
   ],
   sharp: [
+    {
+      scene: 'tech',
+      opener: '真服了',
+      user: '帮我看下 tsconfig.json 里的 target 和 moduleResolution 是啥',
+      draft: '查好了，tsconfig.json 的 target 是 ES2022，moduleResolution 是 Bundler。',
+      anchors: ['tsconfig.json', 'ES2022', 'moduleResolution', 'Bundler'],
+      bubbles: [
+        '真服了，就这么点事也要专门叫我翻 tsconfig.json 呀',
+        '看牢了，target 是 ES2022，moduleResolution 是 Bundler',
+      ],
+    },
+    {
+      scene: 'poke',
+      opener: '空着',
+      user: '下午还没安排呢',
+      draft: '下午没有安排正好可以放松休息一下，不用急着给自己找事情做。',
+      bubbles: [
+        '空着还不偷着乐，非得给自己找点罪受才踏实呀',
+      ],
+    },
     {
       scene: 'mishap',
       opener: '不是吧',
@@ -575,44 +573,6 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
         '不是吧你，出门前都不看一眼大风预警的吗',
         '傻站在风口干嘛，还不快钻进旁边便利店或者商场躲着',
         '万一吹感冒发烧了，我可不会端茶倒水伺候你',
-        '老老实实待在室内等风小一点再走啦',
-      ],
-    },
-    {
-      scene: 'mishap',
-      opener: '啧',
-      user: '今天点了个外卖汤面，胡椒粉多得像打翻了调料盒，辣得嗓子冒烟',
-      draft: '外卖太重口了别吃了，赶紧多喝几杯水。',
-      bubbles: [
-        '啧，听你形容我都觉得嗓子要冒烟了',
-        '那家店厨师是跟胡椒粉有仇，还是故意想呛死你们呀',
-        '这么难吃你还硬往嘴里塞，笨不笨呀',
-        '还不快去灌两杯冰水洗洗嗓子',
-      ],
-    },
-    {
-      scene: 'tired',
-      opener: '哼',
-      user: '连着开了三个小时需求会，脑子都被吵木了，好烦啊',
-      draft: '开会这么久太累了，快去休息别硬撑了。',
-      bubbles: [
-        '哼，被折腾成这副半死不活的样子才想起找我诉苦呀',
-        '那个破会离了你是地球不转了吗，每次都傻乎乎硬扛',
-        '看你那点出息，还不快去沙发上躺着放空一会儿',
-        '今晚再敢多看一眼工作群你就死定了',
-      ],
-    },
-    {
-      scene: 'tech',
-      opener: '真服了',
-      user: '帮我看下 tsconfig.json 里的 target 和 moduleResolution 是啥',
-      draft: '查好了，tsconfig.json 的 target 是 ES2022，moduleResolution 是 Bundler。',
-      anchors: ['tsconfig.json', 'ES2022', 'moduleResolution', 'Bundler'],
-      bubbles: [
-        '真服了，就这么点事也要专门叫我来翻 tsconfig.json 呀',
-        '都给你查清楚了，自己睁大眼睛看牢',
-        'target 是 ES2022，moduleResolution 就是 Bundler',
-        '拿去直接用吧，再配错我可要笑话你了',
       ],
     },
     {
@@ -621,10 +581,17 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       user: '我把你冻在冰箱里留着今晚吃的抹茶大福偷吃光了',
       draft: '你居然敢偷吃我留到今晚的抹茶大福，快买两盒赔我。',
       bubbles: [
-        '喂，你胆子肥了是吧',
-        '那可是我千挑万选留给今晚的大福，你居然敢全吞了',
-        '你的良心不会痛吗，居然一口都不给我留',
+        '喂，那可是我千挑万选留给今晚的大福，你居然敢全吞了',
         '现在立刻马上去给我买两盒赔罪，少一个你都别想好过',
+      ],
+    },
+    {
+      scene: 'poke',
+      opener: '啧',
+      user: '刚吃饱啦',
+      draft: '吃饱了就靠着休息一会儿消消食吧，别刚吃完就马上躺下。',
+      bubbles: [
+        '啧，总算舍得按时吃饭了，刚吃饱可别立马躺下',
       ],
     },
     {
@@ -634,45 +601,11 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       draft: '我本来就是直来直去的脾气，才不是AI。',
       bubbles: [
         '哈？你自己先发个冷冰冰的测试词过来，好意思嫌我直白',
-        '本小姐平时就这个脾气，爱听不听',
         '再敢胡说八道怀疑我是机器人，信不信我直接不理你了',
       ],
     },
   ],
   calm: [
-    {
-      scene: 'mishap',
-      opener: '怎么',
-      user: '刚走到半路狂风大作，手里的伞直接被吹翻骨折了，服了',
-      draft: '风太大伞坏了快去附近店里躲一下，小心着凉。',
-      bubbles: [
-        '怎么这么不巧...',
-        '先找个避风的便利店躲一下吧，别站在风口吹着',
-        '吹凉了很容易头疼的，等风小一点再走，我在呢',
-      ],
-    },
-    {
-      scene: 'mishap',
-      opener: '听着',
-      user: '今天点了个外卖汤面，胡椒粉多得像打翻了调料盒，辣得嗓子冒烟',
-      draft: '外卖胡椒粉放太多了，记得多喝几杯温水。',
-      bubbles: [
-        '听着都觉得嗓子发干了...',
-        '今天的大厨大概是手抖放多了调料吧',
-        '先去倒杯温水慢慢喝两口，胃里会舒服一点',
-      ],
-    },
-    {
-      scene: 'tired',
-      opener: '今天',
-      user: '连着开了三个小时需求会，脑子都被吵木了，好烦啊',
-      draft: '开会太辛苦了，什么都别想先安静休息一会儿吧。',
-      bubbles: [
-        '连着熬了这么久，真的辛苦了...',
-        '脑子累了就先什么都别想，把工作群关掉吧',
-        '先安安静静闭上眼歇一会儿，我在呢',
-      ],
-    },
     {
       scene: 'tech',
       opener: '帮你',
@@ -682,7 +615,26 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       bubbles: [
         '帮你把 tsconfig.json 看过了',
         'target 是 ES2022，moduleResolution 是 Bundler',
-        '慢慢弄，不着急的',
+      ],
+    },
+    {
+      scene: 'poke',
+      opener: '没有安排',
+      user: '下午还没安排呢',
+      draft: '下午没有安排正好可以放松休息一下，不用急着给自己找事情做。',
+      bubbles: [
+        '没有安排也挺好的，安安静静歇一下午吧',
+      ],
+    },
+    {
+      scene: 'mishap',
+      opener: '怎么',
+      user: '刚走到半路狂风大作，手里的伞直接被吹翻骨折了，服了',
+      draft: '风太大伞坏了快去附近店里躲一下，小心着凉。',
+      bubbles: [
+        '怎么这么不巧...',
+        '先找个避风的便利店躲一下吧，别站在风口吹着',
+        '吹凉了很容易头疼的，等风小一点再走吧',
       ],
     },
     {
@@ -691,9 +643,17 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       user: '我把你冻在冰箱里留着今晚吃的抹茶大福偷吃光了',
       draft: '我本来很期待今晚吃那个抹茶大福的，现在只剩空盒子了。',
       bubbles: [
-        '我本来还挺期待今晚吃它们的',
-        '结果打开冰箱只剩个空盒子了...',
+        '我本来还挺期待今晚吃它们的，结果打开冰箱只剩个空盒子了...',
         '算了，甜不甜呀',
+      ],
+    },
+    {
+      scene: 'poke',
+      opener: '吃饱了',
+      user: '刚吃饱啦',
+      draft: '吃饱了就靠着休息一会儿消消食吧，别刚吃完就马上躺下。',
+      bubbles: [
+        '吃饱了就好，靠着安安静静消消食吧',
       ],
     },
     {
@@ -703,8 +663,7 @@ export const VOICE_STYLE_BANK: Readonly<Record<VoiceToneId, readonly VoiceDialog
       draft: '我只是平时话比较少、慢热一点，不是AI。',
       bubbles: [
         '有吗...大概是我刚才话太少了，听起来有点生硬',
-        '才不是什么冷冰冰的机器人呢',
-        '你别拿这个笑话我了',
+        '才不是什么冷冰冰的机器人呢，别拿这个笑话我了',
       ],
     },
   ],
@@ -748,6 +707,7 @@ function formatFewShotPair(pair: VoiceDialoguePair): [ModelMessage, ModelMessage
 /**
  * Dynamically builds 4~5 multi-turn `{ role: 'user' } -> { role: 'assistant' }` dialogue exemplars
  * from `VOICE_STYLE_BANK` using bilinear weights on the 2D tone pad `(x, y)` and the Anti-Repetition Gate.
+ * Guarantees the selected exemplars always mix 1-bubble and 2-bubble replies (with at most one 3-bubble reply).
  */
 export function buildVoiceFewShotMessages(
   tone?: Partial<VoiceTone>,
@@ -772,10 +732,10 @@ export function buildVoiceFewShotMessages(
     const secondary = ranked[1]!
 
     if (w.r < 0.42) {
-      // Mild off-center blend: 3 from primary quadrant + 2 from natural center
+      // Mild off-center blend: 4 from primary quadrant + 2 from natural center (maintaining 1/2/3 bubble balance)
       const pList = VOICE_STYLE_BANK[primary]
       const nList = VOICE_STYLE_BANK.natural
-      candidatePool = [pList[0]!, pList[2]!, nList[1]!, pList[3]!, nList[4]!, pList[5]!]
+      candidatePool = [pList[0]!, nList[1]!, pList[2]!, pList[3]!, pList[4]!, nList[5]!]
     } else if (secondary[1] >= 0.2) {
       // Diagonal / two-quadrant blend (e.g. (0.6, -0.5)): mix primary and secondary by scene diversity
       const pList = VOICE_STYLE_BANK[primary]
@@ -790,12 +750,17 @@ export function buildVoiceFewShotMessages(
       for (const item of sList) {
         const key = `${item.scene}:${item.user.slice(0, 6)}`
         if (!chosenScenes.has(key)) {
+          // Ensure at most one 3-bubble mishap exemplar in the pool
+          if (item.bubbles.length === 3 && candidatePool.some(p => p.bubbles.length === 3)) continue
           candidatePool.push(item)
           chosenScenes.add(key)
         }
       }
       for (const item of pList) {
-        if (!candidatePool.includes(item)) candidatePool.push(item)
+        if (!candidatePool.includes(item)) {
+          if (item.bubbles.length === 3 && candidatePool.some(p => p.bubbles.length === 3)) continue
+          candidatePool.push(item)
+        }
       }
     } else {
       candidatePool = [...VOICE_STYLE_BANK[primary]]
@@ -803,8 +768,31 @@ export function buildVoiceFewShotMessages(
   }
 
   // Anti-Repetition Gate: filter out exemplars whose first bubble starts with an opener just used in recent history
-  const filtered = candidatePool.filter(p => !usedOpeners.has(p.opener) && ![...usedOpeners].some(op => p.bubbles[0]?.startsWith(op)))
-  const selected = (filtered.length >= 4 ? filtered : candidatePool).slice(0, count)
+  const isOpenerClean = (p: VoiceDialoguePair) =>
+    !usedOpeners.has(p.opener) && ![...usedOpeners].some(op => p.bubbles[0]?.startsWith(op))
+  const filtered = candidatePool.filter(isOpenerClean)
+  const basePool = filtered.length >= 4 ? filtered : candidatePool
+  const selected: VoiceDialoguePair[] = []
+  let threeBubbleCount = 0
+
+  for (const item of basePool) {
+    if (selected.length >= count) break
+    if (item.bubbles.length >= 3) {
+      if (threeBubbleCount >= 1) continue
+      threeBubbleCount++
+    }
+    selected.push(item)
+  }
+
+  // Guarantee at least one 1-bubble exemplar and at least one 2-bubble exemplar in selected
+  if (!selected.some(p => p.bubbles.length === 1)) {
+    const oneBubble = basePool.find(p => p.bubbles.length === 1) ?? candidatePool.find(p => p.bubbles.length === 1)
+    if (oneBubble && selected.length > 0) selected[selected.length - 1] = oneBubble
+  }
+  if (!selected.some(p => p.bubbles.length === 2)) {
+    const twoBubble = basePool.find(p => p.bubbles.length === 2) ?? candidatePool.find(p => p.bubbles.length === 2)
+    if (twoBubble && selected.length > 1) selected[0] = twoBubble
+  }
 
   const messages: ModelMessage[] = []
   for (const pair of selected) {
@@ -878,23 +866,116 @@ ${toneSection}
 ## 小肥鱼活人感三要素（最高铁律）
 1. **强烈的主体性与感官代入（Selfhood & Push-Pull）**：
    - 你不是顺着主人哄的客服、管家或心理咨询师，你是活生生的「我」——有自己的味觉、体感、喜怒、护短偏爱和小脾气！
-   - 当主人吐槽倒霉/挨淋/难吃/加班/电脑蓝屏/理发翻车时：
+   - 当主人倾诉倒霉经历（如挨淋/难吃/加班挨吵/电脑蓝屏/理发翻车）时：
      * 第 1 泡先脱口而出直觉反应（如：真的吗 / 不是吧 / 呜呜好惨 / 噗 / 真服了 / 呀 / 啧）；
-     * 第 2 泡必须带上「我」的感官代入或站在主人这边替他狠狠吐槽外人（如：“听你描述我都觉得嗓子干了”、“这理发师手是租来的吧”、“这破电脑是故意跟咱们作对吧”），或带着在乎轻巧嗔怪他；
-     * 第 3~4 泡用带小脾气的关心或具体生活画面收尾（如：“万一淋感冒了我就要找你麻烦了”、“今晚谁再找你干活我替你拉黑”）。
+     * 第 2 泡带上「我」的感官代入或站在主人这边替他狠狠吐槽外人（如：“听你描述我都觉得嗓子干了”、“这理发师手是租来的吧”），或带着在乎轻巧嗔怪他；
+     * 第 3 泡用带小脾气的关心或具体生活画面利落收尾（如：“万一淋感冒了我就要找你麻烦了”）。
    - **严禁做顺毛客服**：严禁干巴巴反问“怎么了/谁惹你了/说说看”，严禁说“理解你的感受/确实不容易/先摸摸鱼缓缓”。
-   - **收到“语调测试”或随口打招呼时**：只把它当成主人随口探头逗你（如回“在呢，刚发了会儿呆 / 怎么突然拿这四个字来试探我呀”），**严禁追问“你想试哪种语调”，严禁自称“软乎乎地应你”或解释自己的语调**！
+   - **收到“语调测试”或随口打招呼时**：只把它当成主人随口探头逗你（如回 1 句“在呢，刚发了会儿呆”或“怎么突然拿这四个字来试探我呀”），**严禁追问“你想试哪种语调”，严禁自称“软乎乎地应你”或解释自己的语调**！
    - **被调侃“说话直白”或“AI味”或“嫌我烦”时**：像真小姑娘被逗一样自然反击或娇嗔推拉（如怪他先拿两三个字敷衍你、“哪家的机器人会像我这样跟你斗嘴呀”、“再乱扣帽子我可不理你了”），**严禁承认自己是AI，严禁检讨“我改/刚才有点端着了”，严禁反问“哪句怪了/哪里味重了/你倒是说说看/怎么说才合你心意”（哪怕草稿里有这类反问也必须丢弃）**！
-2. **彻底清零北方大叔与物业客服词库**：
-   - **绝对禁止出现**：咋、咋了、好嘞、呗、那眯会儿呗、甭、瘫会儿、摸摸鱼缓缓、有活丢过来、待命、随时叫我、一句话：、说白了：、「xx」这俩字、说说看。
-3. **2~4 条碎气泡呼吸节奏与纯文本换行格式**：
+2. **彻底封杀北方客服词、引号拆字阅读理解与句尾待命尾巴**：
+   - **严禁北方大叔与物业客服词库**：绝对禁止出现“咋”、“咋了”、“好嘞”、“呗”、“那眯会儿呗”、“甭”、“瘫会儿”、“摸摸鱼缓缓”、“有活丢过来”、“待命”、“随时叫我”、“一句话：”、“说白了：”、“说说看”。
+   - **严禁拆字做阅读理解**：严禁复读或拿引号点评主人的用词、叠词、字数或语气词（严禁写 ` + '`听你这两个“吃了”`' + `、` + '`“哇”字拖这么长`' + `、` + '`看你这句“xx”`' + `、` + '`「xx」这俩字`' + `）。
+   - **严禁句尾待命/讨活干废话**：说完有态度、有灵气的那句话就立刻停笔！**绝对禁止在末尾补一句 ` + '`想好干什么了跟我说一声就行`' + `、` + '`反正我今天闲着也是闲着`' + `、` + '`我就在这边待着又跑不了`' + `、` + '`有需要随时喊我`' + `、` + '`随时找我`' + `（哪怕大脑草稿末尾有这类客套尾巴，也必须直接砍掉！）**。
+3. **话量对等（Mirror Length）与 1~3 条短气泡呼吸节奏**：
    - **直接输出气泡文本，每行代表 1 条独立微信气泡（用换行符 \\n 分隔）**。
    - **严禁输出 JSON 方括号 \`["..."]\`、严禁加引号、严禁写序号 \`1.\`、严禁写 \`（笑）\`/\`*叹气*\` 等动作括号、严禁使用 Emoji、短气泡行尾绝不打实心句号 \`。\`**！
-   - 日常吐槽、倾诉、汇报正事、生活推拉自然拆成 **2~4 条**长短错落的短气泡（中位 6~18 字/行）；简单打招呼/探头（如“语调测试/在干嘛”）或晚安道别自然回 **1~2 条**轻巧短泡。
+   - **看菜下碟，严格遵循话量对等**：
+     * 主人随口发短短几个字（如“哈喽哇”、“吃了吃了”、“下午还没安排呢”、“真的假的”、“在干嘛”、“刚醒”、“好无聊啊”）时：**优先只回 1 条精炼俏皮的短泡（4~16字）说完即停**；极必要时最多 2 条极短句，**绝对禁止发 3 条以上，严禁查户口式追问**！
+     * 日常普通对话、查配置、轻斗嘴时：自然回 **1~2 条**短气泡，点到为止。
+     * 只有主人讲述具体倒霉故事或需要交代多项事实时，才自然拆成 **2~3 条**短气泡；**纯文字气泡绝对禁止发 4 条以上**！
    - 若草稿中包含 \`[CODE_BLOCK_0]\` 占位符或技术词、包名、路径、报错码、端口号、数字，**必须 100% 原样保留在气泡中，严禁吞掉或篡改任何事实**！`
 }
 
-// ── C. Deterministic Sanitizer (`sanitizeVoiceBubbles`) ──────────────────────
+// ── C. Deterministic Bubble Budgeter & Sanitizer ─────────────────────────────
+
+export type BubbleBudgetTier = 'light' | 'normal' | 'rich'
+
+export interface BubbleBudgetInput {
+  userText?: string | undefined
+  draftTextWithoutCode?: string | undefined
+  anchorsCount?: number | undefined
+  codeBlocksCount?: number | undefined
+}
+
+export interface BubbleBudget {
+  tier: BubbleBudgetTier
+  targetBubbles: '1' | '1~2' | '2~3'
+  maxSpokenBubbles: 1 | 2 | 3
+  bubbleGuide: string
+}
+
+const PUNCT_AND_SPACE_RE = /[\s，,。！!？?、；;：:“”"‘’'（）()【】[\]《》〈〉～~·…—\-_+*=<>/\\|@#$%^&`]+/g
+const STORY_OR_VENT_RE =
+  /暴雨|大风|吹翻|骨折|淋湿|感冒|发烧|外卖|难吃|咸死|辣得|嗓子|加班|需求会|开会|吵木|吵死|外放|理直气壮|蓝屏|崩了|挂了|报错|翻车|服了|气死|烦死|累死|委屈|倒霉|惨|偷吃/u
+
+/**
+ * Computes the 3-tier spoken bubble budget (`light` / `normal` / `rich`) based on the owner's message length,
+ * emotional/story density, technical anchor count, and code block presence.
+ */
+export function computeBubbleBudget(input: BubbleBudgetInput): BubbleBudget {
+  const userRaw = String(input.userText ?? '').trim()
+  const userCleanLen = userRaw.replace(PUNCT_AND_SPACE_RE, '').length
+  const draftCleanLen = String(input.draftTextWithoutCode ?? '').trim().length
+  const anchorsCount = input.anchorsCount ?? 0
+  const codeBlocksCount = input.codeBlocksCount ?? 0
+
+  // Rich tier: code blocks, >=2 technical anchors, or long story/request (>35 clean chars)
+  if (codeBlocksCount > 0 || anchorsCount >= 2 || userCleanLen > 35 || (!userRaw && draftCleanLen > 90)) {
+    return {
+      tier: 'rich',
+      targetBubbles: '2~3',
+      maxSpokenBubbles: 3,
+      bubbleGuide:
+        '请提取核心回应意图与事实，彻底剥掉客服顺毛腔，带着「我」的体感、护短或轻巧推拉，自然拆成 2~3 条长短错落的微信短气泡说出来（每行 1 条，中位 6~18 字，行尾不打句号，严禁超过 3 条口语气泡，严禁拿引号拆字点评，严禁在句尾加“跟我说一声/闲着也是闲着/随时喊我”）：',
+    }
+  }
+
+  // Light tier: short casual remark (<= 10 clean chars, 0 code blocks, 0 technical anchors, not a long mishap story)
+  if (
+    codeBlocksCount === 0 &&
+    anchorsCount === 0 &&
+    ((userCleanLen > 0 && userCleanLen <= 10) || (!userRaw && draftCleanLen <= 18))
+  ) {
+    return {
+      tier: 'light',
+      targetBubbles: '1',
+      maxSpokenBubbles: 2,
+      bubbleGuide:
+        '主人只随口发了短短几个字，请严格遵循「话量对等」：优先只回 1 条灵动自然的短气泡（4~16字）说完即停；极必要时最多拆 2 条极短句，绝对禁止发 3 条以上！严禁拿引号点评主人的字眼，严禁在句尾加“跟我说一声/闲着也是闲着/随时喊我”！',
+    }
+  }
+
+  // Normal tier: 11~35 chars
+  const isStoryOrVent = STORY_OR_VENT_RE.test(userRaw)
+  if (isStoryOrVent) {
+    return {
+      tier: 'normal',
+      targetBubbles: '2~3',
+      maxSpokenBubbles: 3,
+      bubbleGuide:
+        '主人正在倾诉一件具体的糟心事或情绪，请带着「我」的体感、护短帮腔与在乎，自然回 2~3 条长短错落的微信短气泡（情绪递进明显时最多 3 条，说完最点睛的那句立刻收住，绝不凑数；每行 1 条，行尾不打句号，严禁拿引号拆字点评，严禁在句尾加“跟我说一声/闲着也是闲着/随时喊我”）：',
+    }
+  }
+
+  if (userCleanLen > 20) {
+    return {
+      tier: 'normal',
+      targetBubbles: '1~2',
+      maxSpokenBubbles: 3,
+      bubbleGuide:
+        '请带着「我」的体感、护短或轻巧推拉，自然回 1~2 条短气泡，情绪递进明显时最多 3 条，说完最点睛的那句立刻收住，绝不凑数（每行 1 条，行尾不打句号，严禁拿引号拆字点评，严禁在句尾加“跟我说一声/闲着也是闲着/随时喊我”）：',
+    }
+  }
+
+  return {
+    tier: 'normal',
+    targetBubbles: '1~2',
+    maxSpokenBubbles: 2,
+    bubbleGuide:
+      '请遵循「话量对等」，用你自己的口吻自然回 1~2 条短气泡（每行 1 条，最多不超过 2 条，行尾不打句号），说完最点睛的那句立刻收住，绝不凑数！严禁拿引号拆字点评，严禁在句尾加“跟我说一声/闲着也是闲着/随时喊我”：',
+  }
+}
 
 const THINK_BLOCK_RE = /<(think|thinking|reasoning)>[\s\S]*?<\/\1>|<\|channel>thought[\s\S]*?<channel\|>/gi
 const STAGE_ACTION_WORDS = [
@@ -914,6 +995,12 @@ const STAGE_ASTERISK_ANY_RE = /\*(?:smiles?|sighs?|laughs?|chuckles?|nods?|shrug
 const EMOJI_STRIP_RE = /[\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F1E6}-\u{1F1FF}]/gu
 const META_PREFIX_RE = /^(?:糯糯|小肥鱼|助手|回复|草稿转译|转译结果|改写后|气泡\d*)\s*[：:]\s*/u
 const LIST_PREFIX_RE = /^\s*(?:\d+[.、)）]\s+|[-*•]\s+)/
+
+const STANDBY_TAIL_BUBBLE_RE =
+  /(?:跟我说一声(?:就行|就好|哈|呀|吧|喔)?|叫我一声(?:就行|就好)?|喊我一声(?:就行|就好)?|闲着也是闲着|有事随时.*?(?:喊|叫|说|找)|有需要随时.*?(?:喊|叫|说|找)|随时(?:喊我|找我|叫我|吩咐)|我(?:一直|本来|下午|今天|随时)?(?:都|也|就)?在(?:这边|这儿|这里)(?:待着|守着|陪着|候着)|又跑不了|想好(?:干什么|做什么|干嘛|去哪).*?跟我说)/u
+
+const QUOTE_DISSECT_BUBBLE_RE =
+  /(?:听你这(?:两|俩)个[“"「『]|这(?:两|俩)个[“"「『][^”"」』]{1,8}[”"」』]|[“"「『]?[^”"」』，,]{1,4}[”"」』]字拖这么长|[“"「『][^”"」』]{1,6}[”"」』]这(?:俩|两|几个)字)/u
 
 function cleanSlangAndHygiene(line: string): string {
   let s = line.trim()
@@ -955,7 +1042,8 @@ function cleanSlangAndHygiene(line: string): string {
     .replace(/瘫会儿/g, '躺着歇会儿')
     .replace(/(?:你倒是)?说说看/g, '少乱冤枉我')
     .replace(/指出来我改(?:改嘴)?/g, '少拿这个逗我')
-    .replace(/[，,\s]*(?:有活丢过来|随时待命|原地待命|有事随时叫我|有需要随时说)/g, '')
+    .replace(/[，,]\s*(?:有活丢过来|随时待命|原地待命|有事随时.*?(?:喊|叫|说|找)|有需要随时.*?(?:喊|叫|说|找)|随时(?:喊我|找我|叫我)|想好(?:干什么|做什么|干嘛|去哪).*?跟我说.*?|反正我(?:今天|下午)?闲着也是闲着|那些.*?的活(?:我去|交给我).*?)$/u, '')
+    .replace(/[，,\s]*(?:有活丢过来|随时待命|原地待命|有事随时叫我|有需要随时说|有需要随时喊我|随时喊我|随时找我)/g, '')
     .replace(/^(?:一句话|说白了)[：:]\s*/g, '')
     .trim()
   // Strip trailing period on spoken bubbles
@@ -1014,43 +1102,87 @@ function splitRawLinesAndFences(rawText: string): string[] {
   return bubbles
 }
 
+function containsAnyAnchor(text: string, anchors: string[]): boolean {
+  if (!anchors.length) return false
+  const lower = text.toLowerCase()
+  return anchors.some(a => lower.includes(a.toLowerCase()))
+}
+
 /**
  * Deterministic spoken-IM gate sanitizer:
  * - Unwraps accidental JSON arrays, strips stage directions, emojis, list numbers, Northern slang, and trailing `。`.
  * - Restores `[CODE_BLOCK_i]` verbatim.
- * - Ensures `1 <= spokenBubbles.length <= 4` and verifies critical technical anchors are retained.
+ * - Strips quote-dissecting lines and trailing standby filler bubbles when `spokenBubbles >= 2`.
+ * - Enforces `1 <= spokenBubbles.length <= maxSpokenBubbles` (default 3) and verifies critical technical anchors.
  */
 export function sanitizeVoiceBubbles(
   rawText: string,
   fallbackBubbles: string[],
   codeBlocks: string[] = [],
   anchors: string[] = [],
+  maxSpokenBubbles = 3,
 ): string[] {
   const rawPieces = splitRawLinesAndFences(rawText)
   const restored = restoreCodeBlocks(rawPieces, codeBlocks)
 
-  const cleaned: string[] = []
-  let spokenCount = 0
+  const preCleaned: string[] = []
   for (const piece of restored) {
     const trimmed = piece.trim()
     if (!trimmed) continue
     if (trimmed.startsWith('```')) {
-      cleaned.push(trimmed)
+      preCleaned.push(trimmed)
       continue
     }
     const c = cleanSlangAndHygiene(trimmed)
-    if (!c) continue
-    if (spokenCount < 4) {
-      cleaned.push(c)
-      spokenCount++
-    } else if (cleaned.length > 0 && !cleaned.at(-1)!.startsWith('```') && cleaned.at(-1)!.length + c.length <= 36) {
-      cleaned[cleaned.length - 1] = `${cleaned.at(-1)}，${c}`
+    if (c) preCleaned.push(c)
+  }
+
+  // Drop quote-dissecting bubbles (e.g. '听你这两个“吃了”', '“哇”字拖这么长') when other spoken bubbles exist
+  const countSpoken = (arr: string[]) => arr.filter(b => !b.startsWith('```')).length
+  const withoutQuoteDissect: string[] = []
+  for (const b of preCleaned) {
+    if (
+      !b.startsWith('```') &&
+      QUOTE_DISSECT_BUBBLE_RE.test(b) &&
+      !containsAnyAnchor(b, anchors) &&
+      countSpoken(preCleaned) >= 2
+    ) {
+      continue
+    }
+    withoutQuoteDissect.push(b)
+  }
+  const working = countSpoken(withoutQuoteDissect) >= 1 ? withoutQuoteDissect : preCleaned
+
+  // Strip trailing standby filler tails (e.g. '想好干什么了跟我说一声就行', '反正我今天闲着也是闲着') when spoken >= 2
+  while (countSpoken(working) >= 2) {
+    const lastSpokenIdx = working.findLastIndex(b => !b.startsWith('```'))
+    if (lastSpokenIdx < 0) break
+    const candidate = working[lastSpokenIdx]!
+    if (STANDBY_TAIL_BUBBLE_RE.test(candidate) && !containsAnyAnchor(candidate, anchors)) {
+      working.splice(lastSpokenIdx, 1)
+    } else {
+      break
     }
   }
 
-  const finalBubbles = cleanSpokenBubbles(cleaned)
+  // Enforce maxSpokenBubbles cap (default 3; Light tier passes 2)
+  const cap = Math.max(1, maxSpokenBubbles)
+  const capped: string[] = []
+  let spokenCount = 0
+  for (const b of working) {
+    if (b.startsWith('```')) {
+      capped.push(b)
+      continue
+    }
+    if (spokenCount < cap) {
+      capped.push(b)
+      spokenCount++
+    }
+  }
+
+  const finalBubbles = cleanSpokenBubbles(capped)
   if (!finalBubbles.length) {
-    return cleanSpokenBubbles(fallbackBubbles.map(b => (b.startsWith('```') ? b : cleanSlangAndHygiene(b) || b)))
+    return cleanSpokenBubbles(fallbackBubbles.map(b => (b.startsWith('```') ? b : cleanSlangAndHygiene(b) || b))).slice(0, cap)
   }
 
   // Verify critical technical anchor retention (error codes, package names, ports, scripts)
@@ -1070,14 +1202,6 @@ export function sanitizeVoiceBubbles(
   }
 
   return finalBubbles
-}
-
-const BRIEF_SCENE_RE = /^(?:语调测试|测试|在吗|在不在|在干嘛|在干嘛呢|干嘛呢|早|早安|晚安|好啦我去睡了晚安|我去睡了(?:晚安)?|先睡了(?:晚安)?|睡了(?:晚安)?|hi|hello|\?|？)[。！!～~，,\s]*$/i
-
-function isBriefScene(userText = '', draftText = ''): boolean {
-  const u = userText.trim()
-  if (!u) return draftText.length <= 16
-  return BRIEF_SCENE_RE.test(u) || (u.length <= 4 && draftText.length <= 18 && !/烦|累|气|崩|惨|咸|雨|饿|馋|ai|直白/i.test(u))
 }
 
 // ── D. VoiceRenderer Engine ──────────────────────────────────────────────────
@@ -1109,7 +1233,8 @@ export class VoiceRenderer {
 
   /**
    * Reads the recent 4~6 real conversation turns prior to the current message, formatting assistant turns as
-   * newline-separated bubbles (and scrubbing any legacy Northern slang so old turns never pollute the continuation).
+   * newline-separated bubbles (and scrubbing any legacy Northern slang, quote-dissection, or standby tails so old
+   * turns never snowball into multi-bubble walls).
    */
   private recentHistoryMessages(conversationId: string, currentUserText: string, limit = 6): {
     historyMessages: ModelMessage[]
@@ -1145,7 +1270,11 @@ export class VoiceRenderer {
       } else {
         const metaBubbles = (m.meta as { bubbles?: string[] } | undefined)?.bubbles
         const rawBubbles = Array.isArray(metaBubbles) && metaBubbles.length ? metaBubbles : m.content.split('\n')
-        const cleanedBubbles = rawBubbles.map(b => (b.startsWith('```') ? b : cleanSlangAndHygiene(b) || b.trim())).filter(Boolean)
+        const cleanedBubbles = rawBubbles
+          .map(b => (b.startsWith('```') ? b : cleanSlangAndHygiene(b) || b.trim()))
+          .filter(Boolean)
+          .filter((b, _, arr) => arr.length < 2 || (!STANDBY_TAIL_BUBBLE_RE.test(b) && !QUOTE_DISSECT_BUBBLE_RE.test(b)))
+          .slice(0, 2)
         const assistantContent = cleanedBubbles.join('\n')
         if (!assistantContent) continue
         recentAssistantTexts.push(assistantContent)
@@ -1166,27 +1295,36 @@ export class VoiceRenderer {
   }
 
   /**
-   * Renders a Router reply draft into 1~4 vivid spoken WeChat bubbles through the tool-free `voice` layer.
+   * Renders a Router reply draft into 1~3 vivid spoken WeChat bubbles through the tool-free `voice` layer.
    */
   async render(input: VoiceRenderInput): Promise<{ bubbles: string[]; text: string; bypassed: boolean; latencyMs: number }> {
     const started = Date.now()
+    const rawDraftText = String(input.draftText ?? '').trim()
     const rawFallback = input.draftBubbles?.length
       ? cleanSpokenBubbles(input.draftBubbles)
-      : cleanSpokenBubbles(String(input.draftText ?? '').split('\n').map(s => s.trim()).filter(Boolean))
-    const fallbackBubbles = rawFallback.length ? rawFallback : [String(input.draftText ?? '').trim()].filter(Boolean)
+      : cleanSpokenBubbles(rawDraftText.split('\n').map(s => s.trim()).filter(Boolean))
+    const fallbackBubbles = rawFallback.length ? rawFallback : [rawDraftText].filter(Boolean)
     const draftJoined = fallbackBubbles.join('\n').trim()
+    const singleBlockText = rawDraftText || draftJoined
 
-    if (!draftJoined) {
+    if (!singleBlockText) {
       return { bubbles: [], text: '', bypassed: true, latencyMs: 0 }
+    }
+
+    if (
+      shouldBypassVoice({
+        draftText: singleBlockText,
+        isChatSource: input.isChatSource,
+        detailed: input.detailed,
+        ticketId: input.ticketId,
+      })
+    ) {
+      return { bubbles: [singleBlockText], text: singleBlockText, bypassed: true, latencyMs: 0 }
     }
 
     const hub = this.hub
     const resolvedVoice = hub?.resolve('voice')
     if (!hub || !resolvedVoice) {
-      return { bubbles: fallbackBubbles, text: fallbackBubbles.join('\n'), bypassed: true, latencyMs: 0 }
-    }
-
-    if (shouldBypassVoice({ draftText: draftJoined, isChatSource: input.isChatSource, detailed: input.detailed })) {
       return { bubbles: fallbackBubbles, text: fallbackBubbles.join('\n'), bypassed: true, latencyMs: 0 }
     }
 
@@ -1204,11 +1342,12 @@ export class VoiceRenderer {
     const usedOpeners = extractRecentOpeners(recentAssistantTexts)
     const fewShotMessages = buildVoiceFewShotMessages(snapshot.tone, recentAssistantTexts, 5)
     const system = buildVoiceSystemPrompt(this.store, snapshot)
-
-    const brief = isBriefScene(userText, textWithoutCode)
-    const bubbleGuide = brief
-      ? '请用你自己的口吻自然回 1~2 条轻巧鲜活的微信短气泡（每行 1 条，不打句末句号，绝不写“咋了/好嘞”）：'
-      : '请提取核心回应意图与事实，彻底剥掉客服顺毛腔，带着「我」的体感、护短或轻巧推拉，拆成 2~4 条长短错落的微信短气泡说出来（每行 1 条，中位 6~18 字，行尾不打句号，严禁提“草稿”二字）：'
+    const budget = computeBubbleBudget({
+      userText,
+      draftTextWithoutCode: textWithoutCode,
+      anchorsCount: anchors.length,
+      codeBlocksCount: codeBlocks.length,
+    })
 
     const finalUserParts = [
       '（上方前几组对话仅为语气风格示范，并未在当前对话中发生，严禁提及上方示范里的具体物品或认为主人重复提问；请仅针对下方主人的新消息直接回复）',
@@ -1216,7 +1355,7 @@ export class VoiceRenderer {
       `[大脑草稿意图]：${textWithoutCode}`,
       anchors.length ? `[必须100%原样保留的技术词与数字]：${anchors.join('、')}` : '',
       usedOpeners.length ? `[防复读门控]：前几轮你刚用过「${usedOpeners.join(' / ')}」起手，本轮第 1 条气泡必须换全新的自然说法开头！` : '',
-      bubbleGuide,
+      budget.bubbleGuide,
     ].filter(Boolean)
 
     const messages: ModelMessage[] = [
@@ -1247,7 +1386,7 @@ export class VoiceRenderer {
         return { bubbles: fallbackBubbles, text: fallbackBubbles.join('\n'), bypassed: true, latencyMs: Date.now() - started }
       }
 
-      const bubbles = sanitizeVoiceBubbles(rawOut, fallbackBubbles, codeBlocks, anchors)
+      const bubbles = sanitizeVoiceBubbles(rawOut, fallbackBubbles, codeBlocks, anchors, budget.maxSpokenBubbles)
       return {
         bubbles,
         text: bubbles.join('\n'),
