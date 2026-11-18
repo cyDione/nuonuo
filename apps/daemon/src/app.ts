@@ -26,6 +26,7 @@ import { search } from './search'
 import { clearChats, exportAll, PrivacySchema, privacySettings, savePrivacySettings, sideChats } from './data'
 import { DEFAULT_NOTIFY, NotifySettingsSchema, notifySettings, saveNotifySettings } from './notices'
 import type { Runtime } from './runtime'
+import { clientPrefs, saveClientPrefs } from './settings-tools'
 import type { Updater } from './update'
 
 const PricesSchema = z.record(z.string(), z.object({ input: z.number().min(0).optional(), output: z.number().min(0).optional(),
@@ -193,7 +194,9 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.put('/roles/:role', async c => {
     const role = c.req.param('role') as RoleId
     if (!ROLE_IDS.includes(role)) throw new HttpError(404, 'missing', `unknown layer ${role}`)
-    return c.json({ config: rt.hub.saveRole(role, await c.req.json().catch(() => undefined)) })
+    const config = rt.hub.saveRole(role, await c.req.json().catch(() => undefined))
+    rt.bus.emit({ type: 'settings.updated', keys: ['roles'] })
+    return c.json({ config })
   })
 
   // Usage
@@ -223,6 +226,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const input = await body(c, z.object({ name: z.string().max(40), avatar: z.string().max(16), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), personality: z.string().max(2_000), limits: z.array(z.string().max(200)).max(20), role: z.enum(PERSONA_ROLES), language: z.enum(PERSONA_LANGUAGES) }).partial())
     const next = savePersona(rt.store, input)
     rt.bus.emit({ type: 'persona.updated' })
+    rt.bus.emit({ type: 'settings.updated', keys: ['persona'] })
     return c.json({ persona: next })
   })
   // 个性与心境 (Figma sections 29 and 31): what 它是谁 and its window show; they are its only entry.
@@ -240,15 +244,25 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     if (input.values) setMoodValues(mood(), input.values)
     if (input.config) setMindConfig(mood(), input.config)
     if (input.tone) setMoodTone(mood(), input.tone)
+    rt.bus.emit({ type: 'settings.updated', keys: ['mood'] })
     return c.json({ mood: moodView(mood()) })
   })
   api.post('/mood/diary/:id', async c => {
     const { pinned } = await body(c, z.object({ pinned: z.boolean() }))
     pinDiary(mood(), c.req.param('id'), pinned)
+    rt.bus.emit({ type: 'settings.updated', keys: ['mood'] })
     return c.json({ mood: moodView(mood()) })
   })
-  api.delete('/mood/diary/:id', c => { removeDiary(mood(), c.req.param('id')); return c.json({ mood: moodView(mood()) }) })
-  api.post('/mood/reset', c => { resetMood(mood()); return c.json({ mood: moodView(mood()) }) })
+  api.delete('/mood/diary/:id', c => {
+    removeDiary(mood(), c.req.param('id'))
+    rt.bus.emit({ type: 'settings.updated', keys: ['mood'] })
+    return c.json({ mood: moodView(mood()) })
+  })
+  api.post('/mood/reset', c => {
+    resetMood(mood())
+    rt.bus.emit({ type: 'settings.updated', keys: ['mood'] })
+    return c.json({ mood: moodView(mood()) })
+  })
   api.delete('/conversations/:id', c => {
     const id = c.req.param('id')
     if (id === rt.engine.mainConversation()) throw new HttpError(409, 'conflict', '主对话不能删除')
@@ -411,6 +425,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const before = proactiveSettings(rt.store).mode
     const settings = saveProactiveSettings(rt.store, { mode, strategy, sources, ignoreActors, budget }, 'owner')
     if (before !== 'off' && settings.mode === 'off') rt.engine.revokeProactive('主人关闭了主动处理')
+    rt.bus.emit({ type: 'settings.updated', keys: ['proactive'] })
     return c.json({ settings })
   })
 
@@ -418,11 +433,15 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.get('/instructions', c => c.json({ current: rt.instructions.current(), history: rt.instructions.history() }))
   api.put('/instructions', async c => {
     const { body: text } = await body(c, z.object({ body: z.string().max(INSTRUCTIONS_MAX) }))
-    return c.json({ current: rt.instructions.update(text, 'owner') })
+    const current = rt.instructions.update(text, 'owner')
+    rt.bus.emit({ type: 'settings.updated', keys: ['instructions'] })
+    return c.json({ current })
   })
   api.post('/instructions/restore', async c => {
     const { version } = await body(c, z.object({ version: z.number().int().min(1) }))
-    return c.json({ current: guard(() => rt.instructions.restore(version, 'owner')) })
+    const current = guard(() => rt.instructions.restore(version, 'owner'))
+    rt.bus.emit({ type: 'settings.updated', keys: ['instructions'] })
+    return c.json({ current })
   })
 
   // Sources
@@ -431,19 +450,35 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const input = await body(c, z.object({ enabled: z.boolean(), config: z.record(z.string(), z.unknown()) }))
     try { await rt.sources.save(c.req.param('id'), input) } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) }
     await new Promise(r => setTimeout(r, 300))
+    rt.bus.emit({ type: 'settings.updated', keys: ['sources'] })
     return c.json({ sources: rt.sources.list() })
   })
   api.post('/sources/:id/poll', async c => {
     try { await rt.sources.pollNow(c.req.param('id')) } catch (error) { throw new HttpError(400, 'invalid', (error as Error).message) }
+    rt.bus.emit({ type: 'settings.updated', keys: ['sources'] })
     return c.json({ sources: rt.sources.list() })
   })
 
   // Routines
   const RoutineBody = z.object({ name: z.string().trim().min(1).max(60), schedule: z.string().trim().min(9).max(100), prompt: z.string().trim().min(1).max(4000), enabled: z.boolean().optional() })
   api.get('/routines', c => c.json({ routines: rt.routines.list() }))
-  api.post('/routines', async c => { const input = await body(c, RoutineBody); return c.json({ routine: guard(() => rt.routines.create(input)) }, 201) })
-  api.patch('/routines/:id', async c => { const input = await body(c, RoutineBody.partial()); return c.json({ routine: guard(() => rt.routines.update(c.req.param('id'), input)) }) })
-  api.delete('/routines/:id', c => { rt.routines.delete(c.req.param('id')); return c.body(null, 204) })
+  api.post('/routines', async c => {
+    const input = await body(c, RoutineBody)
+    const routine = guard(() => rt.routines.create(input))
+    rt.bus.emit({ type: 'settings.updated', keys: ['routines'] })
+    return c.json({ routine }, 201)
+  })
+  api.patch('/routines/:id', async c => {
+    const input = await body(c, RoutineBody.partial())
+    const routine = guard(() => rt.routines.update(c.req.param('id'), input))
+    rt.bus.emit({ type: 'settings.updated', keys: ['routines'] })
+    return c.json({ routine })
+  })
+  api.delete('/routines/:id', c => {
+    rt.routines.delete(c.req.param('id'))
+    rt.bus.emit({ type: 'settings.updated', keys: ['routines'] })
+    return c.body(null, 204)
+  })
   /** 运行记录: each time a routine fired, what came of it (the reply, or the work it started and how that ended). */
   api.get('/routines/:id/runs', c => {
     const id = c.req.param('id')
@@ -478,12 +513,17 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     sources: z.record(z.string().max(80), z.enum(['read', 'act'])),
   }).partial().strict()
   api.get('/settings/access', c => c.json({ settings: rt.access.settings(), defaults: DEFAULT_ACCESS, platform: process.platform }))
-  api.put('/settings/access', async c => c.json({ settings: rt.access.save(await body(c, LocalAccessBody) as Partial<AccessSettings>) }))
+  api.put('/settings/access', async c => {
+    const settings = rt.access.save(await body(c, LocalAccessBody) as Partial<AccessSettings>)
+    rt.bus.emit({ type: 'settings.updated', keys: ['access'] })
+    return c.json({ settings })
+  })
   api.get('/settings/review', c => c.json({ settings: rt.reviewer.settings(), defaults: DEFAULT_REVIEW }))
   api.put('/settings/review', async c => {
     const settings = await body(c, ReviewBody)
     for (const p of [...settings.allow, ...settings.deny]) { try { new RegExp(p) } catch { throw new HttpError(400, 'invalid', `不是合法的正则表达式：${p}`) } }
     kvSet(rt.store, 'settings:review', settings)
+    rt.bus.emit({ type: 'settings.updated', keys: ['review'] })
     return c.json({ settings: rt.reviewer.settings() })
   })
   api.get('/approvals', c => c.json({ approvals: rt.reviewer.pending() }))
@@ -532,7 +572,11 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
 
   // 点子: a few things it could do, a new batch each morning.
   api.get('/ideas', c => c.json({ batch: rt.ideas.batch(), settings: rt.ideas.settings() }))
-  api.put('/settings/ideas', async c => c.json({ settings: rt.ideas.saveSettings(await body(c, z.object({ cadence: z.enum(['daily', 'weekly', 'off']).optional(), hour: z.number().int().min(0).max(23).optional() }).strict())) }))
+  api.put('/settings/ideas', async c => {
+    const settings = rt.ideas.saveSettings(await body(c, z.object({ cadence: z.enum(['daily', 'weekly', 'off']).optional(), hour: z.number().int().min(0).max(23).optional() }).strict()))
+    rt.bus.emit({ type: 'settings.updated', keys: ['ideas'] })
+    return c.json({ settings })
+  })
   api.post('/ideas/refresh', async c => {
     if (!rt.hub.resolve('router')) throw new ModelError('no_model', '主 Agent 还没有配置模型：请到 设置 → 分层模型 选择')
     try { return c.json({ batch: await rt.ideas.refresh() }) } catch (error) {
@@ -600,13 +644,31 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.get('/settings/notifications', c => c.json({ settings: notifySettings(rt.store), defaults: DEFAULT_NOTIFY }))
   api.put('/settings/notifications', async c => {
     const patch = await body(c, NotifySettingsSchema.partial())
-    return c.json({ settings: guard(() => saveNotifySettings(rt.store, patch)) })
+    const settings = guard(() => saveNotifySettings(rt.store, patch))
+    rt.bus.emit({ type: 'settings.updated', keys: ['notify'] })
+    return c.json({ settings })
   })
   api.post('/notifications/test', c => c.json({ notice: rt.notices.test() }))
 
+  // 客户端偏好镜像 (外观、主题色、界面语言、字号、减少动效、语音输入与回复朗读)
+  api.get('/settings/client-prefs', c => c.json({ prefs: clientPrefs(rt.store) }))
+  api.put('/settings/client-prefs', async c => {
+    const raw = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
+    const broadcast = raw.broadcast !== false
+    const { next, patch } = saveClientPrefs(rt.store, raw)
+    if (broadcast && Object.keys(patch).length > 0) {
+      rt.bus.emit({ type: 'prefs.updated', patch })
+    }
+    return c.json({ prefs: next })
+  })
+
   // 数据和隐私
   api.get('/settings/privacy', c => c.json({ settings: privacySettings(rt.store) }))
-  api.put('/settings/privacy', async c => c.json({ settings: savePrivacySettings(rt.store, await body(c, PrivacySchema.partial())) }))
+  api.put('/settings/privacy', async c => {
+    const settings = savePrivacySettings(rt.store, await body(c, PrivacySchema.partial()))
+    rt.bus.emit({ type: 'settings.updated', keys: ['privacy'] })
+    return c.json({ settings })
+  })
   api.get('/export', c => {
     const data = exportAll(rt.store, { app: 'nuonuo', version: VERSION, persona: persona(rt.store) })
     const day = new Date().toISOString().slice(0, 10)
@@ -731,7 +793,9 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const servers = await body(c, McpBody)
     if (new Set(servers.map(s => s.name)).size !== servers.length) throw new HttpError(400, 'invalid', '名称不能重复')
     kvSet(rt.store, 'settings:mcp', servers)
-    return c.json({ servers, status: await rt.mcp.sync() })
+    const status = await rt.mcp.sync()
+    rt.bus.emit({ type: 'settings.updated', keys: ['mcp'] })
+    return c.json({ servers, status })
   })
   api.post('/mcp/sync', async c => c.json({ status: await rt.mcp.sync() }))
 
@@ -1127,6 +1191,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     const settings = await body(c, ExecutionBody)
     kvSet(rt.store, 'settings:execution', settings)
     rt.agents.options.maxWorkers = settings.maxWorkers
+    rt.bus.emit({ type: 'settings.updated', keys: ['execution'] })
     return c.json({ settings: rt.engine.execution() })
   })
 

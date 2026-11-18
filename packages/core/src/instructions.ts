@@ -44,7 +44,7 @@ export function appendLine(body: string, text: string, heading?: string): string
 }
 
 export class Instructions {
-  constructor(private store: Store, private now: () => number = Date.now) {}
+  constructor(private store: Store, private now: () => number = Date.now, private changed: () => void = () => {}) {}
 
   current(): InstructionsVersion {
     const v = kvGet<Stored>(this.store, KEY)
@@ -64,6 +64,7 @@ export class Instructions {
       kvSet(this.store, KEY, next)
       kvSet(this.store, HISTORY, [next, ...this.history()].slice(0, 50))
     })
+    this.changed()
     return next
   }
 

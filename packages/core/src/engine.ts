@@ -14,6 +14,20 @@ import { sourceOfThread, webchatThread, type Attachment, type Attention, type En
 
 export const ROUTER_SESSION = 'ses_router'
 
+export type EngineEvent =
+  | { type: 'message.created'; conversationId: string; messageId: string }
+  | { type: 'message.updated'; conversationId: string; messageId: string }
+  | { type: 'conversation.updated'; conversationId: string }
+  | { type: 'ticket.updated'; ticketId: string }
+  | { type: 'activity.updated' }
+  | { type: 'persona.updated' }
+  | { type: 'goals.updated' }
+  | { type: 'skills.updated' }
+  | { type: 'feed.updated' }
+  | { type: 'ideas.updated' }
+  | { type: 'settings.updated'; keys: string[] }
+  | { type: 'prefs.updated'; patch: Record<string, unknown> }
+
 const TECHNICAL_BUBBLE_RE = /```|^\s*(?:#{1,6}\s|[-*+]\s|\d+\.\s)|https?:\/\/|www\./m
 const STAGE_PAREN_START_RE = /^[（(]\s*(?:笑|微笑|轻笑|苦笑|干笑|偷笑|抿嘴笑|叹气|轻叹|叹息|挠头|歪头|点头|摇头|耸肩|拍拍|小声|嘀咕|轻声|低声|捂脸|扶额|擦汗|挑眉|眨眼|吐舌|伸懒腰|打哈欠|清嗓|顿了顿|想了想|思考|沉默|看向你|看着你)[^）)]{0,12}[）)]\s*/u
 const STAGE_PAREN_END_RE = /\s*[（(]\s*(?:笑|微笑|轻笑|苦笑|干笑|偷笑|抿嘴笑|叹气|轻叹|叹息|挠头|歪头|点头|摇头|耸肩|拍拍|小声|嘀咕|轻声|低声|捂脸|扶额|擦汗|挑眉|眨眼|吐舌|伸懒腰|打哈欠|清嗓|顿了顿|想了想|思考|沉默|看向你|看着你)[^）)]{0,12}[）)]$/u

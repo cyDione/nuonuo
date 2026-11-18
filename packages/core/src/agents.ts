@@ -217,6 +217,8 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
         // the previous batch. (A retry continues the batch that failed, so it keeps that batch's trust.)
         routerContext.trust = 'external'
         routerContext.source = items.map(i => i.payload.ticketId).find(Boolean) ?? 'router'
+      } else if (!routerContext.source) {
+        routerContext.trust = 'external'
       }
       const body = items.map(item => renderRouterItem(item)).join('\n\n')
       return `${body}${await recallFor(requests)}`
@@ -743,14 +745,24 @@ export function accessExtension(access: LocalAccess, uploadsDir: string): AgentE
   }
 }
 
-/** What the router is answering right now; set per batch in code, read by the memory tools. */
-type RouterContext = { trust: MemoryTrust; source: string; scope: string | undefined }
+/** What the router is answering right now; set per batch in code, read by the memory and settings tools. */
+export type RouterContext = { trust: MemoryTrust; source: string; scope: string | undefined }
 const routerContexts = new WeakMap<Engine, RouterContext>()
 /** Kept per engine, so two assistants in one process (tests, a future multi-profile daemon) never share trust. */
-function routerContextOf(engine: Engine): RouterContext {
+export function routerContextOf(engine: Engine): RouterContext {
   let ctx = routerContexts.get(engine)
-  if (!ctx) routerContexts.set(engine, ctx = { trust: 'external', source: '', scope: undefined })
+  if (!ctx) routerContexts.set(engine, ctx = { trust: 'user', source: '', scope: undefined })
   return ctx
+}
+
+/** Whether the current Router batch is answering a direct owner message (`trust === 'user'`). */
+export function isOwnerDirectTurn(engine: Engine): boolean {
+  return routerContextOf(engine).trust === 'user'
+}
+
+/** Overrides the Router's trust state for the given engine (used by tests and batch setup). */
+export function setRouterTrust(engine: Engine, trust: MemoryTrust): void {
+  routerContextOf(engine).trust = trust
 }
 
 /**
@@ -863,6 +875,7 @@ export function proactiveTool(store: Store, by: string, engine?: Engine) {
       const ignoreActors = [...new Set([...cur.ignoreActors, ...(ignore_actors_add ?? [])])].filter(a => !drop.has(a.toLowerCase()))
       const next = saveProactiveSettings(store, { ...(mode ? { mode } : {}), strategy, ignoreActors, ...(sources ? { sources } : {}) }, by)
       const stopped = cur.mode !== 'off' && next.mode === 'off' ? engine?.revokeProactive('主动处理已关闭') ?? [] : []
+      ;(engine as unknown as { bus?: { emit(e: unknown): void } } | undefined)?.bus?.emit({ type: 'settings.updated', keys: ['proactive'] })
       return { ok: true, version: next.version, mode: next.mode, ignore_actors: next.ignoreActors, sources: next.sources, ...(stopped.length ? { stopped_silent_work: stopped.length } : {}) }
     },
   })

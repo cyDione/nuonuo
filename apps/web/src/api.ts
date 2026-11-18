@@ -171,6 +171,8 @@ export type ServerEvent =
   | Notice
   | { type: 'message.updated'; conversationId: string; messageId: string }
   | { type: 'ideas.updated' }
+  | { type: 'settings.updated'; keys: string[] }
+  | { type: 'prefs.updated'; patch: Record<string, unknown> }
 
 type FieldLinks = { links?: { label: string; href: string }[] }
 export type FieldSpec = FieldLinks & (

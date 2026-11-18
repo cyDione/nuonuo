@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join, sep } from 'node:path'
 import type { ToolSet } from 'ai'
 import type { DaemonConfig } from './config'
+import { settingsExtension } from './settings-tools'
 import { Uploads } from './uploads'
 
 export interface Runtime {
@@ -110,7 +111,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         throw error
       }
     }, { concurrency: 2, baseDelayMs: 10_000, maxDelayMs: 600_000 })
-    const instructions = new Instructions(store)
+    const instructions = new Instructions(store, Date.now, () => bus.emit({ type: 'settings.updated', keys: ['instructions'] }))
     const goals = new Goals(store, Date.now, () => bus.emit({ type: 'goals.updated' }))
     const feed = new Feed(store, Date.now, () => bus.emit({ type: 'feed.updated' }))
     const ideas = new Ideas(store, hub, () => ideasContext(store, { goals, feed, memory }), Date.now, () => bus.emit({ type: 'ideas.updated' }))
@@ -190,6 +191,7 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
         },
       }),
       { routerPrompt: () => personaPrompt(store) },
+      settingsExtension({ store, hub: () => (agents as any).hub ?? hub, bus, engine, access, reviewer, skills, instructions, ideas, plugins, sources, mcp }),
       instructionsExtension(instructions),
       goalsExtension(goals),
       feedExtension(feed),

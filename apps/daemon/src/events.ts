@@ -18,6 +18,8 @@ export type ClientEvent =
   | { type: 'skills.updated' }
   | { type: 'feed.updated' }
   | { type: 'ideas.updated' }
+  | { type: 'settings.updated'; keys: string[] }
+  | { type: 'prefs.updated'; patch: Record<string, unknown> }
   | { type: 'notice'; id: string; kind: string; title: string; body: string; hash: string; silent: boolean; chime: boolean }
 
 /** Reads a possibly unfinished JSON object's string field, e.g. `"text":"hel` → `hel`. */
@@ -56,6 +58,8 @@ export class EventMapper {
       case 'skills.updated': return [{ type: 'skills.updated' }]
       case 'feed.updated': return [{ type: 'feed.updated' }]
       case 'ideas.updated': return [{ type: 'ideas.updated' }]
+      case 'settings.updated': return [{ type: 'settings.updated', keys: Array.isArray(e.keys) ? e.keys.map(String) : [] }]
+      case 'prefs.updated': return [{ type: 'prefs.updated', patch: e.patch && typeof e.patch === 'object' ? (e.patch as Record<string, unknown>) : {} }]
       case 'notice': return [{ type: 'notice', id: e.id, kind: e.kind, title: e.title, body: e.body, hash: e.hash, silent: e.silent, chime: e.chime }]
       case 'approval.updated': return [{ type: 'ticket.updated', ticketId: e.ticketId }]
       // A subagent's state and text belong to its parent's work; the web shows only the helper itself.

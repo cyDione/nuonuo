@@ -3,7 +3,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { playChime } from './sounds'
 import { useEffect, useSyncExternalStore } from 'react'
 import type { Notice, ServerEvent } from './api'
-import { getPrefs } from './prefs'
+import { setUiLanguage, uiLanguage, type UiLanguage } from './i18n'
+import { ACCENTS, getPrefs, setPrefs, type AccentId, type Prefs } from './prefs'
+import { desktop, type DesktopPrefs } from './shell'
 import { speak } from './voice'
 
 interface LiveState {
@@ -91,6 +93,26 @@ export function useLiveEvents() {
       source.addEventListener('ready', () => {
         set({ connected: true })
         void checkFreshUi()
+        const p = getPrefs()
+        void fetch('/api/settings/client-prefs', {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            theme: p.theme,
+            accent: p.accent,
+            uiLanguage,
+            text: p.text,
+            reduceMotion: p.reduceMotion,
+            voiceInput: p.voiceInput,
+            voiceLang: p.voiceLang,
+            autoSend: p.autoSend,
+            readAloud: p.readAloud,
+            voiceRate: p.voiceRate,
+            showRaw: p.showRaw,
+            broadcast: false,
+          }),
+        }).catch(() => {})
         // Anything may have changed while disconnected.
         qc.invalidateQueries()
       })
@@ -121,6 +143,50 @@ export function useLiveEvents() {
         case 'persona.updated':
           qc.invalidateQueries({ queryKey: ['persona'] })
           break
+        case 'settings.updated':
+          for (const k of e.keys ?? []) {
+            qc.invalidateQueries({ queryKey: [k] })
+          }
+          break
+        case 'prefs.updated': {
+          const raw = (e.patch ?? {}) as Record<string, unknown>
+          const webPatch: Partial<Prefs> = {}
+          if (raw.theme === 'light' || raw.theme === 'dark' || raw.theme === 'system') webPatch.theme = raw.theme
+          if (typeof raw.accent === 'string' && ACCENTS.some(a => a.id === raw.accent)) webPatch.accent = raw.accent as AccentId
+          const nextText = raw.text ?? raw.text_size
+          if (nextText === 'small' || nextText === 'normal' || nextText === 'large') webPatch.text = nextText
+          const nextMotion = raw.reduceMotion ?? raw.reduce_motion
+          if (typeof nextMotion === 'boolean') webPatch.reduceMotion = nextMotion
+          const nextVoiceInput = raw.voiceInput ?? raw.voice_input
+          if (typeof nextVoiceInput === 'boolean') webPatch.voiceInput = nextVoiceInput
+          const nextVoiceLang = raw.voiceLang ?? raw.voice_lang
+          if (typeof nextVoiceLang === 'string' && nextVoiceLang) webPatch.voiceLang = nextVoiceLang
+          const nextAutoSend = raw.autoSend ?? raw.auto_send
+          if (typeof nextAutoSend === 'boolean') webPatch.autoSend = nextAutoSend
+          const nextReadAloud = raw.readAloud ?? raw.read_aloud
+          if (typeof nextReadAloud === 'boolean') webPatch.readAloud = nextReadAloud
+          const nextVoiceRate = raw.voiceRate ?? raw.voice_rate
+          if (nextVoiceRate === 'slow' || nextVoiceRate === 'normal' || nextVoiceRate === 'fast') webPatch.voiceRate = nextVoiceRate
+          const nextShowRaw = raw.showRaw ?? raw.show_raw
+          if (typeof nextShowRaw === 'boolean') webPatch.showRaw = nextShowRaw
+          if (Object.keys(webPatch).length > 0) setPrefs(webPatch, { fromServer: true })
+
+          const desktopPatch: Partial<Omit<DesktopPrefs, 'registered'>> = {}
+          const nextOpenAtLogin = raw.openAtLogin ?? raw.open_at_login
+          if (typeof nextOpenAtLogin === 'boolean') desktopPatch.openAtLogin = nextOpenAtLogin
+          if (typeof raw.tray === 'boolean') desktopPatch.tray = raw.tray
+          const nextClose = raw.close ?? raw.close_action
+          if (nextClose === 'hide' || nextClose === 'quit') desktopPatch.close = nextClose
+          if (Object.keys(desktopPatch).length > 0 && desktop?.prefs) {
+            void desktop.prefs.set(desktopPatch).then(d => qc.setQueryData(['desktop-prefs'], d)).catch(() => {})
+          }
+
+          const nextLang = (raw.uiLanguage ?? raw.ui_language) as UiLanguage | undefined
+          if ((nextLang === 'zh' || nextLang === 'en' || nextLang === 'system') && nextLang !== uiLanguage) {
+            setUiLanguage(nextLang)
+          }
+          break
+        }
         case 'goals.updated':
           qc.invalidateQueries({ queryKey: ['goals'] })
           break

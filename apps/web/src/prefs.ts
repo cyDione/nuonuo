@@ -93,11 +93,19 @@ export function comboOf(e: KeyboardEvent): string | null {
   return [...mods, key].join('+')
 }
 
-export function setPrefs(patch: Partial<Prefs>) {
+export function setPrefs(patch: Partial<Prefs>, opts?: { fromServer?: boolean }) {
   prefs = { ...prefs, ...patch }
   try { localStorage.setItem(KEY, JSON.stringify(prefs)) } catch { /* private mode */ }
   applyPrefs()
   for (const l of listeners) l()
+  if (!opts?.fromServer && typeof window !== 'undefined' && typeof fetch === 'function') {
+    void fetch('/api/settings/client-prefs', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...patch, broadcast: false }),
+    }).catch(() => {})
+  }
 }
 
 // Another window of the app (the quick-ask window, a second tab) changed them: follow along without a reload.
