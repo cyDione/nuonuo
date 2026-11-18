@@ -28,9 +28,30 @@ export const GRUDGE_HALF_LIFE_H = 12
 export const GUARDED_GRUDGE = 0.35
 export const GUARDED_UNDERTONE = -0.2
 export const SENSITIVITY = { min: 0.2, max: 2.5 }
+export const TONE_SNAP_RADIUS = 0.06
+export const TONE_NATURAL_RADIUS = 0.08
+export const TONE_VIVID_RADIUS = 0.48
 const HISTORY = 50
 const DIARY_KEEP = 60
 const DIARY_PER_DAY = 3
+
+export type ToneId = 'natural' | 'warm' | 'witty' | 'calm' | 'sharp'
+export interface MoodTone { x: number; y: number }
+export interface MoodToneView {
+  x: number
+  y: number
+  id: ToneId
+  label: string
+  strength: number
+}
+
+export const TONE_LABELS: Record<ToneId, string> = {
+  natural: '自然',
+  warm: '温和',
+  witty: '风趣',
+  calm: '沉静',
+  sharp: '犀利',
+}
 
 export interface MoodPoint {
   at: number; mood: number; undertone?: number; energy: number; patience?: number; trust: number
@@ -43,6 +64,8 @@ export interface MoodState {
   /** Hidden grudge (0..1): dampens praise recovery after hostility/dismissiveness and holds a guarded stance until it fades. */
   grudge: number
   energy: number; patience: number; trust: number; at: number; turns: number; lastFeedback: Feedback; history: MoodPoint[]
+  /** 2D voice tone pad coordinates: x in [-1, 1] (left -1 to right +1), y in [-1, 1] (bottom -1 to top +1). */
+  tone: MoodTone
   /** The stance picked for the last turn and the start of the owner's words it answered (for the curve's notes). */
   lastStance?: Stance['id']; lastText?: string
 }
@@ -61,7 +84,7 @@ export interface DiaryEntry { id: string; at: number; text: string; mood: number
 /** What 它是谁 and the 个性与心境 window show. */
 export interface MoodView {
   enabled: boolean; mood: number; undertone: number; energy: number; patience: number; trust: number; summary: string; history: MoodPoint[]
-  stance: Pick<Stance, 'id' | 'name' | 'why'>; config: MindConfig; baseline: typeof BASELINE; diary: DiaryEntry[]
+  stance: Pick<Stance, 'id' | 'name' | 'why'>; tone: MoodToneView; config: MindConfig; baseline: typeof BASELINE; diary: DiaryEntry[]
 }
 
 type StatePort = PluginContext['state']
@@ -69,13 +92,54 @@ type StatePort = PluginContext['state']
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 const round = (v: number, d = 2) => Math.round(v * 10 ** d) / 10 ** d
 
+/** Normalizes 2D tone coordinates to [-1, 1] with 2-decimal precision, snapping near-origin (< 0.06) to (0, 0). */
+export function normalizeTone(tone?: Partial<MoodTone> | undefined): MoodTone {
+  const x = clamp(Number(tone?.x) || 0, -1, 1)
+  const y = clamp(Number(tone?.y) || 0, -1, 1)
+  if (Math.hypot(x, y) < TONE_SNAP_RADIUS) return { x: 0, y: 0 }
+  return { x: round(x, 2), y: round(y, 2) }
+}
+
+/** Computes bilinear weights for the four corners: warm (-1,+1), witty (+1,+1), calm (-1,-1), sharp (+1,-1). */
+export function toneWeights(tone?: Partial<MoodTone> | undefined): { warm: number; witty: number; calm: number; sharp: number; r: number } {
+  const { x, y } = normalizeTone(tone)
+  const u = (x + 1) / 2
+  const v = (y + 1) / 2
+  const r = Math.min(1, Math.hypot(x, y))
+  return {
+    warm: (1 - u) * v,
+    witty: u * v,
+    calm: (1 - u) * (1 - v),
+    sharp: u * (1 - v),
+    r,
+  }
+}
+
+/** Maps a 2D tone coordinate to its public view `{ x, y, id, label, strength }`. */
+export function describeTone(tone?: Partial<MoodTone> | undefined): MoodToneView {
+  const { x, y } = normalizeTone(tone)
+  const dist = Math.hypot(x, y)
+  const strength = Math.round(Math.min(1, dist) * 100)
+  if (dist < TONE_NATURAL_RADIUS) return { x, y, id: 'natural', label: TONE_LABELS.natural, strength }
+  const w = toneWeights({ x, y })
+  const ranked: [ToneId, number][] = [
+    ['warm', w.warm],
+    ['witty', w.witty],
+    ['calm', w.calm],
+    ['sharp', w.sharp],
+  ]
+  ranked.sort((a, b) => b[1] - a[1])
+  const id = ranked[0]![0]
+  return { x, y, id, label: TONE_LABELS[id], strength }
+}
+
 export function initialMood(now = Date.now()): MoodState {
-  return { ...BASELINE, undertone: BASELINE.mood, grudge: 0, at: now, turns: 0, lastFeedback: 'neutral', history: [] }
+  return { ...BASELINE, undertone: BASELINE.mood, grudge: 0, at: now, turns: 0, lastFeedback: 'neutral', history: [], tone: { x: 0, y: 0 } }
 }
 
 /** Fast mood settles toward the undertone; the undertone, patience and grudge fade back much more slowly. */
 export function settleMood(state: Partial<MoodState> | undefined, now = Date.now()): MoodState {
-  const s = { ...initialMood(now), ...(state ?? {}) }
+  const s = { ...initialMood(now), ...(state ?? {}), tone: normalizeTone(state?.tone) }
   const hours = Math.max(0, (now - s.at) / 3_600_000)
   const keep = Math.pow(0.5, hours / MOOD_HALF_LIFE_H)
   const keepU = Math.pow(0.5, hours / UNDERTONE_HALF_LIFE_H)
@@ -146,6 +210,82 @@ export function moodSummary(s: MoodState): string {
   return `${m === '有点闷' || m === '低落' ? m : `心情${m}`}，${energyWord(s.energy)}`
 }
 
+const TONE_LIGHT_RULES: Record<Exclude<ToneId, 'natural'>, string> = {
+  warm: '语气亲切温和、有人情味，短句柔和自然。',
+  witty: '语气松弛轻快，顺势接话，点到即止不油腻。',
+  calm: '语气沉静克制、惜字少言，留白不打扰。',
+  sharp: '语气直率干脆、一针见血，老友般直接点出重点。',
+}
+
+const TONE_VIVID_RULES: Record<Exclude<ToneId, 'natural'>, string> = {
+  warm: '鲜明温和：亲切体贴、先稳稳接住情绪再利落办事。',
+  witty: '鲜明风趣：松弛幽默、会接梗打趣一句再把事办妥。',
+  calm: '鲜明沉静：安静内敛、极简短句回应，绝不啰嗦。',
+  sharp: '鲜明犀利：直率有锋芒、先一句点破要害再动手解决。',
+}
+
+const TONE_EXEMPLARS: Record<ToneId, { upset: [string, string]; task: [string, string]; chat: [string, string] }> = {
+  natural: {
+    upset: ['["真是够折腾的，我来看看哪卡住了", "你先缓一下"]', '["搞定了", "顺手把测试也跑了一遍，全绿"]'],
+    task: ['["好，我去看看最近更新到哪了"]', '["搞定了", "顺手把测试也跑了一遍，全绿"]'],
+    chat: ['["好，我去看看最近更新到哪了"]', '["搞定了", "顺手把测试也跑了一遍，全绿"]'],
+  },
+  warm: {
+    upset: ['["先别急，歇口气", "剩下的交给我收尾就行"]', '["这事确实烦人，我在呢", "一步步来"]'],
+    task: ['["先别急，歇口气", "剩下的交给我收尾就行"]', '["好，我先帮你理一下", "弄好马上跟你说"]'],
+    chat: ['["先别急，歇口气", "剩下的交给我收尾就行"]', '["忙到现在才空下来？", "有需要搭手的随时喊我"]'],
+  },
+  witty: {
+    upset: ['["看出来了，今天脑细胞已经打卡下班了", "发过来吧，最后这点我替你收了"]', '["这 bug 挺会挑时候", "交给我收拾吧"]'],
+    task: ['["看出来了，今天脑细胞已经打卡下班了", "发过来吧，最后这点我替你收了"]', '["这活儿熟，两分钟的事", "你先喝口水"]'],
+    chat: ['["看出来了，今天脑细胞已经打卡下班了", "发过来吧，最后这点我替你收了"]', '["今天状态挺松弛啊", "刚好我也空着，聊两句"]'],
+  },
+  calm: {
+    upset: ['["嗯，先放着吧", "我在，有急事替你盯着"]', '["知道了，先歇会儿", "剩下的我处理"]'],
+    task: ['["嗯，先放着吧", "我在，有急事替你盯着"]', '["收到，我去查", "弄好发你"]'],
+    chat: ['["嗯，先放着吧", "我在，有急事替你盯着"]', '["嗯，听着呢", "慢点说"]'],
+  },
+  sharp: {
+    upset: ['["这报错写得挺直白，配置漏了一行", "交给我改吧，两分钟的事"]', '["别跟它死磕了，方向不对", "我直接改了"]'],
+    task: ['["这报错写得挺直白，配置漏了一行", "交给我改吧，两分钟的事"]', '["核心问题就一个，别绕远路", "我直接从根上改"]'],
+    chat: ['["这报错写得挺直白，配置漏了一行", "交给我改吧，两分钟的事"]', '["重点其实就一句", "直说吧，想怎么弄"]'],
+  },
+}
+
+function buildToneLines(state: MoodState, hint: { upset: boolean; task: boolean }, stanceId: StanceId): string[] {
+  const w = toneWeights(state.tone)
+  const scene = hint.upset ? 'upset' : hint.task ? 'task' : 'chat'
+  if (w.r < TONE_NATURAL_RADIUS) {
+    const [a, b] = TONE_EXEMPLARS.natural[scene]
+    return [`语调偏向（自然）：像熟人发微信一样拆成 1~3 条短气泡，句末不加生硬句号（示范：${a} / ${b}）。`]
+  }
+  const coolOrGuarded = stanceId === 'cool' || stanceId === 'guarded'
+  const effective: [Exclude<ToneId, 'natural'>, number][] = [
+    ['warm', w.warm],
+    ['witty', coolOrGuarded ? w.witty * 0.15 : w.witty],
+    ['calm', w.calm],
+    ['sharp', w.sharp],
+  ]
+  effective.sort((a, b) => b[1] - a[1])
+  const primary = effective[0]![0]
+  const second = effective[1]!
+  const vivid = w.r > TONE_VIVID_RADIUS
+  const blend = second[1] >= 0.24 ? `${TONE_LABELS[primary]} · ${TONE_LABELS[second[0]]}` : TONE_LABELS[primary]
+  const rule = vivid ? TONE_VIVID_RULES[primary] : TONE_LIGHT_RULES[primary]
+  const gateNote = coolOrGuarded && w.witty > 0.25 ? '（当前心境克制，收起调侃）' : state.turns % 2 === 1 ? '（隔轮冷却：只保留短句节奏，不重复上一轮口头禅）' : ''
+  const [ex1, ex2] = TONE_EXEMPLARS[primary][scene]
+  return [
+    `语调偏向（${vivid ? '鲜明' : '轻度'}偏${blend} ${Math.round(w.r * 100)}%${gateNote}）：${rule}`,
+    `短气泡示范（优先用 reply({ bubbles }) 发 1~3 条 8~22 字短句，省去句末句号）：${ex1} / ${ex2}`,
+  ]
+}
+
+/** Lightweight <mood> tone block injected when dynamic mood shifts are disabled but the 2D tone pad is off-center. */
+export function toneOnlyContext(state: MoodState, text: string): string {
+  const hint = guessOwner(text)
+  return ['<mood>', ...buildToneLines(state, hint, 'partner'), '始终：不说客服套话，不写括号动作描写。', '</mood>'].join('\n')
+}
+
 /** The block appended to the main agent's input for this turn. */
 export function moodContext(state: MoodState, text: string, diary: DiaryEntry[] = []): string {
   const hint = guessOwner(text)
@@ -155,6 +295,7 @@ export function moodContext(state: MoodState, text: string, diary: DiaryEntry[] 
     '<mood>',
     `你此刻的心境：心情${moodWord(state.mood)}（${round(state.mood)}${baseNote}），${energyWord(state.energy)}（${round(state.energy)}），${patienceWord(state.patience)}（耐心 ${Math.round(state.patience)}/100），对主人的信任 ${Math.round(state.trust)}/100。它只影响语气，不影响你帮忙的程度和质量。`,
     `这轮的说话方式（${s.name}，按主人的话初步判断，你看了原话可以自己改判）：${s.rule}`,
+    ...buildToneLines(state, hint, s.id),
     '始终：不说客服套话（“非常理解您的感受”“抱抱你”之类），共情要具体、用自己的话。',
   ]
   if (state.grudge >= 0.25) lines.push('前几轮积了点怨气，一句好话哄不好，先保持分寸。')
@@ -248,17 +389,29 @@ export function hadHeatedTurn(state: StatePort, fromMs: number, toMs = Date.now(
   return history.some(p => p.at >= fromMs - 5_000 && p.at <= toMs + 60_000 && isHeatedTurn(p))
 }
 
-export function moodView(state: StatePort): MoodView {
-  const s = read(state)
+const portOf = (s: StatePort | { state: StatePort }): StatePort => ('state' in s ? s.state : s)
+
+export function moodView(state: StatePort | { state: StatePort }): MoodView {
+  const port = portOf(state)
+  const s = read(port)
   const st = s.lastStance ? stance(s.lastStance) : stanceFor(s)
   // The last stance stops being true once the mood it came from has moved on (a reset, a drag, hours later).
   const shown = st.id === 'cool' && !(s.patience < 35 && s.mood < -0.3) ? stanceFor(s)
     : st.id === 'guarded' && !isGuarded(s) ? stanceFor(s)
     : st.id === 'banter' && !(s.mood > 0.5 && s.trust > 75) ? stanceFor(s) : st
-  return { enabled: moodEnabled(state), mood: round(s.mood), undertone: round(s.undertone), energy: round(s.energy), patience: Math.round(s.patience), trust: round(s.trust, 1), summary: moodSummary(s),
-    history: s.history, stance: { id: shown.id, name: shown.name, why: shown.why }, config: mindConfig(state), baseline: BASELINE, diary: diaryOf(state) }
+  return { enabled: moodEnabled(port), mood: round(s.mood), undertone: round(s.undertone), energy: round(s.energy), patience: Math.round(s.patience), trust: round(s.trust, 1), summary: moodSummary(s),
+    history: s.history, stance: { id: shown.id, name: shown.name, why: shown.why }, tone: describeTone(s.tone), config: mindConfig(port), baseline: BASELINE, diary: diaryOf(port) }
 }
-export function setMoodEnabled(state: StatePort, enabled: boolean): void { state.set('enabled', enabled) }
+export function setMoodEnabled(state: StatePort | { state: StatePort }, enabled: boolean): void { portOf(state).set('enabled', enabled) }
+
+/** Persists the 2D voice tone pad position ({ x, y } in [-1, 1]), snapping < 0.06 to origin (0, 0). */
+export function setMoodTone(state: StatePort | { state: StatePort }, tone: MoodTone): MoodToneView {
+  const port = portOf(state)
+  const s = read(port)
+  const nextTone = normalizeTone(tone)
+  port.set('mood', { ...s, tone: nextTone })
+  return describeTone(nextTone)
+}
 
 /** 回到平时: mood, undertone, grudge, energy and patience back to their baselines. Trust and the history stay. */
 export function resetMood(state: StatePort): void {
@@ -318,8 +471,10 @@ export const moodPlugin = definePlugin({
   name: '个性与心境',
   description: '糯糯自己的心情、精力、耐心和对你的信任，随对话变化、随时间回落；还会记日记。',
   inlineContext: (ctx, { text }) => {
-    if (!moodEnabled(ctx.state)) return undefined
     const s = read(ctx.state)
+    if (!moodEnabled(ctx.state)) {
+      return Math.hypot(s.tone.x, s.tone.y) >= TONE_NATURAL_RADIUS ? toneOnlyContext(s, text) : undefined
+    }
     const st = stanceFor(s, guessOwner(text))
     ctx.state.set('mood', { ...s, lastStance: st.id, lastText: String(text).replace(/\s+/g, ' ').trim().slice(0, 40) })
     return moodContext(s, text, mindConfig(ctx.state).diary ? diaryOf(ctx.state) : [])

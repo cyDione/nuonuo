@@ -350,8 +350,11 @@ function Item({ m, fresh, tapback, name, actions }: { m: Message; fresh: boolean
       </div>
     </div>}
   </div>
+  const bubbles = Array.isArray(m.meta.bubbles) ? m.meta.bubbles.filter((b): b is string => typeof b === 'string' && b.trim().length > 0) : []
   return <div className="msg space-y-1.5">
-    <Bubble fresh={fresh} aside={<MsgActions m={m} actions={actions} />}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div></Bubble>
+    {bubbles.length > 1 ? <div className="space-y-1.5">
+      {bubbles.map((b, idx) => <Bubble key={idx} fresh={fresh} aside={idx === bubbles.length - 1 ? <MsgActions m={m} actions={actions} /> : undefined}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{b}</ReactMarkdown></div></Bubble>)}
+    </div> : <Bubble fresh={fresh} aside={<MsgActions m={m} actions={actions} />}><div className="prose-chat text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div></Bubble>}
     {m.meta.card && <div className={cx(fresh && 'anim-rise')}><ChatCard card={m.meta.card} /></div>}
     {m.meta.open && <OpenChip open={m.meta.open} />}
     {m.meta.error && <div className="flex items-center gap-1 text-xs text-danger"><AlertTriangle size={12} />{m.meta.error}</div>}

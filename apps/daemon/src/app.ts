@@ -19,7 +19,7 @@ import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, D
 import { kvGet, kvSet, newId, schema } from '@nuonuo/db'
 import { findBrowser } from '@nuonuo/agent-runtime'
 import { BRIDGE_JS, ComputerError, fireRoutine, WINDOW_HEADERS, type BrowserInfo } from '@nuonuo/sources'
-import { MOOD_PLUGIN_ID, moodView, pinDiary, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodValues } from '@nuonuo/plugins'
+import { MOOD_PLUGIN_ID, moodView, pinDiary, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodTone, setMoodValues } from '@nuonuo/plugins'
 import { runDoctor } from './doctor'
 import { MAX_UPLOAD, Uploads } from './uploads'
 import { search } from './search'
@@ -234,10 +234,12 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
       enabled: z.boolean().optional(),
       values: z.object({ mood: z.number().min(-1).max(1), energy: z.number().min(0).max(1), patience: z.number().min(0).max(100), trust: z.number().min(0).max(100) }).partial().optional(),
       config: z.object({ up: z.number(), down: z.number(), diary: z.boolean() }).partial().optional(),
+      tone: z.object({ x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) }).optional(),
     }))
     if (input.enabled !== undefined) setMoodEnabled(mood(), input.enabled)
     if (input.values) setMoodValues(mood(), input.values)
     if (input.config) setMindConfig(mood(), input.config)
+    if (input.tone) setMoodTone(mood(), input.tone)
     return c.json({ mood: moodView(mood()) })
   })
   api.post('/mood/diary/:id', async c => {

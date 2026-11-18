@@ -5,7 +5,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { addDiary, applyReport, applyStop, BASELINE, diaryOf, GRUDGE_HALF_LIFE_H, guessOwner, hadHeatedTurn, initialMood, isHeatedTurn, MOOD_HALF_LIFE_H, moodContext, moodEnabled, moodPlugin, moodSummary, moodView, PATIENCE_HALF_LIFE_H, pinDiary, recordMoodStop, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodValues, settleMood, stanceFor, UNDERTONE_HALF_LIFE_H } from './mood'
+import { addDiary, applyReport, applyStop, BASELINE, describeTone, diaryOf, GRUDGE_HALF_LIFE_H, guessOwner, hadHeatedTurn, initialMood, isHeatedTurn, MOOD_HALF_LIFE_H, moodContext, moodEnabled, moodPlugin, moodSummary, moodView, normalizeTone, PATIENCE_HALF_LIFE_H, pinDiary, recordMoodStop, removeDiary, resetMood, setMindConfig, setMoodEnabled, setMoodTone, setMoodValues, settleMood, stanceFor, UNDERTONE_HALF_LIFE_H } from './mood'
 
 describe('心境 model', () => {
   it('drifts mood and energy back to the baseline over time, but not trust', () => {
@@ -179,5 +179,47 @@ describe('心境 built in', () => {
     expect(await sync('不该记')).not.toHaveProperty('diary')
     expect(await ext.inlineContext!('唉，今天好累', undefined)).not.toContain('你自己的日记')
     expect(addDiary(state, '  ', 0)).toBe(false)
+  })
+
+  it('persists 2D neutral tone pad coordinates, snaps near-origin to (0,0), maps all four corners and injects dynamic bubble exemplars', async () => {
+    store = openStore(':memory:')
+    const plugins = new PluginManager(mkdtempSync(join(tmpdir(), 'nn-mood-')), new SourceRegistry(store, new Effects(store), new MemorySecrets()), store, { sandbox: false })
+    plugins.registerBuiltIn(moodPlugin)
+    const ext = plugins.agentExtensions()
+    const state = plugins.stateOf('mood')
+
+    // Default origin is 自然 (0, 0)
+    expect(moodView(state).tone).toEqual({ x: 0, y: 0, id: 'natural', label: '自然', strength: 0 })
+    expect(normalizeTone({ x: 0.03, y: -0.04 })).toEqual({ x: 0, y: 0 })
+    expect(describeTone({ x: 0.04, y: 0.03 })).toMatchObject({ x: 0, y: 0, id: 'natural', label: '自然', strength: 0 })
+
+    // Four corners: 左上 (-1, +1) 温和, 右上 (+1, +1) 风趣, 左下 (-1, -1) 沉静, 右下 (+1, -1) 犀利
+    setMoodTone(state, { x: -0.8, y: 0.6 })
+    expect(moodView(state).tone).toEqual({ x: -0.8, y: 0.6, id: 'warm', label: '温和', strength: 100 })
+    expect(await ext.inlineContext!('烦死了，又报错了', undefined)).toContain('["先别急，歇口气", "剩下的交给我收尾就行"]')
+
+    setMoodTone(state, { x: 0.8, y: 0.6 })
+    expect(moodView(state).tone).toEqual({ x: 0.8, y: 0.6, id: 'witty', label: '风趣', strength: 100 })
+    expect(await ext.inlineContext!('今天好累', undefined)).toContain('["看出来了，今天脑细胞已经打卡下班了", "发过来吧，最后这点我替你收了"]')
+
+    setMoodTone(state, { x: -0.8, y: -0.6 })
+    expect(moodView(state).tone).toEqual({ x: -0.8, y: -0.6, id: 'calm', label: '沉静', strength: 100 })
+    expect(await ext.inlineContext!('在吗', undefined)).toContain('["嗯，先放着吧", "我在，有急事替你盯着"]')
+
+    setMoodTone(state, { x: 0.8, y: -0.6 })
+    expect(moodView(state).tone).toEqual({ x: 0.8, y: -0.6, id: 'sharp', label: '犀利', strength: 100 })
+    expect(await ext.inlineContext!('接口报错 500', undefined)).toContain('["这报错写得挺直白，配置漏了一行", "交给我改吧，两分钟的事"]')
+
+    // Even when dynamic mood shifts are disabled, off-center tone pad still injects <mood> tone guidance
+    setMoodEnabled(state, false)
+    const toneOnly = await ext.inlineContext!('帮我看看配置', undefined)
+    expect(toneOnly).toContain('<mood>')
+    expect(toneOnly).toContain('犀利')
+    expect(toneOnly).toContain('["这报错写得挺直白，配置漏了一行", "交给我改吧，两分钟的事"]')
+
+    // Snapping back to origin (< 0.06) returns to 自然 and stays silent when mood is disabled
+    setMoodTone(state, { x: 0.02, y: -0.03 })
+    expect(moodView(state).tone).toEqual({ x: 0, y: 0, id: 'natural', label: '自然', strength: 0 })
+    expect(await ext.inlineContext!('帮我看看配置', undefined)).toBe('')
   })
 })

@@ -1,6 +1,6 @@
 /** Shapes the domain for the web UI: ticket rows, a ticket's page with its worker transcript, and what waits for the owner. */
 import type { AgentRuntime } from '@nuonuo/agent-runtime'
-import { canGrant, sourceOfThread, STAGE_LABEL, type Engine, type Ticket } from '@nuonuo/core'
+import { canGrant, cleanSpokenBubbles, sourceOfThread, STAGE_LABEL, type Engine, type Ticket } from '@nuonuo/core'
 import { schema, type Store } from '@nuonuo/db'
 import { desc, eq } from 'drizzle-orm'
 
@@ -31,7 +31,7 @@ export function transcript(agents: AgentRuntime, sessionId: string) {
       const id = `${event.id}.${i}`
       if (p.type === 'text' && p.text) items.push({ id, kind: 'text', text: p.text, at: event.at })
       else if (p.type === 'reasoning' && p.text) items.push({ id, kind: 'reasoning', text: clip(p.text, 4_000), at: event.at })
-      else if (p.type === 'tool-call') items.push({ id, kind: 'tool-call', callId: p.toolCallId, tool: p.toolName, input: p.input, at: event.at })
+      else if (p.type === 'tool-call') items.push({ id, kind: 'tool-call', callId: p.toolCallId, tool: p.toolName, input: p.input, ...(Array.isArray(p.input?.bubbles) ? { bubbles: cleanSpokenBubbles(p.input.bubbles) } : {}), at: event.at })
       else if (p.type === 'tool-result') {
         const v = p.output?.type === 'json' || p.output?.type === 'text' ? p.output.value : p.output?.type === 'error-text' || p.output?.type === 'error-json' ? { error: p.output.value } : p.output
         items.push({ id, kind: 'tool-result', callId: p.toolCallId, tool: p.toolName, output: clip(typeof v === 'string' ? v : JSON.stringify(v, null, 1), 4_000), at: event.at })

@@ -310,6 +310,45 @@ describe('Muse features (backend)', () => {
     await call(`/api/tickets/${ticket2.id}/stop`, { method: 'POST' })
     expect(((await (await call('/api/mood')).json()) as any).mood.history).toHaveLength(after.history.length)
   })
+
+  it('persists 2D voice tone via PUT /api/mood with origin snapping and exposes cleaned multi-bubble replies on /api/conversations/:id/messages', async () => {
+    const initial = ((await (await call('/api/mood')).json()) as any).mood
+    expect(initial.tone).toEqual({ x: 0, y: 0, id: 'natural', label: '自然', strength: 0 })
+
+    // Four corners: 温和 (-1, +1), 风趣 (+1, +1), 沉静 (-1, -1), 犀利 (+1, -1)
+    const warm = ((await (await call('/api/mood', json('PUT', { tone: { x: -0.8, y: 0.6 } }))).json()) as any).mood
+    expect(warm.tone).toEqual({ x: -0.8, y: 0.6, id: 'warm', label: '温和', strength: 100 })
+
+    const witty = ((await (await call('/api/mood', json('PUT', { tone: { x: 0.6, y: 0.8 } }))).json()) as any).mood
+    expect(witty.tone).toEqual({ x: 0.6, y: 0.8, id: 'witty', label: '风趣', strength: 100 })
+
+    const calm = ((await (await call('/api/mood', json('PUT', { tone: { x: -0.6, y: -0.8 } }))).json()) as any).mood
+    expect(calm.tone).toEqual({ x: -0.6, y: -0.8, id: 'calm', label: '沉静', strength: 100 })
+
+    const sharp = ((await (await call('/api/mood', json('PUT', { tone: { x: 0.8, y: -0.6 } }))).json()) as any).mood
+    expect(sharp.tone).toEqual({ x: 0.8, y: -0.6, id: 'sharp', label: '犀利', strength: 100 })
+
+    // Snap near origin (< 0.06) to (0, 0) 自然
+    const snapped = ((await (await call('/api/mood', json('PUT', { tone: { x: 0.03, y: -0.04 } }))).json()) as any).mood
+    expect(snapped.tone).toEqual({ x: 0, y: 0, id: 'natural', label: '自然', strength: 0 })
+
+    // Multi-bubble reply is cleaned and exposed in Message.meta.bubbles
+    const cnv = rt.engine.mainConversation()
+    const msgId = rt.engine.reply({ conversationId: cnv, bubbles: ['搞定了。', '（微笑）测试也全过了。'] })
+    const codeSnippet = '```ts\nconst status = 200;\n```'
+    const codeMsgId = rt.engine.reply({ conversationId: cnv, bubbles: ['（叹气）配置漏了一行。', codeSnippet] })
+    const { messages } = await (await call(`/api/conversations/${cnv}/messages`)).json() as any
+    const bubbleMsg = messages.find((m: any) => m.id === msgId)
+    expect(bubbleMsg).toMatchObject({
+      content: '搞定了\n测试也全过了',
+      meta: { bubbles: ['搞定了', '测试也全过了'] },
+    })
+    const codeMsg = messages.find((m: any) => m.id === codeMsgId)
+    expect(codeMsg).toMatchObject({
+      content: `配置漏了一行\n${codeSnippet}`,
+      meta: { bubbles: ['配置漏了一行', codeSnippet] },
+    })
+  })
 })
 
 describe('non-streaming complete replies', () => {

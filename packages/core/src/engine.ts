@@ -14,6 +14,36 @@ import { sourceOfThread, webchatThread, type Attachment, type Attention, type En
 
 export const ROUTER_SESSION = 'ses_router'
 
+const TECHNICAL_BUBBLE_RE = /```|^\s*(?:#{1,6}\s|[-*+]\s|\d+\.\s)|https?:\/\/|www\./m
+const STAGE_PAREN_START_RE = /^[（(]\s*(?:笑|微笑|轻笑|苦笑|干笑|偷笑|抿嘴笑|叹气|轻叹|叹息|挠头|歪头|点头|摇头|耸肩|拍拍|小声|嘀咕|轻声|低声|捂脸|扶额|擦汗|挑眉|眨眼|吐舌|伸懒腰|打哈欠|清嗓|顿了顿|想了想|思考|沉默|看向你|看着你)[^）)]{0,12}[）)]\s*/u
+const STAGE_PAREN_END_RE = /\s*[（(]\s*(?:笑|微笑|轻笑|苦笑|干笑|偷笑|抿嘴笑|叹气|轻叹|叹息|挠头|歪头|点头|摇头|耸肩|拍拍|小声|嘀咕|轻声|低声|捂脸|扶额|擦汗|挑眉|眨眼|吐舌|伸懒腰|打哈欠|清嗓|顿了顿|想了想|思考|沉默|看向你|看着你)[^）)]{0,12}[）)]$/u
+const STAGE_ASTERISK_RE = /^\*(?:smiles?|sighs?|laughs?|chuckles?|nods?|shrugs?|winks?|grins?|waves?|pauses?|thinks?|blushes?|giggles?|tilts?\s+head|clears?\s+throat)(?:\s+[^\n*]{0,16})?\*\s*|\s*\*(?:smiles?|sighs?|laughs?|chuckles?|nods?|shrugs?|winks?|grins?|waves?|pauses?|thinks?|blushes?|giggles?|tilts?\s+head|clears?\s+throat)(?:\s+[^\n*]{0,16})?\*$/gi
+
+/**
+ * Post-generation hygiene sanitizer for conversational bubbles (ported from xiaofeiyu quality_gate):
+ * - Strictly preserves technical blocks containing code fences (```), Markdown headings/lists, or URLs.
+ * - Strips stage-direction / roleplay brackets (e.g. "（微笑）", "（叹气）", "*smiles*", "*sighs*").
+ * - Removes a single stiff trailing Chinese period "。" on short spoken bubbles (<= 40 chars, no internal "。").
+ */
+export function cleanSpokenBubbles(bubbles: string[]): string[] {
+  const out: string[] = []
+  for (const raw of bubbles) {
+    let s = String(raw ?? '').trim()
+    if (!s) continue
+    if (TECHNICAL_BUBBLE_RE.test(s)) {
+      out.push(s)
+      continue
+    }
+    s = s.replace(STAGE_PAREN_START_RE, '').replace(STAGE_PAREN_END_RE, '').replace(STAGE_ASTERISK_RE, '').trim()
+    if (!s) continue
+    if (s.length <= 40 && s.endsWith('。') && !s.endsWith('。。') && !s.slice(0, -1).includes('。')) {
+      s = s.slice(0, -1).trimEnd()
+    }
+    if (s) out.push(s)
+  }
+  return out
+}
+
 /** A paired client device (client protocol) the owner wrote from: a phone, a watch, a speaker, a car… */
 export interface SendingDevice { id: string; name: string; kind: string; display: 'full' | 'small' | 'none' }
 
@@ -454,11 +484,14 @@ export class Engine {
    * Posts the agent's message in a conversation. It also goes out through the source's channel (a GitHub comment) when it
    * answers a message from that source (`replyTo`) or reports on a task that came from it (`ticketId`); otherwise it stays in the web.
    */
-  reply(input: { conversationId?: string; text: string; ticketId?: string; replyTo?: string; callId?: string; extra?: Record<string, unknown> }): string {
+  reply(input: { conversationId?: string; text?: string; bubbles?: string[]; ticketId?: string; replyTo?: string; callId?: string; extra?: Record<string, unknown> }): string {
     const conversationId = input.conversationId ?? (input.ticketId ? this.conversationOfTicket(input.ticketId) : undefined)
     if (!conversationId) throw new DomainError('invalid', 'reply 需要 conversation_id 或 ticket_id')
     const conversation = this.store.db.select().from(schema.conversations).where(eq(schema.conversations.id, conversationId)).get()
     if (!conversation) throw new DomainError('missing', `没有对话 ${conversationId}`)
+    const cleanedBubbles = input.bubbles?.length ? cleanSpokenBubbles(input.bubbles) : undefined
+    const bodyText = cleanedBubbles?.length ? cleanedBubbles.join('\n') : String(input.text ?? '')
+    if (!bodyText.trim()) throw new DomainError('invalid', 'reply 需要非空的 text 或 bubbles')
     const recent = this.store.db.select().from(schema.messages)
       .where(eq(schema.messages.conversationId, conversationId))
       .orderBy(desc(schema.messages.createdAt), desc(schema.messages.id))
@@ -472,7 +505,7 @@ export class Engine {
     if (
       last &&
       last.role === 'assistant' &&
-      last.content.trim() === input.text.trim() &&
+      last.content.trim() === bodyText.trim() &&
       (!input.ticketId || !last.ticketId || last.ticketId === input.ticketId) &&
       this.now() - last.createdAt < 60_000
     ) {
@@ -485,12 +518,12 @@ export class Engine {
     const external = via !== 'webchat' && threadId && sourceOfThread(threadId) === via && this.opts.sources?.hasChannel(via)
     this.store.atomic(() => {
       const delivery = this.takeDelivery(conversation.threadId ?? webchatThread(conversationId), input.ticketId)
-      this.store.db.insert(schema.messages).values({ id, conversationId, role: 'assistant', content: input.text,
+      this.store.db.insert(schema.messages).values({ id, conversationId, role: 'assistant', content: bodyText,
         ticketId: input.ticketId ?? delivery?.ticketId ?? null,
-        meta: { ...(input.extra ?? {}), ...(input.callId ? { callId: input.callId } : {}), ...(external ? { via, delivery: 'pending' } : {}), ...(delivery ? { result: delivery } : {}) }, createdAt: at }).run()
+        meta: { ...(input.extra ?? {}), ...(cleanedBubbles && cleanedBubbles.length > 1 ? { bubbles: cleanedBubbles } : {}), ...(input.callId ? { callId: input.callId } : {}), ...(external ? { via, delivery: 'pending' } : {}), ...(delivery ? { result: delivery } : {}) }, createdAt: at }).run()
       this.store.db.update(schema.conversations).set({ updatedAt: at }).where(eq(schema.conversations.id, conversationId)).run()
       if (input.replyTo) this.setDisposition(input.replyTo, { answered: id })
-      if (external) this.opts.sources!.send({ messageId: id, source: via, threadId: threadId!, text: input.text, ...(input.ticketId ? { ticketId: input.ticketId } : {}) })
+      if (external) this.opts.sources!.send({ messageId: id, source: via, threadId: threadId!, text: bodyText, ...(input.ticketId ? { ticketId: input.ticketId } : {}) })
     })
     this.bus.emit({ type: 'message.created', conversationId, messageId: id })
     return id

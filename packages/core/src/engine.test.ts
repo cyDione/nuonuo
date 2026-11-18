@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { registerAgents } from './agents'
-import { Engine, ROUTER_SESSION } from './engine'
+import { cleanSpokenBubbles, Engine, ROUTER_SESSION } from './engine'
 
 let store: Store
 let runtime: AgentRuntime
@@ -222,5 +222,24 @@ describe('reply deduplication (13:42 更新情况 regression)', () => {
 
     const matching = messages(cnv).filter(m => m.role === 'assistant' && m.content === finalText)
     expect(matching).toHaveLength(1)
+  })
+})
+
+describe('multi-bubble spoken replies & cleanSpokenBubbles sanitizer', () => {
+  it('cleans stage brackets and trailing period on short bubbles while preserving code blocks and technical params 100%', async () => {
+    const { engine, conversation } = await setup()
+    const cnv = conversation()
+
+    expect(cleanSpokenBubbles(['搞定了。', '（微笑）测试也全过了。'])).toEqual(['搞定了', '测试也全过了'])
+    const codeBlock = '```bash\npnpm --filter @nuonuo/core test --preset ECONNREFUSED\n```'
+    expect(cleanSpokenBubbles(['*sighs* 报错是 ECONNREFUSED 429，加 --preset 就行。', codeBlock])).toEqual([
+      '报错是 ECONNREFUSED 429，加 --preset 就行',
+      codeBlock,
+    ])
+
+    const msgId = engine.reply({ conversationId: cnv, bubbles: ['搞定了。', '（微笑）测试也全过了。'] })
+    const row = messages(cnv).find(m => m.id === msgId)!
+    expect(row.content).toBe('搞定了\n测试也全过了')
+    expect((row.meta as any).bubbles).toEqual(['搞定了', '测试也全过了'])
   })
 })

@@ -51,7 +51,7 @@ export interface Resolved { source: RoleId; model: ModelRef; effectiveReasoning?
 export interface RolesResponse { configs: Partial<Record<RoleId, RoleConfig>>; defaults?: Partial<Record<RoleId, ReasoningLevel>>; resolved: Record<RoleId, Resolved | null> }
 export interface Conversation { id: string; title: string; pinned: boolean; archived: boolean; createdAt: number; updatedAt: number; lastMessage?: string | null
   source: string; origin: 'owner' | 'agent'; threadId: string | null; meta: { url?: string; [k: string]: unknown }; unread?: number; lastReadAt?: number }
-export interface Message { id: string; conversationId: string; role: 'user' | 'assistant' | 'system' | 'event'; content: string; meta: Record<string, any>; ticketId: string | null; triggerId: string | null; createdAt: number }
+export interface Message { id: string; conversationId: string; role: 'user' | 'assistant' | 'system' | 'event'; content: string; meta: { bubbles?: string[]; [k: string]: any }; ticketId: string | null; triggerId: string | null; createdAt: number }
 export interface UsageRow { role: RoleId; providerId: string; model: string; calls: number; failures: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number; costUsd: number | null }
 export interface Check { id: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string; fix?: string }
 export interface Release { tag: string; version: string; url: string; notes: string; publishedAt: string | null; hasPackage: boolean }

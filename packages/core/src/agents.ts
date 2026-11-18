@@ -4,7 +4,7 @@ import { schema, type Store } from '@nuonuo/db'
 import { tool, type ToolSet } from 'ai'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { z } from 'zod'
-import { clip, DomainError, Engine, ROUTER_SESSION } from './engine'
+import { cleanSpokenBubbles, clip, DomainError, Engine, ROUTER_SESSION } from './engine'
 import { sourceOfThread, STAGE_LABEL, type Mandate, type Ticket } from './model'
 import { PROACTIVE_WORKER_PROMPT, ROUTER_PROMPT, SUBAGENT_PROMPT, WORKER_PROMPT } from './prompts'
 import { LOCAL_APPS, type LocalAccess } from './access'
@@ -229,23 +229,30 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
     tools: () => wrapSpeaking({
       ...(ext.routerTools?.() ?? {}),
       reply: tool({
-        description: 'Post a message to the owner — the only way to speak. It also goes out to the source (e.g. a GitHub comment) when reply_to is a message from that source, or ticket_id is work that came from it; otherwise it stays in the web. The owner sees only your text: the full result and files stay in the work\'s details.',
-        inputSchema: z.object({ conversation_id: z.string().optional().describe('Required unless ticket_id is given'), text: z.string().min(1),
+        description: 'Post a message to the owner — the only way to speak. Prefer `bubbles` (1–3 short conversational lines) for chat; use `text` for a single block or structured markdown. It also goes out to the source (e.g. a GitHub comment) when reply_to is a message from that source, or ticket_id is work that came from it; otherwise it stays in the web. The owner sees only your text: the full result and files stay in the work\'s details.',
+        inputSchema: z.object({
+          conversation_id: z.string().optional().describe('Required unless ticket_id is given'),
+          bubbles: z.array(z.string().trim().min(1)).min(1).max(4).optional().describe('1–4 short chat bubbles (8–30 chars each, like real IM messages) for natural conversational replies'),
+          text: z.string().optional().describe('Single-bubble reply text (use when sending one block or structured markdown)'),
           reply_to: z.string().optional().describe('trigger_id of the message you answer'),
           ticket_id: z.string().optional().describe('The work this message is about'),
           detailed: z.boolean().optional().describe('Only when the owner explicitly asked for a long, detailed answer in chat'),
           open: OpenLink.optional().describe('A 带你去 chip under the message that opens a place in the app, when the owner asked where something is or needs to change a setting'),
-          card: ChatCard.optional().describe('A small card under the message for a day\'s schedule, a reminder you set, or a place') }),
-        execute: async ({ conversation_id, text, ticket_id, reply_to, detailed, open, card }, { toolCallId }) => {
+          card: ChatCard.optional().describe('A small card under the message for a day\'s schedule, a reminder you set, or a place'),
+        }),
+        execute: async ({ conversation_id, bubbles, text, ticket_id, reply_to, detailed, open, card }, { toolCallId }) => {
+          const cleanedBubbles = bubbles?.length ? cleanSpokenBubbles(bubbles) : undefined
+          const bodyText = cleanedBubbles?.length ? cleanedBubbles.join('\n') : (text ?? '').trim()
+          if (!bodyText) return { ok: false, error: 'Provide non-empty bubbles or text' }
           const conversationId = conversation_id ?? (ticket_id ? engine.conversationOfTicket(ticket_id) : undefined)
           if (!conversationId) return { ok: false, error: 'conversation_id is required without ticket_id' }
           const source = reply_to || ticket_id ? engine.replySource(reply_to, ticket_id) : conversationSource(conversationId)
-          const length = chatLength(text)
+          const length = chatLength(bodyText)
           const limit = detailed ? DETAILED_LIMIT : CHAT_LIMIT
           if (engine.isChatSource(source) && length > limit) {
             return { ok: false, error: `Not sent: about ${length} words; chat replies must stay under ${limit}. Say only the outcome and key facts${ticket_id ? ' — the full result stays in the work\'s details' : ''}, then call reply again.` }
           }
-          return { ok: true, message_id: engine.reply({ conversationId, text, callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}),
+          return { ok: true, message_id: engine.reply({ conversationId, text: bodyText, ...(cleanedBubbles ? { bubbles: cleanedBubbles } : {}), callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}),
             ...(open || card ? { extra: { ...(open ? { open } : {}), ...(card ? { card } : {}) } } : {}) }) }
         },
       }),

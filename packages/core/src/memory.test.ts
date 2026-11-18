@@ -1,4 +1,6 @@
-import { generateOf, systemText } from '@nuonuo/agent-runtime/src/testing'
+import type { EmbeddingModelV4 } from '@ai-sdk/provider'
+import { AgentRuntime, Bus } from '@nuonuo/agent-runtime'
+import { generateOf, lastUserText, streamOf, systemText, type Scripted } from '@nuonuo/agent-runtime/src/testing'
 import { kvSet, newId, openStore, schema, type Store } from '@nuonuo/db'
 import { MemorySecrets, ModelHub } from '@nuonuo/models'
 import { MockLanguageModelV4 } from 'ai/test'
@@ -6,7 +8,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { combineExtensions, memoryExtension, registerAgents } from './agents'
 import { Distiller } from './distiller'
+import { Engine } from './engine'
 import { Memory } from './memory'
 
 let store: Store
@@ -81,6 +85,131 @@ describe('Memory runtime', () => {
     expect(existsSync(join(home, 'memory', 'user.md.imported'))).toBe(true)
     memory.exportMarkdown()
     expect(readFileSync(join(home, 'memory', 'MEMORY.md'), 'utf8')).toMatch(/## 关于你\n\n- 主人用 macOS[\s\S]*### demo\n- 用 pnpm/)
+  })
+
+  it('keeps inline() strictly 0ms local (0 embedder calls) while search_memory and recall() run hybrid vector search', async () => {
+    store = openStore(':memory:')
+    const home = mkdtempSync(join(tmpdir(), 'sa-mem-'))
+    let embedderCalls = 0
+    let doEmbedCalls = 0
+    const vecOf = (v: string): number[] => {
+      if (v.includes('布偶猫') || v.includes('宠物')) return [1, 0, 0]
+      if (v.includes('deploy.sh') || v.includes('部署')) return [0, 1, 0]
+      return [0, 0, 1]
+    }
+    const mockEmbedModel: EmbeddingModelV4 = {
+      specificationVersion: 'v4',
+      provider: 'mock',
+      modelId: 'mock-embed',
+      maxEmbeddingsPerCall: 32,
+      supportsParallelCalls: true,
+      doEmbed: async ({ values }) => {
+        doEmbedCalls++
+        return { embeddings: values.map(vecOf), warnings: [] }
+      },
+    }
+    const memory = new Memory(store, home, {
+      embedder: () => {
+        embedderCalls++
+        return mockEmbedModel
+      },
+    })
+    memory.add({ kind: 'episodic', text: '主人家里养了一只叫咪咪的布偶猫', trust: 'user', createdBy: 'owner' })
+    memory.add({ kind: 'lesson', text: '发布脚本位于 scripts/deploy.sh，需要先执行构建', trust: 'system', createdBy: 'tkt_1' })
+    expect(await memory.embedPending()).toBe(2)
+
+    // Reset counters after background embedding
+    embedderCalls = 0
+    doEmbedCalls = 0
+
+    // 1) Hot-path inline() must NEVER invoke embedder (0 calls), yet still recalls literal keyword matches
+    const inlineLiteral = await memory.inline('发布脚本在哪里')
+    expect(embedderCalls).toBe(0)
+    expect(doEmbedCalls).toBe(0)
+    expect(inlineLiteral).toContain('scripts/deploy.sh')
+
+    const inlineSemanticOnly = await memory.inline('宠物名字是什么')
+    expect(embedderCalls).toBe(0)
+    expect(doEmbedCalls).toBe(0)
+    expect(inlineSemanticOnly).toBe('')
+
+    // 2) Default recall() and search_memory tool invoke embedder and recall semantically with zero literal overlap
+    const semanticHits = await memory.recall('宠物名字是什么')
+    expect(embedderCalls).toBe(1)
+    expect(doEmbedCalls).toBe(1)
+    expect(semanticHits.map(m => m.text)).toEqual(['主人家里养了一只叫咪咪的布偶猫'])
+
+    const tools = memory.tools({ by: 'router', trust: () => 'user', scope: () => undefined, source: () => 'trg_1' })
+    const toolOut = await tools.search_memory.execute!({ query: '宠物名字是什么' }, { toolCallId: 'c1', messages: [] } as any)
+    expect(embedderCalls).toBe(2)
+    expect(doEmbedCalls).toBe(2)
+    expect(toolOut).toContain('主人家里养了一只叫咪咪的布偶猫')
+  })
+
+  it('gracefully falls back to local keywords when embedder throws or times out', async () => {
+    store = openStore(':memory:')
+    const home = mkdtempSync(join(tmpdir(), 'sa-mem-'))
+    let shouldFail = false
+    let seenAbortSignal = false
+    const mockEmbedModel: EmbeddingModelV4 = {
+      specificationVersion: 'v4',
+      provider: 'mock',
+      modelId: 'mock-embed',
+      maxEmbeddingsPerCall: 32,
+      supportsParallelCalls: true,
+      doEmbed: async ({ values, abortSignal }) => {
+        if (abortSignal) seenAbortSignal = true
+        if (shouldFail) throw new Error('Embedding service timeout / 503')
+        return { embeddings: values.map(() => [1, 0, 0]), warnings: [] }
+      },
+    }
+    const memory = new Memory(store, home, { embedder: () => mockEmbedModel })
+    memory.add({ kind: 'lesson', text: '数据库迁移命令是 pnpm db:migrate', trust: 'system', createdBy: 'tkt_1' })
+    await memory.embedPending()
+
+    shouldFail = true
+    const hits = await memory.recall('怎么执行数据库迁移命令')
+    expect(seenAbortSignal).toBe(true)
+    expect(hits.map(m => m.text)).toEqual(['数据库迁移命令是 pnpm db:migrate'])
+  })
+
+  it('includes a deterministic Memory Index in prompt() and stays 100% byte-identical across calls', () => {
+    const { memory } = setup()
+    memory.add({ kind: 'profile', text: '主人习惯用简体中文', trust: 'user', createdBy: 'owner' })
+    // When all active memories are shown inline in profile, no Memory index line or trailing blank line is added
+    const cleanPrompt = memory.prompt('router')
+    expect(cleanPrompt).not.toContain('Memory index')
+    expect(cleanPrompt.endsWith('主人习惯用简体中文')).toBe(true)
+
+    // Add project memories with varying counts and tie-breaking names, episodic, and lessons
+    for (let i = 0; i < 6; i++) memory.add({ kind: 'project', scope: 'nuonuo', text: `nuonuo 规范 ${i}`, trust: 'user', createdBy: 'owner' })
+    for (let i = 0; i < 2; i++) memory.add({ kind: 'project', scope: 'blog', text: `blog 规范 ${i}`, trust: 'user', createdBy: 'owner' })
+    for (let i = 0; i < 2; i++) memory.add({ kind: 'project', scope: 'alpha', text: `alpha 规范 ${i}`, trust: 'user', createdBy: 'owner' })
+    for (let i = 0; i < 3; i++) memory.add({ kind: 'episodic', text: `近期事件 ${i}`, trust: 'user', createdBy: 'owner' })
+    for (let i = 0; i < 4; i++) memory.add({ kind: 'lesson', text: `经验教训 ${i}`, trust: 'system', createdBy: 'tkt_1' })
+
+    const routerPrompt1 = memory.prompt('router')
+    const routerPrompt2 = memory.prompt('router')
+    expect(routerPrompt1).toBe(routerPrompt2)
+    expect(routerPrompt1).toContain(
+      'Memory index (not shown inline — call search_memory when relevant): projects [nuonuo: 6, alpha: 2, blog: 2] · recent episodic: 3 · lessons: 4',
+    )
+
+    // Worker in 'nuonuo' scope already sees 'nuonuo' project entries and up to 15 lessons inline, so index only lists other projects + episodic
+    const workerPrompt1 = memory.prompt('worker', 'nuonuo')
+    const workerPrompt2 = memory.prompt('worker', 'nuonuo')
+    expect(workerPrompt1).toBe(workerPrompt2)
+    expect(workerPrompt1).toContain(
+      'Memory index (not shown inline — call search_memory when relevant): projects [alpha: 2, blog: 2] · recent episodic: 3',
+    )
+
+    // More than 12 projects summarizes the tail as +N more deterministically
+    for (let i = 1; i <= 12; i++) {
+      memory.add({ kind: 'project', scope: `proj-${String(i).padStart(2, '0')}`, text: `条目 ${i}`, trust: 'user', createdBy: 'owner' })
+    }
+    const cappedPrompt = memory.prompt('router')
+    expect(cappedPrompt).toContain('+3 more]')
+    expect(cappedPrompt).toBe(memory.prompt('router'))
   })
 })
 
@@ -196,5 +325,76 @@ describe('Distiller (memory side path)', () => {
     const r2 = await distiller.distill(cnv)
     expect(r2.added[0]!.status).toBe('pending')
     expect(memory.get(calm.id)!.status).toBe('active')
+  })
+
+  it('in ModelHub + Engine conversation flow: normal turns do 0 embedding calls, and search_memory triggers 1 embedding call', async () => {
+    store = openStore(':memory:')
+    const home = mkdtempSync(join(tmpdir(), 'sa-mem-'))
+    let embedCalls = 0
+    const seenToolResults: string[] = []
+    let routerPlan: (last: string, o: any) => Scripted = () => ({ text: 'done' })
+    const model = new MockLanguageModelV4({
+      doStream: async o => streamOf(routerPlan(lastUserText(o), o)),
+      doGenerate: async o => generateOf(routerPlan(lastUserText(o), o)),
+    })
+    const hub = new ModelHub(store, new MemorySecrets(), {
+      language: () => model,
+      embedding: (_p, _k, modelId) => ({
+        specificationVersion: 'v4',
+        provider: 'mock',
+        modelId,
+        maxEmbeddingsPerCall: 32,
+        supportsParallelCalls: true,
+        doEmbed: async ({ values }) => {
+          embedCalls++
+          return {
+            embeddings: values.map(v => (v.includes('猫咪') || v.includes('宠物') ? [1, 0, 0] : [0, 1, 0])),
+            warnings: [],
+          }
+        },
+      }),
+    })
+    const p = hub.createProvider({ kind: 'openai', name: 'O', apiKey: 'k' })
+    hub.saveRole('router', { chain: [{ providerId: p.id, model: 'gpt-4o' }] })
+    hub.saveRole('embedding', { chain: [{ providerId: p.id, model: 'text-embedding-3-small' }] })
+
+    const bus = new Bus()
+    const runtime = new AgentRuntime(store, hub, bus)
+    const engine = new Engine(store, runtime, bus, { home })
+    const memory = new Memory(store, home, { embedder: () => hub.embeddingModel() })
+    registerAgents(store, runtime, engine, combineExtensions(memoryExtension(memory, engine)))
+
+    try {
+      memory.add({ kind: 'episodic', text: '主人领养了一只叫雪球的猫咪', trust: 'user', createdBy: 'owner' })
+      await memory.embedPending()
+      embedCalls = 0
+
+      const main = engine.mainConversation()
+
+      // 1) Ordinary turn: 0 embedding calls
+      routerPlan = last => {
+        const cnvId = /conversation_id="([^"]+)"/.exec(last)?.[1] ?? main
+        return { calls: [{ name: 'reply', input: { conversation_id: cnvId, text: '你好！' } }] }
+      }
+      engine.receiveMessage(main, '早上好')
+      for (let i = 0; i < 6; i++) { await new Promise(r => setTimeout(r, 20)); await runtime.idle() }
+      expect(embedCalls).toBe(0)
+
+      // 2) Turn calling search_memory: 1 embedding call and returns semantic result
+      routerPlan = (_last, o) => {
+        const lastMsg = o.prompt.at(-1)
+        if (lastMsg?.role === 'tool') {
+          seenToolResults.push(JSON.stringify(lastMsg.content))
+          return { calls: [{ name: 'reply', input: { conversation_id: main, text: '叫雪球。' } }] }
+        }
+        return { calls: [{ name: 'search_memory', input: { query: '宠物名字是什么' } }] }
+      }
+      engine.receiveMessage(main, '帮我想想那个名字')
+      for (let i = 0; i < 6; i++) { await new Promise(r => setTimeout(r, 20)); await runtime.idle() }
+      expect(embedCalls).toBe(1)
+      expect(seenToolResults.join('\n')).toContain('主人领养了一只叫雪球的猫咪')
+    } finally {
+      await runtime.shutdown()
+    }
   })
 })
