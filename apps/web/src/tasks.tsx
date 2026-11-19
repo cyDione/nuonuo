@@ -490,7 +490,7 @@ function CodeInspectorCard({ lang, content, filename }: { lang: string; content:
   }
   const isTerminal = lang.startsWith('terminal')
   return (
-    <div className="rounded-[12px] border border-[#e5e7eb] bg-[#f4f5f7] px-3.5 py-2.5 dark:border-[#282a32] dark:bg-[#191a1f]">
+    <div className="rounded-[12px] border border-code-border bg-code-bg px-3.5 py-2.5">
       <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] text-muted">
         <span className="font-mono text-[11px] text-muted select-none">{lang}</span>
         <div className="flex items-center gap-1">
@@ -499,7 +499,7 @@ function CodeInspectorCard({ lang, content, filename }: { lang: string; content:
             onClick={onDownload}
             aria-label={tx('下载代码片段')}
             title={tx('下载')}
-            className="press flex size-6 items-center justify-center rounded-md text-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5"
+            className="press flex size-6 items-center justify-center rounded-md text-muted hover:bg-fg/6 hover:text-fg"
           >
             <Download size={13} />
           </button>
@@ -508,7 +508,7 @@ function CodeInspectorCard({ lang, content, filename }: { lang: string; content:
             onClick={onCopy}
             aria-label={tx('复制代码片段')}
             title={copied ? tx('已复制') : tx('复制')}
-            className="press flex size-6 items-center justify-center rounded-md text-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5"
+            className="press flex size-6 items-center justify-center rounded-md text-muted hover:bg-fg/6 hover:text-fg"
           >
             {copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />}
           </button>
@@ -517,7 +517,7 @@ function CodeInspectorCard({ lang, content, filename }: { lang: string; content:
       <pre
         className={cx(
           'max-h-[250px] overflow-auto font-mono text-[11.5px] leading-[17px] whitespace-pre-wrap break-words',
-          isTerminal ? 'text-[#2656c7] dark:text-[#78aef2]' : 'text-[#53448a] dark:text-[#b5a6f2]',
+          isTerminal ? 'text-terminal-fg' : 'text-code-fg',
         )}
       >
         {content}
@@ -822,8 +822,8 @@ function WorkerNoteCard({ note, running }: { note: string; running: boolean }) {
   return (
     <div className="space-y-1.5 pt-1">
       <div className="text-[12.5px] font-semibold text-fg">Worker note:</div>
-      <div className="rounded-[12px] border border-[#2656c7]/30 bg-[#edf2fe] px-3.5 py-2.5 text-[12px] leading-[18px] text-fg dark:border-[#78aef2]/30 dark:bg-[#162133]">
-        <div className="mb-1 text-[11.5px] font-semibold text-[#2656c7] dark:text-[#78aef2]">
+      <div className="rounded-[12px] border border-border-running bg-surface-running px-3.5 py-2.5 text-[12px] leading-[18px] text-fg">
+        <div className="mb-1 text-[11.5px] font-semibold text-fg-running">
           {running ? tx('实时推理进展') : tx('推理与诊断记录')}
         </div>
         <div className="prose-chat text-[12px] leading-[18px] text-fg">
@@ -932,8 +932,8 @@ export function TaskDrawer() {
             {t && (
               <div className="mb-1.5 flex items-center gap-2">
                 {isRunning ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-[#dbe6fd] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#2656c7] tabular-nums dark:bg-[#1f314d] dark:text-[#78aef2]">
-                    <span className="size-1.5 animate-pulse rounded-full bg-[#2656c7] dark:bg-[#78aef2]" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-pill-running px-2.5 py-0.5 text-[11.5px] font-semibold text-fg-running tabular-nums">
+                    <span className="size-1.5 animate-pulse rounded-full bg-fg-running" />
                     {tx('正在执行')} · {tx('第 {0} 步', stepCount)} · {mmss}
                   </span>
                 ) : t.stage.startsWith('person/') ? (
@@ -941,11 +941,11 @@ export function TaskDrawer() {
                     {STATE_TEXT[t.stage]}
                   </span>
                 ) : t.ended?.outcome === 'completed' ? (
-                  <span className="inline-flex items-center rounded-full bg-[#e4f3eb] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#236947] dark:bg-[#162b21] dark:text-[#6fcf9c]">
+                  <span className="inline-flex items-center rounded-full bg-ok-soft px-2.5 py-0.5 text-[11.5px] font-semibold text-ok">
                     {tx('已完成')}
                   </span>
                 ) : (
-                  <span className="inline-flex items-center rounded-full bg-danger/12 px-2.5 py-0.5 text-[11.5px] font-semibold text-danger">
+                  <span className="inline-flex items-center rounded-full bg-danger-soft px-2.5 py-0.5 text-[11.5px] font-semibold text-danger">
                     {t.ended?.outcome === 'dropped' ? tx('不需要做') : tx('已停下')}
                   </span>
                 )}
@@ -1003,7 +1003,7 @@ export function TaskDrawer() {
         {/* Split-Pane Body */}
         <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
           {/* Left Timeline Column (252px) */}
-          <div className="flex max-h-[185px] w-full shrink-0 flex-col gap-1 overflow-y-auto border-b border-line bg-[#fafafa] p-3.5 sm:max-h-none sm:w-[252px] sm:border-r sm:border-b-0 dark:bg-[#111114]">
+          <div className="flex max-h-[185px] w-full shrink-0 flex-col gap-1 overflow-y-auto border-b border-line bg-inspector-rail p-3.5 sm:max-h-none sm:w-[252px] sm:border-r sm:border-b-0">
             {nodes.map(n => {
               const selected = n.id === activeNode?.id
               return (
@@ -1017,7 +1017,7 @@ export function TaskDrawer() {
                   className={cx(
                     'flex w-full items-start gap-2.5 rounded-[12px] px-3 py-2 text-left text-[12.5px] leading-[17px] transition-colors',
                     selected
-                      ? 'bg-[#ebebeb] font-medium text-fg dark:bg-[#25262c]'
+                      ? 'bg-inspector-active font-medium text-fg'
                       : 'text-muted hover:bg-sunken hover:text-fg',
                   )}
                 >
@@ -1034,7 +1034,7 @@ export function TaskDrawer() {
                       <XCircle size={15} className="mt-[1px] shrink-0 text-danger" />
                     )
                   ) : n.status === 'running' ? (
-                    <Loader2 size={15} className="mt-[1px] shrink-0 animate-spin text-[#2656c7] dark:text-[#78aef2]" />
+                    <Loader2 size={15} className="mt-[1px] shrink-0 animate-spin text-fg-running" />
                   ) : n.status === 'failed' ? (
                     <XCircle size={15} className={cx('mt-[1px] shrink-0', selected ? 'text-fg' : 'text-danger')} />
                   ) : (
@@ -1047,8 +1047,8 @@ export function TaskDrawer() {
 
             {d && d.jobs.length > 0 && (
               <div className="mt-auto pt-2">
-                <div className="rounded-[11px] border border-[#2656c7]/30 bg-[#edf2fe] px-2.5 py-2 dark:border-[#78aef2]/30 dark:bg-[#162133]">
-                  <div className="text-[11px] font-semibold text-[#2656c7] dark:text-[#78aef2]">
+                <div className="rounded-[11px] border border-border-running bg-surface-running px-2.5 py-2">
+                  <div className="text-[11px] font-semibold text-fg-running">
                     {tx('{0} 个后台命令持续运行中', d.jobs.length)}
                   </div>
                   <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted">

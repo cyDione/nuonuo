@@ -54,9 +54,12 @@ const listeners = new Set<() => void>()
 
 /** Puts the theme and the accent on <html>; called before the first render so the page never flashes the wrong colours. */
 export function applyPrefs(p: Prefs = prefs) {
+  if (typeof document === 'undefined') return
   const root = document.documentElement
   if (p.theme === 'system') delete root.dataset.theme
   else root.dataset.theme = p.theme
+  const isDark = p.theme === 'dark' || (p.theme === 'system' && typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  root.classList.toggle('dark', isDark)
   root.dataset.accent = p.accent
   if (p.text === 'normal') delete root.dataset.text
   else root.dataset.text = p.text
@@ -109,12 +112,32 @@ export function setPrefs(patch: Partial<Prefs>, opts?: { fromServer?: boolean })
 }
 
 // Another window of the app (the quick-ask window, a second tab) changed them: follow along without a reload.
-if (typeof window !== 'undefined') window.addEventListener('storage', e => {
-  if (e.key !== KEY) return
-  prefs = load()
+if (typeof window !== 'undefined') {
   applyPrefs()
-  for (const l of listeners) l()
-})
+  window.addEventListener('storage', e => {
+    if (e.key !== KEY) return
+    prefs = load()
+    applyPrefs()
+    for (const l of listeners) l()
+  })
+  if (typeof window.matchMedia === 'function') {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    mq.addEventListener?.('change', () => {
+      applyPrefs()
+      for (const l of listeners) l()
+    })
+  }
+  if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+    const obs = new MutationObserver(() => {
+      const root = document.documentElement
+      const dt = root.dataset.theme
+      const sysDark = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches
+      const isDark = dt === 'dark' ? true : dt === 'light' ? false : (prefs.theme === 'dark' || (prefs.theme === 'system' && sysDark))
+      if (root.classList.contains('dark') !== isDark) root.classList.toggle('dark', isDark)
+    })
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  }
+}
 
 export const getPrefs = () => prefs
 export const usePrefs = () => useSyncExternalStore(l => { listeners.add(l); return () => listeners.delete(l) }, () => prefs)

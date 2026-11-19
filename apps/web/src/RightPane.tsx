@@ -87,7 +87,7 @@ export function RightPane({ onClose }: { onClose(): void }) {
     : waiting.length > 0
       ? 'bg-warn'
       : going.length > 0
-        ? 'bg-[#2656c7] dark:bg-[#78aef2]'
+        ? 'bg-fg-running'
         : 'bg-ok'
   const statusText = !connected
     ? tx('重连中…')
@@ -101,7 +101,7 @@ export function RightPane({ onClose }: { onClose(): void }) {
     <div className="flex h-11 shrink-0 items-center justify-end px-3"><IconButton label={tx('关闭')} onClick={onClose}><X size={17} /></IconButton></div>
     <div className="flex flex-col items-center px-6 pt-0.5 pb-2 text-center">
       <div className="relative">
-        <div className={cx('flex size-[68px] items-center justify-center overflow-hidden rounded-full ring-2 ring-line', isMascot(persona) ? 'bg-[#f6ebe6] dark:bg-[#251e21]' : 'bg-sunken')}>
+        <div className={cx('flex size-[68px] items-center justify-center overflow-hidden rounded-full ring-2 ring-line', isMascot(persona) ? 'bg-avatar-well' : 'bg-sunken')}>
           {isMascot(persona) ? <Mascot color={persona.color} size={46} mood={mood} track />
             : isImageAvatar(persona.avatar) ? <img src={persona.avatar} alt={persona.name} className="size-full rounded-full object-cover" />
             : <Avatar persona={persona} size={68} mood={mood} className="rounded-full!" />}
@@ -216,14 +216,14 @@ function ActivityTab() {
             <button
               type="button"
               onClick={() => openTask(t.id)}
-              className="press block w-full rounded-[14px] border border-[#2656c7]/35 bg-[#edf2fe] px-3 py-2.5 text-left transition-colors dark:border-[#78aef2]/35 dark:bg-[#162133]"
+              className="press block w-full rounded-[14px] border border-border-running bg-surface-running px-3 py-2.5 text-left transition-colors"
             >
               <div className="flex items-start gap-2.5">
-                <Loader2 size={17} className="mt-0.5 shrink-0 animate-spin text-[#2656c7] dark:text-[#78aef2]" />
+                <Loader2 size={17} className="mt-0.5 shrink-0 animate-spin text-fg-running" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-[13.5px] font-semibold text-fg">{t.title}</span>
-                    <span className="shrink-0 rounded-full bg-[#dbe6fd] px-2 py-0.5 text-[10.5px] font-medium text-[#2656c7] tabular-nums dark:bg-[#1f314d] dark:text-[#78aef2]">
+                    <span className="shrink-0 rounded-full bg-pill-running px-2 py-0.5 text-[10.5px] font-medium text-fg-running tabular-nums">
                       {tx('第 {0} 步', stepNum)}
                     </span>
                   </div>
@@ -234,8 +234,8 @@ function ActivityTab() {
                   </div>
                 </div>
               </div>
-              <div className="mt-2 h-[3px] w-full overflow-hidden rounded-full bg-[#dbe6fd] dark:bg-[#1f314d]">
-                <div className="h-full w-2/3 rounded-full bg-[#2656c7] dark:bg-[#78aef2]" />
+              <div className="mt-2 h-[3px] w-full overflow-hidden rounded-full bg-pill-running">
+                <div className="h-full w-2/3 rounded-full bg-fg-running" />
               </div>
             </button>
             <BrowserWatch t={t} />

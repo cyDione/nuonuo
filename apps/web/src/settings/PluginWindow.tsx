@@ -16,8 +16,11 @@ type Tab = 'page' | 'settings'
 
 /** Whether the app is showing its dark theme right now. */
 const isDark = () => {
-  const set = document.documentElement.dataset.theme
-  return set === 'dark' || (set !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+  if (typeof document === 'undefined') return false
+  const root = document.documentElement
+  if (root.dataset.theme === 'light') return false
+  if (root.dataset.theme === 'dark' || root.classList.contains('dark')) return true
+  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
 }
 
 function useTheme(): 'light' | 'dark' {
@@ -25,7 +28,7 @@ function useTheme(): 'light' | 'dark' {
   useEffect(() => {
     const update = () => setTheme(isDark() ? 'dark' : 'light')
     const mo = new MutationObserver(update)
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] })
     const mq = matchMedia('(prefers-color-scheme: dark)')
     mq.addEventListener('change', update)
     return () => { mo.disconnect(); mq.removeEventListener('change', update) }

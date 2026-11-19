@@ -3,7 +3,7 @@ import { APICallError } from '@ai-sdk/provider'
 import { openStore, type Store } from '@nuonuo/db'
 import { generateText, streamText } from 'ai'
 import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -187,6 +187,106 @@ describe('macOS secrets', () => {
     const dir = mkdtempSync(join(tmpdir(), 'sa-secrets-'))
     const { store } = await openSecretStore(dir, undefined, 'darwin')
     expect(store.backend).toBe('file')
+  })
+
+  it('returns pure FileSecrets with 0 Keychain accesses when secrets.enc already exists on macOS', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'sa-home-enc-'))
+    writeFileSync(join(home, 'state.db'), '')
+    new FileSecrets(join(home, 'secrets')).set('provider:existing', 'sk-existing')
+
+    let keyringCalls = 0
+    const { store } = await openSecretStore(home, undefined, 'darwin', async () => {
+      keyringCalls++
+      throw new Error('keyring must not be imported when secrets.enc exists')
+    })
+    expect(store).toBeInstanceOf(FileSecrets)
+    expect(store).not.toBeInstanceOf(KeychainMigratingSecrets)
+    expect(store.get('provider:existing')).toBe('sk-existing')
+    expect(store.get('provider:missing')).toBeUndefined()
+    expect(keyringCalls).toBe(0)
+
+    const { store: defaultStore } = await openSecretStore(home, undefined, 'darwin')
+    expect(defaultStore).toBeInstanceOf(FileSecrets)
+    expect(defaultStore.get('provider:missing')).toBeUndefined()
+  })
+
+  it('returns pure FileSecrets with 0 Keychain accesses on a fresh macOS directory without state.db', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'sa-home-fresh-'))
+    let keyringCalls = 0
+    const { store } = await openSecretStore(home, undefined, 'darwin', async () => {
+      keyringCalls++
+      throw new Error('keyring must not be imported on a fresh install without state.db')
+    })
+    expect(store).toBeInstanceOf(FileSecrets)
+    expect(store).not.toBeInstanceOf(KeychainMigratingSecrets)
+    expect(store.get('provider:missing')).toBeUndefined()
+    expect(keyringCalls).toBe(0)
+
+    const { store: defaultStore } = await openSecretStore(home, undefined, 'darwin')
+    expect(defaultStore).toBeInstanceOf(FileSecrets)
+    expect(defaultStore.get('provider:missing')).toBeUndefined()
+  })
+
+  it('persists tried refs in migrated.json across restarts and trips the circuit breaker immediately on Keychain denial', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'sa-home-migrate-'))
+    writeFileSync(join(home, 'state.db'), '')
+    const secretsDir = join(home, 'secrets')
+    let reads = 0
+    class EmptyEntry {
+      constructor(private service: string, private account: string) {}
+      getPassword() { reads++; return null }
+      setPassword() {}
+      deletePassword() {}
+    }
+
+    // 1. First instance looks up missing provider:none once (checks nuonuo + super-assistant = 2 reads) and writes migrated.json
+    const first = new KeychainMigratingSecrets(new FileSecrets(secretsDir), new KeychainSecrets(EmptyEntry, false))
+    expect(first.get('provider:none')).toBeUndefined()
+    expect(reads).toBe(2)
+    const migratedFile = join(secretsDir, 'migrated.json')
+    expect(existsSync(migratedFile)).toBe(true)
+    expect(statSync(migratedFile).mode & 0o777).toBe(0o600)
+    expect(JSON.parse(readFileSync(migratedFile, 'utf8'))).toEqual({ tried: ['provider:none'] })
+
+    // 2. Second instance (simulating process restart) reloads migrated.json and does +0 Keychain reads for provider:none
+    const second = new KeychainMigratingSecrets(new FileSecrets(secretsDir), new KeychainSecrets(EmptyEntry, false))
+    expect(second.get('provider:none')).toBeUndefined()
+    expect(reads).toBe(2)
+
+    // And openSecretStore on a home with migrated.json skips KeychainMigratingSecrets altogether
+    const { store: reopened } = await openSecretStore(home, undefined, 'darwin')
+    expect(reopened).toBeInstanceOf(FileSecrets)
+
+    // 3. Circuit breaker: when Keychain getPassword() throws (user clicks "Deny" on super-assistant prompt), immediately abort all subsequent reads
+    const denyDir = mkdtempSync(join(tmpdir(), 'sa-secrets-deny-'))
+    let denyPrompts = 0
+    class DenyEntry {
+      constructor(private service: string, private account: string) {}
+      getPassword() {
+        denyPrompts++
+        if (this.service === 'super-assistant') throw new Error('User canceled / errSecAuthFailed (-128)')
+        return null
+      }
+      setPassword() {}
+      deletePassword() {}
+    }
+    const migrating = new KeychainMigratingSecrets(new FileSecrets(denyDir), new KeychainSecrets(DenyEntry, false))
+    expect(migrating.get('provider:legacy-1')).toBeUndefined()
+    // 1 read on 'nuonuo' (null) + 1 read on 'super-assistant' (throws) = 2 reads total
+    expect(denyPrompts).toBe(2)
+    expect(JSON.parse(readFileSync(join(denyDir, 'migrated.json'), 'utf8'))).toEqual({
+      tried: ['provider:legacy-1'],
+      aborted: true,
+    })
+
+    // Subsequent queries for other unknown refs in the same process OR after restart trigger +0 Keychain calls
+    expect(migrating.get('provider:legacy-2')).toBeUndefined()
+    expect(migrating.get('source:gmail:runtime:refresh_token')).toBeUndefined()
+    expect(denyPrompts).toBe(2)
+
+    const afterRestart = new KeychainMigratingSecrets(new FileSecrets(denyDir), new KeychainSecrets(DenyEntry, false))
+    expect(afterRestart.get('provider:legacy-3')).toBeUndefined()
+    expect(denyPrompts).toBe(2)
   })
 })
 

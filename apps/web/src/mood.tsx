@@ -79,8 +79,8 @@ function useIsDark(): boolean {
   const compute = () => {
     if (typeof document === 'undefined') return false
     const root = document.documentElement
-    if (root.dataset.theme === 'dark' || root.classList.contains('dark')) return true
     if (root.dataset.theme === 'light') return false
+    if (root.dataset.theme === 'dark' || root.classList.contains('dark')) return true
     if (theme === 'dark') return true
     if (theme === 'light') return false
     return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches

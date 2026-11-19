@@ -25,8 +25,10 @@ const VIEWPORT_H = 800
 
 const checkDark = () => {
   if (typeof document === 'undefined') return false
-  const set = document.documentElement.dataset.theme
-  return set === 'dark' || (set !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+  const root = document.documentElement
+  if (root.dataset.theme === 'light') return false
+  if (root.dataset.theme === 'dark' || root.classList.contains('dark')) return true
+  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
 }
 
 function useIsDark(): boolean {
@@ -34,7 +36,7 @@ function useIsDark(): boolean {
   useEffect(() => {
     const update = () => setDark(checkDark())
     const mo = new MutationObserver(update)
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] })
     const mq = matchMedia('(prefers-color-scheme: dark)')
     mq.addEventListener('change', update)
     return () => { mo.disconnect(); mq.removeEventListener('change', update) }
