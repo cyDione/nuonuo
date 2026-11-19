@@ -1,6 +1,6 @@
 {
   "name": "@nuonuo/agent-runtime",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "license": "MIT",
   "private": true,
   "type": "module",
