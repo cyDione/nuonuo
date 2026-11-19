@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="532" viewBox="0 0 1200 532" role="img" aria-labelledby="title desc">
+  <title id="title">Nuonuo System Architecture</title>
+  <desc id="desc">Four-stage local architecture: Triggers with two-stage filtering, always-on shell-free Router with Split-Phase Voice and Sideband Memory, parallel Workers gated by Policy &amp; Reviewer, and pluggable Execution Environments on top of a single Node.js daemon, SQLite, Watchdog, and Plugin Sandbox.</desc>
+
+  <rect width="1200" height="532" rx="24" fill="#FFFFFF"/>
+  <rect x="0.5" y="0.5" width="1199" height="531" rx="23.5" fill="none" stroke="#E6E6EA"/>
+
+  <!-- Subscription Bypass Arc -->
+  <path d="M150 86 V42 H758 V80" stroke="#9696A2" stroke-width="1.6" stroke-dasharray="5 5" fill="none"/>
+  <path d="M753 74 l5 7 l5 -7" stroke="#9696A2" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="240" y="25" width="460" height="32" rx="16" fill="#FAFAFA" stroke="#E6E6EA"/>
+  <text x="470" y="46" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="500" fill="#666672">Subscription Bypass · Follow-ups route straight to Workers</text>
+
+  <!-- Column 1: Triggers -->
+  <g id="col-triggers">
+    <rect x="36" y="86" width="232" height="128" rx="16" fill="#FAFAFA" stroke="#F2BDCE" stroke-width="1.5"/>
+    <text x="56" y="120" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="700" fill="#141416">Direct Input</text>
+    <text x="56" y="150" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#484852">Web · Desktop · IM</text>
+    <text x="56" y="176" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#666672">Telegram · Feishu · Slack…</text>
+    <text x="56" y="200" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15.5" fill="#D43D6D">Paired /client/v1</text>
+
+    <rect x="36" y="232" width="232" height="176" rx="16" fill="#FAFAFA" stroke="#D4D4DC"/>
+    <text x="56" y="266" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="700" fill="#141416">External Sources</text>
+    <text x="56" y="296" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#484852">GitHub · Gmail · Cal</text>
+    <text x="56" y="324" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#484852">Routines · Plugins</text>
+    <rect x="54" y="346" width="196" height="44" rx="10" fill="#F3F3F6"/>
+    <text x="152" y="366" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15.5" font-weight="600" fill="#141416">2-Stage Filter</text>
+    <text x="152" y="384" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14.5" fill="#666672">Rules → Small Model</text>
+  </g>
+
+  <!-- Arrows Col 1 -> Col 2 (both Direct Input and filtered External Sources route into Router) -->
+  <path d="M268 134 H312 m-6 -5 l6 5 l-6 5" stroke="#D43D6D" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M268 308 H292 V186 H312 m-6 -5 l6 5 l-6 5" stroke="#666672" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Column 2: Router + Voice + Sideband Memory -->
+  <g id="col-router">
+    <rect x="316" y="86" width="264" height="128" rx="16" fill="#FCEEF3" stroke="#F2BDCE" stroke-width="1.5"/>
+    <g transform="translate(332 97) scale(0.34)"><ellipse cx="50" cy="93" rx="26" ry="3.2" fill="#141416" opacity="0.08"/><path d="M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z" fill="#FF7A9A"/><rect x="35.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><rect x="56.5" y="48" width="8" height="15" rx="4" fill="#FFFFFF"/><path d="M74 9 C75.6 16.4 75.6 16.4 83 18 C75.6 19.6 75.6 19.6 74 27 C72.4 19.6 72.4 19.6 65 18 C72.4 16.4 72.4 16.4 74 9 Z" fill="#FFC23D"/></g>
+    <text x="374" y="121" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="700" fill="#141416">Router · Nuonuo</text>
+    <text x="336" y="152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16.5" font-weight="600" fill="#D43D6D">Fast model · Zero shell</text>
+    <text x="336" y="179" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16.5" fill="#484852">Reply · Dispatch · Settings</text>
+    <text x="336" y="201" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" fill="#666672">Batched inbox + live SSE</text>
+
+    <rect x="316" y="228" width="264" height="84" rx="14" fill="#FFFFFF" stroke="#D4D4DC"/>
+    <text x="336" y="257" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="700" fill="#141416">Split-Phase Voice</text>
+    <text x="336" y="281" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#484852">2D Tone Pad + 4D Mood</text>
+    <text x="336" y="301" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14.5" fill="#666672">Tool-free natural short bubbles</text>
+
+    <rect x="316" y="324" width="264" height="84" rx="14" fill="#FAFAFA" stroke="#D4D4DC" stroke-dasharray="5 4"/>
+    <text x="336" y="353" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="700" fill="#141416">Sideband Memory</text>
+    <text x="336" y="377" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#484852">SOUL.md · MEMORY.md</text>
+    <text x="336" y="397" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14.5" fill="#666672">Async idle extract · vector recall</text>
+  </g>
+
+  <!-- Arrows Col 2 <-> Col 3 -->
+  <path d="M580 132 H628 m-6 -5 l6 5 l-6 5" stroke="#141416" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M632 164 H584 m6 -5 l-6 5 l6 5" stroke="#666672" stroke-width="1.6" stroke-dasharray="4 4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Column 3: Workers + Policy Gate -->
+  <g id="col-workers">
+    <rect x="640" y="79" width="248" height="142" rx="16" fill="#FAFAFA" stroke="#E6E6EA"/>
+    <rect x="632" y="86" width="248" height="142" rx="16" fill="#FFFFFF" stroke="#D4D4DC"/>
+    <text x="652" y="120" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" font-weight="700" fill="#141416">Workers × N</text>
+    <text x="652" y="150" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#484852">1 task = 1 strong model</text>
+    <text x="652" y="177" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16.5" fill="#666672">Subagents + mid-step inject</text>
+    <text x="652" y="204" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15.5" fill="#2656C7">Inline &amp; Spill → recall()</text>
+
+    <path d="M756 228 V260 m-5 -5 l5 5 l5 -5" stroke="#141416" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <rect x="632" y="264" width="248" height="144" rx="16" fill="#FAFAFA" stroke="#D43D6D" stroke-width="1.6"/>
+    <text x="652" y="298" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="700" fill="#141416">Policy &amp; Reviewer</text>
+    <text x="652" y="328" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16.5" fill="#484852">Code-enforced folders &amp;</text>
+    <text x="652" y="352" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16.5" fill="#484852">secrets + Reviewer model</text>
+    <text x="652" y="384" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#D43D6D">High-risk → Approval card</text>
+  </g>
+
+  <!-- Arrow Col 3 -> Col 4 -->
+  <text x="908" y="324" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15.5" font-weight="600" fill="#237852">Allow</text>
+  <path d="M880 336 H932 m-6 -5 l6 5 l-6 5" stroke="#237852" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Column 4: Execution Environments -->
+  <g id="col-exec">
+    <rect x="936" y="86" width="228" height="322" rx="16" fill="#FAFAFA" stroke="#D4D4DC"/>
+    <text x="956" y="120" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="700" fill="#141416">Execution</text>
+    <text x="956" y="146" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" fill="#666672">Pluggable isolation tiers</text>
+
+    <rect x="954" y="166" width="192" height="46" rx="10" fill="#FFFFFF" stroke="#E6E6EA"/>
+    <text x="1050" y="195" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16.5" font-weight="600" fill="#141416">Local / Docker</text>
+
+    <rect x="954" y="224" width="192" height="46" rx="10" fill="#FFFFFF" stroke="#E6E6EA"/>
+    <text x="1050" y="253" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16.5" font-weight="600" fill="#141416">Playwright &amp; MCP</text>
+
+    <rect x="954" y="282" width="192" height="46" rx="10" fill="#FFFFFF" stroke="#E6E6EA"/>
+    <text x="1050" y="311" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16.5" font-weight="600" fill="#141416">macOS Native Apps</text>
+
+    <rect x="954" y="340" width="192" height="50" rx="10" fill="#EDF2FE" stroke="#2656C7" stroke-opacity="0.35"/>
+    <text x="1050" y="363" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="700" fill="#141416">Cloud Linux Desktop</text>
+    <text x="1050" y="382" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" fill="#2656C7">60fps Browser Takeover</text>
+  </g>
+
+  <!-- Foundation Bar -->
+  <g id="foundation">
+    <rect x="36" y="430" width="1128" height="72" rx="14" fill="#F3F3F6" stroke="#E6E6EA"/>
+    <line x1="318" y1="444" x2="318" y2="488" stroke="#D4D4DC"/>
+    <line x1="600" y1="444" x2="600" y2="488" stroke="#D4D4DC"/>
+    <line x1="882" y1="444" x2="882" y2="488" stroke="#D4D4DC"/>
+
+    <text x="177" y="460" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17.5" font-weight="700" fill="#141416">Single-Process Daemon</text>
+    <text x="177" y="485" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15.5" fill="#666672">Node.js 22 · Hono · SSE</text>
+
+    <text x="459" y="460" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17.5" font-weight="700" fill="#141416">Single-File SQLite</text>
+    <text x="459" y="485" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15.5" fill="#666672">Stateless loop · Outbox</text>
+
+    <text x="741" y="460" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17.5" font-weight="700" fill="#141416">External Watchdog</text>
+    <text x="741" y="485" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15.5" fill="#666672">1-min probes · Auto-heal</text>
+
+    <text x="1023" y="460" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17.5" font-weight="700" fill="#141416">Sandbox &amp; Model Hub</text>
+    <text x="1023" y="485" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15.5" fill="#666672">Isolated plugins · 12 layers</text>
+  </g>
+</svg>
