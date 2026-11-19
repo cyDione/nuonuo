@@ -190,6 +190,15 @@ Wrap any new UI copy with `tx()` and add its English entry in `apps/web/src/i18n
 
 ---
 
+<p align="center">
+  <a href="https://github.com/oil-oil/beautify-github-readme">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/made-with-beautify-dark.svg" />
+      <img src="docs/assets/readme/made-with-beautify-light.svg" width="300" alt="README made with beautify-github-readme" />
+    </picture>
+  </a>
+</p>
+
 ## License
 
 Released under the **[MIT License](LICENSE)**.

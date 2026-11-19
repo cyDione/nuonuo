@@ -188,6 +188,15 @@ pnpm check                  # 完整运行类型检查、测试与生产构建
 
 ---
 
+<p align="center">
+  <a href="https://github.com/oil-oil/beautify-github-readme">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/made-with-beautify-dark.svg" />
+      <img src="docs/assets/readme/made-with-beautify-light.svg" width="300" alt="README made with beautify-github-readme" />
+    </picture>
+  </a>
+</p>
+
 ## 开源协议
 
 本项目基于 **[MIT License](LICENSE)** 开源。
