@@ -22,12 +22,18 @@ export const usePersona = () => {
 }
 
 export const isMascot = (p: Persona) => !p.avatar || p.avatar === MASCOT || p.avatar === '✨'
+export const isImageAvatar = (avatar: string | undefined) => Boolean(avatar && /^https?:\/\/|^data:image\/|^\//.test(avatar))
 
 export type Mood = 'idle' | 'working' | 'waiting' | 'thinking' | 'happy' | 'sleepy' | 'listening'
 export const moodOf = (tone: 'idle' | 'working' | 'waiting'): Mood => tone
 
 export function Avatar({ persona, size = 28, className, mood = 'idle', track }: { persona: Persona; size?: number; className?: string; mood?: Mood; track?: boolean }) {
   if (isMascot(persona)) return <Mascot color={persona.color} size={size} mood={mood} {...(className ? { className } : {})} {...(track ? { track } : {})} />
+  if (isImageAvatar(persona.avatar)) {
+    return <span className={cx('inline-flex shrink-0 overflow-hidden rounded-full bg-sunken select-none', className)} style={{ width: size, height: size }}>
+      <img src={persona.avatar} alt={persona.name} className="size-full rounded-full object-cover" />
+    </span>
+  }
   return <span className={cx('inline-flex shrink-0 items-center justify-center rounded-[32%] leading-none select-none', className)}
     style={{ width: size, height: size, background: `color-mix(in oklab, ${persona.color} 13%, transparent)`, boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${persona.color} 27%, transparent)`, fontSize: size * 0.55 }} aria-hidden>
     {persona.avatar || persona.name.slice(0, 1)}

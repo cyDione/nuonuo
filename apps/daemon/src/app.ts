@@ -14,6 +14,7 @@ import { CLIENT_BASE, ClientError, clientApi, Devices, DISPLAYS, SCOPES } from '
 import { connectHost, isLoopback, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, resolveConfig, validHost, VERSION, writeSavedConfig } from './config'
 import { Conversations } from './conversations'
 import { EventMapper } from './events'
+import { extractRouterActionRuns } from './activity-runs'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
 import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@nuonuo/core'
 import { kvGet, kvSet, newId, schema } from '@nuonuo/db'
@@ -223,7 +224,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.get('/conversations/main', c => c.json({ id: rt.engine.mainConversation() }))
   api.get('/persona', c => c.json({ persona: persona(rt.store), defaults: DEFAULT_PERSONA }))
   api.put('/persona', async c => {
-    const input = await body(c, z.object({ name: z.string().max(40), avatar: z.string().max(16), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), personality: z.string().max(2_000), limits: z.array(z.string().max(200)).max(20), role: z.enum(PERSONA_ROLES), language: z.enum(PERSONA_LANGUAGES) }).partial())
+    const input = await body(c, z.object({ name: z.string().max(40), avatar: z.string().max(250_000), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), personality: z.string().max(2_000), limits: z.array(z.string().max(200)).max(20), role: z.enum(PERSONA_ROLES), language: z.enum(PERSONA_LANGUAGES) }).partial())
     const next = savePersona(rt.store, input)
     rt.bus.emit({ type: 'persona.updated' })
     rt.bus.emit({ type: 'settings.updated', keys: ['persona'] })
@@ -352,20 +353,49 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   // Tasks
   api.get('/tickets', c => {
     const conversationId = c.req.query('conversation')
+    const includeActions = c.req.query('includeActions') !== '0'
     const list = rt.engine.tickets(conversationId ? { threadId: rt.engine.threadOf(conversationId) } : {}).slice(0, 200)
-    return c.json({ tickets: list.map(t => ticketView(rt.engine, t, rt.reviewer.pending(t.id))) })
+    const ticketViews = list.map(t => ticketView(rt.engine, t, rt.reviewer.pending(t.id), rt.agents))
+    const { runs: actions } = extractRouterActionRuns(rt.engine, rt.agents, {
+      ...(conversationId ? { conversationId } : {}),
+      limit: 50,
+    })
+    const merged = includeActions
+      ? [...ticketViews, ...actions].sort((a, b) => {
+          const aLive = a.stage !== 'ended' ? 1 : 0
+          const bLive = b.stage !== 'ended' ? 1 : 0
+          if (aLive !== bLive) return bLive - aLive
+          return (b.ended?.at ?? b.updatedAt ?? b.createdAt) - (a.ended?.at ?? a.updatedAt ?? a.createdAt)
+        })
+      : ticketViews
+    return c.json({ tickets: merged, actions })
   })
   api.get('/tickets/:id', c => {
-    const ticket = rt.engine.ticket(c.req.param('id'))
-    return c.json({ ticket: ticketView(rt.engine, ticket, rt.reviewer.pending(ticket.id)), reports: reportsOf(rt.store, ticket.id), transcript: transcript(rt.agents, ticket.sessionId),
+    const id = c.req.param('id')
+    if (id.startsWith('act_')) {
+      const { detailsById } = extractRouterActionRuns(rt.engine, rt.agents, { limit: 200 })
+      const found = detailsById.get(id)
+      if (!found) throw new HttpError(404, 'missing', `没有动作记录 ${id}`)
+      return c.json(found)
+    }
+    const ticket = rt.engine.ticket(id)
+    return c.json({ ticket: ticketView(rt.engine, ticket, rt.reviewer.pending(ticket.id), rt.agents), reports: reportsOf(rt.store, ticket.id), transcript: transcript(rt.agents, ticket.sessionId),
       running: rt.agents.isRunning(ticket.sessionId), jobs: rt.agents.jobs.running(ticket.sessionId), approvals: rt.reviewer.pending(ticket.id),
       browser: rt.browser.hasPage(ticket.id), project: rt.engine.projectOf(ticket) ?? null, usage: rt.engine.usageOf(ticket.id),
       files: rt.engine.artifacts({ ticketId: ticket.id }).map(a => ({ id: a.id, name: a.name, size: a.size })) })
   })
-  api.post('/tickets/:id/stop', c => { rt.engine.stopTask(c.req.param('id'), 'person', '主人在界面上停止'); return c.json({ ok: true }) })
-  api.post('/tickets/:id/retry', c => { rt.engine.retry(c.req.param('id')); return c.json({ ok: true }) })
+  api.post('/tickets/:id/stop', c => {
+    const id = c.req.param('id')
+    if (!id.startsWith('act_')) rt.engine.stopTask(id, 'person', '主人在界面上停止')
+    return c.json({ ok: true })
+  })
+  api.post('/tickets/:id/retry', c => {
+    const id = c.req.param('id')
+    if (!id.startsWith('act_')) rt.engine.retry(id)
+    return c.json({ ok: true })
+  })
   api.get('/inbox', c => {
-    const items = rt.engine.tickets({ open: true }).map(t => ticketView(rt.engine, t)).filter(t => t.stage.startsWith('person/'))
+    const items = rt.engine.tickets({ open: true }).map(t => ticketView(rt.engine, t, [], rt.agents)).filter(t => t.stage.startsWith('person/'))
     return c.json({ items })
   })
   api.get('/router', c => c.json({ state: rt.agents.session(ROUTER_SESSION)?.state ?? 'idle', transcript: transcript(rt.agents, ROUTER_SESSION).slice(-200) }))

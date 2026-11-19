@@ -52,6 +52,7 @@ export function AssistantPage() {
 
     {mood && <Section title={tx('个性与心境')} foot={tx('关掉后性格底色照常生效，心情不再随对话起伏，也不写日记。')}>
       <Row label={tx('心境变化')} sub={tx('让糯糯的心情、精力、耐心和信任随你们相处自然波动')}>
+        <span className="mr-2 text-xs text-faint">{tx('默认开启')}</span>
         <Toggle label={tx('心境变化')} checked={mood.enabled} disabled={toggleMood.isPending} onChange={enabled => toggleMood.mutate({ enabled })} />
       </Row>
       <Row label={tx('心境日记')} sub={tx('有感触时用第一人称记一笔，只在聊到感受时翻出来')} className={cx(!mood.enabled && 'opacity-50')}>

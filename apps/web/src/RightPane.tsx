@@ -6,18 +6,18 @@
  * On narrower windows the same pane opens as a drawer, and on phones as a sheet from the bottom.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Ban, Brain, CalendarDays, ChevronDown, Cloud, CreditCard, FileText, Folder, GitBranch, Globe, Image, ListChecks, Lock, Mail, Plus, ScrollText, Send, Shield, ShieldCheck, Smile, Trash2, Users, X } from 'lucide-react'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { Ban, Brain, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, Cloud, CreditCard, FileText, Folder, GitBranch, Globe, Image, ListChecks, Loader2, Lock, Mail, Pencil, Plus, ScrollText, Send, Shield, ShieldCheck, Smile, SquareTerminal, Trash2, Upload, Users, X, XCircle } from 'lucide-react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { api, type AccessSettings, type AppLevel, type AuditEntry, type ExecutionSettings, type InstructionsState, type Level, type LocalApp, type Persona, type ReviewSettings, type Routine, type SourceInfo, type Ticket } from './api'
-import { BrowserPaneTab, useBrowsers } from './browser'
+import { BrowserPaneTab } from './browser'
 import { BrowserWatch } from './watch'
 import { SkillsSection } from './skills'
 import { MoodSection } from './mood'
 import { openActivity, openTask, useActivityOpen, useLive } from './live'
-import { Avatar, isMascot, Mascot, MASCOT, statusLine, usePersona } from './persona'
+import { Avatar, isImageAvatar, isMascot, Mascot, MASCOT, statusLine, usePersona } from './persona'
 import { go } from './route'
 import { LiquidButton, MemorySheet, pickHues, SoulSheet } from './soul'
-import { needsOwner, useTickets } from './tasks'
+import { endedText, needsOwner, STATE_TEXT, useTickets } from './tasks'
 import { cx, IconButton, Seg } from './ui'
 import { usePresence } from './shell'
 import { locale, tx } from './i18n'
@@ -28,14 +28,13 @@ const tabListeners = new Set<() => void>()
 export function setPaneTab(next: PaneTab) { tab = next; for (const l of tabListeners) l() }
 const usePaneTab = () => useSyncExternalStore(l => { tabListeners.add(l); return () => tabListeners.delete(l) }, () => tab)
 
-const ACTIVITY_TAB = { id: 'activity' as PaneTab, label: <span className="flex items-center" title={tx('活动')}><Activity size={17} aria-label={tx('活动')} /></span> }
+const ACTIVITY_TAB = { id: 'activity' as PaneTab, label: <span className="flex items-center" title={tx('活动')}><ListChecks size={17} aria-label={tx('活动')} /></span> }
 const BROWSER_TAB = { id: 'browser' as PaneTab, label: <span className="flex items-center" title={tx('浏览器')}><Globe size={17} aria-label={tx('浏览器')} /></span> }
 const WHO_TAB = { id: 'who' as PaneTab, label: <span className="flex items-center" title={tx('它是谁')}><Smile size={17} aria-label={tx('它是谁')} /></span> }
 const PERMISSIONS_TAB = { id: 'permissions' as PaneTab, label: <span className="flex items-center" title={tx('权限')}><Shield size={17} aria-label={tx('权限')} /></span> }
-const BASE_TABS = [ACTIVITY_TAB, WHO_TAB, PERMISSIONS_TAB]
 const BROWSER_TABS = [ACTIVITY_TAB, BROWSER_TAB, WHO_TAB, PERMISSIONS_TAB]
 
-const hm = (at: number) => new Date(at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+const hm = (at: number) => new Date(at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false })
 const WEEK = [tx('周日'), tx('周一'), tx('周二'), tx('周三'), tx('周四'), tx('周五'), tx('周六')]
 function when(at: number) {
   const d = new Date(at), now = new Date()
@@ -48,31 +47,90 @@ function ago(at: number) {
   return `${days === 0 ? tx('今天') : days === 1 ? tx('昨天') : `${new Date(at).getMonth() + 1}/${new Date(at).getDate()}`} ${hm(at)}`
 }
 
+function activityTime(at: number) {
+  const d = new Date(at), now = new Date()
+  const days = Math.round((new Date(now.toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86_400_000)
+  if (days === 0) return hm(at)
+  if (days === 1) return `${tx('昨天')} ${hm(at)}`
+  return `${d.getMonth() + 1}/${d.getDate()} ${hm(at)}`
+}
+
+export function fmtElapsed(startAt: number, now: number): string {
+  const sec = Math.max(0, Math.floor((now - startAt) / 1000))
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+export function useNow(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!enabled) return
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [enabled])
+  return now
+}
+
 export function RightPane({ onClose }: { onClose(): void }) {
   const persona = usePersona()
   const connected = useLive(s => s.connected)
   const live = (useTickets().data?.tickets ?? []).filter(t => t.stage !== 'ended')
+  const waiting = live.filter(needsOwner)
+  const going = live.filter(t => !needsOwner(t))
   const status = statusLine(live)
-  const current = usePaneTab()
-  const browsers = useBrowsers(current === 'browser')
-  const hasBrowser = Boolean(browsers.data?.available)
-  useEffect(() => {
-    if (current === 'browser' && browsers.data && !browsers.data.available) setPaneTab('activity')
-  }, [current, browsers.data?.available])
-  const activeTab: PaneTab = current === 'browser' && !hasBrowser ? 'activity' : current
-  const tabs = hasBrowser ? BROWSER_TABS : BASE_TABS
+  const activeTab = usePaneTab()
   const mood = !connected ? 'sleepy' : status.tone === 'working' ? 'thinking' : status.tone
+  const statusDotCls = !connected
+    ? 'bg-faint'
+    : waiting.length > 0
+      ? 'bg-warn'
+      : going.length > 0
+        ? 'bg-[#2656c7] dark:bg-[#78aef2]'
+        : 'bg-ok'
+  const statusText = !connected
+    ? tx('重连中…')
+    : waiting.length > 0
+      ? `${tx('已连接')} · ${tx('{0} 件事等你点头', waiting.length)}`
+      : going.length > 0
+        ? `${tx('已连接')} · ${tx('正在执行 {0} 项任务', going.length)}`
+        : tx('已连接')
+
   return <div className="flex h-full flex-col">
-    <div className="flex h-12 shrink-0 items-center justify-end px-3"><IconButton label={tx('关闭')} onClick={onClose}><X size={17} /></IconButton></div>
-    <div className="flex items-center gap-3.5 px-6">
-      <Avatar persona={persona} size={56} mood={mood} track />
-      <div className="min-w-0">
-        <div className="truncate text-xl font-semibold">{persona.name}</div>
-        <div className="mt-0.5 truncate text-xs text-muted">{connected ? status.text : tx('重连中…')}</div>
+    <div className="flex h-11 shrink-0 items-center justify-end px-3"><IconButton label={tx('关闭')} onClick={onClose}><X size={17} /></IconButton></div>
+    <div className="flex flex-col items-center px-6 pt-0.5 pb-2 text-center">
+      <div className="relative">
+        <div className={cx('flex size-[68px] items-center justify-center overflow-hidden rounded-full ring-2 ring-line', isMascot(persona) ? 'bg-[#f6ebe6] dark:bg-[#251e21]' : 'bg-sunken')}>
+          {isMascot(persona) ? <Mascot color={persona.color} size={46} mood={mood} track />
+            : isImageAvatar(persona.avatar) ? <img src={persona.avatar} alt={persona.name} className="size-full rounded-full object-cover" />
+            : <Avatar persona={persona} size={68} mood={mood} className="rounded-full!" />}
+        </div>
+        <button
+          type="button"
+          aria-label={tx('修改名字和样子')}
+          title={tx('修改名字和样子')}
+          onClick={() => {
+            setPaneTab('who')
+            requestAnimationFrame(() => {
+              const el = document.getElementById('nuonuo-persona-name-input') as HTMLInputElement | null
+              el?.focus()
+              el?.select()
+            })
+          }}
+          className="press absolute right-0 bottom-0 flex size-[21px] items-center justify-center rounded-full border border-line bg-card text-muted shadow-xs hover:text-fg"
+        >
+          <Pencil size={10} />
+        </button>
+      </div>
+      <div className="mt-2.5 max-w-full truncate text-[16.5px] font-bold tracking-tight text-fg">{persona.name}</div>
+      <div className="mt-1 flex items-center justify-center gap-1.5 text-[11.5px] text-muted tabular-nums">
+        <span className={cx('size-[7px] shrink-0 rounded-full', statusDotCls)} />
+        <span className="truncate">{statusText}</span>
       </div>
     </div>
-    <div className="px-6 pt-5 pb-1"><Seg label={tx('右侧栏')} value={activeTab} options={tabs} onChange={setPaneTab} className="[&_button]:h-8" /></div>
-    <div key={activeTab} className="anim-fade min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-6">
+    <div className="px-5 pt-3 pb-1"><Seg label={tx('右侧栏')} value={activeTab} options={BROWSER_TABS} onChange={setPaneTab} className="[&_button]:h-8" /></div>
+    <div key={activeTab} className={cx('anim-fade min-h-0 flex-1 px-5 pt-3.5', activeTab === 'activity' ? 'flex flex-col overflow-hidden pb-3.5' : 'overflow-y-auto pb-5')}>
       {activeTab === 'activity' ? <ActivityTab /> : activeTab === 'browser' ? <BrowserPaneTab /> : activeTab === 'who' ? <WhoTab /> : <PermissionsTab />}
     </div>
   </div>
@@ -89,6 +147,23 @@ const LinkBtn = ({ onClick, children }: { onClick(): void; children: React.React
 
 // ── 活动 ────────────────────────────────────────────────────────────────────
 
+function activitySummary(t: Ticket): string {
+  const raw = t.latestReport?.summary
+    ? t.latestReport.summary.replace(/[#*`>]/g, '').replace(/\s+/g, ' ').trim()
+    : ''
+  if (raw) return raw
+  if (t.currentStep?.label) return t.currentStep.label
+  if (t.ended?.reason) return t.ended.reason
+  return endedText(t)
+}
+
+function ActivityRowIcon({ t, isFailed }: { t: Ticket; isFailed: boolean }) {
+  if (isFailed) return <XCircle size={17} className="mt-0.5 shrink-0 text-danger" />
+  if (t.iconKind === 'file') return <FileText size={17} className="mt-0.5 shrink-0 text-muted" />
+  if (t.iconKind === 'terminal') return <SquareTerminal size={17} className="mt-0.5 shrink-0 text-muted" />
+  return <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-muted" />
+}
+
 function ActivityTab() {
   const tickets = useTickets().data?.tickets ?? []
   const routines = useQuery({ queryKey: ['routines'], queryFn: () => api.get<{ routines: Routine[] }>('/routines') }).data?.routines ?? []
@@ -96,75 +171,125 @@ function ActivityTab() {
   const live = tickets.filter(t => t.stage !== 'ended')
   const waiting = live.filter(needsOwner)
   const going = live.filter(t => !needsOwner(t))
-  const finished = tickets.filter(t => t.ended?.outcome === 'completed').sort((a, b) => b.ended!.at - a.ended!.at)
-  const today = new Date().toDateString()
-  const done = all ? finished : finished.filter(t => new Date(t.ended!.at).toDateString() === today)
+  const now = useNow(going.length > 0)
+  const history = tickets
+    .filter(t => t.stage === 'ended')
+    .sort((a, b) => (b.ended?.at ?? b.updatedAt) - (a.ended?.at ?? a.updatedAt))
+  const shownHistory = all ? history : history.slice(0, 25)
   const next = routines.filter(r => r.enabled && r.next).sort((a, b) => a.next! - b.next!).slice(0, 4)
-  const open = (t: Ticket) => { if (t.conversationId) go(`/c/${t.conversationId}`); else openTask(t.id) }
-  if (!live.length && !next.length && !finished.length) return <div className="flex flex-col items-center gap-1.5 py-12 text-sm text-faint"><ShieldCheck size={20} />{tx('现在没事，有事叫我')}</div>
-  return <div className="space-y-6">
-    {waiting.length > 0 && <section>
-      <Head title={tx('等你点头')} count={waiting.length} />
-      <div className="space-y-1.5">{waiting.map(t => <button key={t.id} onClick={() => open(t)} className="press flex w-full items-center gap-3 rounded-2xl bg-sunken px-3.5 py-3 text-left">
-        <Shield size={16} className="shrink-0 text-muted" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm">{t.title}</span>
-          <span className="mt-0.5 block text-[11px] text-faint tabular-nums">{hm(t.attention?.at ?? t.approvals[0]?.createdAt ?? t.updatedAt)}{t.conversationId ? tx(' · 在聊天里') : ''}</span>
-        </span>
-        <span className="shrink-0 text-xs font-medium text-accent">{tx('去确认')}</span>
-      </button>)}</div>
-    </section>}
-    {going.length > 0 && <section>
-      <Head title={tx('正在做')} count={going.length} />
-      <div className="space-y-3">{going.map(t => <div key={t.id}>
-        <button onClick={() => openTask(t.id)} className="block w-full text-left">
-          <span className="block truncate text-sm font-semibold">{t.title}</span>
-          {t.latestReport?.summary && <span className="mt-0.5 block truncate text-xs text-muted">{t.latestReport.summary}</span>}
-          {t.stage === 'working' ? <span className="progress mt-2 block h-1" /> : <span className="mt-2 block h-1 rounded-full bg-sunken" />}
-        </button>
-        <BrowserWatch t={t} />
-      </div>)}</div>
-    </section>}
-    {next.length > 0 && <section>
-      <Head title={tx('接下来')} count={next.length} />
-      <div className="space-y-2">{next.map(r => <a key={r.id} href={r.conversationId ? `#/c/${r.conversationId}` : '#/settings/routines'} className="flex gap-4 text-sm hover:text-accent">
-        <span className="w-[96px] shrink-0 font-medium whitespace-nowrap tabular-nums">{when(r.next!)}</span><span className="min-w-0 flex-1 truncate">{r.name}</span>
-      </a>)}</div>
-    </section>}
-    {(done.length > 0 || finished.length > 0) && <section className="border-t border-line pt-5">
-      <Head title={all ? tx('做过') : tx('今天做过')} count={done.length}
-        action={finished.length > done.length || all ? <LinkBtn onClick={() => setAll(v => !v)}>{all ? tx('收起') : tx('展开')}</LinkBtn> : undefined} />
-      {all ? <Done tickets={done} /> : done.length > 0 ? <Rows tickets={done.slice(0, 6)} />
-        : <p className="text-sm text-faint">{tx('今天还没做完什么。')}</p>}
-    </section>}
-  </div>
-}
+  const openWaiting = (t: Ticket) => { if (t.conversationId) go(`/c/${t.conversationId}`); else openTask(t.id) }
 
-/** Finished work as time + title rows; a row opens the task to see how it went. */
-function Rows({ tickets }: { tickets: Ticket[] }) {
-  return <div className="space-y-2">{tickets.map(t => <button key={t.id} onClick={() => openTask(t.id)} className="flex w-full gap-4 text-left text-sm hover:text-accent">
-    <span className="w-10 shrink-0 text-faint tabular-nums">{hm(t.ended!.at)}</span><span className="min-w-0 flex-1 truncate">{t.title}</span>
-  </button>)}</div>
-}
-
-/** Everything it has finished, grouped by day, right here in the pane (动态 is for changes outside, not this). */
-function Done({ tickets }: { tickets: Ticket[] }) {
-  const groups: { day: string; tickets: Ticket[] }[] = []
-  for (const t of tickets) {
-    const day = dayName(t.ended!.at)
-    const g = groups.at(-1)
-    if (g?.day === day) g.tickets.push(t); else groups.push({ day, tickets: [t] })
+  if (!live.length && !next.length && !history.length) {
+    return <div className="flex flex-col items-center gap-1.5 py-12 text-sm text-faint"><ShieldCheck size={20} />{tx('现在没事，有事叫我')}</div>
   }
-  return <div className="space-y-4">{groups.map(g => <div key={g.day}>
-    <div className="mb-1.5 text-[11px] font-medium text-faint">{g.day}</div>
-    <Rows tickets={g.tickets} />
-  </div>)}</div>
-}
 
-function dayName(at: number) {
-  const d = new Date(at), now = new Date()
-  const days = Math.round((new Date(now.toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86_400_000)
-  return days === 0 ? tx('今天') : days === 1 ? tx('昨天') : tx('{0} 月 {1} 日 · {2}', d.getMonth() + 1, d.getDate(), WEEK[d.getDay()])
+  return <div className="flex h-full min-h-0 flex-col gap-2.5">
+    <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-0.5">
+      {waiting.length > 0 && <div className="space-y-2">
+        {waiting.map(t => {
+          const detailLine = t.approvals[0]?.command
+            ? `${tx('申请执行')} ${t.approvals[0].command}`
+            : (t.approvals[0]?.reason ?? t.attention?.question ?? STATE_TEXT[t.stage])
+          return <button
+            key={t.id}
+            type="button"
+            onClick={() => openWaiting(t)}
+            className="press block w-full rounded-[14px] border border-warn/35 bg-warn-soft px-3 py-2.5 text-left transition-colors"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[13px] font-bold text-warn">{tx('等你点头')} · {t.title}</span>
+              <span className="shrink-0 text-[11.5px] font-bold text-accent">{tx('去确认')} &gt;</span>
+            </div>
+            <div className="mt-1 truncate text-[11.5px] text-muted">
+              {detailLine}{t.conversationId ? tx(' · 在聊天里') : ''}
+            </div>
+          </button>
+        })}
+      </div>}
+
+      {going.length > 0 && <div className="space-y-2">
+        {going.map(t => {
+          const stepNum = Math.max(1, t.stepCount ?? 1)
+          const stepText = t.currentStep?.label || t.latestReport?.summary?.replace(/[#*`>]/g, '').trim() || tx('正在准备执行步骤…')
+          const mmss = fmtElapsed(t.createdAt, now)
+          return <div key={t.id} className="space-y-1.5">
+            <button
+              type="button"
+              onClick={() => openTask(t.id)}
+              className="press block w-full rounded-[14px] border border-[#2656c7]/35 bg-[#edf2fe] px-3 py-2.5 text-left transition-colors dark:border-[#78aef2]/35 dark:bg-[#162133]"
+            >
+              <div className="flex items-start gap-2.5">
+                <Loader2 size={17} className="mt-0.5 shrink-0 animate-spin text-[#2656c7] dark:text-[#78aef2]" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-[13.5px] font-semibold text-fg">{t.title}</span>
+                    <span className="shrink-0 rounded-full bg-[#dbe6fd] px-2 py-0.5 text-[10.5px] font-medium text-[#2656c7] tabular-nums dark:bg-[#1f314d] dark:text-[#78aef2]">
+                      {tx('第 {0} 步', stepNum)}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 line-clamp-2 break-all text-[12px] leading-[17px] text-fg">{stepText}</div>
+                  <div className="mt-1 text-[11px] text-muted tabular-nums">
+                    {tx('刚刚 · 已用时 {0}（点击查看实时输出）', mmss)}
+                    {t.runningJobs ? tx(' · {0} 个后台命令', t.runningJobs) : ''}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 h-[3px] w-full overflow-hidden rounded-full bg-[#dbe6fd] dark:bg-[#1f314d]">
+                <div className="h-full w-2/3 rounded-full bg-[#2656c7] dark:bg-[#78aef2]" />
+              </div>
+            </button>
+            <BrowserWatch t={t} />
+          </div>
+        })}
+      </div>}
+
+      {shownHistory.length > 0 && <div className="space-y-1">
+        {shownHistory.map(t => {
+          const isFailed = Boolean(t.ended?.outcome && t.ended.outcome !== 'completed') || t.iconKind === 'error'
+          const steps = t.stepCount ?? 0
+          const ts = activityTime(t.ended?.at ?? t.updatedAt)
+          return <button
+            key={t.id}
+            type="button"
+            onClick={() => openTask(t.id)}
+            className="group flex w-full items-start gap-2.5 rounded-[14px] px-2.5 py-2 text-left transition-colors hover:bg-sunken"
+          >
+            <ActivityRowIcon t={t} isFailed={isFailed} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-[13.5px] font-medium text-fg">{t.title}</span>
+                {isFailed ? (
+                  <span className="shrink-0 text-[11px] font-medium text-danger">{tx('已停下')} &gt;</span>
+                ) : steps >= 2 && t.kind !== 'action' ? (
+                  <span className="shrink-0 text-[11px] text-faint tabular-nums">{tx('{0} 步', steps)} &gt;</span>
+                ) : null}
+              </div>
+              <div className="mt-0.5 line-clamp-2 text-[12px] leading-[17px] text-muted">{activitySummary(t)}</div>
+              <div className="mt-1 text-[11px] text-faint tabular-nums">
+                {ts}{isFailed ? ` · ${tx('点击可重试或查看失败步骤')}` : ''}
+              </div>
+            </div>
+          </button>
+        })}
+        {history.length > 25 && (
+          <div className="pt-1 text-center">
+            <LinkBtn onClick={() => setAll(v => !v)}>{all ? tx('收起早期记录') : tx('展开全部 {0} 条记录', history.length)}</LinkBtn>
+          </div>
+        )}
+      </div>}
+    </div>
+
+    {next.length > 0 && <a
+      href={next[0]!.conversationId ? `#/c/${next[0]!.conversationId}` : '#/settings/routines'}
+      className="flex shrink-0 items-center justify-between gap-2 rounded-[12px] bg-sunken px-3 py-2 text-[11.5px] text-muted transition-colors hover:text-fg"
+    >
+      <span className="flex min-w-0 items-center gap-2 truncate">
+        <CalendarDays size={13} className="shrink-0 text-muted" />
+        <span className="truncate tabular-nums">{tx('接下来')} · {when(next[0]!.next!)} {next[0]!.name}</span>
+      </span>
+      <ChevronRight size={13} className="shrink-0 text-faint" />
+    </a>}
+  </div>
 }
 
 // ── 它是谁 ──────────────────────────────────────────────────────────────────
@@ -214,9 +339,37 @@ function WhoTab() {
 const ROLES: { id: Persona['role']; label: string }[] = [{ id: 'all', label: tx('什么都帮') }, { id: 'life', label: tx('生活助理') }, { id: 'work', label: tx('工作助理') }, { id: 'study', label: tx('学习伙伴') }]
 const AVATARS = ['🦊', '🐱', '🐼', '🦉', '🐙', '🌱']
 
+function compressAvatarImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error)
+    reader.onload = () => {
+      const img = new window.Image()
+      img.onerror = () => reject(new Error('Image load failed'))
+      img.onload = () => {
+        const size = 160
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { resolve(String(reader.result)); return }
+        const minSide = Math.min(img.width, img.height) || 1
+        const sx = (img.width - minSide) / 2
+        const sy = (img.height - minSide) / 2
+        ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size)
+        const webp = canvas.toDataURL('image/webp', 0.86)
+        resolve(webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/jpeg', 0.86))
+      }
+      img.src = String(reader.result)
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 /** 名字和样子 (Figma v7 D): who it is, set where you look at it. Settings no longer has a copy. */
 function Identity({ persona }: { persona: Persona }) {
   const qc = useQueryClient()
+  const fileRef = useRef<HTMLInputElement>(null)
   const save = useMutation({
     mutationFn: (p: Partial<Persona>) => api.put('/persona', p),
     onMutate: p => qc.setQueryData<{ persona: Persona }>(['persona'], old => old && { persona: { ...old.persona, ...p } }),
@@ -225,11 +378,12 @@ function Identity({ persona }: { persona: Persona }) {
   const [name, setName] = useState(persona.name)
   useEffect(() => setName(persona.name), [persona.name])
   const field = 'h-8 w-[150px] rounded-[10px] border border-line bg-card px-3 text-[13px] outline-none focus:border-faint'
+  const customImg = isImageAvatar(persona.avatar)
   return <section>
     <Head title={tx('名字和样子')} />
     <div className="rounded-2xl bg-sunken px-3.5 py-1.5">
       <label className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">{tx('名字')}</span>
-        <input value={name} maxLength={24} aria-label={tx('名字')} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        <input id="nuonuo-persona-name-input" value={name} maxLength={24} aria-label={tx('名字')} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
           onBlur={() => { if (name.trim() && name.trim() !== persona.name) save.mutate({ name: name.trim() }); else setName(persona.name) }} className={field} />
       </label>
       <label className="flex min-h-11 items-center gap-3 text-sm"><span className="flex-1">{tx('角色')}</span>
@@ -246,6 +400,31 @@ function Identity({ persona }: { persona: Persona }) {
             className={cx('flex size-7 items-center justify-center rounded-lg', isMascot(persona) ? 'bg-card ring-1 ring-line' : 'hover:bg-card')}><Mascot color={persona.color} size={20} /></button>
           {AVATARS.map(a => <button key={a} type="button" aria-pressed={persona.avatar === a} onClick={() => save.mutate({ avatar: a })}
             className={cx('size-7 rounded-lg text-sm', persona.avatar === a ? 'bg-card ring-1 ring-line' : 'hover:bg-card')}>{a}</button>)}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={async e => {
+              const f = e.target.files?.[0]
+              e.target.value = ''
+              if (!f) return
+              try {
+                const dataUrl = await compressAvatarImage(f)
+                save.mutate({ avatar: dataUrl })
+              } catch { /* ignore invalid image */ }
+            }}
+          />
+          <button
+            type="button"
+            aria-label={tx('上传自定义头像')}
+            title={tx('上传自定义头像')}
+            aria-pressed={customImg}
+            onClick={() => fileRef.current?.click()}
+            className={cx('flex size-7 items-center justify-center overflow-hidden rounded-lg text-muted hover:text-fg', customImg ? 'bg-card ring-1 ring-line' : 'hover:bg-card')}
+          >
+            {customImg ? <img src={persona.avatar} alt={persona.name} className="size-5 rounded-full object-cover" /> : <Upload size={13} />}
+          </button>
         </span>
       </div>
     </div>
@@ -289,7 +468,7 @@ function PermissionsTab() {
     <section>
       <Head title={tx('它能自己做什么')} />
       <div className="space-y-1">
-        <Row icon={<Globe size={16} />} label={tx('查网页、看资料')}><span className="px-3 text-xs text-muted">{tx('直接做')}</span></Row>
+        <Row icon={<Globe size={16} />} label={tx('查网页、看资料')}><span className="inline-flex h-7 items-center rounded-full bg-sunken px-3 text-xs font-medium text-fg">{tx('直接做')}</span></Row>
         <Row icon={<Send size={16} />} label={tx('往外发：评论、发消息')}>
           <LevelPick value={review.external} options={['allow', 'review', 'ask', 'deny']} onChange={external => saveReview.mutate({ external })} label={tx('往外发')} />
         </Row>

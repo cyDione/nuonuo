@@ -133,7 +133,10 @@ export function Roles({ item }: { item?: string }) {
   const usable = (spec: RoleSpec) => providers.data!.providers.filter(p => p.kind !== 'typesafe' || spec.id === 'reviewer')
   const spec = item ? specs.find(s => s.id === item) : undefined
   if (spec) return <div className="space-y-4">
-    <a href="#/settings/roles" className="inline-flex items-center gap-0.5 text-[13px] text-muted hover:text-fg"><ChevronLeft size={15} />{tx('分层模型')}</a>
+    <div className="flex items-center gap-2.5">
+      <a href="#/settings/roles" className="inline-flex items-center gap-0.5 rounded-full border border-line bg-card px-2.5 py-1 text-xs font-medium text-fg hover:border-faint"><ChevronLeft size={14} />{tx('分层模型')}</a>
+      <span className="text-xs text-faint">{tx('设置 / 模型 / 分层模型 / {0}', short(spec.label))}</span>
+    </div>
     <RoleDetail key={spec.id} spec={spec} labelOf={labelOf} config={roles.data.configs[spec.id] ?? EMPTY} resolved={roles.data.resolved[spec.id]} providers={usable(spec)} />
   </div>
   return <RoleList specs={specs} labelOf={labelOf} roles={roles.data} providers={usable(specs.find(s => s.id === 'router')!)} />
@@ -198,10 +201,22 @@ function RoleList({ specs, labelOf, roles, providers }: { specs: RoleSpec[]; lab
     return <span className="text-[13px] text-faint">{s.optional ? tx('没开') : tx('还没选')}</span>
   }
   const layerSub = (s: RoleSpec) => {
-    const advice = (s.id === 'voice' ? roleSubFallback('voice') : s.advice) || (!s.duty.includes('思考') ? roleSubFallback(s.id) : '')
-    return <span className="line-clamp-1">{s.duty}{advice ? ` · ${advice}` : ''}</span>
+    switch (s.id) {
+      case 'voice': return <span className="line-clamp-1">{tx('把回复草稿转译为鲜活口语短气泡 · 零思考秒出，可单配高语感模型')}</span>
+      case 'worker': return <span className="line-clamp-1">{tx('执行具体任务 · 后台干真活默认全力深想，减少翻车重试')}</span>
+      case 'subagent': return <span className="line-clamp-1">{tx('Worker 内部派生的子任务 · 延续深度推理')}</span>
+      case 'filter': return <span className="line-clamp-1">{tx('外部事件值不值得处理 · 关着时主 Agent 兼做')}</span>
+      case 'reviewer': return <span className="line-clamp-1">{tx('审核高风险动作 · 建议和执行不同供应商')}</span>
+      case 'watchdog': return <span className="line-clamp-1">{tx('判断任务有无实质进展 · 快速巡检不阻塞主流程')}</span>
+      case 'summarizer': return <span className="line-clamp-1">{tx('上下文压缩不思考，长记忆提炼轻度思考')}</span>
+      default: {
+        const advice = s.advice || (!s.duty.includes('思考') ? roleSubFallback(s.id) : '')
+        return <span className="line-clamp-1">{s.duty}{advice ? ` · ${advice}` : ''}</span>
+      }
+    }
   }
   const layerRow = (s: RoleSpec) => <Row key={s.id} href={`#/settings/roles/${s.id}`} label={s.label} sub={layerSub(s)}>{valueOf(s)}</Row>
+  const overriddenNames = overridden.map(s => short(s.label)).join('、')
 
   return <Page title={tx('分层模型')}>
     <Section title={tx('主 Agent')} foot={tx('所有层默认都用这个模型，思考强度按各层职责自动匹配。')}>
@@ -227,14 +242,15 @@ function RoleList({ specs, labelOf, roles, providers }: { specs: RoleSpec[]; lab
           <span className="min-w-0 flex-1">
             <span className="block text-sm">{tx('高级选项')}</span>
             <span className="mt-0.5 block text-xs text-muted">
-              {advanced ? tx('收起后，单独设置的层照样生效')
-                : overridden.length ? tx('{0}单独设置了，其余跟主 Agent', overridden.map(s => short(s.label)).join('、'))
+              {advanced
+                ? (overridden.length ? tx('{0}单独设置了，其余跟主 Agent · 收起后照样生效', overriddenNames) : tx('收起后，单独设置的层照样生效'))
+                : overridden.length ? tx('{0}单独设置了，其余跟主 Agent', overriddenNames)
                 : tx('给执行、审核、摘要等层单独选模型；开启向量、听写、朗读')}
             </span>
           </span>
-          {!advanced && (overridden.length
+          {overridden.length
             ? <span className="shrink-0 rounded-full border border-line bg-panel px-2 py-0.5 text-[11px] text-muted">{tx('{0} 层单独设置', overridden.length)}</span>
-            : <span className="shrink-0 text-[13px] text-faint">{tx('都跟主 Agent')}</span>)}
+            : <span className="shrink-0 text-[13px] text-faint">{tx('都跟主 Agent')}</span>}
           {advanced ? <ChevronDown size={16} className="shrink-0 text-faint" /> : <ChevronRight size={16} className="shrink-0 text-faint" />}
         </button>
       </div>
@@ -292,9 +308,23 @@ function MainModel({ config, providers }: { config: RoleConfig; providers: Provi
 function RoleDetail({ spec, labelOf, config, resolved, providers }: { spec: RoleSpec; labelOf(id: string): string; config: RoleConfig; resolved: Resolved; providers: Provider[] }) {
   const qc = useQueryClient()
   const [draft, setDraft] = useState<RoleConfig>(config)
-  useEffect(() => setDraft(config), [JSON.stringify(config)])
-  const dirty = JSON.stringify(draft) !== JSON.stringify(config)
+  const { enabled: _dEn, ...draftRest } = draft
+  const { enabled: _cEn, ...configRest } = config
+  useEffect(() => setDraft(config), [JSON.stringify(configRest)])
+  useEffect(() => setDraft(d => (d.enabled === config.enabled ? d : { ...d, enabled: config.enabled })), [config.enabled])
+  const dirty = JSON.stringify(draftRest) !== JSON.stringify(configRest)
   const save = useMutation({ mutationFn: () => api.put(`/roles/${spec.id}`, clean(draft)), onSuccess: () => qc.invalidateQueries({ queryKey: ['roles'] }) })
+  const toggleEnabled = useMutation({
+    mutationFn: (enabled: boolean) => api.put(`/roles/${spec.id}`, clean({ ...config, enabled })),
+    onMutate: enabled => {
+      setDraft(d => ({ ...d, enabled }))
+      qc.setQueryData<RolesResponse>(['roles'], old => old && {
+        ...old,
+        configs: { ...old.configs, [spec.id]: { ...(old.configs[spec.id] ?? EMPTY), enabled } },
+      })
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['roles'] }),
+  })
   const setChain = (chain: ModelRef[]) => setDraft(d => ({ ...d, chain }))
   const activeRef = (draft.chain[0]?.model.trim() ? draft.chain[0] : undefined) ?? resolved?.model
   const reasoningQuery = useQuery({
@@ -309,10 +339,22 @@ function RoleDetail({ spec, labelOf, config, resolved, providers }: { spec: Role
     value: draft[k] ?? '', placeholder: k === 'temperature' ? (spec.id === 'voice' ? '0.88' : tx('默认')) : k === 'maxOutputTokens' ? tx('默认') : tx('不限'),
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setDraft(d => ({ ...d, [k]: e.target.value === '' ? undefined : Number(e.target.value) })),
   })
+  const detailSub = spec.id === 'voice'
+    ? tx('负责把主 Agent 的回复意图转译成自然多泡口语；代码块与路径原样保留。')
+    : `${spec.duty}${spec.advice ? ` · ${spec.advice}` : ''}`
+  const modelFoot = spec.id === 'voice'
+    ? tx('未单独指定时默认跟随主 Agent 模型；也可单配高语感对话模型（如 deepseek-chat / claude-sonnet-4-5）。')
+    : draft.chain.length > 1 ? tx('主模型出错或超出上限时，按顺序换备用的。') : undefined
+  const paramFoot = spec.id === 'voice'
+    ? tx('声带层以原版多轮样本续写（Multi-turn Few-Shot）运行，默认强制「不思考」与微高温度（0.88）以兼顾秒回与活人感。')
+    : spec.kind === 'language' && spec.id !== 'router'
+      ? tx('未单独选模型时继承主 Agent 模型，但思考强度按本层职责默认使用「{0}」；也可手动固定为自动 / 不思考 / 轻度 / 标准 / 深度 / 超高。', roleThinkingTag(spec, EMPTY))
+      : undefined
+  const err = save.error ?? toggleEnabled.error
   return <Page title={spec.label}>
-    <p className="-mt-3 text-[13px] text-muted">{spec.duty}{spec.advice ? ` · ${spec.advice}` : ''}{resolved && resolved.today.tokens > 0 ? tx(' · 今天 {0} tokens{1}', fmtNum(resolved.today.tokens), resolved.today.costUsd ? `，${fmtUsd(resolved.today.costUsd)}` : '') : ''}</p>
-    {spec.optional && <Section><Row label={spec.id === 'voice' ? tx('开启这一层') : tx('启用这一层')} sub={spec.id === 'voice' ? tx('关闭后跳过独立声带渲染，由主 Agent 直接发消息') : undefined}><Toggle label={spec.id === 'voice' ? tx('开启这一层') : tx('启用这一层')} checked={draft.enabled} onChange={enabled => setDraft(d => ({ ...d, enabled }))} /></Row></Section>}
-    <Section title={tx('模型')} foot={draft.chain.length > 1 ? tx('主模型出错或超出上限时，按顺序换备用的。') : undefined}>
+    <p className="-mt-3 text-[13px] text-muted">{detailSub}{resolved && resolved.today.tokens > 0 ? tx(' · 今天 {0} tokens{1}', fmtNum(resolved.today.tokens), resolved.today.costUsd ? `，${fmtUsd(resolved.today.costUsd)}` : '') : ''}</p>
+    {spec.optional && <Section><Row label={spec.id === 'voice' ? tx('开启这一层') : tx('启用这一层')} sub={spec.id === 'voice' ? tx('关闭后跳过独立声带渲染，由主 Agent 直接发消息') : undefined}><Toggle label={spec.id === 'voice' ? tx('开启这一层') : tx('启用这一层')} checked={draft.enabled} disabled={toggleEnabled.isPending} onChange={enabled => toggleEnabled.mutate(enabled)} /></Row></Section>}
+    <Section title={tx('首选模型')} foot={modelFoot}>
       {draft.chain.map((ref, i) => <ChainRow key={i} index={i} value={ref} role={spec.id} kind={spec.kind} providers={providers}
         onChange={v => setChain(draft.chain.map((r, j) => (j === i ? v : r)))} onRemove={() => setChain(draft.chain.filter((_, j) => j !== i))} />)}
       {!draft.chain.length && <Row label={spec.inherits ? (spec.inherits === 'router' && spec.id === 'voice' ? tx('跟主 Agent 一样') : tx('跟{0}一样', labelOf(spec.inherits))) : tx('还没选模型')} sub={spec.optional && !spec.inherits ? tx('配上模型才会启用这一层') : tx('想单独用一个模型就在下面选')}>
@@ -321,7 +363,7 @@ function RoleDetail({ spec, labelOf, config, resolved, providers }: { spec: Role
       {draft.chain.length < 5 && providers.length > 0 && <button type="button" onClick={() => setChain([...draft.chain, { providerId: providers[0]!.id, model: '' }])}
         className="flex min-h-[44px] w-full items-center gap-2 text-left text-sm text-muted hover:text-fg"><Plus size={16} />{draft.chain.length ? tx('加一个备用模型') : tx('选一个模型')}</button>}
     </Section>
-    <Section title={tx('参数和上限')} foot={spec.kind === 'language' && spec.id !== 'router' ? tx('未单独选模型时继承主 Agent 模型，但思考强度按本层职责默认使用「{0}」；也可手动固定为自动 / 不思考 / 轻度 / 标准 / 深度 / 超高。', roleThinkingTag(spec, EMPTY)) : undefined}>
+    <Section title={tx('参数和上限')} foot={paramFoot}>
       {spec.kind === 'language' && <>
         {info && !info.supported
           ? <Row label={tx('思考强度')} sub={tx('当前模型不支持调节思考强度')}>
@@ -340,8 +382,15 @@ function RoleDetail({ spec, labelOf, config, resolved, providers }: { spec: Role
       <Row label={tx('每天的 token 上限')}><NumberInput min={1} className="w-[120px]" {...optNum('dailyTokenLimit')} aria-label={tx('每天的 token 上限')} /></Row>
       <Row label={tx('每天的费用上限')} sub={tx('美元；要在供应商里填了价格才算得出')}><NumberInput min={0} step="any" className="w-[100px]" {...optNum('dailyCostLimitUsd')} aria-label={tx('每天的费用上限')} /></Row>
     </Section>
-    <SaveBar dirty={dirty} pending={save.isPending || draft.chain.some(r => !r.model.trim())} error={save.error} onReset={() => { setDraft(config); save.reset() }} onSave={() => save.mutate()} />
-    {!dirty && save.isSuccess && <Foot>{tx('已保存。')}</Foot>}
+    <SaveBar
+      dirty={dirty}
+      pending={save.isPending || draft.chain.some(r => !r.model.trim())}
+      error={err}
+      extra={!err && spec.optional ? <span className="mr-auto px-1 text-xs text-faint">{!dirty && (save.isSuccess || toggleEnabled.isSuccess) ? tx('已保存。') : tx('单独指定模型或调整参数后显示保存栏；开关即点即存。')}</span> : undefined}
+      onReset={() => { setDraft(config); save.reset() }}
+      onSave={() => save.mutate()}
+    />
+    {!spec.optional && !dirty && save.isSuccess && <Foot>{tx('已保存。')}</Foot>}
   </Page>
 }
 

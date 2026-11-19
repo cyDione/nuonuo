@@ -902,7 +902,7 @@ export function BrowserTakeoverModal({
 
           <form
             onSubmit={handleGoto}
-            className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg bg-sunken px-3 focus-within:ring-1 focus-within:ring-line"
+            className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg bg-sunken px-3 focus-within:bg-card focus-within:ring-1 focus-within:ring-fg"
           >
             {currentUrl.startsWith('https://') && !urlFocused && !draftDirty
               ? <Lock size={13} className="shrink-0 text-faint" />
@@ -1054,12 +1054,14 @@ export function BrowserTakeoverModal({
         <footer className="flex h-8 shrink-0 items-center gap-2 border-t border-line bg-sunken/50 px-4 text-[11px] text-muted">
           <span
             aria-hidden
-            className={cx('size-1.5 shrink-0 rounded-full', useStreamIframe ? 'bg-emerald-500' : 'bg-faint')}
+            className={cx('size-1.5 shrink-0 rounded-full', (useStreamIframe || ready || isDesktopRoot) ? 'bg-ok' : 'bg-faint')}
           />
           <span className="min-w-0 flex-1 truncate">
-            {reason || (useStreamIframe
-              ? tx('实时交互连接 · 糯糯已暂停操作这一页，登录状态会自动留存')
-              : tx('糯糯已暂停操作这一页 · 登录状态会自动留存'))}
+            {reason || (isBlankInitial && (!currentUrl || currentUrl === 'about:blank') && !isDesktopRoot
+              ? tx('实时交互连接 · 刚激活空白页时焦点锁定在顶栏地址框，回车即刻打开网页')
+              : useStreamIframe
+                ? tx('实时交互连接 · 糯糯已暂停操作这一页，登录状态会自动留存')
+                : tx('糯糯已暂停操作这一页 · 登录状态会自动留存'))}
           </span>
           {error && <span className="max-w-[45%] shrink-0 truncate text-danger">{error}</span>}
         </footer>

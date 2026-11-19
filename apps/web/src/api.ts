@@ -70,6 +70,8 @@ export interface AccessStatus {
 export interface Health { ok: boolean; version: string; home: string; pid: number; uptimeMs: number; secrets: string; effects: { kind: string; pending: number; failing: number }[] }
 
 export type Stage = 'person/approve' | 'person/answer' | 'person/blocked' | 'person/failed' | 'queued' | 'working' | 'idle' | 'ended'
+export type StepIconKind = 'file' | 'terminal' | 'web' | 'settings' | 'memory' | 'error' | 'check'
+export interface CurrentStep { tool: string; label: string; status: 'running' | 'done' | 'failed' }
 export interface Report { status: 'progress' | 'waiting' | 'ready' | 'blocked' | 'failed' | 'dropped'; summary: string; humanAction?: { question: string; options?: string[]; kind?: 'question' | 'handoff' }; at: number }
 export interface Ticket {
   id: string; title: string; name: string; note: string | null; stage: Stage; stageLabel: string; conversationId: string | null; source: string; directory: string
@@ -77,6 +79,11 @@ export interface Ticket {
   approvals: { id: string; command: string; reason: string; risk: string; createdAt: number; card?: ApprovalCard | null; standing?: boolean }[]
   ended: { at: number; by: string; outcome: 'completed' | 'stopped' | 'dropped'; reason?: string } | null; createdAt: number; updatedAt: number
   proactive: boolean; why: string | null
+  kind?: 'ticket' | 'action'
+  stepCount?: number
+  currentStep?: CurrentStep | null
+  iconKind?: StepIconKind
+  runningJobs?: number
 }
 export interface Artifact { id: string; ticketId: string; path: string; name: string; size: number; createdAt: number; title: string; conversationId: string | null; text: boolean }
 export interface ActivityEvent { id: string; source: string; actor: string; human: boolean; at: number; text: string; url: string | null; conversationId: string | null; thread: string

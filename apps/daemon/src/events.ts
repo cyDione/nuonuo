@@ -4,6 +4,21 @@
  */
 import type { BusEvent } from '@nuonuo/agent-runtime'
 
+/** Substantive Router action tools that create virtual `act_<callId>` activity items. */
+export const ROUTER_ACTION_TOOLS = new Set([
+  'update_my_settings',
+  'update_instructions',
+  'update_proactive',
+  'schedule_routine',
+  'update_routine',
+  'remember',
+  'propose_skill',
+])
+
+export function isRouterActionTool(tool: unknown): boolean {
+  return typeof tool === 'string' && ROUTER_ACTION_TOOLS.has(tool)
+}
+
 export type ClientEvent =
   | { type: 'message.created'; conversationId: string; messageId: string }
   | { type: 'message.updated'; conversationId: string; messageId: string }
@@ -45,6 +60,8 @@ export function partialString(json: string, field: string): string | undefined {
 }
 
 export class EventMapper {
+  private pendingRouterActionId: string | null = null
+
   map(event: BusEvent): ClientEvent[] {
     const e = event as any
     switch (event.type) {
@@ -64,11 +81,38 @@ export class EventMapper {
       case 'approval.updated': return [{ type: 'ticket.updated', ticketId: e.ticketId }]
       // A subagent's state and text belong to its parent's work; the web shows only the helper itself.
       case 'session.state': return e.role === 'subagent' ? [] : [{ type: 'session.state', role: e.role, sessionId: e.sessionId, ticketId: e.ticketId, state: e.state }]
+      case 'session.message': {
+        if (e.role === 'worker' && e.ticketId) {
+          return [{ type: 'ticket.updated', ticketId: e.ticketId }]
+        }
+        if (e.role === 'router' && this.pendingRouterActionId) {
+          const actionId = this.pendingRouterActionId
+          this.pendingRouterActionId = null
+          return [{ type: 'ticket.updated', ticketId: actionId }, { type: 'activity.updated' }]
+        }
+        return []
+      }
       case 'session.part': {
         const part = e.part
         // Router and watchdog replies are shown only as complete messages once saved (message.created), never streamed as partial bubbles.
-        if (e.role === 'router' || e.role === 'watchdog') return []
-        if (e.ticketId && e.role === 'worker') return [{ type: 'worker.part', ticketId: e.ticketId, part }]
+        // Substantive Router action tools (`update_my_settings`, `remember`, etc.) notify the UI so the Activity tab refreshes immediately.
+        if (e.role === 'router') {
+          if ((part?.kind === 'tool-call' || part?.kind === 'tool-result') && isRouterActionTool(part?.tool)) {
+            const actionId = `act_${part.id}`
+            this.pendingRouterActionId = actionId
+            if (part.kind === 'tool-result') {
+              return [{ type: 'ticket.updated', ticketId: actionId }, { type: 'activity.updated' }]
+            }
+          }
+          return []
+        }
+        if (e.role === 'watchdog') return []
+        if (e.ticketId && e.role === 'worker') {
+          if (part?.kind === 'tool-call' || part?.kind === 'tool-result') {
+            return [{ type: 'worker.part', ticketId: e.ticketId, part }, { type: 'ticket.updated', ticketId: e.ticketId }]
+          }
+          return [{ type: 'worker.part', ticketId: e.ticketId, part }]
+        }
         return []
       }
       default: return []

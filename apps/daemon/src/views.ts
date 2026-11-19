@@ -3,15 +3,47 @@ import type { AgentRuntime } from '@nuonuo/agent-runtime'
 import { canGrant, cleanSpokenBubbles, sourceOfThread, STAGE_LABEL, type Engine, type Ticket } from '@nuonuo/core'
 import { schema, type Store } from '@nuonuo/db'
 import { desc, eq } from 'drizzle-orm'
+import { parseMarkerInput, summarizeTranscriptSteps, type CurrentStep, type StepIconKind } from './activity-runs'
 
-export function ticketView(engine: Engine, t: Ticket, approvals: { id: string; tool: string; input: Record<string, unknown>; reason: string; risk: string; createdAt: number }[] = []) {
+export function ticketView(
+  engine: Engine,
+  t: Ticket,
+  approvals: { id: string; tool: string; input: Record<string, unknown>; reason: string; risk: string; createdAt: number }[] = [],
+  agents?: AgentRuntime,
+) {
   const stage = engine.stage(t)
+  const rtAgents = agents ?? (engine as unknown as { runtime?: AgentRuntime }).runtime
+  const items = rtAgents ? transcript(rtAgents, t.sessionId) : []
+  const { stepCount, currentStep, iconKind } = summarizeTranscriptSteps(items, {
+    workDir: t.directory,
+    stage,
+    endedOutcome: t.ended?.outcome ?? null,
+    isSessionRunning: rtAgents ? rtAgents.isRunning(t.sessionId) : false,
+  })
+  const runningJobs = rtAgents ? rtAgents.jobs.running(t.sessionId).length : 0
   return {
     approvals: approvals.map(a => ({ id: a.id, command: String(a.input.command ?? ''), reason: a.reason, risk: a.risk, createdAt: a.createdAt, card: (a.input.card as object | undefined) ?? null, standing: canGrant(a) })),
-    id: t.id, title: t.title, name: t.name, note: t.note, stage, stageLabel: STAGE_LABEL[stage],
-    conversationId: engine.conversationOfThread(t.threadId) ?? null, source: sourceOfThread(t.threadId), directory: t.directory,
-    latestReport: t.latestReport, attention: t.attention, ended: t.ended, createdAt: t.createdAt, updatedAt: t.updatedAt,
-    proactive: t.mandate.strength === 'proactive', why: t.mandate.reason ?? null,
+    id: t.id,
+    kind: 'ticket' as 'ticket' | 'action',
+    title: t.title,
+    name: t.name,
+    note: t.note,
+    stage,
+    stageLabel: STAGE_LABEL[stage],
+    conversationId: engine.conversationOfThread(t.threadId) ?? null,
+    source: sourceOfThread(t.threadId),
+    directory: t.directory,
+    latestReport: t.latestReport,
+    attention: t.attention,
+    ended: t.ended,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+    proactive: t.mandate.strength === 'proactive',
+    why: t.mandate.reason ?? null,
+    stepCount,
+    currentStep: currentStep as CurrentStep | null,
+    iconKind: iconKind as StepIconKind,
+    runningJobs,
   }
 }
 export type TicketView = ReturnType<typeof ticketView>
@@ -20,9 +52,52 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…（�
 
 /** A worker session's events as display items; tool outputs are clipped (the full text stays in the session log). */
 export function transcript(agents: AgentRuntime, sessionId: string) {
+  const rawEvents = agents.events(sessionId)
+  const endedMarkerIds = new Set<number>()
+  const messageCallIds = new Set<string>()
+  for (const event of rawEvents) {
+    if (event.kind === 'marker' && event.payload?.type === 'tool-end' && typeof event.payload.start === 'number') {
+      endedMarkerIds.add(event.payload.start)
+    } else if (event.kind === 'message') {
+      const m = event.payload
+      if (Array.isArray(m?.content)) {
+        for (const p of m.content) {
+          if (p?.type === 'tool-call' && p.toolCallId) messageCallIds.add(String(p.toolCallId))
+        }
+      }
+    }
+  }
+  const sessionRunning = agents.isRunning(sessionId)
   const items: { id: string; kind: string; [k: string]: unknown }[] = []
-  for (const event of agents.events(sessionId)) {
-    if (event.kind === 'marker') { items.push({ id: `${event.id}`, kind: 'marker', ...event.payload, at: event.at }); continue }
+  for (const event of rawEvents) {
+    if (event.kind === 'marker') {
+      items.push({ id: `${event.id}`, kind: 'marker', ...event.payload, at: event.at })
+      if (event.payload?.type === 'tool-start') {
+        const callId = String(event.payload.callId ?? `call_${event.id}`)
+        if (!messageCallIds.has(callId) && (!endedMarkerIds.has(event.id) || sessionRunning)) {
+          const parsedInput = parseMarkerInput(event.payload.input)
+          items.push({
+            id: `${event.id}.0`,
+            kind: 'tool-call',
+            callId,
+            tool: String(event.payload.tool ?? ''),
+            input: parsedInput,
+            at: event.at,
+          })
+          if (endedMarkerIds.has(event.id)) {
+            items.push({
+              id: `${event.id}.1`,
+              kind: 'tool-result',
+              callId,
+              tool: String(event.payload.tool ?? ''),
+              output: '',
+              at: event.at,
+            })
+          }
+        }
+      }
+      continue
+    }
     if (event.kind === 'compaction') { items.push({ id: `${event.id}`, kind: 'compaction', summary: event.payload.summary, at: event.at }); continue }
     const m = event.payload
     if (m.role === 'user') { items.push({ id: `${event.id}`, kind: 'input', text: clip(String(m.content), 6_000), at: event.at }); continue }

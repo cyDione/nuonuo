@@ -265,7 +265,7 @@ const TYPING: [number, number][][] = [[[0, 0]], [[1, 0]], [[2, 0]], []]
 /** The typing bubble's three dots light up in turn. */
 function Typing() {
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches
-  return <div role="status" aria-label={tx('正在输入')} className="flex h-6 items-center">
+  return <div role="status" aria-label={tx('正在输入')} className="flex h-[18px] items-center">
     <MotionGrid gridSize={[3, 1]} frames={TYPING} duration={220} animate={!still} className="gap-1"><MotionGridCells className="typing-cell" /></MotionGrid>
   </div>
 }

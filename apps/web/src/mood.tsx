@@ -211,7 +211,7 @@ export function ToneDotPad({ value, compact, className, onLiveChange, onCommit }
   const dragging = useRef(false)
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: value.x, y: value.y })
   const [hoverNorm, setHoverNorm] = useState<{ x: number; y: number } | null>(null)
-  const [size, setSize] = useState<{ w: number; h: number }>({ w: compact ? 288 : 592, h: compact ? 124 : 136 })
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: compact ? 288 : 592, h: compact ? 124 : 140 })
 
   useEffect(() => {
     if (!dragging.current) setPos({ x: value.x, y: value.y })
@@ -547,17 +547,19 @@ export function MoodSection({ Head }: { Head: React.ComponentType<{ title: strin
           <button type="button" onClick={() => setOpenTab('persona')} className="press inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-full border border-line bg-card py-1 pr-2.5 pl-2 text-xs font-medium text-fg tabular-nums hover:border-faint">
             <span className={cx('size-[7px] shrink-0 rounded-full', activeTone.id === 'natural' && 'border border-muted bg-transparent')}
               style={activeTone.id === 'natural' ? undefined : { backgroundColor: toneDotHex(activeTone.id, isDark) }} />
-            {activeTone.id === 'natural' ? tx('自然') : tx('偏{0} · {1}%', activeTone.label, Math.round(activeTone.strength * 100))}
+            {activeTone.id === 'natural' ? tx('自然') : tx('偏{0}', activeTone.label)}
           </button>
-          <span className="min-w-0 flex-1 truncate text-xs text-muted">{TONE_SUB[activeTone.id]()}</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-muted tabular-nums">
+            {activeTone.id === 'natural' ? TONE_SUB[activeTone.id]() : `${Math.round(activeTone.strength * 100)}% · ${TONE_SUB[activeTone.id]()}`}
+          </span>
         </>}
-        <div role="tablist" aria-label={tx('心境与语调')} className="inline-flex h-6 shrink-0 items-center rounded-lg border border-line bg-card p-0.5 text-[11px]">
+        <div role="tablist" aria-label={tx('心境与语调')} className="inline-flex h-6 shrink-0 items-center rounded-[7px] bg-sunken p-[2px] text-[11px]">
           <button type="button" role="tab" aria-selected={cardMode === 'mood'} onClick={() => setCardMode('mood')}
-            className={cx('h-5 rounded-[6px] px-2 font-medium transition-colors', cardMode === 'mood' ? 'bg-sunken text-fg' : 'text-muted hover:text-fg')}>
+            className={cx('h-5 rounded-[5px] px-2 font-medium transition-colors', cardMode === 'mood' ? 'bg-card text-fg shadow-2xs ring-1 ring-line/80' : 'text-muted hover:text-fg')}>
             {tx('心境')}
           </button>
           <button type="button" role="tab" aria-selected={cardMode === 'tone'} onClick={() => setCardMode('tone')}
-            className={cx('h-5 rounded-[6px] px-2 font-medium transition-colors', cardMode === 'tone' ? 'bg-sunken text-fg' : 'text-muted hover:text-fg')}>
+            className={cx('h-5 rounded-[5px] px-2 font-medium transition-colors', cardMode === 'tone' ? 'bg-card text-fg shadow-2xs ring-1 ring-line/80' : 'text-muted hover:text-fg')}>
             {tx('语调')}
           </button>
         </div>
@@ -584,9 +586,12 @@ export function MoodSection({ Head }: { Head: React.ComponentType<{ title: strin
           </div>
           {view.history.length > 1 ? <Trend points={view.history} base={view.undertone ?? view.baseline.mood} positive={view.mood >= 0} /> : <span className="shrink-0 text-[11px] text-faint">{tx('聊几轮后出现曲线')}</span>}
         </> : <>
-          <span className="min-w-0 truncate text-[11px] text-faint">{tx('拖到哪就按哪种口气接话')}</span>
+          <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted">
+            <span className="size-1.5 shrink-0 rounded-full border-[1.5px] border-muted/80" aria-hidden />
+            <span className="truncate">{tx('拖到哪就按哪种口气接话')}</span>
+          </span>
           {activeTone.id !== 'natural' && <button type="button" onClick={() => commitTone({ x: 0, y: 0 })}
-            className="press shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted hover:bg-card hover:text-fg">
+            className="press shrink-0 rounded-[6px] border border-line bg-card px-2 py-0.5 text-[11px] font-medium text-fg hover:border-faint">
             {tx('归中')}
           </button>}
         </>}
@@ -793,20 +798,21 @@ function PersonaPage({ onDirty }: { onDirty(d: boolean): void }) {
           title={tx('语调偏向')}
           sub={tx('日常说话的语气偏向，松手即生效')}
           right={<>
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-fg tabular-nums">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-sunken px-2.5 py-0.5 text-[11.5px] font-medium text-fg tabular-nums">
               <span className={cx('size-[7px] rounded-full', activeTone.id === 'natural' && 'border border-muted bg-transparent')}
                 style={activeTone.id === 'natural' ? undefined : { backgroundColor: toneDotHex(activeTone.id, isDark) }} />
               {activeTone.id === 'natural' ? tx('自然') : tx('偏{0} · {1}%', activeTone.label, Math.round(activeTone.strength * 100))}
             </span>
             {activeTone.id !== 'natural' && (
               <button type="button" onClick={() => commitTone({ x: 0, y: 0 })}
-                className="press inline-flex h-5 items-center gap-1 rounded-md border border-line bg-card px-1.5 text-[11px] text-muted hover:border-faint hover:text-fg">
+                className="press inline-flex h-[22px] items-center gap-1 rounded-md border border-line bg-card px-2 text-[11px] text-muted hover:border-faint hover:text-fg">
+                <span className="size-1.5 shrink-0 rounded-full border-[1.5px] border-muted/80" aria-hidden />
                 {tx('归中')}
               </button>
             )}
           </>}
         />
-        <ToneDotPad value={{ x: savedTone.x, y: savedTone.y }} onLiveChange={setLivePos} onCommit={commitTone} className="h-[130px] w-full" />
+        <ToneDotPad value={{ x: savedTone.x, y: savedTone.y }} onLiveChange={setLivePos} onCommit={commitTone} className="h-[140px] w-full" />
       </div>
       <div>
         <Head title={tx('性格底色')} sub={tx('它是什么样的人。每句话都会照着来；心情只改语气，不改这个。')} />
@@ -826,14 +832,18 @@ function PersonaPage({ onDirty }: { onDirty(d: boolean): void }) {
       </div>
       <div>
         <Head title={tx('敏感度')} sub={tx('同样一句话，对它影响多大。')} />
-        <div className="grid grid-cols-2 gap-4 rounded-xl bg-sunken px-4 py-2.5 max-sm:grid-cols-1">
-          <Slider label={tx('被夸')} note={tx('开心起来有多快')} value={draft.up} min={0.2} max={2.5} step={0.1} base={1} shown={v => `×${v.toFixed(1)}`} onCommit={up => set({ up })} />
-          <Slider label={tx('被冷落')} note={tx('受伤有多深')} value={draft.down} min={0.2} max={2.5} step={0.1} base={1} shown={v => `×${v.toFixed(1)}`} onCommit={down => set({ down })} />
+        <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+          <div className="rounded-xl bg-sunken px-3.5 py-2.5">
+            <Slider label={tx('被夸')} note={tx('开心起来有多快')} value={draft.up} min={0.2} max={2.5} step={0.1} base={1} shown={v => `×${v.toFixed(1)}`} onCommit={up => set({ up })} />
+          </div>
+          <div className="rounded-xl bg-sunken px-3.5 py-2.5">
+            <Slider label={tx('被冷落')} note={tx('受伤有多深')} value={draft.down} min={0.2} max={2.5} step={0.1} base={1} shown={v => `×${v.toFixed(1)}`} onCommit={down => set({ down })} />
+          </div>
         </div>
       </div>
     </div>
     {(changed > 0 || save.error) && <div className="flex shrink-0 items-center gap-2 border-t border-line px-6 py-2.5">
-      <span className={cx('mr-auto text-xs', save.error ? 'text-danger' : 'text-muted')}>{save.error ? (save.error as Error).message : tx('改了 {0} 项', changed)}</span>
+      <span className={cx('mr-auto text-xs', save.error ? 'text-danger' : 'text-muted')}>{save.error ? (save.error as Error).message : tx('改了 {0} 项 · 语调偏向松手即生效，底色与底线点保存生效', changed)}</span>
       <button type="button" onClick={() => setDraft(initial)} className="press h-8 rounded-lg border border-line px-3 text-xs hover:bg-sunken">{tx('还原')}</button>
       <button type="button" onClick={() => save.mutate(draft)} disabled={save.isPending} className="press h-8 rounded-lg bg-ink px-3.5 text-xs font-medium text-ink-fg disabled:opacity-50">{tx('保存')}</button>
     </div>}

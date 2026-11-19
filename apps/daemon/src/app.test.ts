@@ -602,3 +602,313 @@ describe('unified browsers & cloud desktop endpoints', () => {
     expect((await call('/api/computers/headlessbox/desktop', { method: 'POST' })).status).toBe(400)
   })
 })
+
+describe('Section 38 activity stream & step inspector (backend)', () => {
+  it('1) returns real-time stepCount, currentStep, iconKind, and runningJobs for a running and completed Worker ticket on GET /api/tickets', async () => {
+    const cnv = rt.engine.mainConversation()
+    const trig = rt.engine.receiveMessage(cnv, '帮我编辑角色设计池并排查登录接口超时')
+    rt.agents.discardPending('router')
+    rt.agents.cancel('router')
+    const ticket = rt.engine.startTask({ conversationId: cnv, triggerIds: [trig.triggerId], title: '排查登录接口 504 超时' })
+    const sessionId = ticket.sessionId
+    rt.agents.discardPending(sessionId)
+    rt.agents.cancel(sessionId)
+
+    // Mark worker session running
+    rt.store.db.update(schema.sessions).set({ state: 'running', updatedAt: Date.now() }).where(schema.sessions.id as any).run()
+
+    // Step 1: failed edit_file
+    rt.agents.appendEvent(sessionId, 'message', {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call_edit_1',
+          toolName: 'edit_file',
+          input: { path: `${ticket.directory}/memory/2026-11-18.md`, old_text: 'foo', new_text: 'bar' },
+        },
+      ],
+    })
+    rt.agents.appendEvent(sessionId, 'message', {
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          toolCallId: 'call_edit_1',
+          toolName: 'edit_file',
+          output: { type: 'error-text', value: 'old_text 在文件中不存在' },
+        },
+      ],
+    })
+
+    // Check failed step state
+    const afterStep1 = await (await call('/api/tickets')).json() as any
+    const t1 = afterStep1.tickets.find((x: any) => x.id === ticket.id)
+    expect(t1).toMatchObject({
+      id: ticket.id,
+      kind: 'ticket',
+      stage: 'working',
+      stepCount: 1,
+      currentStep: {
+        tool: 'edit_file',
+        label: '编辑 memory/2026-11-18.md 失败',
+        status: 'failed',
+      },
+      iconKind: 'error',
+      runningJobs: 0,
+    })
+
+    // Step 2: succeeded edit_file
+    rt.agents.appendEvent(sessionId, 'message', {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call_edit_2',
+          toolName: 'edit_file',
+          input: { path: `${ticket.directory}/novelai-follow-image/character-design-pool.md`, old_text: 'a', new_text: 'b' },
+        },
+      ],
+    })
+    rt.agents.appendEvent(sessionId, 'message', {
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          toolCallId: 'call_edit_2',
+          toolName: 'edit_file',
+          output: { type: 'text', value: '已修改 novelai-follow-image/character-design-pool.md（替换 1 处）' },
+        },
+      ],
+    })
+
+    // Step 3: in-flight shell command (via tool-start marker before tool-end)
+    const startMarkerId = rt.agents.appendEvent(sessionId, 'marker', {
+      type: 'tool-start',
+      tool: 'shell',
+      callId: 'call_shell_3',
+      input: JSON.stringify({ command: 'curl -I https://api.nuonuo.dev/v1/auth/login' }),
+    })
+
+    const duringStep3 = await (await call('/api/tickets')).json() as any
+    const t3 = duringStep3.tickets.find((x: any) => x.id === ticket.id)
+    expect(t3).toMatchObject({
+      id: ticket.id,
+      kind: 'ticket',
+      stage: 'working',
+      stepCount: 3,
+      currentStep: {
+        tool: 'shell',
+        label: '正在运行 curl -I https://api.nuonuo.dev/v1/auth/login',
+        status: 'running',
+      },
+      iconKind: 'terminal',
+      runningJobs: 0,
+    })
+
+    // Detail endpoint also exposes the in-flight tool-call in transcript
+    const detailDuring = await (await call(`/api/tickets/${ticket.id}`)).json() as any
+    const duringToolCalls = detailDuring.transcript.filter((i: any) => i.kind === 'tool-call')
+    expect(duringToolCalls).toHaveLength(3)
+    expect(duringToolCalls.at(-1)).toMatchObject({
+      kind: 'tool-call',
+      callId: 'call_shell_3',
+      tool: 'shell',
+      input: { command: 'curl -I https://api.nuonuo.dev/v1/auth/login' },
+    })
+
+    // Finish Step 3 and report task completion
+    rt.agents.appendEvent(sessionId, 'marker', { type: 'tool-end', start: startMarkerId })
+    rt.agents.appendEvent(sessionId, 'message', {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call_shell_3',
+          toolName: 'shell',
+          input: { command: 'curl -I https://api.nuonuo.dev/v1/auth/login' },
+        },
+      ],
+    })
+    rt.agents.appendEvent(sessionId, 'message', {
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          toolCallId: 'call_shell_3',
+          toolName: 'shell',
+          output: { type: 'text', value: '[job_1 退出码 0，用时 0.2s]\nHTTP/2 200' },
+        },
+      ],
+    })
+    rt.engine.report(ticket.id, { status: 'ready', summary: 'Updated ninth draw entry in character design pool' })
+    rt.store.db.update(schema.sessions).set({ state: 'idle', updatedAt: Date.now() }).where(schema.sessions.id as any).run()
+
+    const afterDone = await (await call('/api/tickets')).json() as any
+    const tDone = afterDone.tickets.find((x: any) => x.id === ticket.id)
+    expect(tDone).toMatchObject({
+      id: ticket.id,
+      kind: 'ticket',
+      stage: 'ended',
+      stepCount: 3,
+      currentStep: {
+        tool: 'shell',
+        label: '已运行 curl -I https://api.nuonuo.dev/v1/auth/login',
+        status: 'done',
+      },
+      iconKind: 'file',
+      runningJobs: 0,
+    })
+  })
+
+  it('2) exposes Router update_my_settings action as「修改助理名字与语调」in GET /api/tickets and returns full TicketDetail transcript on GET /api/tickets/act_...', async () => {
+    let routerStep = 0
+    const scriptedRouter = new MockLanguageModelV4({
+      doStream: async o => {
+        const last = lastUserText(o)
+        const cnv = /conversation_id="([a-z]+_[a-z0-9]+)"/.exec(last)?.[1] ?? rt.engine.mainConversation()
+        routerStep++
+        if (routerStep === 1) {
+          return streamOf({
+            calls: [
+              {
+                name: 'update_my_settings',
+                input: {
+                  persona: { name: '千绪' },
+                  mood: { tone_preset: 'warm' },
+                },
+              },
+            ],
+          })
+        }
+        if (routerStep === 2) {
+          return streamOf({
+            calls: [
+              {
+                name: 'reply',
+                input: {
+                  conversation_id: cnv,
+                  text: '好呀，以后就叫我千绪，语调也换成温和啦。',
+                },
+              },
+            ],
+          })
+        }
+        return streamOf({ text: 'done' })
+      },
+      doGenerate: async o => generateOf({ text: systemText(o) || '改名语调' }),
+    })
+
+    rt.hub = new ModelHub(rt.store, rt.secrets, {
+      language: () => scriptedRouter,
+      embedding: () => { throw new Error('unused') },
+    })
+    ;(rt.agents as any).hub = rt.hub
+    ;(rt.engine as any).runtime = rt.agents
+    const { provider } = await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
+    await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
+
+    const mapper = new EventMapper()
+    const sseEvents: any[] = []
+    const off = rt.bus.on(ev => {
+      sseEvents.push(...mapper.map(ev))
+    })
+
+    try {
+      const cnv = rt.engine.mainConversation()
+      const sendRes = await call(`/api/conversations/${cnv}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content: '把你的名字改成千绪，语调切成温和' }),
+      })
+      expect(sendRes.status).toBe(201)
+      for (let i = 0; i < 8; i++) {
+        await new Promise(r => setTimeout(r, 30))
+        await rt.agents.idle()
+      }
+
+      // Check GET /api/tickets includes the virtual ActionRun
+      const listRes = await (await call('/api/tickets')).json() as any
+      const actionItem = listRes.tickets.find((t: any) => t.kind === 'action')
+      expect(actionItem).toBeDefined()
+      expect(actionItem.id).toMatch(/^act_/)
+      expect(actionItem).toMatchObject({
+        kind: 'action',
+        title: '修改助理名字与语调',
+        stage: 'ended',
+        conversationId: cnv,
+        latestReport: {
+          status: 'ready',
+          summary: '已将名字改为「千绪」，语调切换至温和',
+        },
+        ended: {
+          by: 'router',
+          outcome: 'completed',
+        },
+        stepCount: 1,
+        currentStep: {
+          tool: 'update_my_settings',
+          label: '修改助理名字与语调',
+          status: 'done',
+        },
+        iconKind: 'check',
+        runningJobs: 0,
+      })
+
+      // Also exposed in `actions` array
+      expect(listRes.actions).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: actionItem.id, title: '修改助理名字与语调' })]),
+      )
+
+      // Check GET /api/tickets/:id for act_... returns full TicketDetail with transcript
+      const detailRes = await call(`/api/tickets/${actionItem.id}`)
+      expect(detailRes.status).toBe(200)
+      const detail = await detailRes.json() as any
+      expect(detail).toMatchObject({
+        ticket: expect.objectContaining({
+          id: actionItem.id,
+          kind: 'action',
+          title: '修改助理名字与语调',
+        }),
+        running: false,
+        jobs: [],
+        approvals: [],
+        browser: false,
+        project: null,
+        usage: { tokens: 0, costUsd: 0 },
+        files: [],
+        reports: [
+          expect.objectContaining({
+            ticketId: actionItem.id,
+            status: 'ready',
+            summary: '已将名字改为「千绪」，语调切换至温和',
+          }),
+        ],
+      })
+      const toolCall = detail.transcript.find((i: any) => i.kind === 'tool-call' && i.tool === 'update_my_settings')
+      const toolResult = detail.transcript.find((i: any) => i.kind === 'tool-result' && i.tool === 'update_my_settings')
+      expect(toolCall).toMatchObject({
+        kind: 'tool-call',
+        tool: 'update_my_settings',
+        input: {
+          persona: { name: '千绪' },
+          mood: { tone_preset: 'warm' },
+        },
+      })
+      expect(toolResult).toBeDefined()
+      expect(toolResult.output).toContain('"ok": true')
+
+      // Check SSE events notified the frontend about the router action
+      expect(sseEvents).toEqual(
+        expect.arrayContaining([
+          { type: 'ticket.updated', ticketId: actionItem.id },
+          { type: 'activity.updated' },
+        ]),
+      )
+
+      // Unknown act_ id returns 404
+      expect((await call('/api/tickets/act_nope')).status).toBe(404)
+    } finally {
+      off()
+    }
+  })
+})

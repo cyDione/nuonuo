@@ -4,15 +4,14 @@
  * - everything else — what was done, step by step — is one click away in the activity view, never in the conversation.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, AppWindow, Brain, CheckCircle2, Image as ImageIcon, Table2, ChevronDown, ChevronRight, CircleDot, Clock, CornerUpLeft, Dot, FileText, FolderOpen, Globe, Hand, History, Hourglass, Link2, Loader2, MessageCircleQuestion, MessageSquareText, MousePointerClick, NotebookPen, OctagonX, PencilLine, Repeat, RotateCcw, ShieldAlert, Sparkles, Square, SquareTerminal, Users, X, type LucideIcon } from 'lucide-react'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { AlertTriangle, AppWindow, Brain, Check, CheckCircle2, ChevronDown, ChevronRight, CircleDot, Clock, Copy, CornerUpLeft, Dot, Download, FileText, FolderOpen, Globe, Hand, History, Hourglass, Image as ImageIcon, Link2, Loader2, MessageCircleQuestion, MousePointerClick, NotebookPen, OctagonX, PencilLine, Repeat, RotateCcw, ShieldAlert, Sparkles, SquareTerminal, Table2, Users, X, XCircle, type LucideIcon } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, type Stage, type Ticket, type TicketDetail, type TranscriptItem } from './api'
 import { openTask, useLive, useOpenTask } from './live'
 import { go } from './route'
-import { Button, cx, IconButton } from './ui'
-import { getPrefs } from './prefs'
+import { Button, cx } from './ui'
 import { HandoffModal } from './handoff'
 import { ArtifactModal, previewKind } from './preview'
 import { usePresence } from './shell'
@@ -185,120 +184,905 @@ export function WorkingLine({ tickets }: { tickets: Ticket[] }) {
   </div>
 }
 
-// ── "What I did": the activity of one piece of work, told as steps ──────────
+// ── Split-Pane Step Inspector Modal (Figma Section 38 B1 / B2 / B3) ──────────
 
-/** A step in plain words; the raw call stays one click away. */
-function describeStep(tool: string, input: any): { icon: LucideIcon; text: string } {
-  const i = input ?? {}
-  const short = (v: unknown, n = 80) => { const s = String(v ?? ''); return s.length > n ? `${s.slice(0, n)}…` : s }
+function isStepOutputError(output: string | undefined): boolean {
+  if (!output) return false
+  const s = output.trim()
+  if (!s) return false
+  if (s.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(s) as Record<string, unknown>
+      if (parsed.ok === false) return true
+      if (typeof parsed.error === 'string' && parsed.ok !== true) return true
+      if (typeof parsed.exitCode === 'number' && parsed.exitCode !== 0) return true
+    } catch {
+      if (/"ok"\s*:\s*false/.test(s) || /^\{\s*"error"\s*:/.test(s)) return true
+    }
+  }
+  if (/\[[^\]]*(?:退出码\s+(?!0\b)-?\d+|超时被终止)/.test(s)) return true
+  if (/\b(?:exit(?:\s+_?code)?|exitCode)\s*[:=]\s*(?!0\b)-?\d+/i.test(s)) return true
+  if (/^(?:Error:|Failed\b|Result:\s*Failed\b)/i.test(s) || /\bResult:\s*Failed\b/i.test(s)) return true
+  if (/old_text 在文件中不存在|text not found|not applied|不在工作目录内|审核拦截了这条命令|被禁止/i.test(s)) return true
+  return false
+}
+
+function relativePath(rawPath: unknown, dir?: string): string {
+  const raw = String(rawPath ?? '').trim()
+  if (!raw) return ''
+  if (dir) {
+    const cleanDir = dir.replace(/\/+$/, '')
+    if (raw === cleanDir) return '.'
+    if (raw.startsWith(`${cleanDir}/`)) return raw.slice(cleanDir.length + 1)
+  }
+  return raw
+}
+
+function baseName(rawPath: unknown): string {
+  const raw = String(rawPath ?? '').trim().replace(/\/+$/, '')
+  return raw.split('/').pop() || 'snippet.txt'
+}
+
+function guessLang(rawPath: unknown): string {
+  const name = String(rawPath ?? '').toLowerCase()
+  if (name.endsWith('.md') || name.endsWith('.mdx')) return 'markdown'
+  if (name.endsWith('.ts') || name.endsWith('.tsx')) return 'typescript'
+  if (name.endsWith('.js') || name.endsWith('.jsx') || name.endsWith('.mjs')) return 'javascript'
+  if (name.endsWith('.json')) return 'json'
+  if (name.endsWith('.py')) return 'python'
+  if (name.endsWith('.sh') || name.endsWith('.zsh') || name.endsWith('.bash')) return 'bash'
+  if (name.endsWith('.css')) return 'css'
+  if (name.endsWith('.html')) return 'html'
+  if (name.endsWith('.yml') || name.endsWith('.yaml')) return 'yaml'
+  if (name.endsWith('.sql')) return 'sql'
+  if (name.endsWith('.conf') || name.endsWith('.ini') || name.endsWith('.env')) return 'config'
+  return 'text'
+}
+
+function formatJsonOrText(raw: string | undefined): string {
+  if (!raw) return ''
+  const s = raw.trim()
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try {
+      return JSON.stringify(JSON.parse(s), null, 2)
+    } catch {
+      return raw
+    }
+  }
+  return raw
+}
+
+function fmtInspectorElapsed(startAt: number, endOrNow: number): string {
+  const sec = Math.max(0, Math.floor((endOrNow - startAt) / 1000))
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+const hmSec = (at: number) =>
+  new Date(at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+
+function describeInspectorStep(
+  tool: string,
+  input: any,
+  status: 'running' | 'done' | 'failed',
+  dir?: string,
+  ticketTitle?: string,
+  isAction?: boolean,
+): { icon: LucideIcon; title: string } {
+  const i = (input && typeof input === 'object' ? input : {}) as Record<string, any>
+  const short = (v: unknown, n = 64) => {
+    const s = String(v ?? '').replace(/\s+/g, ' ').trim()
+    return s.length > n ? `${s.slice(0, n)}…` : s
+  }
+  const rel = (p: unknown) => relativePath(p, dir) || '文件'
+
   switch (tool) {
-    case 'shell': return { icon: SquareTerminal, text: tx('运行 {0}', short(i.command, 70)) }
-    case 'read_file': return { icon: FileText, text: tx('查看 {0}', short(i.path)) }
-    case 'write_file': return { icon: PencilLine, text: tx('写入 {0}', short(i.path)) }
-    case 'edit_file': return { icon: PencilLine, text: tx('修改 {0}', short(i.path)) }
-    case 'list_dir': return { icon: FolderOpen, text: tx('浏览 {0}', short(i.path ?? '.')) }
-    case 'web_fetch': return { icon: Globe, text: tx('阅读网页 {0}', short(i.url, 60)) }
-    case 'browser_open': return { icon: Globe, text: tx('打开 {0}', short(i.url, 60)) }
-    case 'browser_click': case 'browser_type': case 'browser_snapshot': case 'browser_screenshot': return { icon: MousePointerClick, text: tx('在浏览器里操作') }
-    case 'request_handoff': return { icon: Hand, text: tx('请你接管浏览器') }
-    case 'job_status': case 'job_stop': return { icon: Hourglass, text: tx('查看后台命令') }
-    case 'recall': return { icon: History, text: tx('回顾之前的记录') }
-    case 'remember': return { icon: Brain, text: tx('记下一条经验') }
-    case 'search_memory': return { icon: Brain, text: tx('翻看记忆') }
-    case 'subagent_start': return { icon: Users, text: tx('分出一个子任务：{0}', short(i.job, 60)) }
-    case 'subagent_stop': return { icon: Users, text: tx('停下一个子任务') }
-    case 'report': return { icon: NotebookPen, text: i.status === 'ready' ? tx('整理好结果') : i.status === 'waiting' ? tx('有问题要问你') : i.status === 'progress' ? tx('告一段落，等后续') : i.status === 'dropped' ? tx('判断不需要做') : tx('说明遇到的问题') }
-    case 'handback': return { icon: CornerUpLeft, text: tx('把一条无关的消息转回去') }
-    case 'github_follow': return { icon: Link2, text: tx('关注一个 GitHub 讨论') }
-    default: return { icon: Dot, text: tool.replace(/^mcp_/, '').replace(/_/g, ' ') }
+    case 'edit_file': {
+      const p = rel(i.path)
+      return {
+        icon: FileText,
+        title: status === 'running' ? tx('正在编辑 {0}', p) : status === 'failed' ? tx('编辑 {0} 失败', p) : tx('已编辑 {0}', p),
+      }
+    }
+    case 'write_file': {
+      const p = rel(i.path)
+      return {
+        icon: FileText,
+        title: status === 'running' ? tx('正在写入 {0}', p) : status === 'failed' ? tx('写入 {0} 失败', p) : tx('已写入 {0}', p),
+      }
+    }
+    case 'read_file': {
+      const p = rel(i.path)
+      return {
+        icon: FileText,
+        title: status === 'running' ? tx('正在读取 {0}', p) : status === 'failed' ? tx('读取 {0} 失败', p) : tx('已读取 {0}', p),
+      }
+    }
+    case 'list_dir':
+    case 'find_files': {
+      const p = rel(i.path ?? '.')
+      return {
+        icon: FolderOpen,
+        title: status === 'running' ? tx('正在浏览 {0}', p) : status === 'failed' ? tx('浏览 {0} 失败', p) : tx('已浏览 {0}', p),
+      }
+    }
+    case 'shell':
+    case 'local_shell':
+    case 'computer': {
+      const cmd = short(i.command ?? i.cmd ?? '', 58) || tx('命令')
+      return {
+        icon: SquareTerminal,
+        title: status === 'running' ? tx('正在运行 {0}', cmd) : status === 'failed' ? tx('运行 {0} 失败', cmd) : tx('已运行 {0}', cmd),
+      }
+    }
+    case 'job_status':
+    case 'local_job_status':
+      return {
+        icon: SquareTerminal,
+        title: status === 'running' ? tx('正在检查后台日志进程 (job_status)') : status === 'failed' ? tx('检查后台日志进程失败') : tx('已检查后台日志进程 (job_status)'),
+      }
+    case 'job_stop':
+    case 'local_job_stop':
+      return { icon: SquareTerminal, title: tx('终止后台进程') }
+    case 'web_fetch':
+    case 'browser_open': {
+      const url = short(i.url, 56) || tx('网页')
+      return {
+        icon: Globe,
+        title: status === 'running' ? tx('正在访问 {0}', url) : status === 'failed' ? tx('访问 {0} 失败', url) : tx('已访问 {0}', url),
+      }
+    }
+    case 'browser_click':
+    case 'browser_type':
+    case 'browser_snapshot':
+    case 'browser_screenshot':
+      return { icon: MousePointerClick, title: status === 'running' ? tx('正在操作浏览器') : tx('在浏览器里操作') }
+    case 'request_handoff':
+      return { icon: Hand, title: tx('请你接管浏览器') }
+    case 'recall':
+      return { icon: History, title: tx('回顾之前的记录') }
+    case 'remember':
+      return { icon: Brain, title: status === 'failed' ? tx('记下新记忆失败') : tx('记下新记忆') }
+    case 'search_memory':
+      return { icon: Brain, title: tx('翻看记忆') }
+    case 'subagent_start':
+      return { icon: Users, title: tx('分出一个子任务：{0}', short(i.job, 48)) }
+    case 'subagent_stop':
+      return { icon: Users, title: tx('停下一个子任务') }
+    case 'report':
+      return {
+        icon: NotebookPen,
+        title: i.status === 'ready' ? tx('整理好结果') : i.status === 'waiting' ? tx('有问题要问你') : i.status === 'progress' ? tx('告一段落，等后续') : i.status === 'dropped' ? tx('判断不需要做') : tx('说明遇到的问题'),
+      }
+    case 'handback':
+      return { icon: CornerUpLeft, title: tx('把一条无关的消息转回去') }
+    case 'github_follow':
+      return { icon: Link2, title: tx('关注一个 GitHub 讨论') }
+    case 'get_my_settings':
+      return { icon: FileText, title: tx('读取当前助理设置 (get_my_settings)') }
+    case 'update_my_settings':
+    case 'update_instructions':
+    case 'update_proactive':
+    case 'schedule_routine':
+    case 'update_routine':
+    case 'propose_skill':
+      return {
+        icon: CheckCircle2,
+        title: isAction && ticketTitle ? (status === 'failed' ? `${ticketTitle}失败` : ticketTitle) : tx('更新助理设置 ({0})', tool),
+      }
+    default: {
+      const clean = tool.replace(/^mcp_/, '').replace(/_/g, ' ')
+      return {
+        icon: Dot,
+        title: status === 'running' ? tx('正在执行 {0}', clean) : status === 'failed' ? tx('执行 {0} 失败', clean) : clean,
+      }
+    }
   }
 }
 
+type InspectorNode =
+  | { id: 'start'; kind: 'start'; title: string; at: number }
+  | {
+      id: string
+      kind: 'step'
+      callId: string
+      tool: string
+      input: any
+      output?: string
+      status: 'running' | 'done' | 'failed'
+      icon: LucideIcon
+      title: string
+      note?: string
+      at: number
+    }
+  | { id: 'end'; kind: 'end'; title: string; completed: boolean; at: number }
+
+function buildInspectorNodes(d: TicketDetail, isLiveRunning: boolean): InspectorNode[] {
+  const { ticket: t, transcript } = d
+  const nodes: InspectorNode[] = [
+    {
+      id: 'start',
+      kind: 'start',
+      title: isLiveRunning ? `${tx('已开始')} (${hmSec(t.createdAt)})` : tx('已开始'),
+      at: t.createdAt,
+    },
+  ]
+
+  const allToolCalls = transcript.filter(i => i.kind === 'tool-call') as Extract<TranscriptItem, { kind: 'tool-call' }>[]
+  const resultsByCallId = new Map<string, Extract<TranscriptItem, { kind: 'tool-result' }>>()
+  for (const item of transcript) {
+    if (item.kind === 'tool-result') resultsByCallId.set(item.callId, item)
+  }
+
+  const hasNonReportCalls = allToolCalls.some(c => c.tool !== 'report' && c.tool !== 'handback')
+
+  transcript.forEach((item, idx) => {
+    if (item.kind !== 'tool-call') return
+    if (t.stage === 'ended' && hasNonReportCalls && (item.tool === 'report' || item.tool === 'handback')) return
+
+    const res = resultsByCallId.get(item.callId)
+    let status: 'running' | 'done' | 'failed'
+    if (!res) {
+      if (isLiveRunning || t.stage === 'working') status = 'running'
+      else if (t.ended?.outcome === 'completed') status = 'done'
+      else status = 'failed'
+    } else {
+      status = isStepOutputError(res.output) ? 'failed' : 'done'
+    }
+
+    // Collect any assistant reasoning or text between this tool-call and the next tool-call
+    const noteParts: string[] = []
+    for (let j = idx + 1; j < transcript.length; j++) {
+      const next = transcript[j]!
+      if (next.kind === 'tool-call') break
+      if ((next.kind === 'text' || next.kind === 'reasoning') && next.text.trim()) {
+        noteParts.push(next.text.trim())
+      }
+    }
+
+    const { icon, title } = describeInspectorStep(item.tool, item.input, status, t.directory, t.title, t.kind === 'action')
+    nodes.push({
+      id: item.id,
+      kind: 'step',
+      callId: item.callId,
+      tool: item.tool,
+      input: item.input,
+      ...(res ? { output: res.output } : {}),
+      status,
+      icon,
+      title,
+      ...(noteParts.length ? { note: noteParts.join('\n\n') } : {}),
+      at: item.at,
+    })
+  })
+
+  if (t.stage === 'ended' && !isLiveRunning) {
+    const completed = t.ended?.outcome === 'completed'
+    nodes.push({
+      id: 'end',
+      kind: 'end',
+      title: completed ? tx('已完成') : endedText(t),
+      completed,
+      at: t.ended?.at ?? t.updatedAt,
+    })
+  }
+
+  return nodes
+}
+
+function CodeInspectorCard({ lang, content, filename }: { lang: string; content: string; filename?: string }) {
+  const [copied, setCopied] = useState(false)
+  const onCopy = () => {
+    void navigator.clipboard?.writeText(content)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  const onDownload = () => {
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const ext = lang.startsWith('markdown') ? 'md' : lang.startsWith('bash') ? 'sh' : lang.startsWith('json') ? 'json' : lang.startsWith('typescript') ? 'ts' : 'txt'
+    a.download = filename || `snippet.${ext}`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 500)
+  }
+  const isTerminal = lang.startsWith('terminal')
+  return (
+    <div className="rounded-[12px] border border-[#e5e7eb] bg-[#f4f5f7] px-3.5 py-2.5 dark:border-[#282a32] dark:bg-[#191a1f]">
+      <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] text-muted">
+        <span className="font-mono text-[11px] text-muted select-none">{lang}</span>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onDownload}
+            aria-label={tx('下载代码片段')}
+            title={tx('下载')}
+            className="press flex size-6 items-center justify-center rounded-md text-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5"
+          >
+            <Download size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={onCopy}
+            aria-label={tx('复制代码片段')}
+            title={copied ? tx('已复制') : tx('复制')}
+            className="press flex size-6 items-center justify-center rounded-md text-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5"
+          >
+            {copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />}
+          </button>
+        </div>
+      </div>
+      <pre
+        className={cx(
+          'max-h-[250px] overflow-auto font-mono text-[11.5px] leading-[17px] whitespace-pre-wrap break-words',
+          isTerminal ? 'text-[#2656c7] dark:text-[#78aef2]' : 'text-[#53448a] dark:text-[#b5a6f2]',
+        )}
+      >
+        {content}
+      </pre>
+    </div>
+  )
+}
+
+function EditFileResultView({
+  output,
+  status,
+  lang,
+  filename,
+}: {
+  output: string | undefined
+  status: 'running' | 'done' | 'failed'
+  lang: string
+  filename: string
+}) {
+  if (!output) {
+    return (
+      <div className="text-[12.5px] text-muted">
+        <span className="font-semibold text-fg">Result: </span>
+        {status === 'running' ? tx('正在应用文件修改…') : status === 'failed' ? 'Failed.' : tx('修改已应用。')}
+      </div>
+    )
+  }
+
+  const s = output.trim()
+  const snippetIdx = s.indexOf('snippet:\n')
+  if (snippetIdx !== -1) {
+    const before = s.slice(0, snippetIdx + 'snippet:'.length).trim()
+    const after = s.slice(snippetIdx + 'snippet:\n'.length)
+    const lines = before.split('\n').map(l => l.trim()).filter(Boolean)
+    const tailSplit = after.lastIndexOf('\nThe edit was not applied')
+    const snippetCode = tailSplit !== -1 ? after.slice(0, tailSplit).trim() : after.trim()
+    const footerLine = tailSplit !== -1 ? after.slice(tailSplit + 1).trim() : ''
+    return (
+      <div className="space-y-2.5 text-[12.5px] leading-[18px]">
+        {lines.map((line, idx) => (
+          <div key={idx} className={idx === 0 ? 'font-medium text-fg' : 'text-muted'}>
+            {line}
+          </div>
+        ))}
+        <CodeInspectorCard lang={lang} content={snippetCode} filename={filename} />
+        {footerLine && <div className="text-[12px] text-muted">{footerLine}</div>}
+      </div>
+    )
+  }
+
+  if (status === 'failed' && /old_text 在文件中不存在|text not found/i.test(s)) {
+    return (
+      <div className="space-y-2 text-[12.5px] leading-[18px]">
+        <div className="font-medium text-fg">
+          Result: Failed. The tool reported <code className="rounded bg-sunken px-1.5 py-0.5 font-mono text-[11.5px]">text not found</code> for the old text.
+        </div>
+        <div className="text-[12px] text-muted">{s}</div>
+        <div className="text-[12px] text-muted">The edit was not applied because the exact old text was not present.</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-1.5 text-[12.5px] leading-[18px]">
+      <div className="font-medium text-fg">
+        Result: <span className="font-normal text-muted">{s.length <= 160 ? s : status === 'failed' ? 'Failed.' : 'Success.'}</span>
+      </div>
+      {s.length > 160 && <CodeInspectorCard lang="text" content={s} filename="edit-result.txt" />}
+    </div>
+  )
+}
+
+function StepDetailPane({
+  node,
+  d,
+  isLatestStep,
+  liveWorkerText,
+  onSelectStep,
+}: {
+  node: InspectorNode
+  d: TicketDetail
+  isLatestStep: boolean
+  liveWorkerText: string
+  onSelectStep(id: string): void
+}) {
+  const t = d.ticket
+
+  if (node.kind === 'start') {
+    const firstInput = d.transcript.find(i => i.kind === 'input') as Extract<TranscriptItem, { kind: 'input' }> | undefined
+    return (
+      <div className="space-y-4">
+        <h3 className="text-[17px] font-bold tracking-tight text-fg">{tx('任务起点与上下文')}</h3>
+        {t.proactive && t.why && (
+          <div className="flex gap-2 rounded-[14px] bg-accent-soft px-3.5 py-3 text-[13px] text-pretty">
+            <Sparkles size={15} className="mt-0.5 shrink-0 text-accent" />
+            <span>{tx('没人找我，是按你的主动策略做的：{0}', t.why)}</span>
+          </div>
+        )}
+        <div className="rounded-[12px] border border-line bg-sunken/60 px-4 py-3 text-[12.5px] leading-6">
+          <div className="grid grid-cols-[5.5em_1fr] gap-x-3 gap-y-1.5">
+            <span className="text-muted">{tx('开始时间')}</span>
+            <span className="font-mono text-fg tabular-nums">
+              {new Date(t.createdAt).toLocaleString(locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+            </span>
+            {t.directory && (
+              <>
+                <span className="text-muted">{tx('工作目录')}</span>
+                <span className="break-all font-mono text-fg">{t.directory}</span>
+              </>
+            )}
+            <span className="text-muted">{tx('来源')}</span>
+            <span className="text-fg">{t.kind === 'action' ? tx('主 Agent 实时操作') : t.source}</span>
+          </div>
+        </div>
+        {firstInput?.text && (
+          <div className="space-y-1.5">
+            <div className="text-[12.5px] font-semibold text-fg">{tx('触发指令 / 输入上下文')}:</div>
+            <CodeInspectorCard lang="markdown" content={firstInput.text} filename="prompt.md" />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (node.kind === 'end') {
+    const report = t.latestReport
+    const stepNodes = buildInspectorNodes(d, false).filter((n): n is Extract<InspectorNode, { kind: 'step' }> => n.kind === 'step')
+    return (
+      <div className="space-y-4">
+        <h3 className="text-[17px] font-bold tracking-tight text-fg">
+          {node.completed ? tx('任务执行结果') : tx('任务已停下')}
+        </h3>
+        {(report?.summary || t.ended?.reason) && (
+          <div className="prose-chat rounded-[14px] border border-line bg-sunken/60 px-4 py-3 text-[13px]">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{report?.summary || t.ended?.reason || endedText(t)}</ReactMarkdown>
+          </div>
+        )}
+        {d.files && d.files.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-[12.5px] font-semibold text-fg">{tx('产出文件')}</div>
+            <div className="flex flex-wrap items-start gap-2">
+              {d.files.map(f => <FileChip key={f.id} {...f} />)}
+            </div>
+          </div>
+        )}
+        {stepNodes.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-[12.5px] font-semibold text-fg">{tx('步骤摘要（点击左侧或下方步骤查看输入/输出）')}</div>
+            <div className="divide-y divide-line rounded-[12px] border border-line bg-sunken/40">
+              {stepNodes.map((s, idx) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => onSelectStep(s.id)}
+                  className="flex w-full items-center justify-between gap-2 px-3.5 py-2 text-left text-[12.5px] transition-colors hover:bg-sunken"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="w-4 shrink-0 font-mono text-[11px] text-faint tabular-nums">{idx + 1}.</span>
+                    <span className={cx('truncate', s.status === 'failed' ? 'text-danger' : 'text-fg')}>{s.title}</span>
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted">{tx('查看详情')} &gt;</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-[11.5px] text-faint tabular-nums">
+          <span>
+            {tx('完成于')} {new Date(node.at).toLocaleString(locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+          </span>
+          <span>
+            {tx('总耗时')} {fmtInspectorElapsed(t.createdAt, node.at)}
+          </span>
+          {d.usage.tokens > 0 && (
+            <span>
+              {fmtTokens(d.usage.tokens)} tokens{d.usage.costUsd ? tx('（约 ${0}）', d.usage.costUsd.toFixed(2)) : ''}
+            </span>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Step node
+  const i = (node.input && typeof node.input === 'object' ? node.input : {}) as Record<string, any>
+  const workerNote = node.note || (isLatestStep && liveWorkerText ? liveWorkerText : '')
+
+  if (node.tool === 'edit_file') {
+    const rawPath = String(i.path ?? '')
+    const relPath = relativePath(rawPath, t.directory) || rawPath || 'file'
+    const lang = guessLang(rawPath)
+    const fname = baseName(rawPath)
+    const newText = String(i.new_text ?? i.newText ?? i.new_string ?? i.content ?? '')
+    const oldText = String(i.old_text ?? i.oldText ?? i.old_string ?? '')
+    return (
+      <div className="space-y-3">
+        <h3 className="text-[17px] font-bold tracking-tight text-fg">{node.title}</h3>
+        <div className="text-[12.5px] text-fg">
+          Attempted edit to <code className="rounded bg-sunken px-1.5 py-0.5 font-mono text-[11.5px]">{relPath}</code>{' '}
+          (path <code className="rounded bg-sunken px-1.5 py-0.5 font-mono text-[11.5px]">{rawPath || relPath}</code>):
+        </div>
+        <div className="space-y-1.5">
+          <div className="text-[12.5px] font-semibold text-fg">New text:</div>
+          <CodeInspectorCard lang={lang} content={newText || '(empty)'} filename={fname} />
+        </div>
+        <div className="space-y-1.5">
+          <div className="text-[12.5px] font-semibold text-fg">Old text provided:</div>
+          <CodeInspectorCard lang={lang} content={oldText || '(empty)'} filename={fname} />
+        </div>
+        <EditFileResultView output={node.output} status={node.status} lang={lang} filename={fname} />
+        {workerNote && <WorkerNoteCard note={workerNote} running={node.status === 'running'} />}
+      </div>
+    )
+  }
+
+  if (node.tool === 'write_file' || node.tool === 'read_file') {
+    const rawPath = String(i.path ?? '')
+    const relPath = relativePath(rawPath, t.directory) || rawPath || 'file'
+    const lang = guessLang(rawPath)
+    const fname = baseName(rawPath)
+    const isWrite = node.tool === 'write_file'
+    const bodyContent = isWrite
+      ? String(i.content ?? '')
+      : (node.output ?? (node.status === 'running' ? tx('正在读取文件内容…') : '(空文件)'))
+    return (
+      <div className="space-y-3">
+        <h3 className="text-[17px] font-bold tracking-tight text-fg">{node.title}</h3>
+        <div className="text-[12.5px] text-fg">
+          {isWrite ? 'Attempted write to' : 'Read file'}{' '}
+          <code className="rounded bg-sunken px-1.5 py-0.5 font-mono text-[11.5px]">{relPath}</code>{' '}
+          (path <code className="rounded bg-sunken px-1.5 py-0.5 font-mono text-[11.5px]">{rawPath || relPath}</code>):
+        </div>
+        <div className="space-y-1.5">
+          <div className="text-[12.5px] font-semibold text-fg">{isWrite ? 'New text:' : 'File content:'}</div>
+          <CodeInspectorCard lang={lang} content={bodyContent} filename={fname} />
+        </div>
+        {isWrite && (
+          <div className="text-[12.5px] text-muted">
+            <span className="font-semibold text-fg">Result: </span>
+            {node.output || (node.status === 'running' ? tx('正在写入…') : 'Success.')}
+          </div>
+        )}
+        {workerNote && <WorkerNoteCard note={workerNote} running={node.status === 'running'} />}
+      </div>
+    )
+  }
+
+  if (node.tool === 'shell' || node.tool === 'local_shell' || node.tool === 'computer') {
+    const cmd = String(i.command ?? i.cmd ?? '')
+    const workDir = String(i.cwd ?? t.directory ?? '~')
+    return (
+      <div className="space-y-3">
+        <h3 className="text-[17px] font-bold tracking-tight text-fg">{node.title}</h3>
+        <div className="text-[12.5px] text-muted">
+          Running shell command in <code className="rounded bg-sunken px-1.5 py-0.5 font-mono text-[11.5px] text-fg">{workDir}</code>
+          {node.status === 'running' ? ' (streaming stdout):' : ':'}
+        </div>
+        <div className="space-y-1.5">
+          <div className="text-[12.5px] font-semibold text-fg">Command:</div>
+          <CodeInspectorCard lang="bash" content={cmd || '(empty command)'} filename="command.sh" />
+        </div>
+        <div className="space-y-1.5">
+          <div className="text-[12.5px] font-semibold text-fg">Live Output (stdout / stderr):</div>
+          <CodeInspectorCard
+            lang={node.status === 'running' ? 'terminal · streaming' : 'terminal'}
+            content={node.output || (node.status === 'running' ? tx('正在等待实时终端输出…') : tx('(无终端输出)'))}
+            filename="terminal.log"
+          />
+        </div>
+        {workerNote && <WorkerNoteCard note={workerNote} running={node.status === 'running'} />}
+      </div>
+    )
+  }
+
+  // Settings / Router action or other generic tool calls
+  return (
+    <div className="space-y-3">
+      <h3 className="text-[17px] font-bold tracking-tight text-fg">{node.title}</h3>
+      {t.kind === 'action' && t.latestReport?.summary && (
+        <div className="rounded-[12px] border border-line bg-sunken/60 px-3.5 py-2.5 text-[12.5px] text-fg">
+          {t.latestReport.summary}
+        </div>
+      )}
+      <div className="space-y-1.5">
+        <div className="text-[12.5px] font-semibold text-fg">Parameters ({node.tool}):</div>
+        <CodeInspectorCard lang="json" content={JSON.stringify(i, null, 2)} filename={`${node.tool}-input.json`} />
+      </div>
+      <div className="space-y-1.5">
+        <div className="text-[12.5px] font-semibold text-fg">Result:</div>
+        <CodeInspectorCard
+          lang={node.output?.trim().startsWith('{') ? 'json' : 'text'}
+          content={formatJsonOrText(node.output) || (node.status === 'running' ? tx('正在执行…') : tx('已完成'))}
+          filename={`${node.tool}-result.txt`}
+        />
+      </div>
+      {workerNote && <WorkerNoteCard note={workerNote} running={node.status === 'running'} />}
+    </div>
+  )
+}
+
+function WorkerNoteCard({ note, running }: { note: string; running: boolean }) {
+  return (
+    <div className="space-y-1.5 pt-1">
+      <div className="text-[12.5px] font-semibold text-fg">Worker note:</div>
+      <div className="rounded-[12px] border border-[#2656c7]/30 bg-[#edf2fe] px-3.5 py-2.5 text-[12px] leading-[18px] text-fg dark:border-[#78aef2]/30 dark:bg-[#162133]">
+        <div className="mb-1 text-[11.5px] font-semibold text-[#2656c7] dark:text-[#78aef2]">
+          {running ? tx('实时推理进展') : tx('推理与诊断记录')}
+        </div>
+        <div className="prose-chat text-[12px] leading-[18px] text-fg">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{note}</ReactMarkdown>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function TaskDrawer() {
-  // Keeps the last task on screen while the drawer slides away.
   const { shown: id, leaving } = usePresence(useOpenTask())
   const qc = useQueryClient()
-  const detail = useQuery({ queryKey: ['ticket', id], enabled: Boolean(id), queryFn: () => api.get<TicketDetail>(`/tickets/${id}`) })
-  const working = useLive(s => (id ? s.workerState[id] === 'running' : false))
-  const stop = useMutation({ mutationFn: () => api.post(`/tickets/${id}/stop`), onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }) })
-  const scroller = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }) }, [detail.data?.transcript.length])
+  const detail = useQuery({
+    queryKey: ['ticket', id],
+    enabled: Boolean(id),
+    queryFn: () => api.get<TicketDetail>(`/tickets/${id}`),
+  })
+  const liveRunning = useLive(s => (id ? s.workerState[id] === 'running' : false))
+  const liveWorkerText = useLive(s => (id ? s.workerText[id] ?? '' : ''))
+  const stop = useMutation({
+    mutationFn: () => api.post(`/tickets/${id}/stop`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tickets'] })
+      qc.invalidateQueries({ queryKey: ['ticket', id] })
+    },
+  })
+  const retry = useMutation({
+    mutationFn: () => api.post(`/tickets/${id}/retry`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tickets'] })
+      qc.invalidateQueries({ queryKey: ['ticket', id] })
+    },
+  })
+
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [userPicked, setUserPicked] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    setSelectedId(null)
+    setUserPicked(false)
+  }, [id])
+
+  const d = detail.data
+  const t = d?.ticket
+  const isRunning = Boolean(liveRunning || d?.running || t?.stage === 'working' || t?.stage === 'queued')
+
+  useEffect(() => {
+    if (!id || !isRunning) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [id, isRunning])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') openTask(null) }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
   }, [])
+
   if (!id) return null
-  const d = detail.data
-  const t = d?.ticket
-  const steps = d ? toSteps(d.transcript, d.ticket.directory) : []
-  const report = t?.latestReport
-  return <div className={cx('anim-fade fixed inset-0 z-40 flex justify-end bg-[var(--scrim)]', leaving && 'out-fade')} onMouseDown={e => { if (e.target === e.currentTarget) openTask(null) }}>
-    <div role="dialog" aria-modal="true" aria-label={t?.title ?? tx('任务')} className={cx('anim-drawer-r flex h-full w-full max-w-xl flex-col bg-card shadow-2xl md:my-2 md:mr-2 md:h-[calc(100%-1rem)] md:rounded-[24px]', leaving && 'out-r')}>
-      <div className="flex items-start gap-3 border-b border-line px-5 py-4">
-        {t && <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-sunken"><StateIcon t={t} size={16} /></div>}
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-display text-[17px] font-semibold">{t?.title ?? '…'}</div>
-          {t && <div className="mt-0.5 text-xs text-pretty text-muted tabular-nums">{t.stage === 'ended' ? endedText(t) : STATE_TEXT[t.stage]}{t.proactive ? tx(' · 我主动发现的') : ''} · {new Date(t.createdAt).toLocaleString(locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{d && d.usage.tokens > 0 ? ` · ${fmtTokens(d.usage.tokens)} tokens${d.usage.costUsd ? tx('（约 ${0}）', d.usage.costUsd.toFixed(2)) : ''}` : ''}</div>}
+
+  const nodes = d ? buildInspectorNodes(d, isRunning) : []
+  const stepNodes = nodes.filter((n): n is Extract<InspectorNode, { kind: 'step' }> => n.kind === 'step')
+
+  // Compute effective selected node:
+  const activeId = (() => {
+    if (!nodes.length) return null
+    if (userPicked && selectedId && nodes.some(n => n.id === selectedId)) return selectedId
+    if (isRunning) {
+      const runningStep = [...stepNodes].reverse().find(n => n.status === 'running')
+      return runningStep?.id ?? stepNodes.at(-1)?.id ?? 'start'
+    }
+    if (selectedId && nodes.some(n => n.id === selectedId)) return selectedId
+    const failedStep = stepNodes.find(n => n.status === 'failed')
+    if (failedStep) return failedStep.id
+    if (t?.kind === 'action' || (!t?.latestReport?.summary && !d?.files?.length)) {
+      return stepNodes.at(-1)?.id ?? 'end'
+    }
+    return stepNodes[0]?.id ?? 'end'
+  })()
+
+  const activeNode = nodes.find(n => n.id === activeId) ?? nodes[0] ?? null
+  const isLatestStep = Boolean(activeNode && activeNode.kind === 'step' && stepNodes.at(-1)?.id === activeNode.id)
+  const stepCount = Math.max(1, stepNodes.length || t?.stepCount || 1)
+  const mmss = t ? fmtInspectorElapsed(t.createdAt, isRunning ? now : (t.ended?.at ?? t.updatedAt)) : '00:00'
+
+  return (
+    <div
+      className={cx('anim-fade fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-3 sm:p-4', leaving && 'out-fade')}
+      onMouseDown={e => { if (e.target === e.currentTarget) openTask(null) }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={t?.title ?? tx('任务')}
+        className={cx(
+          'anim-pop flex h-[min(656px,88dvh)] w-[min(888px,calc(100vw-24px))] flex-col overflow-hidden rounded-[24px] border border-line bg-card shadow-2xl',
+          leaving && 'out-pop',
+        )}
+      >
+        {/* Top Header */}
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-6 pt-5 pb-4">
+          <div className="min-w-0 flex-1">
+            {t && (
+              <div className="mb-1.5 flex items-center gap-2">
+                {isRunning ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-[#dbe6fd] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#2656c7] tabular-nums dark:bg-[#1f314d] dark:text-[#78aef2]">
+                    <span className="size-1.5 animate-pulse rounded-full bg-[#2656c7] dark:bg-[#78aef2]" />
+                    {tx('正在执行')} · {tx('第 {0} 步', stepCount)} · {mmss}
+                  </span>
+                ) : t.stage.startsWith('person/') ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-warn-soft px-2.5 py-0.5 text-[11.5px] font-semibold text-warn">
+                    {STATE_TEXT[t.stage]}
+                  </span>
+                ) : t.ended?.outcome === 'completed' ? (
+                  <span className="inline-flex items-center rounded-full bg-[#e4f3eb] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#236947] dark:bg-[#162b21] dark:text-[#6fcf9c]">
+                    {tx('已完成')}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-danger/12 px-2.5 py-0.5 text-[11.5px] font-semibold text-danger">
+                    {t.ended?.outcome === 'dropped' ? tx('不需要做') : tx('已停下')}
+                  </span>
+                )}
+              </div>
+            )}
+            <h2 className="truncate font-display text-[19px] font-bold tracking-tight text-fg">
+              {t?.title ?? '…'}
+            </h2>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            {t?.conversationId && (
+              <button
+                type="button"
+                onClick={() => { go(`/c/${t.conversationId}`); openTask(null) }}
+                className="press inline-flex h-[30px] items-center rounded-full border border-line bg-card px-3 text-[12px] font-medium text-fg hover:bg-sunken"
+              >
+                {tx('回到对话')}
+              </button>
+            )}
+            {t && t.stage !== 'ended' && t.kind !== 'action' && (
+              <button
+                type="button"
+                disabled={stop.isPending}
+                onClick={() => { if (confirm(tx('停下「{0}」？', t.title))) stop.mutate() }}
+                className="press inline-flex h-[30px] items-center gap-1.5 rounded-full border border-danger/30 bg-danger/10 px-3 text-[12px] font-semibold text-danger hover:bg-danger/15 disabled:opacity-50"
+              >
+                <span className="size-2 rounded-[2px] bg-danger" />
+                {tx('停下')}
+              </button>
+            )}
+            {t && t.kind !== 'action' && (t.stage === 'person/failed' || (t.stage === 'ended' && t.ended?.outcome === 'stopped')) && (
+              <button
+                type="button"
+                disabled={retry.isPending}
+                onClick={() => retry.mutate()}
+                className="press inline-flex h-[30px] items-center gap-1 rounded-full border border-line bg-card px-3 text-[12px] font-medium text-fg hover:bg-sunken disabled:opacity-50"
+              >
+                <RotateCcw size={12} />
+                {tx('重试')}
+              </button>
+            )}
+            <button
+              type="button"
+              aria-label={tx('关闭')}
+              title={tx('关闭')}
+              onClick={() => openTask(null)}
+              className="press flex size-[30px] items-center justify-center rounded-full bg-sunken text-muted hover:text-fg"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
-        <IconButton label={tx('关闭')} onClick={() => openTask(null)}><X size={18} /></IconButton>
-      </div>
-      {t && <div className="flex flex-wrap gap-1.5 border-b border-line px-5 py-2.5 empty:hidden">
-        {t.conversationId && <Button size="sm" variant="secondary" onClick={() => { go(`/c/${t.conversationId}`); openTask(null) }}>{tx('回到对话')}</Button>}
-        {t.stage !== 'ended' && <Button size="sm" variant="ghost" onClick={() => { if (confirm(tx('停下「{0}」？', t.title))) stop.mutate() }}><Square size={12} />{tx('停下')}</Button>}
-      </div>}
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {t?.proactive && t.why && <div className="mb-4 flex gap-2 rounded-2xl bg-accent-soft px-3.5 py-3 text-sm text-pretty"><Sparkles size={15} className="mt-0.5 shrink-0 text-accent" />{tx('没人找我，是按你的主动策略做的：{0}', t.why)}</div>}
-        {report && report.status !== 'progress' && report.summary && <section className="mb-5">
-          <h3 className="eyebrow mb-2">{report.status === 'ready' ? tx('结果') : tx('最新情况')}</h3>
-          <div className="prose-chat rounded-2xl bg-sunken px-4 py-3 text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{report.summary}</ReactMarkdown></div>
-        </section>}
-        {d?.files && d.files.length > 0 && <section className="mb-5">
-          <h3 className="eyebrow mb-2">{tx('文件')}</h3>
-          <div className="flex flex-wrap items-start gap-2">{d.files.map(f => <FileChip key={f.id} {...f} />)}</div>
-        </section>}
-        <h3 className="eyebrow mb-2">{tx('我做了什么')}</h3>
-        {!steps.length && <div className="text-sm text-faint">{working ? tx('刚开始…') : tx('还没有步骤')}</div>}
-        <ol className="relative space-y-0.5 before:absolute before:top-3 before:bottom-3 before:left-[22px] before:w-px before:bg-line">{steps.map(s => <Step key={s.id} step={s} />)}</ol>
-        {working && <div className="mt-2 flex items-center gap-1.5 text-xs text-faint"><Loader2 size={12} className="animate-spin" />{tx('进行中')}</div>}
-        {d && d.jobs.length > 0 && <div className="mt-3 text-xs text-faint">{tx('后台还在运行 {0} 个命令', d.jobs.length)}</div>}
+
+        {/* Split-Pane Body */}
+        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+          {/* Left Timeline Column (252px) */}
+          <div className="flex max-h-[185px] w-full shrink-0 flex-col gap-1 overflow-y-auto border-b border-line bg-[#fafafa] p-3.5 sm:max-h-none sm:w-[252px] sm:border-r sm:border-b-0 dark:bg-[#111114]">
+            {nodes.map(n => {
+              const selected = n.id === activeNode?.id
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(n.id)
+                    setUserPicked(true)
+                  }}
+                  className={cx(
+                    'flex w-full items-start gap-2.5 rounded-[12px] px-3 py-2 text-left text-[12.5px] leading-[17px] transition-colors',
+                    selected
+                      ? 'bg-[#ebebeb] font-medium text-fg dark:bg-[#25262c]'
+                      : 'text-muted hover:bg-sunken hover:text-fg',
+                  )}
+                >
+                  {n.kind === 'start' ? (
+                    <span className="mt-[4px] flex size-[15px] shrink-0 items-center justify-center">
+                      <span className="size-[5px] rounded-full bg-muted" />
+                    </span>
+                  ) : n.kind === 'end' ? (
+                    n.completed ? (
+                      <span className="mt-[1px] flex size-[15px] shrink-0 items-center justify-center rounded-full bg-fg text-bg">
+                        <Check size={10} strokeWidth={3} />
+                      </span>
+                    ) : (
+                      <XCircle size={15} className="mt-[1px] shrink-0 text-danger" />
+                    )
+                  ) : n.status === 'running' ? (
+                    <Loader2 size={15} className="mt-[1px] shrink-0 animate-spin text-[#2656c7] dark:text-[#78aef2]" />
+                  ) : n.status === 'failed' ? (
+                    <XCircle size={15} className={cx('mt-[1px] shrink-0', selected ? 'text-fg' : 'text-danger')} />
+                  ) : (
+                    <n.icon size={15} className="mt-[1px] shrink-0 text-muted" />
+                  )}
+                  <span className="min-w-0 flex-1 break-words">{n.title}</span>
+                </button>
+              )
+            })}
+
+            {d && d.jobs.length > 0 && (
+              <div className="mt-auto pt-2">
+                <div className="rounded-[11px] border border-[#2656c7]/30 bg-[#edf2fe] px-2.5 py-2 dark:border-[#78aef2]/30 dark:bg-[#162133]">
+                  <div className="text-[11px] font-semibold text-[#2656c7] dark:text-[#78aef2]">
+                    {tx('{0} 个后台命令持续运行中', d.jobs.length)}
+                  </div>
+                  <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted">
+                    {d.jobs[0]!.command}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Inspector Detail Column */}
+          <div className="min-w-0 flex-1 overflow-y-auto bg-card px-6 py-5 sm:px-7">
+            {!d || !activeNode ? (
+              <div className="flex h-full items-center justify-center gap-2 text-sm text-faint">
+                <Loader2 size={15} className="animate-spin" />
+                {tx('正在加载步骤详情…')}
+              </div>
+            ) : (
+              <StepDetailPane
+                node={activeNode}
+                d={d}
+                isLatestStep={isLatestStep}
+                liveWorkerText={liveWorkerText}
+                onSelectStep={stepId => {
+                  setSelectedId(stepId)
+                  setUserPicked(true)
+                }}
+              />
+            )}
+          </div>
+        </div>
       </div>
     </div>
-  </div>
-}
-
-type StepItem = { id: string; icon: LucideIcon; text: string; detail?: string; output?: string; pending?: boolean; kind: 'step' | 'note' | 'error' }
-
-function toSteps(items: TranscriptItem[], dir: string): StepItem[] {
-  // Paths read better relative to the working directory.
-  const local = (v: unknown): any => (typeof v === 'string' ? v.split(`${dir}/`).join('').split(dir).join('.') : Array.isArray(v) ? v.map(local) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, local(x)])) : v)
-  const out: StepItem[] = []
-  items.forEach((item, i) => {
-    if (item.kind === 'tool-call') {
-      const result = items.slice(i + 1).find(r => r.kind === 'tool-result' && r.callId === item.callId) as Extract<TranscriptItem, { kind: 'tool-result' }> | undefined
-      const { icon, text } = describeStep(item.tool, local(item.input))
-      out.push({ id: item.id, icon, text, detail: JSON.stringify(item.input, null, 2), ...(result ? { output: result.output } : { pending: true }), kind: 'step' })
-    } else if (item.kind === 'text' && item.text.trim()) out.push({ id: item.id, icon: MessageSquareText, text: item.text.trim().split('\n')[0]!.slice(0, 140), detail: item.text, kind: 'note' })
-    else if (item.kind === 'marker' && item.type === 'error') out.push({ id: item.id, icon: AlertTriangle, text: tx('出错：{0}', item.message ?? ''), kind: 'error' })
-  })
-  return out
-}
-
-function Step({ step }: { step: StepItem }) {
-  // 显示原始记录 (设置 → 数据和隐私): each call opens with its raw input and output.
-  const [open, setOpen] = useState(() => getPrefs().showRaw && step.kind === 'step')
-  return <li>
-    <button onClick={() => setOpen(v => !v)} aria-expanded={open} className={cx('relative flex w-full items-start gap-2.5 rounded-xl px-2 py-1.5 text-left text-sm hover:bg-sunken', step.kind === 'error' && 'text-danger', step.kind === 'note' && 'text-muted')}>
-      <span className={cx('flex size-6 shrink-0 items-center justify-center rounded-lg border border-line bg-panel', step.kind === 'error' ? 'text-danger' : 'text-muted')}><step.icon size={13} /></span>
-      <span className="min-w-0 flex-1 py-0.5 break-words">{step.text}</span>
-      {step.pending && <Loader2 size={12} className="mt-1 shrink-0 animate-spin text-faint" />}
-    </button>
-    {open && (step.detail || step.output) && <div className="anim-fade mb-2 space-y-1.5 pl-11">
-      {step.kind === 'note' ? <div className="prose-chat text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{step.detail!}</ReactMarkdown></div>
-        : <pre className="overflow-x-auto rounded-lg bg-sunken px-3 py-2 font-mono text-[11px] whitespace-pre-wrap text-muted">{step.detail}</pre>}
-      {step.output && <pre className="max-h-72 overflow-auto rounded-lg border border-line px-3 py-2 font-mono text-[11px] whitespace-pre-wrap">{step.output}</pre>}
-    </div>}
-  </li>
+  )
 }
 
 /** A delivered file: images show as themselves; anything else opens a preview in place. */
