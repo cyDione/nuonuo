@@ -1,7 +1,6 @@
-// A terminal chat client built on @nuonuo/client: streams the answer as it is written.
-//   node chat.mjs pair http://192.168.1.5:7420 K7QF-2M9D      (saves the token to ./.nuonuo-device.json)
-//   node chat.mjs
-// Run from the repo with tsx (the SDK is TypeScript source): pnpm dlx tsx examples/clients/chat.mjs
+// A terminal chat client built on @nuonuo/client (unified /v1 protocol with auto-rotating refresh tokens).
+//   pnpm dlx tsx examples/clients/chat.mjs pair http://127.0.0.1:7420 K7QF-2M9D
+//   pnpm dlx tsx examples/clients/chat.mjs
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline/promises'
 import { NuonuoClient } from '../../packages/client/src/index.ts'
@@ -10,14 +9,20 @@ const FILE = '.nuonuo-device.json'
 const [cmd, url, code] = process.argv.slice(2)
 
 if (cmd === 'pair') {
-  const { token, device } = await NuonuoClient.pair(url, code, { name: `终端 ${process.env.USER ?? ''}`.trim(), kind: 'desktop', platform: process.platform })
-  writeFileSync(FILE, JSON.stringify({ baseUrl: url, token }), { mode: 0o600 })
-  console.log(`已配对：${device.name}（${device.id}）`)
+  const bundle = await NuonuoClient.pair(url, code, { name: `终端 ${process.env.USER ?? ''}`.trim(), kind: 'cli', platform: process.platform })
+  writeFileSync(FILE, JSON.stringify({ baseUrl: url, accessToken: bundle.accessToken, refreshToken: bundle.refreshToken }), { mode: 0o600 })
+  console.log(`已配对：${bundle.device.name}（${bundle.device.id}）`)
   process.exit(0)
 }
-if (!existsSync(FILE)) { console.log('先运行：node chat.mjs pair <地址> <配对码>'); process.exit(2) }
+if (!existsSync(FILE)) { console.log('先运行：tsx examples/clients/chat.mjs pair <地址> <配对码>'); process.exit(2) }
 
-const nuonuo = new NuonuoClient(JSON.parse(readFileSync(FILE, 'utf8')))
+const saved = JSON.parse(readFileSync(FILE, 'utf8'))
+const nuonuo = new NuonuoClient({
+  ...saved,
+  onTokensUpdated: bundle => {
+    writeFileSync(FILE, JSON.stringify({ baseUrl: saved.baseUrl, accessToken: bundle.accessToken, refreshToken: bundle.refreshToken }), { mode: 0o600 })
+  },
+})
 const hello = await nuonuo.hello()
 console.log(`已连上 ${hello.assistant.name}（服务 ${hello.server.version}，协议 ${hello.protocol}）。输入消息，Ctrl+C 退出。`)
 
@@ -25,7 +30,7 @@ let shown = ''
 ;(async () => {
   for await (const e of nuonuo.events({ conversation: 'main' })) {
     if (e.type === 'reply.delta') { process.stdout.write(e.text.slice(shown.length)); shown = e.text }
-    if (e.type === 'message' && e.op === 'created' && e.message.role === 'assistant') {
+    if (e.type === 'message' && e.op === 'created' && e.message?.role === 'assistant') {
       process.stdout.write(shown ? '\n' : `${e.message.text}\n`)
       shown = ''
     }

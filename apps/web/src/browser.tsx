@@ -17,6 +17,7 @@ import {
   type BrowsersOverview,
   type OpenPageItem,
 } from './api'
+import { authedFetch } from './connection'
 import { tx } from './i18n'
 import { cx } from './ui'
 
@@ -109,6 +110,7 @@ function LiveScreenshot({
 
   useEffect(() => {
     let cancelled = false
+    let prevObjectUrl: string | null = null
     setShownSrc(null)
     const st = { busy: false, wantImmediate: false, seq: 0, timer: 0 as ReturnType<typeof setTimeout> | 0 }
 
@@ -118,18 +120,25 @@ function LiveScreenshot({
       st.busy = true
       st.wantImmediate = false
       const sep = srcBase.includes('?') ? '&' : '?'
-      const url = `${srcBase}${sep}t=${Date.now()}_${++st.seq}`
-      const pre = new window.Image()
-      const done = (ok: boolean) => {
-        if (cancelled) return
-        st.busy = false
-        if (ok) setShownSrc(url)
-        clearTimeout(st.timer)
-        st.timer = setTimeout(loadNext, st.wantImmediate ? 40 : intervalMs)
-      }
-      pre.onload = () => done(true)
-      pre.onerror = () => done(false)
-      pre.src = url
+      const path = `${srcBase}${sep}t=${Date.now()}_${++st.seq}`
+      void authedFetch(path, { cache: 'no-store' })
+        .then(async res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const blob = await res.blob()
+          if (cancelled) return
+          const nextUrl = URL.createObjectURL(blob)
+          const old = prevObjectUrl
+          prevObjectUrl = nextUrl
+          setShownSrc(nextUrl)
+          if (old) URL.revokeObjectURL(old)
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (cancelled) return
+          st.busy = false
+          clearTimeout(st.timer)
+          st.timer = setTimeout(loadNext, st.wantImmediate ? 40 : intervalMs)
+        })
     }
 
     kickRef.current = () => {
@@ -150,6 +159,7 @@ function LiveScreenshot({
       cancelled = true
       clearTimeout(st.timer)
       document.removeEventListener('visibilitychange', onVis)
+      if (prevObjectUrl) URL.revokeObjectURL(prevObjectUrl)
     }
   }, [srcBase, intervalMs])
 
@@ -374,7 +384,7 @@ export function BrowserPaneTab() {
           )}
         >
           <LiveScreenshot
-            srcBase={`/api/browsers/screenshot?key=${encodeURIComponent(active.key)}`}
+            srcBase={`/browsers/screenshot?key=${encodeURIComponent(active.key)}`}
             intervalMs={2_000}
             alt={activeTitle}
             className="block size-full object-cover object-top select-none"
@@ -869,8 +879,8 @@ export function BrowserTakeoverModal({
   }
 
   const screenshotBase = isDesktopRoot && computerId
-    ? `/api/computers/${encodeURIComponent(computerId)}/desktop/screenshot`
-    : `/api/browsers/screenshot?key=${encodeURIComponent(activeKey)}`
+    ? `/computers/${encodeURIComponent(computerId)}/desktop/screenshot`
+    : `/browsers/screenshot?key=${encodeURIComponent(activeKey)}`
 
   return (
     <div

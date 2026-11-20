@@ -9,6 +9,8 @@ import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, type Artifact, type Conversation } from './api'
+import { AuthedImage, AuthedPdfFrame, openAuthedLink } from './AuthedMedia'
+import { authedFetch } from './connection'
 import { go } from './route'
 import { locale, tx } from './i18n'
 
@@ -25,11 +27,11 @@ export function previewKind(name: string): PreviewKind {
   return 'none'
 }
 
-const url = (id: string) => `/api/artifacts/${id}`
+const artifactPath = (id: string) => `/artifacts/${id}`
 
 function useText(id: string, enabled: boolean) {
   return useQuery({ queryKey: ['artifact-text', id], enabled, staleTime: 60_000, queryFn: async () => {
-    const res = await fetch(url(id), { credentials: 'same-origin' })
+    const res = await authedFetch(artifactPath(id))
     if (!res.ok) throw new Error(res.status === 404 ? tx('文件已不存在') : tx('读取失败（{0}）', res.status))
     return res.text()
   } })
@@ -54,8 +56,8 @@ function parseCsv(text: string, sep: string): string[][] {
 export function ArtifactBody({ id, name }: { id: string; name: string }) {
   const kind = previewKind(name)
   const text = useText(id, ['markdown', 'csv', 'html', 'text'].includes(kind))
-  if (kind === 'image') return <img src={url(id)} alt={name} className="mx-auto max-h-[70vh] rounded-lg" />
-  if (kind === 'pdf') return <iframe src={url(id)} title={name} className="h-[75vh] w-full rounded-lg border border-line" />
+  if (kind === 'image') return <AuthedImage src={artifactPath(id)} alt={name} className="mx-auto max-h-[70vh] rounded-lg" />
+  if (kind === 'pdf') return <AuthedPdfFrame path={artifactPath(id)} title={name} className="h-[75vh] w-full rounded-lg border border-line" />
   if (kind === 'none') return <p className="py-10 text-center text-sm text-muted">{tx('这种文件没法在这里预览，可以下载后打开。')}</p>
   if (text.error) return <p className="py-10 text-center text-sm text-danger">{(text.error as Error).message}</p>
   if (!text.data) return <p className="py-10 text-center text-sm text-faint">{tx('读取中…')}</p>
@@ -105,8 +107,8 @@ export function ArtifactModal({ id, name, onClose }: { id: string; name: string;
       <div className="border-b border-line px-5 py-3">
         <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate font-display font-semibold">{name}</span>
-          <a href={url(id)} target="_blank" rel="noreferrer" className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title={tx('新窗口打开')} aria-label={tx('新窗口打开')}><ExternalLink size={16} /></a>
-          <a href={`${url(id)}?download=1`} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title={tx('下载')} aria-label={tx('下载')}><Download size={16} /></a>
+          <button type="button" onClick={() => void openAuthedLink(artifactPath(id))} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title={tx('新窗口打开')} aria-label={tx('新窗口打开')}><ExternalLink size={16} /></button>
+          <button type="button" onClick={() => void openAuthedLink(artifactPath(id), { download: true })} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" title={tx('下载')} aria-label={tx('下载')}><Download size={16} /></button>
           <button onClick={onClose} className="press rounded-full p-2 text-faint hover:bg-sunken hover:text-fg" aria-label={tx('关闭')}><X size={18} /></button>
         </div>
         <Source id={id} onGo={onClose} />

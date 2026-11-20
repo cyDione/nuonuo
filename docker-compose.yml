@@ -1,0 +1,15 @@
+services:
+  nuonuo:
+    build: .
+    container_name: nuonuo-server
+    restart: unless-stopped
+    ports:
+      - "${NUONUO_PORT:-7420}:7420"
+    environment:
+      NUONUO_HOST: "0.0.0.0"
+      NUONUO_PORT: "7420"
+      # 设为 1 开启服务端内置 WebUI；默认 0 为纯 Headless API 服务
+      NUONUO_WEB: "${NUONUO_WEB:-0}"
+      NUONUO_SECRETS: "file"
+    volumes:
+      - "${NUONUO_DATA_DIR:-~/.nuonuo}:/data"

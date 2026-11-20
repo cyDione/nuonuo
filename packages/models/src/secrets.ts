@@ -179,17 +179,12 @@ export async function openSecretStore(
   const fileStore = () => new FileSecrets(secretsDir)
   if (prefer === 'file') return { store: fileStore(), note: 'NUONUO_SECRETS=file' }
   if (platform === 'darwin' && prefer !== 'keychain') {
-    const note = 'macOS 上默认用加密文件，避免钥匙串每次启动都要密码（NUONUO_SECRETS=keychain 可改回）'
-    if (
-      prefer !== 'migrate-keychain' &&
-      (existsSync(join(secretsDir, 'secrets.enc')) ||
-        existsSync(join(secretsDir, 'migrated.json')) ||
-        !existsSync(join(home, 'state.db')))
-    ) {
+    const note = 'macOS 上默认用加密文件，避免钥匙串每次启动都要密码（NUONUO_SECRETS=keychain 可改回，NUONUO_SECRETS=migrate-keychain 可迁移旧钥匙串密钥）'
+    if (prefer !== 'migrate-keychain') {
       return { store: fileStore(), note }
     }
     try {
-      // No probe here: writing a probe item another binary created would itself ask for the password.
+      // Explicit opt-in migration only: no probe here, as writing a probe item another binary created would ask for the password.
       const { Entry } = await loadKeyring()
       return { store: new KeychainMigratingSecrets(fileStore(), new KeychainSecrets(Entry, false)), note }
     } catch { return { store: fileStore(), note } }

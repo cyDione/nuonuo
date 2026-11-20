@@ -10,10 +10,49 @@ import { tx } from './i18n'
 
 /** The desktop app's own settings (设置 → 通用 · 快捷键). */
 export interface DesktopPrefs { tray: boolean; close: 'hide' | 'quit'; summon: string; quick: string; openAtLogin: boolean; registered: { summon?: boolean; quick?: boolean } }
-interface DesktopBridge { isDesktop: true; platform: string; setBadge?(n: number): void; on?(event: string, fn: (value: unknown) => void): void; quick?(action: 'hide' | 'open', hash?: string): void
-  prefs?: { get(): Promise<DesktopPrefs>; set(patch: Partial<Omit<DesktopPrefs, 'registered'>>): Promise<DesktopPrefs> }; reveal?(path: string): Promise<string>; pickFolder?(): Promise<string | undefined>
-  update?: { install(): Promise<string> } }
-export const desktop = (window as { nuonuoDesktop?: DesktopBridge }).nuonuoDesktop
+export interface LocalDeployDetect {
+  platform: string
+  daemonRunning: { pid: number; host: string; port: number; web: boolean } | null
+  hasCli: boolean
+  cliPath: string | null
+  hasNode: boolean
+  nodeVersion: string | null
+  hasDocker: boolean
+  dockerRunning: boolean
+}
+export interface LocalDeployResult {
+  ok: boolean
+  serverUrl?: string
+  pairCode?: string
+  error?: string
+}
+interface DesktopBridge {
+  isDesktop: true
+  platform: string
+  setBadge?(n: number): void
+  on?(event: string, fn: (value: unknown) => void): void
+  quick?(action: 'hide' | 'open', hash?: string): void
+  prefs?: { get(): Promise<DesktopPrefs>; set(patch: Partial<Omit<DesktopPrefs, 'registered'>>): Promise<DesktopPrefs> }
+  reveal?(path: string): Promise<string>
+  pickFolder?(): Promise<string | undefined>
+  update?: { install(): Promise<string> }
+  vault?: {
+    list(): Promise<{ profiles: any[]; activeId: string | null; encryptionAvailable: boolean }>
+    save(profile: any, refreshToken?: string): Promise<void>
+    getRefreshToken(profileId: string): Promise<string | undefined>
+    setActive(profileId: string | null): Promise<void>
+    remove(profileId: string): Promise<void>
+    setActiveSession?(session: { id: string; baseUrl: string; accessToken: string } | null): Promise<void>
+  }
+  deploy?: {
+    detect(): Promise<LocalDeployDetect>
+    startLocal(opts?: { web?: boolean; host?: string; port?: number }): Promise<LocalDeployResult>
+    startDocker(opts?: { web?: boolean; port?: number }): Promise<LocalDeployResult>
+    stopLocal(): Promise<{ ok: boolean }>
+    onLog(fn: (line: string) => void): () => void
+  }
+}
+export const desktop = typeof window !== 'undefined' ? (window as { nuonuoDesktop?: DesktopBridge }).nuonuoDesktop : undefined
 export const isMacDesktop = desktop?.platform === 'darwin'
 
 // ── Pane sizes, remembered per device ───────────────────────────────────────

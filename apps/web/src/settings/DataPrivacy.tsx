@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type Health, type PrivacySettings } from '../api'
+import { authedFetch } from '../connection'
 import { desktop, isMacDesktop } from '../shell'
 import { setPrefs, usePrefs } from '../prefs'
 import { Btn, Page, Row, Section, SelectInput, Toggle } from './kit'
@@ -26,10 +27,21 @@ export function DataPrivacy() {
   const clearChats = useMutation({ mutationFn: () => api.del<{ removed: number }>('/conversations'),
     onSuccess: r => { setDone(tx('清掉了 {0} 条聊天记录。', r?.removed ?? 0)); qc.invalidateQueries() } })
   const reveal = async () => {
-    if (!health) return
+    if (!health?.home) return
     if (desktop?.reveal) { await desktop.reveal(health.home); return }
     await navigator.clipboard?.writeText(health.home).catch(() => {})
     setCopied(true)
+  }
+  const exportData = async () => {
+    const res = await authedFetch('/export')
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `nuonuo-export-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
   }
   return <Page title={tx('数据和隐私')}>
     <Section title={tx('存在哪里')}>
@@ -49,7 +61,7 @@ export function DataPrivacy() {
     <RawRecords />
     <Section title={tx('导出和清除')} foot={done ?? tx('清除之后不能恢复。想留一份，先导出。')}>
       <Row label={tx('导出全部数据')} sub={tx('聊天、记忆、目标、动态、定时任务和做过的事，一个 JSON 文件；不含 API key')}>
-        <a href="/api/export" download className="inline-flex h-[28px] items-center rounded-[8px] border border-line bg-card px-3 text-[13px] font-medium hover:border-faint">{tx('导出')}</a>
+        <Btn onClick={() => void exportData()}>{tx('导出')}</Btn>
       </Row>
       <Row label={tx('清除全部记忆')} sub={tx('它记得的关于你的事，包括等你确认的')}>
         <Btn tone="danger" disabled={clearMemories.isPending} onClick={() => { if (confirm(tx('清除它记得的全部内容？不能恢复。'))) clearMemories.mutate() }}>{tx('清除')}</Btn>

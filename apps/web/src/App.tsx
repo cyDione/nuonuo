@@ -3,6 +3,8 @@ import { Inbox, Menu } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, ApiError, type Health } from './api'
 import { Chat } from './Chat'
+import { Connect } from './Connect'
+import { bootstrapConnection, isInsecureRemoteUrl, openConnectionCenter, useConnection } from './connection'
 import { go, useRoute } from './route'
 import { Settings } from './settings/Settings'
 import { Sidebar, StatusDot } from './Sidebar'
@@ -24,8 +26,15 @@ import { tx } from './i18n'
 
 export function App() {
   const route = useRoute()
+  const conn = useConnection()
   useDesktopChrome()
-  const health = useQuery({ queryKey: ['health'], queryFn: () => api.get<Health>('/health'), refetchInterval: 30_000 })
+  useEffect(() => { void bootstrapConnection() }, [])
+  const health = useQuery({
+    queryKey: ['health', conn.activeProfileId, conn.baseUrl],
+    queryFn: () => api.get<Health>('/health'),
+    enabled: conn.status === 'ready',
+    refetchInterval: 30_000,
+  })
   const [nav, setNav] = useState(false)
   // Going somewhere else closes the activity panel and any open task.
   useEffect(() => {
@@ -33,14 +42,22 @@ export function App() {
     // Old links to 它 (#/me) open the right pane on 它是谁 over the main chat.
     if (route.page === 'me') { go('/'); setPaneTab('who'); setTimeout(() => openPane(true), 60) }
   }, [JSON.stringify(route)])
-  useWaitingLink(route.page === 'waiting')
+  useWaitingLink(route.page === 'waiting' && conn.status === 'ready')
 
-  const authed = health.isSuccess
-  if (health.error instanceof ApiError && health.error.status === 401) return <Login />
+  if (conn.status === 'booting') return <Splash />
+  if (conn.status === 'unauthenticated' || (health.error instanceof ApiError && health.error.status === 401)) return <Connect />
+  if (conn.status === 'offline') return <Offline message={conn.error || tx('服务端当前不可达')} />
   if (health.isPending) return <Splash />
   if (health.error) return <Offline message={health.error.message} />
 
-  return <Shell authed={authed}>{route.page === 'quick' ? <QuickAsk /> : <Layout route={route} nav={nav} setNav={setNav} />}</Shell>
+  const authed = health.isSuccess
+  const insecure = isInsecureRemoteUrl(conn.baseUrl)
+  return <Shell authed={authed}>
+    {insecure && <div className="flex items-center justify-center gap-2 bg-warn-soft px-3 py-1 text-[11px] text-warn">
+      <span>{tx('当前通过非加密 HTTP 连接远程服务（{0}），生产环境请改用 HTTPS 或 Tailscale。', conn.baseUrl)}</span>
+    </div>}
+    {route.page === 'quick' ? <QuickAsk /> : <Layout route={route} nav={nav} setNav={setNav} />}
+  </Shell>
 }
 
 function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; nav: boolean; setNav(v: boolean): void }) {
@@ -82,7 +99,7 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
  * that chat, where its card is; otherwise the main chat with the right pane on 活动, where 等你点头 is on top.
  */
 function useWaitingLink(active: boolean) {
-  const tickets = useTickets()
+  const tickets = useTickets(active)
   useEffect(() => {
     if (!active || !tickets.data) return
     const first = tickets.data.tickets.filter(needsOwner).sort((a, b) => b.updatedAt - a.updatedAt)[0]
@@ -130,7 +147,7 @@ function Shell({ authed, children }: { authed: boolean; children: React.ReactNod
 function Splash() {
   return <div className="flex h-dvh flex-col items-center justify-center gap-4 text-sm text-muted">
     <Mascot color={BRAND} size={72} mood="thinking" />
-    <span className="anim-fade">{tx('正在连接本机服务…')}</span>
+    <span className="anim-fade">{tx('正在连接服务…')}</span>
   </div>
 }
 
@@ -141,20 +158,15 @@ function Centered({ children }: { children: React.ReactNode }) {
   </div>
 }
 
-function Login() {
-  return <Centered>
-    <div className="flex justify-center"><Mascot color={BRAND} size={88} mood="waiting" track /></div>
-    <h1 className="font-display text-2xl font-semibold text-balance">{tx('先打个招呼')}</h1>
-    <p className="text-sm text-pretty text-muted">{tx('Nuonuo 只接受带访问令牌的请求。在终端运行下面的命令，打开它输出的链接：')}</p>
-    <pre className="rounded-2xl bg-ink px-4 py-3 text-left font-mono text-sm text-ink-fg">nuonuo token</pre>
-  </Centered>
-}
-
 function Offline({ message }: { message: string }) {
   return <Centered>
     <div className="flex justify-center"><Mascot color={BRAND} size={88} mood="sleepy" /></div>
-    <h1 className="font-display text-2xl font-semibold text-balance">{tx('连不上本机服务')}</h1>
-    <p className="text-sm text-pretty text-muted">{tx('请确认')} <code className="rounded bg-sunken px-1.5 py-0.5 font-mono">nuonuo start</code> {tx('正在运行。')}</p>
+    <h1 className="font-display text-2xl font-semibold text-balance">{tx('暂时连不上服务')}</h1>
+    <p className="text-sm text-pretty text-muted">{tx('请确认目标 Nuonuo 服务端正在运行，或切换到其他服务地址。')}</p>
     <p className="text-xs break-words text-faint">{message}</p>
+    <div className="flex justify-center gap-2 pt-2">
+      <button type="button" onClick={() => location.reload()} className="press h-9 rounded-xl border border-line bg-sunken px-4 text-xs font-medium hover:border-faint">{tx('重试连接')}</button>
+      <button type="button" onClick={openConnectionCenter} className="press h-9 rounded-xl bg-ink px-4 text-xs font-medium text-ink-fg">{tx('切换服务 / 重新认证')}</button>
+    </div>
   </Centered>
 }

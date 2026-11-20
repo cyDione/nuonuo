@@ -7,7 +7,8 @@ import { Skills, skillsExtension, accessExtension, LocalAccess, LocalApps, local
 import { Effects, kvGet, kvSet, openStore, type Store } from '@nuonuo/db'
 import { BUILT_IN_PLUGINS, hadHeatedTurn, MOOD_PLUGIN_ID, recordMoodStop } from '@nuonuo/plugins'
 import { computerExtension, Computers, githubKind, PluginManager, Routines, routinesKind, runApproved, SourceRegistry } from '@nuonuo/sources'
-import { Devices } from './clients'
+import { AuthService } from './auth-service'
+import { PasskeyService } from './passkey'
 import { DECISION_KINDS, EnvAwareSecrets, ModelError, ModelHub, openSecretStore, type SecretStore } from '@nuonuo/models'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
@@ -49,15 +50,17 @@ export interface Runtime {
   plugins: PluginManager
   computers: Computers
   mcp: McpManager
-  /** Paired client devices (client protocol). */
-  devices: Devices
+  /** Unified v1 authentication & rotating session service. */
+  auth: AuthService
+  /** WebAuthn / Passkey service. */
+  passkeys: PasskeyService
   /** Starts agent turns: recovery of interrupted sessions and anything queued. */
   startAgents(): void
   startedAt: number
   close(): Promise<void>
 }
 
-export interface LockInfo { pid: number; port: number; startedAt: number; host?: string; desktop?: boolean }
+export interface LockInfo { pid: number; port: number; startedAt: number; host?: string; web?: boolean }
 
 export function readLock(home: string): LockInfo | undefined {
   const file = join(home, 'daemon.json')
@@ -78,11 +81,11 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
   if (options.lock !== false) {
     const running = readLock(config.home)
     if (running && running.pid !== process.pid) throw new Error(`另一个 nuonuo 正在运行（pid ${running.pid}，端口 ${running.port}）`)
-    writeFileSync(lockFile, JSON.stringify({ pid: process.pid, port: config.port, host: config.host, desktop: config.desktop, startedAt: Date.now() }))
+    writeFileSync(lockFile, JSON.stringify({ pid: process.pid, port: config.port, host: config.host, web: config.web, startedAt: Date.now() }))
   }
+  const { store: base, note } = await openSecretStore(config.home)
   const store = openStore(join(config.home, 'state.db'))
   try {
-    const { store: base, note } = await openSecretStore(config.home)
     const secrets = new EnvAwareSecrets(base)
     const hub = new ModelHub(store, secrets)
     await bootstrapModels(hub)
@@ -237,10 +240,12 @@ export async function createRuntime(config: DaemonConfig, options: { lock?: bool
     let watchdogTimer: NodeJS.Timeout | undefined
     let memoryTimer: NodeJS.Timeout | undefined
     let ideasTimer: NodeJS.Timeout | undefined
+    const auth = new AuthService(store)
+    const passkeys = new PasskeyService(auth)
     const browserPath = await findBrowser()
     return {
       ...(browserPath ? { browserPath } : {}),
-      config, store, secrets, access, uploadsDir, skills, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, computers, mcp, devices: new Devices(store), startedAt: Date.now(),
+      config, store, secrets, access, uploadsDir, skills, ...(note ? { secretsNote: note } : {}), hub, effects, bus, agents, engine, sources, routines, reviewer, memory, distiller, instructions, goals, feed, ideas, notices, screener, watchdog, browser, plugins, computers, mcp, auth, passkeys, startedAt: Date.now(),
       startAgents() {
         engine.mainConversation()
         agents.recover(session => engine.recoveryNote(session.id, session.role))

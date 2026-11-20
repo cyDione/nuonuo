@@ -20,9 +20,12 @@ export const REPO = 'cyDione/nuonuo'
 /** NUONUO_UPDATE_API points the check at another server with the same API (used by tests). */
 const api = (env: NodeJS.ProcessEnv) => (env.NUONUO_UPDATE_API || `https://api.github.com/repos/${REPO}`).replace(/\/$/, '')
 
-/** The release file for this machine: the headless tar.gz on Linux, the installer for the desktop app. */
+/** The release file for this machine: the standalone server tar.gz on Linux/macOS, or the installer for the desktop app. */
 export function assetPattern(desktop: boolean, platform: NodeJS.Platform = process.platform, arch: string = process.arch): RegExp {
-  if (!desktop) return new RegExp(`^nuonuo-.+-linux-${arch}\\.tar\\.gz$`)
+  if (!desktop) {
+    const serverOs = platform === 'darwin' ? 'darwin' : 'linux'
+    return new RegExp(`^nuonuo-.+-${serverOs}-${arch}\\.tar\\.gz$`)
+  }
   const os = platform === 'darwin' ? 'mac' : platform === 'win32' ? 'win' : 'linux'
   return new RegExp(`^nuonuo-.+-${os}-${arch}[.-]`)
 }
@@ -234,7 +237,7 @@ export class Updater {
     if (this.run?.state === 'running') this.run = { ...this.run, log: tail(join(this.opts.home, 'logs/update.log')) }
     return {
       current: VERSION, install: this.install.kind,
-      canUpdate: this.install.kind === 'package' ? process.platform === 'linux' : this.install.kind === 'desktop' && this.desktopCanUpdate(),
+      canUpdate: this.install.kind === 'package' ? (this.platform === 'linux' || this.platform === 'darwin') : this.install.kind === 'desktop' && this.desktopCanUpdate(),
       checkedAt: this.checkedAt, latest: this.latest, available, checkError: this.checkError, run: this.run, download: this.download, hint, prefs: this.prefs,
     }
   }
@@ -267,7 +270,7 @@ export class Updater {
    */
   async prepare(): Promise<{ tag: string; script: string; env: NodeJS.ProcessEnv }> {
     if (this.install.kind !== 'package') throw new Error(this.status().hint)
-    if (process.platform !== 'linux') throw new Error('自动更新目前只支持 Linux 安装包')
+    if (this.platform !== 'linux' && this.platform !== 'darwin') throw new Error('自动更新目前只支持 Linux / macOS 服务端安装包')
     const prefix = this.install.prefix
     const status = await this.check()
     if (!status.latest) throw new Error(status.checkError ?? '读不到最新版本')
@@ -279,7 +282,7 @@ export class Updater {
       if (existsSync(bundled)) return readFileSync(bundled, 'utf8')
       throw error
     })
-    return { tag, script, env: { ...this.env, ...(token ? { GITHUB_TOKEN: token } : {}), NUONUO_PREFIX: prefix, NUONUO_VERSION: tag } }
+    return { tag, script, env: { ...this.env, ...(token ? { GITHUB_TOKEN: token } : {}), NUONUO_COMPONENT: 'server', NUONUO_PREFIX: prefix, NUONUO_VERSION: tag } }
   }
 
   /**

@@ -1,9 +1,9 @@
 """A minimal Python client for Nuonuo's client protocol v1 (docs/11-client-protocol.md). Standard library only, so it
 runs on a Raspberry Pi, in Home Assistant's python_script, or anywhere with Python 3.8+.
 
-    python3 nuonuo_client.py pair http://192.168.1.5:7420 K7QF-2M9D 客厅音箱 speaker   # prints the token
-    NUONUO_URL=http://192.168.1.5:7420 NUONUO_DEVICE_TOKEN=nnd_… python3 nuonuo_client.py ask "明天要带伞吗？"
-    NUONUO_URL=… NUONUO_DEVICE_TOKEN=… python3 nuonuo_client.py events
+    python3 nuonuo_client.py pair http://127.0.0.1:7420 K7QF-2M9D 客厅音箱 speaker   # prints accessToken & refreshToken
+    NUONUO_URL=http://127.0.0.1:7420 NUONUO_ACCESS_TOKEN=nna_… python3 nuonuo_client.py ask "明天要带伞吗？"
+    NUONUO_URL=… NUONUO_ACCESS_TOKEN=… python3 nuonuo_client.py events
 """
 import json
 import os
@@ -43,7 +43,7 @@ def _request(method, url, token=None, body=None, timeout=30):
 
 class NuonuoClient:
     def __init__(self, base_url, token):
-        self.base = base_url.rstrip("/") + "/client/v1"
+        self.base = base_url.rstrip("/") + "/v1"
         self.token = token
 
     @staticmethod
@@ -51,7 +51,7 @@ class NuonuoClient:
         device = {"name": name, "kind": kind}
         if display:
             device["display"] = display
-        return _request("POST", base_url.rstrip("/") + "/client/v1/pair", body={"code": code, "device": device})
+        return _request("POST", base_url.rstrip("/") + "/v1/auth/pair/exchange", body={"code": code, "device": device})
 
     def hello(self):
         return _request("GET", self.base + "/hello", self.token)
@@ -101,9 +101,9 @@ if __name__ == "__main__":
     if args[:1] == ["pair"] and len(args) >= 3:
         print(json.dumps(NuonuoClient.pair(args[1], args[2], args[3] if len(args) > 3 else "python", args[4] if len(args) > 4 else "bot"), ensure_ascii=False, indent=2))
     elif args[:1] == ["ask"] and len(args) == 2:
-        print(NuonuoClient(os.environ["NUONUO_URL"], os.environ["NUONUO_DEVICE_TOKEN"]).ask(args[1])["text"])
+        print(NuonuoClient(os.environ["NUONUO_URL"], os.environ["NUONUO_ACCESS_TOKEN"]).ask(args[1])["text"])
     elif args[:1] == ["events"]:
-        for name, payload in NuonuoClient(os.environ["NUONUO_URL"], os.environ["NUONUO_DEVICE_TOKEN"]).events():
+        for name, payload in NuonuoClient(os.environ["NUONUO_URL"], os.environ["NUONUO_ACCESS_TOKEN"]).events():
             print(name, json.dumps(payload, ensure_ascii=False))
     else:
         print(__doc__)

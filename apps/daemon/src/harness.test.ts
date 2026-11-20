@@ -146,6 +146,29 @@ describe('harness guardrails', () => {
     })
   })
 
+  describe('decoupled client-server architecture guardrails', () => {
+    it('forbids legacy /api/ paths and native EventSource in apps/web/src', () => {
+      const legacyApi = /['"`]\/api\//
+      const nativeEventSource = /\bnew\s+EventSource\s*\(/
+      const violations: string[] = []
+      for (const file of walkSourceFiles(WEB_SRC)) {
+        const src = readFileSync(file, 'utf8')
+        if (legacyApi.test(src)) violations.push(`${file.slice(REPO_ROOT.length + 1)}: legacy /api/ path`)
+        if (nativeEventSource.test(src)) violations.push(`${file.slice(REPO_ROOT.length + 1)}: native EventSource (use streamAuthedSSE)`)
+      }
+      expect(violations).toEqual([])
+    })
+
+    it('keeps apps/desktop as a thin client without bundled daemon or node runtimes', () => {
+      const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'apps/desktop/package.json'), 'utf8')) as {
+        build?: { extraResources?: { from?: string; to?: string }[] }
+      }
+      const resources = pkg.build?.extraResources ?? []
+      expect(resources.some(r => r.to === 'daemon' || r.to === 'node')).toBe(false)
+      expect(resources.some(r => r.to === 'web')).toBe(true)
+    })
+  })
+
   describe('agent tool boundaries and prompt consistency', () => {
     it('enforces no shell/fs/web execution tools on router and aligns core prompt tool names', async () => {
       const store = openStore(':memory:')

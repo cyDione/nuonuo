@@ -4,7 +4,7 @@
   "version": "0.3.12",
   "license": "MIT",
   "private": true,
-  "description": "Nuonuo desktop app for macOS and Windows: window, tray, notifications, global shortcut, with its own Node.js and service",
+  "description": "Nuonuo thin desktop client for macOS, Windows, and Linux: connects remotely or deploys locally on demand",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
@@ -21,7 +21,12 @@
     "appId": "dev.nuonuo.desktop",
     "productName": "Nuonuo",
     "publish": null,
-    "afterPack": "scripts/after-pack.cjs",
+    "protocols": [
+      {
+        "name": "Nuonuo Pairing",
+        "schemes": ["nuonuo"]
+      }
+    ],
     "files": [
       "main.cjs",
       "preload.cjs",
@@ -31,12 +36,8 @@
     ],
     "extraResources": [
       {
-        "from": ".stage/daemon",
-        "to": "daemon"
-      },
-      {
-        "from": ".stage/node",
-        "to": "node"
+        "from": ".stage/web",
+        "to": "web"
       }
     ],
     "mac": {

@@ -351,4 +351,57 @@ export const MIGRATIONS: readonly string[] = [
   /* 12: a job's process id, so a restart can stop commands the previous process left behind */ `
   ALTER TABLE jobs ADD COLUMN pid INTEGER;
   `,
+  /* 13: unified v1 authentication (devices, rotating refresh sessions, WebAuthn passkeys, auth audit) */ `
+  CREATE TABLE auth_devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    platform TEXT,
+    display TEXT NOT NULL DEFAULT 'full',
+    scopes TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER,
+    revoked_at INTEGER
+  );
+  CREATE TABLE auth_sessions (
+    id TEXT PRIMARY KEY,
+    family_id TEXT NOT NULL,
+    device_id TEXT NOT NULL REFERENCES auth_devices(id) ON DELETE CASCADE,
+    refresh_hash TEXT NOT NULL,
+    retired_hashes TEXT NOT NULL DEFAULT '[]',
+    access_version INTEGER NOT NULL DEFAULT 1,
+    expires_at INTEGER NOT NULL,
+    rotated_at INTEGER,
+    revoked_at INTEGER,
+    revoke_reason TEXT,
+    ip TEXT,
+    user_agent TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX auth_sessions_device ON auth_sessions(device_id, revoked_at);
+  CREATE INDEX auth_sessions_family ON auth_sessions(family_id);
+  CREATE INDEX auth_sessions_refresh ON auth_sessions(refresh_hash);
+  CREATE TABLE auth_passkeys (
+    id TEXT PRIMARY KEY,
+    credential_id TEXT NOT NULL UNIQUE,
+    public_key TEXT NOT NULL,
+    counter INTEGER NOT NULL DEFAULT 0,
+    transports TEXT NOT NULL DEFAULT '[]',
+    device_type TEXT,
+    backed_up INTEGER NOT NULL DEFAULT 0,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER
+  );
+  CREATE TABLE auth_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    event TEXT NOT NULL,
+    device_id TEXT,
+    session_id TEXT,
+    ip TEXT,
+    detail TEXT
+  );
+  CREATE INDEX auth_audit_at ON auth_audit(at);
+  `,
 ]

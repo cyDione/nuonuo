@@ -3,9 +3,10 @@
  * service, who may open the web version, and health (the watchdog and the environment check).
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check as CheckIcon, Copy, Download, RefreshCw } from 'lucide-react'
+import { Check as CheckIcon, Copy, Download, Fingerprint, KeyRound, LogOut, QrCode, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api, type AccessStatus, type Check, type Health, type UpdatePrefs, type UpdateStatus } from '../api'
+import { disconnectCurrent, isPasskeyBrowserSupported, openConnectionCenter, registerPasskey, useConnection } from '../connection'
 import { BRAND, Mascot } from '../persona'
 import { Btn, Choice, Foot, NumberInput, Page, Row, Section, TextInput, Toggle } from './kit'
 import { tx } from '../i18n'
@@ -17,14 +18,138 @@ const uptime = (ms: number) => { const m = Math.round(ms / 60_000); return m < 6
 export function System() {
   const health = useQuery({ queryKey: ['health'], queryFn: () => api.get<Health>('/health') }).data
   return <Page title={tx('系统和更新')}>
+    <ConnectionCard />
     <Updates />
     {health && <Section title={tx('服务')}>
       <Service health={health} />
-      <Row label={tx('密钥存储')}><span className="text-[13px] text-muted">{health.secrets === 'keychain' ? tx('系统钥匙串') : tx('加密文件')}</span></Row>
+      {health.secrets && <Row label={tx('密钥存储')}><span className="text-[13px] text-muted">{health.secrets === 'keychain' ? tx('系统钥匙串') : tx('加密文件')}</span></Row>}
     </Section>}
+    <AuthSecuritySection />
     <Access />
     <Healthy />
   </Page>
+}
+
+function ConnectionCard() {
+  const conn = useConnection()
+  const active = conn.profiles.find(p => p.id === conn.activeProfileId)
+  return <Section title={tx('当前连接')}>
+    <Row label={active?.name || tx('当前服务')} sub={<span className="font-mono">{conn.baseUrl || location.origin}</span>}>
+      <Btn onClick={openConnectionCenter}><Server size={13} />{tx('切换服务')}</Btn>
+      <Btn onClick={() => void disconnectCurrent(true)}><LogOut size={13} />{tx('退出登录')}</Btn>
+    </Row>
+  </Section>
+}
+
+function AuthSecuritySection() {
+  const qc = useQueryClient()
+  const status = useQuery({ queryKey: ['auth-status'], queryFn: () => api.get<{ hasPassword: boolean; passkeyCount: number; activeDevices: number; activeSessions: number }>('/auth/status'), retry: false }).data
+  const devices = useQuery({ queryKey: ['auth-devices'], queryFn: () => api.get<{ devices: { id: string; name: string; kind: string; scopes: string[]; lastSeenAt: number | null }[] }>('/devices'), retry: false }).data?.devices ?? []
+  const passkeys = useQuery({ queryKey: ['auth-passkeys'], queryFn: () => api.get<{ passkeys: { id: string; name: string; createdAt: number; lastUsedAt: number | null }[] }>('/auth/passkeys'), retry: false }).data?.passkeys ?? []
+
+  const [pairAdmin, setPairAdmin] = useState(true)
+  const [pairName, setPairName] = useState('')
+  const [pairResult, setPairResult] = useState<{ code: string; uri: string; qrSvg: string; expiresAt: number } | null>(null)
+  const [copiedUri, setCopiedUri] = useState(false)
+  const makePair = useMutation({
+    mutationFn: () => api.post<{ code: string; uri: string; qrSvg: string; expiresAt: number }>('/auth/pair/codes', {
+      admin: pairAdmin,
+      ...(!pairAdmin ? { scopes: ['chat', 'notices', 'approvals'] } : {}),
+      ...(pairName.trim() ? { name: pairName.trim() } : {}),
+    }),
+    onSuccess: data => setPairResult(data),
+  })
+
+  const [pw, setPw] = useState('')
+  const [curPw, setCurPw] = useState('')
+  const [pwMsg, setPwMsg] = useState<string | null>(null)
+  const savePw = useMutation({
+    mutationFn: () => api.post('/auth/password', { password: pw, ...(status?.hasPassword ? { currentPassword: curPw } : {}) }),
+    onSuccess: () => { setPw(''); setCurPw(''); setPwMsg(tx('密码已保存')); void qc.invalidateQueries({ queryKey: ['auth-status'] }) },
+  })
+  const clearPw = useMutation({
+    mutationFn: () => api.del('/auth/password'),
+    onSuccess: () => { setPwMsg(tx('已关闭密码登录')); void qc.invalidateQueries({ queryKey: ['auth-status'] }) },
+  })
+
+  const [pkName, setPkName] = useState('')
+  const [pkErr, setPkErr] = useState<string | null>(null)
+  const addPasskey = async () => {
+    setPkErr(null)
+    try {
+      await registerPasskey(pkName.trim() || tx('我的 Passkey'))
+      setPkName('')
+      void qc.invalidateQueries({ queryKey: ['auth-passkeys'] })
+      void qc.invalidateQueries({ queryKey: ['auth-status'] })
+    } catch (e) {
+      setPkErr((e as Error).message)
+    }
+  }
+  const delPasskey = useMutation({
+    mutationFn: (id: string) => api.del(`/auth/passkeys/${encodeURIComponent(id)}`),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['auth-passkeys'] }); void qc.invalidateQueries({ queryKey: ['auth-status'] }) },
+  })
+  const revokeDevice = useMutation({
+    mutationFn: (id: string) => api.del(`/devices/${encodeURIComponent(id)}`),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['auth-devices'] }); void qc.invalidateQueries({ queryKey: ['auth-status'] }) },
+  })
+
+  return <>
+    <Section title={tx('配对与二维码接入')} foot={makePair.error ? <span className="text-danger">{(makePair.error as Error).message}</span> : tx('配对码 10 分钟内有效且仅能使用一次；新设备扫码或粘贴连接串后即可安全换取独立轮换令牌。')}>
+      <Row label={tx('权限级别')} sub={pairAdmin ? tx('完整管理权限（桌面端 / Web 管理端）') : tx('轻量设备权限（对话 + 通知 + 审批，不含系统设置）')}>
+        <Choice label={tx('权限级别')} value={pairAdmin ? 'admin' : 'client'} onChange={v => setPairAdmin(v === 'admin')}
+          options={[{ id: 'admin', label: tx('管理端') }, { id: 'client', label: tx('轻量设备') }]} />
+      </Row>
+      <Row label={tx('设备备注（可选）')}>
+        <TextInput value={pairName} onChange={e => setPairName(e.target.value)} placeholder={tx('例如：iPad / 手机')} />
+        <Btn tone="ink" onClick={() => makePair.mutate()} disabled={makePair.isPending}><QrCode size={13} />{tx('生成配对码')}</Btn>
+      </Row>
+      {pairResult && <div className="flex flex-col items-center gap-3 px-4 py-4 sm:flex-row sm:items-start">
+        <div className="shrink-0 overflow-hidden rounded-2xl border border-line bg-white p-2" dangerouslySetInnerHTML={{ __html: pairResult.qrSvg }} />
+        <div className="min-w-0 flex-1 space-y-2 text-center sm:text-left">
+          <div className="font-mono text-2xl font-bold tracking-[0.18em]">{pairResult.code}</div>
+          <p className="font-mono text-[11px] break-all text-muted">{pairResult.uri}</p>
+          <div className="flex justify-center gap-2 sm:justify-start">
+            <Btn onClick={async () => { await navigator.clipboard.writeText(pairResult.uri); setCopiedUri(true); setTimeout(() => setCopiedUri(false), 1500) }}>
+              {copiedUri ? <CheckIcon size={13} /> : <Copy size={13} />}{copiedUri ? tx('已复制') : tx('复制连接串')}
+            </Btn>
+          </div>
+        </div>
+      </div>}
+    </Section>
+
+    <Section title={tx('密码与 Passkey 登录')} foot={savePw.error ? <span className="text-danger">{(savePw.error as Error).message}</span> : pkErr ? <span className="text-danger">{pkErr}</span> : pwMsg ?? undefined}>
+      <div className="space-y-2.5 px-4 py-3">
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium text-fg">{tx('Owner 登录密码')}</div>
+          <div className="mt-0.5 text-xs text-muted">{status?.hasPassword ? tx('已设置（scrypt 哈希存储，防爆破限速）') : tx('未设置，设置后可在公网浏览器用密码直接登录')}</div>
+        </div>
+        <form
+          onSubmit={e => { e.preventDefault(); if (pw.length >= 8 && !savePw.isPending) savePw.mutate() }}
+          className="flex flex-wrap items-center gap-2"
+        >
+          {status?.hasPassword && <TextInput id="nuonuo-current-password" name="current-password" autoComplete="current-password" type="password" value={curPw} onChange={e => setCurPw(e.target.value)} placeholder={tx('当前密码')} className="w-40" />}
+          <TextInput id="nuonuo-new-password" name="new-password" autoComplete="new-password" type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder={tx('新密码（≥8位）')} className="w-44" />
+          <Btn type="submit" tone="ink" disabled={pw.length < 8 || savePw.isPending}><KeyRound size={13} />{tx('保存')}</Btn>
+          {status?.hasPassword && <Btn type="button" onClick={() => clearPw.mutate()} disabled={clearPw.isPending}>{tx('关闭')}</Btn>}
+        </form>
+      </div>
+      <Row label="Passkey" sub={isPasskeyBrowserSupported() ? tx('使用指纹、面容或安全密钥无密码登录（需 HTTPS 或 localhost）') : tx('当前来源不支持 WebAuthn Passkey')}>
+        <TextInput id="nuonuo-passkey-name" name="passkey-name" value={pkName} onChange={e => setPkName(e.target.value)} placeholder={tx('例如：Mac Touch ID')} className="w-36" />
+        <Btn disabled={!isPasskeyBrowserSupported()} onClick={() => void addPasskey()}><Fingerprint size={13} />{tx('添加 Passkey')}</Btn>
+      </Row>
+      {passkeys.map(k => <Row key={k.id} label={k.name} sub={tx('绑定于 {0}', new Date(k.createdAt).toLocaleDateString())}>
+        <Btn onClick={() => delPasskey.mutate(k.id)}><Trash2 size={13} />{tx('移除')}</Btn>
+      </Row>)}
+    </Section>
+
+    <Section title={tx('已认证设备 ({0})', devices.length)}>
+      {devices.length === 0 && <Row label={tx('暂无其他已认证设备')} />}
+      {devices.map(d => <Row key={d.id} label={`${d.name} (${d.kind})`} sub={tx('权限：{0}{1}', d.scopes.join(', '), d.lastSeenAt ? tx(' · 上次活跃 {0}', new Date(d.lastSeenAt).toLocaleString()) : '')}>
+        <Btn onClick={() => revokeDevice.mutate(d.id)} disabled={revokeDevice.isPending}><Trash2 size={13} />{tx('吊销')}</Btn>
+      </Row>)}
+    </Section>
+  </>
 }
 
 /** The header card and 更新: checked by the service twice a day; a package install can update itself and restart. */
@@ -122,7 +247,7 @@ function Service({ health }: { health: Health }) {
   const access = useQuery({ queryKey: ['access'], queryFn: () => api.get<AccessStatus>('/system/access'), retry: false }).data
   const [restarting, setRestarting] = useState(false)
   const restart = useMutation({ mutationFn: () => api.post('/system/restart'), onSuccess: () => { setRestarting(true); setTimeout(() => location.reload(), 4000) } })
-  return <Row label={tx('本机服务')} sub={restart.error ? <span className="text-danger">{(restart.error as Error).message}</span> : tx('{0} · pid {1} · 已运行 {2}', restarting ? tx('正在重启') : tx('运行中'), health.pid, uptime(health.uptimeMs))}>
+  return <Row label={tx('服务端进程')} sub={restart.error ? <span className="text-danger">{(restart.error as Error).message}</span> : tx('{0} · pid {1} · 已运行 {2}', restarting ? tx('正在重启') : tx('运行中'), health.pid ?? '-', uptime(health.uptimeMs))}>
     {access?.canRestart ? <Btn onClick={() => restart.mutate()} disabled={restart.isPending || restarting}><RefreshCw size={13} className={restarting ? 'animate-spin' : ''} />{tx('重启服务')}</Btn>
       : <span className="text-xs text-faint">{tx('重启：nuonuo restart')}</span>}
   </Row>
@@ -147,7 +272,7 @@ function Access() {
   const save = useMutation({
     mutationFn: () => {
       const host = form!.mode === 'local' ? '127.0.0.1' : form!.mode === 'lan' ? '0.0.0.0' : form!.host.trim()
-      return api.put<AccessStatus>('/system/access', { host, port: Number(form!.port), ...(s?.desktop ? { web: form!.web } : {}) })
+      return api.put<AccessStatus>('/system/access', { host, port: Number(form!.port), web: form!.web })
     },
     onSuccess: data => qc.setQueryData(['access'], data),
   })
@@ -156,47 +281,36 @@ function Access() {
     mutationFn: () => api.post('/system/restart'),
     onSuccess: () => {
       setRestarting(true)
-      const target = s!.saved
-      const host = target.host === '0.0.0.0' || target.host === '::' ? location.hostname : target.host
-      const moved = String(target.port) !== location.port || (host !== location.hostname && !['127.0.0.1', 'localhost'].includes(host))
-      const isDesktop = Boolean((window as { nuonuoDesktop?: unknown }).nuonuoDesktop)
-      setTimeout(() => {
-        if (moved && !isDesktop) location.href = `http://${host.includes(':') ? `[${host}]` : host}:${target.port}/`
-        else location.reload()
-      }, 4000)
+      setTimeout(() => location.reload(), 4000)
     },
   })
   if (!s || !form) return null
   const host = form.mode === 'local' ? '127.0.0.1' : form.mode === 'lan' ? '0.0.0.0' : form.host.trim()
-  const dirty = host !== s.saved.host || form.port !== String(s.saved.port) || (s.desktop && form.web !== s.saved.web)
-  const overridden = (['host', 'port'] as const).filter(k => s.sources[k] === 'flag' || s.sources[k] === 'env')
-  return <Section title={tx('谁能打开网页版')} foot={<>
-    {form.mode !== 'local' && tx('选局域网时，同一网络的手机、电脑用登录链接就能打开；登录链接就是密码，别直接放到公网上（远程访问请用 HTTPS 反向代理或 SSH 隧道）。')}
-    {overridden.length > 0 && <span className="block text-warn">{tx('{0}，这里存的值要去掉它之后才生效。', overridden.map(k => tx('{0}由{1}指定', k === 'host' ? tx('地址') : tx('端口'), SOURCE[s.sources[k]])).join('，'))}</span>}
+  const dirty = host !== s.saved.host || form.port !== String(s.saved.port) || form.web !== s.saved.web
+  const overridden = (['host', 'port', 'web'] as const).filter(k => s.sources[k] === 'flag' || s.sources[k] === 'env')
+  return <Section title={tx('服务端网络与 WebUI')} foot={<>
+    {tx('服务端默认以纯 API 模式运行；可通过 nuonuo start --web 或开启上方开关托管内置网页界面。公网访问请配合 HTTPS 反向代理或 Tailscale。')}
+    {overridden.length > 0 && <span className="block text-warn">{tx('{0}，这里存的值要去掉它之后才生效。', overridden.map(k => tx('{0}由{1}指定', k === 'host' ? tx('地址') : k === 'port' ? tx('端口') : 'WebUI', SOURCE[s.sources[k]])).join('，'))}</span>}
     {(save.error || restart.error) && <span className="block text-danger">{((save.error ?? restart.error) as Error).message}</span>}
   </>}>
-    {s.desktop && <Row label={tx('允许在浏览器里打开')} sub={tx('关掉时只有这个应用能用')}><Toggle label={tx('允许在浏览器里打开')} checked={form.web} onChange={web => setForm({ ...form, web })} /></Row>}
-    {(!s.desktop || form.web) && <>
-      <Row label={tx('访问')}>
-        <Choice label={tx('访问')} value={form.mode} onChange={mode => setForm({ ...form, mode })} options={[{ id: 'local', label: tx('仅本机') }, { id: 'lan', label: tx('局域网') }, { id: 'custom', label: tx('指定 IP') }]} />
-      </Row>
-      {form.mode === 'custom' && <Row label={tx('IP 地址')}><TextInput className="font-mono" value={form.host} placeholder="192.168.1.20" onChange={e => setForm({ ...form, host: e.target.value })} /></Row>}
-      <Row label={tx('端口')}><NumberInput value={form.port} onChange={e => setForm({ ...form, port: e.target.value.replace(/\D/g, '') })} aria-label={tx('端口')} className="w-[90px] font-mono" /></Row>
-    </>}
+    <Row label={tx('开启服务端 WebUI')} sub={tx('关闭时仅提供 /v1 API（默认关闭）')}><Toggle label={tx('开启服务端 WebUI')} checked={form.web} onChange={web => setForm({ ...form, web })} /></Row>
+    <Row label={tx('监听范围')}>
+      <Choice label={tx('监听范围')} value={form.mode} onChange={mode => setForm({ ...form, mode })} options={[{ id: 'local', label: tx('仅本机') }, { id: 'lan', label: tx('局域网') }, { id: 'custom', label: tx('指定 IP') }]} />
+    </Row>
+    {form.mode === 'custom' && <Row label={tx('IP 地址')}><TextInput className="font-mono" value={form.host} placeholder="192.168.1.20" onChange={e => setForm({ ...form, host: e.target.value })} /></Row>}
+    <Row label={tx('端口')}><NumberInput value={form.port} onChange={e => setForm({ ...form, port: e.target.value.replace(/\D/g, '') })} aria-label={tx('端口')} className="w-[90px] font-mono" /></Row>
     {(dirty || s.restartNeeded) && <Row label={dirty ? tx('还没保存') : restarting ? tx('正在重启…') : tx('已保存，重启服务后生效')}>
       {dirty && <Btn tone="ink" onClick={() => save.mutate()} disabled={save.isPending || !form.port || (form.mode === 'custom' && !form.host.trim())}>{tx('保存')}</Btn>}
       {!dirty && s.restartNeeded && (s.canRestart ? <Btn onClick={() => restart.mutate()} disabled={restart.isPending || restarting}>{tx('重启服务')}</Btn> : <span className="text-xs text-faint">nuonuo restart</span>)}
     </Row>}
-    {s.running.web && <>
-      <LinkRow label={tx('本机')} url={s.localUrl} />
-      {s.networkUrls.map(u => <LinkRow key={u} label={tx('局域网')} url={u} />)}
-    </>}
+    <LinkRow label={tx('本机地址')} url={s.localUrl} />
+    {s.networkUrls.map(u => <LinkRow key={u} label={tx('局域网地址')} url={u} />)}
   </Section>
 }
 
 function LinkRow({ label, url }: { label: string; url: string }) {
   const [copied, setCopied] = useState(false)
-  return <Row label={tx('登录链接 · {0}', label)} sub={<span className="font-mono break-all">{url.replace(/token=.*/, 'token=••••••')}</span>}>
+  return <Row label={label} sub={<span className="font-mono break-all">{url}</span>}>
     <Btn onClick={async () => { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>{copied ? <CheckIcon size={13} /> : <Copy size={13} />}{copied ? tx('已复制') : tx('复制')}</Btn>
   </Row>
 }

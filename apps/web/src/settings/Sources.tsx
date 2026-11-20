@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronLeft, Copy, ExternalLink, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type FieldSpec, type ProactiveSettings, type SourceAction, type SourceInfo } from '../api'
+import { authedFetch } from '../connection'
 import { SourceIcon } from '../icons'
 import { Area, Block, Btn, Foot, NumberInput, Page, Row, SaveBar, Section, SelectInput, TextInput, Toggle } from './kit'
 import { locale, tx } from '../i18n'
@@ -113,7 +114,7 @@ function SourceDetail({ s }: { s: SourceInfo }) {
 /** Calls an action endpoint; alerts and returns undefined on an error. */
 async function runAction(id: string, a: SourceAction): Promise<Record<string, any> | undefined> {
   if (a.confirm && !confirm(a.confirm)) return undefined
-  const res = await fetch(`/api/sources/${id}/http/${a.path}`, { method: 'POST', credentials: 'same-origin' })
+  const res = await authedFetch(`/sources/${id}/http/${a.path}`, { method: 'POST' })
   const data = await res.json().catch(async () => ({ error: await res.text() }))
   if (!res.ok || data.error) { alert(data.error?.message ?? data.error ?? `${res.status}`); return undefined }
   return data
@@ -129,7 +130,7 @@ function Authorization({ s, onDone }: { s: SourceInfo; onDone(): void }) {
   useEffect(() => {
     if (!device) return
     const timer = setInterval(async () => {
-      const data = await fetch(`/api/sources/${s.id}/http/${device.poll}`, { credentials: 'same-origin' }).then(r => r.json()).catch(() => undefined) as { status: string; error?: string } | undefined
+      const data = await authedFetch(`/sources/${s.id}/http/${device.poll}`).then(r => r.json()).catch(() => undefined) as { status: string; error?: string } | undefined
       if (data?.status === 'done') { setDevice(undefined); onDone() }
       else if (data?.status === 'error') { setDevice(undefined); setError(data.error ?? tx('授权失败')) }
     }, 2_000)

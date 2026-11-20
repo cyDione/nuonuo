@@ -13,10 +13,10 @@
 - `packages/sources` — 来源/渠道协议、GitHub、Routines、插件沙箱、云电脑共用层（→ `db`, `models`, `agent-runtime`, `core`）
 - `packages/plugin-sdk` — 第三方插件 SDK（→ `core`, `sources`）
 - `packages/plugins` — 内置渠道与心境插件（→ `db`, `models`, `agent-runtime`, `core`, `sources`, `plugin-sdk`）
-- `packages/client` — `/client/v1` 配对设备独立 TypeScript SDK（无内部依赖）
-- `apps/daemon` — 组合根：Hono HTTP API、SSE、CLI（→ 全部 `@nuonuo/*`）
-- `apps/web` — React 19 + Vite + Tailwind CSS 4 前端（零 `@nuonuo/*` 依赖）
-- `apps/desktop` — Electron 桌面壳与 daemon 生命周期托管（零 `@nuonuo/*` 依赖）
+- `packages/client` — 统一公开协议 `/v1/*` 独立 TypeScript SDK（无内部依赖）
+- `apps/daemon` — 独立服务端：统一 `/v1/*` HTTP API + RBAC 认证内核（配对码/QR、scrypt 密码、WebAuthn Passkey、轮换 Refresh Token）、SSE、CLI，默认纯 Headless 模式（加 `--web` / `NUONUO_WEB=1` 开启内置 WebUI）（→ 全部 `@nuonuo/*`）
+- `apps/web` — React 19 + Vite + Tailwind CSS 4 解耦前端（零 `@nuonuo/*` 依赖；统一通过 `connection.ts` 走 `/v1/*` + Bearer + `fetch` SSE，严禁硬编码 `/api/` 或原生 `EventSource`）
+- `apps/desktop` — 轻量 Electron 纯客户端（零 `@nuonuo/*` 依赖，不打包 daemon 与 Node.js；内置 `web` 静态包、`safeStorage` 加密多服务凭据库、扫码/配对与按需本机/Docker 一键部署）
 
 ## 2. 不可突破的架构红线
 

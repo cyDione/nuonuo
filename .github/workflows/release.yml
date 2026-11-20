@@ -113,18 +113,18 @@ jobs:
       - name: Package
         run: bash scripts/package-linux.sh ${{ matrix.arch }}
 
-      - name: Smoke test the package (background start on all interfaces, stop)
+      - name: Smoke test the package (headless default + --web flag + /v1 pairing)
         run: |
           mkdir -p "$RUNNER_TEMP/pkg"
           tar -xzf dist/nuonuo-*-linux-${{ matrix.arch }}.tar.gz -C "$RUNNER_TEMP/pkg"
           bin="$(echo "$RUNNER_TEMP"/pkg/*/bin/nuonuo)"
           export NUONUO_HOME="$RUNNER_TEMP/home" NUONUO_SECRETS=file
-          "$bin" start -d --host 0.0.0.0 --port 7431
-          token="$(cat "$NUONUO_HOME/token")"
-          curl -fsS -H "authorization: Bearer $token" http://127.0.0.1:7431/api/health
-          lan="$(hostname -I | awk '{print $1}')"
-          curl -fsS -o /dev/null -H "authorization: Bearer $token" "http://$lan:7431/api/health"
+          "$bin" start -d --host 0.0.0.0 --port 7431 --web
+          key="$(cat "$NUONUO_HOME/local-admin.key")"
+          curl -fsS http://127.0.0.1:7431/v1/auth/methods
+          curl -fsS -H "x-nuonuo-local-admin: $key" http://127.0.0.1:7431/v1/health
           curl -fsS -o /dev/null http://127.0.0.1:7431/
+          "$bin" pair --admin --json
           "$bin" status
           "$bin" stop
           cat "$NUONUO_HOME/logs/daemon.log"
@@ -173,7 +173,7 @@ jobs:
       - name: Build web UI and service
         run: pnpm build
 
-      - name: Stage the service and Node.js
+      - name: Stage thin desktop web bundle
         run: node scripts/stage-desktop.mjs
 
       # A release is signed with the Developer ID certificate and notarized by Apple when these repository secrets are set
@@ -251,22 +251,25 @@ jobs:
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=4 "$app"
 
-      - name: Smoke test the bundled service
+      - name: Smoke test the thin desktop bundle
         run: |
           resources="$(find apps/desktop/dist -type d \( -path '*.app/Contents/Resources' -o -path '*-unpacked/resources' \) | head -n1)"
           [ -n "$resources" ] || { echo "no unpacked app in apps/desktop/dist"; ls -R apps/desktop/dist | head -50; exit 1; }
-          node_bin="$resources/node/node"; [ -f "$node_bin.exe" ] && node_bin="$node_bin.exe"
-          tmp="$RUNNER_TEMP"; command -v cygpath >/dev/null && tmp="$(cygpath -m "$RUNNER_TEMP")"
-          export NUONUO_HOME="$tmp/home" NUONUO_SECRETS=file
-          "$node_bin" --version
-          "$node_bin" "$resources/daemon/cli.mjs" start -d --desktop --port 7432
-          token="$(cat "$NUONUO_HOME/token")"
-          curl -fsS -H "authorization: Bearer $token" http://127.0.0.1:7432/api/health
-          # Browser access is off by default in the desktop app; its window is let in.
-          test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:7432/auth?token=$token")" = 403
-          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'x-nuonuo-client: desktop' "http://127.0.0.1:7432/auth?token=$token")" = 302
-          "$node_bin" "$resources/daemon/cli.mjs" stop
-          cat "$NUONUO_HOME/logs/daemon.log"
+          test -f "$resources/web/index.html"
+          test ! -d "$resources/daemon"
+          test ! -d "$resources/node"
+
+      - name: Package and smoke test macOS standalone server CLI
+        if: matrix.os == 'mac'
+        run: |
+          bash scripts/package-linux.sh ${{ matrix.arch }} darwin
+          mkdir -p "$RUNNER_TEMP/pkg"
+          tar -xzf dist/nuonuo-*-darwin-${{ matrix.arch }}.tar.gz -C "$RUNNER_TEMP/pkg"
+          bin="$(echo "$RUNNER_TEMP"/pkg/*/bin/nuonuo)"
+          export NUONUO_HOME="$RUNNER_TEMP/home"
+          "$bin" start -d --port 7432
+          "$bin" pair --admin --json
+          "$bin" stop
 
       - uses: actions/upload-artifact@v4
         with:
@@ -275,6 +278,7 @@ jobs:
             apps/desktop/dist/nuonuo-*.dmg
             apps/desktop/dist/nuonuo-*.zip
             apps/desktop/dist/nuonuo-*-setup.exe
+            dist/nuonuo-*-darwin-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   publish:
