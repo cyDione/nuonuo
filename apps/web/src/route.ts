@@ -5,7 +5,7 @@ export const SETTINGS_TABS = ['persona', 'routines', 'sources', 'plugins', 'mcp'
   'general', 'notifications', 'voice', 'shortcuts', 'data', 'system'] as const
 export type SettingsTab = (typeof SETTINGS_TABS)[number]
 
-function parse(hash: string): Route {
+export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/')
   // Who the assistant is (性格 · 灵魂 · 记忆) lives in the right pane's 它是谁.
   if (parts[0] === 'me') return { page: 'me' }
@@ -28,9 +28,9 @@ function parse(hash: string): Route {
 }
 
 export function useRoute(): Route {
-  const [route, setRoute] = useState(() => parse(location.hash))
+  const [route, setRoute] = useState(() => parseRoute(location.hash))
   useEffect(() => {
-    const onChange = () => setRoute(parse(location.hash))
+    const onChange = () => setRoute(parseRoute(location.hash))
     addEventListener('hashchange', onChange)
     return () => removeEventListener('hashchange', onChange)
   }, [])
