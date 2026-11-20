@@ -3,6 +3,7 @@
  * show the raw tool calls. Kept in localStorage and applied to <html> as data-theme / data-accent.
  */
 import { useSyncExternalStore } from 'react'
+import { authedFetch, getConnection } from './connection'
 import { tx } from './i18n'
 
 export type Theme = 'light' | 'dark' | 'system'
@@ -101,10 +102,9 @@ export function setPrefs(patch: Partial<Prefs>, opts?: { fromServer?: boolean })
   try { localStorage.setItem(KEY, JSON.stringify(prefs)) } catch { /* private mode */ }
   applyPrefs()
   for (const l of listeners) l()
-  if (!opts?.fromServer && typeof window !== 'undefined' && typeof fetch === 'function') {
-    void fetch('/api/settings/client-prefs', {
+  if (!opts?.fromServer && typeof window !== 'undefined' && typeof fetch === 'function' && getConnection().status === 'ready') {
+    void authedFetch('/settings/client-prefs', {
       method: 'PUT',
-      credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...patch, broadcast: false }),
     }).catch(() => {})

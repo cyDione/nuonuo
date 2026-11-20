@@ -356,3 +356,58 @@ export const feed = sqliteTable('feed', {
   saved: integer('saved', { mode: 'boolean' }).notNull().default(false),
   dismissed: integer('dismissed', { mode: 'boolean' }).notNull().default(false),
 })
+
+/** Authenticated client devices (desktop, web, phone, watch, speaker, CLI, third-party apps). */
+export const authDevices = sqliteTable('auth_devices', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull(),
+  platform: text('platform'),
+  display: text('display').notNull().default('full'),
+  scopes: json<string[]>('scopes').notNull().default([]),
+  createdAt: integer('created_at').notNull(),
+  lastSeenAt: integer('last_seen_at'),
+  revokedAt: integer('revoked_at'),
+})
+
+/** Refresh token sessions with strict single-use rotation and family-wide replay revocation. */
+export const authSessions = sqliteTable('auth_sessions', {
+  id: text('id').primaryKey(),
+  familyId: text('family_id').notNull(),
+  deviceId: text('device_id').notNull(),
+  refreshHash: text('refresh_hash').notNull(),
+  retiredHashes: json<string[]>('retired_hashes').notNull().default([]),
+  accessVersion: integer('access_version').notNull().default(1),
+  expiresAt: integer('expires_at').notNull(),
+  rotatedAt: integer('rotated_at'),
+  revokedAt: integer('revoked_at'),
+  revokeReason: text('revoke_reason'),
+  ip: text('ip'),
+  userAgent: text('user_agent'),
+  createdAt: integer('created_at').notNull(),
+})
+
+/** Registered WebAuthn Passkeys for passwordless owner authentication on HTTPS / localhost. */
+export const authPasskeys = sqliteTable('auth_passkeys', {
+  id: text('id').primaryKey(),
+  credentialId: text('credential_id').notNull(),
+  publicKey: text('public_key').notNull(),
+  counter: integer('counter').notNull().default(0),
+  transports: json<string[]>('transports').notNull().default([]),
+  deviceType: text('device_type'),
+  backedUp: integer('backed_up', { mode: 'boolean' }).notNull().default(false),
+  name: text('name').notNull(),
+  createdAt: integer('created_at').notNull(),
+  lastUsedAt: integer('last_used_at'),
+})
+
+/** Security audit trail for pairing, login, refresh rotation, replay alerts, and revocations. */
+export const authAudit = sqliteTable('auth_audit', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  at: integer('at').notNull(),
+  event: text('event').notNull(),
+  deviceId: text('device_id'),
+  sessionId: text('session_id'),
+  ip: text('ip'),
+  detail: text('detail'),
+})

@@ -1,11 +1,13 @@
-/** Typed calls to the daemon's /api. The session cookie travels automatically (same origin). */
+/** Typed calls to the unified `/v1/*` API via Bearer Access Token + single-flight refresh. */
+import { authedFetch } from './connection'
+
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    method, credentials: 'same-origin',
+  const res = await authedFetch(path, {
+    method,
     headers: body === undefined ? {} : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
@@ -29,7 +31,7 @@ export async function upload(file: File, conversationId?: string): Promise<Uploa
   const form = new FormData()
   form.set('file', file)
   if (conversationId) form.set('conversation', conversationId)
-  const res = await fetch('/api/uploads', { method: 'POST', credentials: 'same-origin', body: form })
+  const res = await authedFetch('/uploads', { method: 'POST', body: form })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new ApiError(res.status, data?.error?.code ?? 'http', data?.error?.message ?? res.statusText)
   return data.upload as Upload
@@ -61,13 +63,12 @@ export interface UpdateStatus { current: string; install: 'package' | 'source' |
   /** Desktop app: the new version the service downloaded (installed by the app). */
   download?: { state: 'downloading' | 'ready' | 'failed'; tag: string; version: string; received: number; size: number; error?: string } | null }
 export interface AccessStatus {
-  desktop: boolean
   running: { host: string; port: number; web: boolean }
   saved: { host: string; port: number; web: boolean }
-  sources: { host: 'flag' | 'env' | 'file' | 'default'; port: 'flag' | 'env' | 'file' | 'default' }
+  sources: { host: 'flag' | 'env' | 'file' | 'default'; port: 'flag' | 'env' | 'file' | 'default'; web: 'flag' | 'env' | 'file' | 'default' }
   localUrl: string; networkUrls: string[]; restartNeeded: boolean; canRestart: boolean
 }
-export interface Health { ok: boolean; version: string; home: string; pid: number; uptimeMs: number; secrets: string; effects: { kind: string; pending: number; failing: number }[] }
+export interface Health { ok: boolean; version: string; protocol?: string; webUi?: boolean; home?: string; pid?: number; uptimeMs: number; secrets?: string; effects?: { kind: string; pending: number; failing: number }[] }
 
 export type Stage = 'person/approve' | 'person/answer' | 'person/blocked' | 'person/failed' | 'queued' | 'working' | 'idle' | 'ended'
 export type StepIconKind = 'file' | 'terminal' | 'web' | 'settings' | 'memory' | 'error' | 'check'

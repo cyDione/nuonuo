@@ -8,19 +8,29 @@ import { ModelHub } from '@nuonuo/models'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { schema } from '@nuonuo/db'
 import { createApp } from './app'
+import { FULL_ADMIN_SCOPES } from './auth-service'
 import { resolveConfig } from './config'
 import { createRuntime, type Runtime } from './runtime'
 
 let rt: Runtime
 let app: ReturnType<typeof createApp>
-const TOKEN = 'test-token-123456'
+let accessToken = ''
+const LOCAL_KEY = 'test-local-admin-key-123456'
 const base = 'http://127.0.0.1:7420'
-const headers = { host: '127.0.0.1:7420', authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }
-const call = (path: string, init: RequestInit = {}) => app.request(`${base}${path}`, { ...init, headers: { ...headers, ...(init.headers as object) } })
+const call = (path: string, init: RequestInit = {}) => app.request(`${base}${path}`, {
+  ...init,
+  headers: {
+    host: '127.0.0.1:7420',
+    authorization: `Bearer ${accessToken}`,
+    'content-type': 'application/json',
+    ...(init.headers as object),
+  },
+})
 
 beforeEach(async () => {
   process.env.NUONUO_HOME = mkdtempSync(join(tmpdir(), 'sa-home-'))
   process.env.NUONUO_SECRETS = 'file'
+  delete process.env.NUONUO_WEB
   rt = await createRuntime(resolveConfig({ port: 7420 }), { lock: false })
   // Swap in a hub whose models are scripted mocks, keeping the runtime's store and secrets.
   const script = (opts: any) => {
@@ -33,156 +43,158 @@ beforeEach(async () => {
   rt.hub = new ModelHub(rt.store, rt.secrets, { language: () => model, embedding: () => { throw new Error('unused') } })
   ;(rt.agents as any).hub = rt.hub
   ;(rt.engine as any).runtime = rt.agents
-  app = createApp(rt, TOKEN)
+  accessToken = rt.auth.issueDeviceSession({ name: 'test-admin', kind: 'desktop' }, FULL_ADMIN_SCOPES, {}, 'test').accessToken
+  app = createApp(rt, LOCAL_KEY)
 })
 afterEach(async () => { await rt.close() })
 
-describe('access control', () => {
-  it('refuses a missing token, a foreign Host and a foreign Origin', async () => {
-    expect((await app.request(`${base}/api/health`, { headers: { host: '127.0.0.1:7420' } })).status).toBe(401)
-    expect((await call('/api/health', { headers: { host: 'evil.example:7420' } })).status).toBe(403)
-    expect((await call('/api/health', { headers: { origin: 'https://evil.example' } })).status).toBe(403)
-    expect((await call('/api/health')).status).toBe(200)
+describe('access control & headless WebUI gate', () => {
+  it('requires Bearer auth on /v1 endpoints, allows CORS for decoupled clients, and blocks WebUI unless --web is on', async () => {
+    expect((await app.request(`${base}/v1/health`)).status).toBe(401)
+    expect((await app.request(`${base}/v1/auth/methods`)).status).toBe(200)
+    const ok = await call('/v1/health', { headers: { origin: 'app://nuonuo' } })
+    expect(ok.status).toBe(200)
+    expect(ok.headers.get('access-control-allow-origin')).toBe('*')
+    expect(ok.headers.get('access-control-allow-credentials')).toBeNull()
+    expect(ok.headers.get('x-nuonuo-protocol')).toBe('2.0')
+    // Legacy /api and /auth routes no longer exist; root WebUI is disabled by default.
+    expect((await app.request(`${base}/`)).status).toBe(404)
+    expect((await app.request(`${base}/api/health`)).status).toBe(404)
   })
-  it('accepts any Host when listening on the network, but still wants the token and a same-origin page', async () => {
-    const open = createApp(rt, TOKEN, undefined, undefined, undefined)
-    ;(rt.config as any).host = '0.0.0.0'
-    const lan = createApp(rt, TOKEN)
-    ;(rt.config as any).host = '127.0.0.1'
-    const h = { host: '192.168.1.5:7420', authorization: `Bearer ${TOKEN}` }
-    expect((await open.request('http://192.168.1.5:7420/api/health', { headers: h })).status).toBe(403)
-    expect((await lan.request('http://192.168.1.5:7420/api/health', { headers: h })).status).toBe(200)
-    expect((await lan.request('http://192.168.1.5:7420/api/health', { headers: { host: h.host } })).status).toBe(401)
-    expect((await lan.request('http://192.168.1.5:7420/api/health', { headers: { ...h, origin: 'http://192.168.1.5:7420' } })).status).toBe(200)
-    expect((await lan.request('http://192.168.1.5:7420/api/health', { headers: { ...h, origin: 'http://evil.example' } })).status).toBe(403)
+  it('enforces RBAC scope isolation between light devices and admin devices', async () => {
+    const chatOnly = rt.auth.issueDeviceSession({ name: 'Watch', kind: 'watch' }, ['chat'], {}, 'test')
+    const res1 = await app.request(`${base}/v1/conversations`, { headers: { authorization: `Bearer ${chatOnly.accessToken}` } })
+    expect(res1.status).toBe(200)
+    const res2 = await app.request(`${base}/v1/providers`, { headers: { authorization: `Bearer ${chatOnly.accessToken}` } })
+    expect(res2.status).toBe(403)
+    const res3 = await app.request(`${base}/v1/approvals`, { headers: { authorization: `Bearer ${chatOnly.accessToken}` } })
+    expect(res3.status).toBe(403)
   })
-  it('serves the desktop app only its window while browser access is off', async () => {
-    ;(rt.config as any).desktop = true
-    ;(rt.config as any).web = false
-    const desktop = createApp(rt, TOKEN)
-    expect((await desktop.request(`${base}/auth?token=${TOKEN}`, { headers: { host: '127.0.0.1:7420' } })).status).toBe(403)
-    expect((await desktop.request(`${base}/auth?token=${TOKEN}`, { headers: { host: '127.0.0.1:7420', 'x-nuonuo-client': 'desktop' } })).status).toBe(302)
-    expect((await desktop.request(`${base}/api/health`, { headers })).status).toBe(200)
+  it('saves host, port, and web toggle for the next start and reports restartNeeded', async () => {
+    const before = await (await call('/v1/system/access')).json() as any
+    expect(before).toMatchObject({ running: { host: '127.0.0.1', port: 7420, web: false }, restartNeeded: false, canRestart: false })
+    const after = await (await call('/v1/system/access', { method: 'PUT', body: JSON.stringify({ host: '0.0.0.0', port: 7500, web: true }) })).json() as any
+    expect(after).toMatchObject({ saved: { host: '0.0.0.0', port: 7500, web: true }, restartNeeded: true })
+    expect((await call('/v1/system/access', { method: 'PUT', body: JSON.stringify({ host: 'not a host' }) })).status).toBe(400)
+    expect((await call('/v1/system/restart', { method: 'POST' })).status).toBe(409)
   })
-  it('saves the listening address for the next start and says a restart is needed', async () => {
-    const before = await (await call('/api/system/access')).json() as any
-    expect(before).toMatchObject({ running: { host: '127.0.0.1', port: 7420, web: true }, restartNeeded: false, canRestart: false })
-    const after = await (await call('/api/system/access', { method: 'PUT', body: JSON.stringify({ host: '0.0.0.0', port: 7500 }) })).json() as any
-    expect(after).toMatchObject({ saved: { host: '0.0.0.0', port: 7500 }, restartNeeded: true })
-    expect((await call('/api/system/access', { method: 'PUT', body: JSON.stringify({ host: 'not a host' }) })).status).toBe(400)
-    expect((await call('/api/system/restart', { method: 'POST' })).status).toBe(409)
-  })
-  it('trades the login link for an HttpOnly cookie', async () => {
-    const res = await app.request(`${base}/auth?token=${TOKEN}`, { headers: { host: '127.0.0.1:7420' } })
-    expect(res.status).toBe(302)
-    expect(res.headers.get('set-cookie')).toMatch(/sa_token=.*HttpOnly.*SameSite=Strict/)
-    const cookie = res.headers.get('set-cookie')!.split(';')[0]!
-    expect((await app.request(`${base}/api/health`, { headers: { host: '127.0.0.1:7420', cookie } })).status).toBe(200)
+  it('issues 30s single-path resource tickets for protected uploads without exposing bearer tokens in URLs', async () => {
+    const form = new FormData()
+    form.set('file', new File(['hello'], 'hi.txt', { type: 'text/plain' }))
+    const up = await app.request(`${base}/v1/uploads`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: form })
+    expect(up.status).toBe(201)
+    const { upload } = (await up.json()) as { upload: { id: string } }
+    const ticketRes = await call('/v1/auth/resource-ticket', { method: 'POST', body: JSON.stringify({ path: `/v1/uploads/${upload.id}` }) })
+    expect(ticketRes.status).toBe(201)
+    const { ticket } = (await ticketRes.json()) as { ticket: string }
+    expect((await app.request(`${base}/v1/uploads/${upload.id}?ticket=${encodeURIComponent(ticket)}`)).status).toBe(200)
+    // Reject ticket on a different path.
+    expect((await app.request(`${base}/v1/health?ticket=${encodeURIComponent(ticket)}`)).status).toBe(401)
   })
 })
 
 describe('providers and layers', () => {
   it('creates a provider without echoing its key, configures the router layer, and validates input', async () => {
-    const created = await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'anthropic', name: 'Claude', apiKey: 'sk-ant-abcd9876' }) })).json() as any
+    const created = await (await call('/v1/providers', { method: 'POST', body: JSON.stringify({ kind: 'anthropic', name: 'Claude', apiKey: 'sk-ant-abcd9876' }) })).json() as any
     expect(created.provider).toMatchObject({ name: 'Claude', hasKey: true, keyHint: '…9876' })
     expect(JSON.stringify(created)).not.toContain('sk-ant')
-    const bad = await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai-compatible', name: 'x' }) })
+    const bad = await call('/v1/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai-compatible', name: 'x' }) })
     expect(bad.status).toBe(400)
-    const put = await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: created.provider.id, model: 'claude-sonnet-5-5' }] }) })
+    const put = await call('/v1/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: created.provider.id, model: 'claude-sonnet-5-5' }] }) })
     expect(put.status).toBe(200)
-    const roles = await (await call('/api/roles')).json() as any
+    const roles = await (await call('/v1/roles')).json() as any
     expect(roles.defaults).toMatchObject({ router: 'auto', voice: 'none', worker: 'high', subagent: 'high', reviewer: 'low', watchdog: 'low', summarizer: 'auto', filter: 'none' })
     expect(roles.resolved.router).toMatchObject({ source: 'router', effectiveReasoning: 'auto', defaultReasoning: 'auto', reasoningInfo: { supported: true, canDisable: true } })
     expect(roles.resolved.voice).toMatchObject({ source: 'router', model: { model: 'claude-sonnet-5-5' }, effectiveReasoning: 'none', defaultReasoning: 'none' })
     expect(roles.resolved.worker).toMatchObject({ source: 'router', model: { model: 'claude-sonnet-5-5' }, effectiveReasoning: 'high', defaultReasoning: 'high' })
     expect(roles.resolved.filter).toBeNull()
-    const rInfo = await (await call(`/api/models/reasoning-info?providerId=${created.provider.id}&model=gemini-4-argon-high`)).json() as any
+    const rInfo = await (await call(`/v1/models/reasoning-info?providerId=${created.provider.id}&model=gemini-4-argon-high`)).json() as any
     expect(rInfo).toEqual({ supported: false, fixedById: true, canDisable: false, levels: [] })
-    expect((await call('/api/roles/nope', { method: 'PUT', body: '{}' })).status).toBe(404)
+    expect((await call('/v1/roles/nope', { method: 'PUT', body: '{}' })).status).toBe(404)
   })
   it('lists a provider\'s models for a layer without caching, and keeps the suggestions when the list fails', async () => {
-    const gw = (await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai-compatible', name: 'gw', baseUrl: 'http://127.0.0.1:9/v1' }) })).json() as any).provider
-    const res = await call(`/api/providers/${gw.id}/models?role=reviewer`)
+    const gw = (await (await call('/v1/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai-compatible', name: 'gw', baseUrl: 'http://127.0.0.1:9/v1' }) })).json() as any).provider
+    const res = await call(`/v1/providers/${gw.id}/models?role=reviewer`)
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
     const body = await res.json() as any
     expect(body.models[0]).toBe('jev-latest')
     expect(body.error).toBeTruthy()
-    expect((await (await call(`/api/providers/${gw.id}/models?role=router`)).json() as any).models).not.toContain('jev-latest')
-    expect((await call(`/api/providers/${gw.id}/models?role=nope`)).status).toBe(400)
-    expect((await call('/api/providers/missing/models')).status).toBe(404)
+    expect((await (await call(`/v1/providers/${gw.id}/models?role=router`)).json() as any).models).not.toContain('jev-latest')
+    expect((await call(`/v1/providers/${gw.id}/models?role=nope`)).status).toBe(400)
+    expect((await call('/v1/providers/missing/models')).status).toBe(404)
   })
 })
 
 describe('conversations', () => {
   it('asks for a router model before chatting', async () => {
-    const { conversation } = await (await call('/api/conversations', { method: 'POST', body: '{}' })).json() as any
-    const res = await call(`/api/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: 'hi' }) })
-    expect(res.status).toBe(400)
+    const { conversation } = await (await call('/v1/conversations', { method: 'POST', body: '{}' })).json() as any
+    const res = await call(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: 'hi' }) })
+    expect(res.status).toBe(409)
     expect(((await res.json()) as any).error.code).toBe('no_model')
   })
 
   it('stores the message as a trigger, lets the router answer it, names the conversation and serves tasks', async () => {
-    const { provider } = await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
-    await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
-    const { conversation } = await (await call('/api/conversations', { method: 'POST', body: '{}' })).json() as any
-    const res = await call(`/api/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '在吗' }) })
+    const { provider } = await (await call('/v1/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
+    await call('/v1/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
+    const { conversation } = await (await call('/v1/conversations', { method: 'POST', body: '{}' })).json() as any
+    const res = await call(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '在吗' }) })
     expect(res.status).toBe(201)
     for (let i = 0; i < 5; i++) { await new Promise(r => setTimeout(r, 40)); await rt.agents.idle() }
-    const { messages } = await (await call(`/api/conversations/${conversation.id}/messages`)).json() as any
+    const { messages } = await (await call(`/v1/conversations/${conversation.id}/messages`)).json() as any
     expect(messages.map((m: any) => [m.role, m.content])).toEqual([['user', '在吗'], ['assistant', '你好，我在。']])
-    const usage = await (await call('/api/usage?days=1')).json() as any
+    const usage = await (await call('/v1/usage?days=1')).json() as any
     expect(usage.rows[0]).toMatchObject({ role: 'router' })
-    const list = await (await call('/api/conversations')).json() as any
+    const list = await (await call('/v1/conversations')).json() as any
     expect(list.conversations.find((c: any) => c.id === conversation.id)).toMatchObject({ title: '问候' })
-    expect((await (await call('/api/tickets')).json() as any).tickets).toEqual([])
-    expect((await call('/api/tickets/tkt_nope')).status).toBe(404)
+    expect((await (await call('/v1/tickets')).json() as any).tickets).toEqual([])
+    expect((await call('/v1/tickets/tkt_nope')).status).toBe(404)
   })
 
   it('serves 点子 and their cadence, and refuses to think them up without a model', async () => {
-    expect(await (await call('/api/ideas')).json()).toEqual({ batch: null, settings: { cadence: 'daily', hour: 7 } })
-    const put = await call('/api/settings/ideas', { method: 'PUT', body: JSON.stringify({ cadence: 'weekly' }) })
+    expect(await (await call('/v1/ideas')).json()).toEqual({ batch: null, settings: { cadence: 'daily', hour: 7 } })
+    const put = await call('/v1/settings/ideas', { method: 'PUT', body: JSON.stringify({ cadence: 'weekly' }) })
     expect(((await put.json()) as any).settings.cadence).toBe('weekly')
-    expect((await call('/api/settings/ideas', { method: 'PUT', body: JSON.stringify({ cadence: 'hourly' }) })).status).toBe(400)
-    expect((await call('/api/ideas/ida_nope/dismiss', { method: 'POST' })).status).toBe(400)
-    expect((await call('/api/ideas/refresh', { method: 'POST' })).status).toBe(400)
+    expect((await call('/v1/settings/ideas', { method: 'PUT', body: JSON.stringify({ cadence: 'hourly' }) })).status).toBe(400)
+    expect((await call('/v1/ideas/ida_nope/dismiss', { method: 'POST' })).status).toBe(400)
+    expect((await call('/v1/ideas/refresh', { method: 'POST' })).status).toBe(409)
   })
 
   it('searches the conversations and what it remembers, taking % literally', async () => {
-    const { conversation } = await (await call('/api/conversations', { method: 'POST', body: '{}' })).json() as any
+    const { conversation } = await (await call('/v1/conversations', { method: 'POST', body: '{}' })).json() as any
     rt.store.db.insert(schema.messages).values([
       { id: 'msg_a', conversationId: conversation.id, role: 'user', content: '那帮我盯着 XM6 耳机，降到 2000 以下告诉我', createdAt: 1 },
       { id: 'msg_b', conversationId: conversation.id, role: 'assistant', content: '折扣 100% 是假的', createdAt: 2 },
     ]).run()
     rt.memory.add({ kind: 'profile', text: '你更喜欢头戴式耳机，通勤用', trust: 'user', createdBy: 'owner' })
-    const found = await (await call(`/api/search?q=${encodeURIComponent('耳机')}`)).json() as any
+    const found = await (await call(`/v1/search?q=${encodeURIComponent('耳机')}`)).json() as any
     expect(found.messages.map((m: any) => m.id)).toEqual(['msg_a'])
     expect(found.memories[0].text).toContain('头戴式')
     expect(found.artifacts).toEqual([])
-    const pct = await (await call(`/api/search?q=${encodeURIComponent('0%')}`)).json() as any
+    const pct = await (await call(`/v1/search?q=${encodeURIComponent('0%')}`)).json() as any
     expect(pct.messages.map((m: any) => m.id)).toEqual(['msg_b'])
-    expect((await (await call('/api/search?q=%20')).json() as any).messages).toEqual([])
+    expect((await (await call('/v1/search?q=%20')).json() as any).messages).toEqual([])
   })
 })
 
 describe('attachments and folder access', () => {
   it('uploads a file, sends it with a quoted message, serves it and lists it for the agent', async () => {
-    const { provider } = await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
-    await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
-    const { conversation } = await (await call('/api/conversations', { method: 'POST', body: '{}' })).json() as any
+    const { provider } = await (await call('/v1/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
+    await call('/v1/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
+    const { conversation } = await (await call('/v1/conversations', { method: 'POST', body: '{}' })).json() as any
     rt.store.db.insert(schema.messages).values({ id: 'msg_q', conversationId: conversation.id, role: 'assistant', content: '周五前要交报告', createdAt: 1 }).run()
     const form = new FormData()
     form.set('file', new File([new Uint8Array([137, 80, 78, 71])], '../收据 1.png', { type: 'image/png' }))
     form.set('conversation', conversation.id)
-    const up = await app.request(`${base}/api/uploads`, { method: 'POST', body: form, headers: { host: headers.host, authorization: headers.authorization } })
+    const up = await app.request(`${base}/v1/uploads`, { method: 'POST', body: form, headers: { host: "127.0.0.1:7420", authorization: `Bearer ${accessToken}` } })
     expect(up.status).toBe(201)
     const { upload } = await up.json() as any
     expect(upload).toMatchObject({ name: '收据 1.png', mime: 'image/png', size: 4 })
-    const file = await call(`/api/uploads/${upload.id}`)
+    const file = await call(`/v1/uploads/${upload.id}`)
     expect(file.headers.get('content-type')).toBe('image/png')
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array([137, 80, 78, 71]))
-    expect((await call(`/api/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '' }) })).status).toBe(400)
-    const res = await call(`/api/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '看看这个', attachments: [upload.id], quote: 'msg_q' }) })
+    expect((await call(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '' }) })).status).toBe(400)
+    const res = await call(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '看看这个', attachments: [upload.id], quote: 'msg_q' }) })
     expect(res.status).toBe(201)
     const { message } = await res.json() as any
     expect(message.meta.attachments).toEqual([{ id: upload.id, name: '收据 1.png', mime: 'image/png', size: 4 }])
@@ -191,50 +203,50 @@ describe('attachments and folder access', () => {
     expect(trigger.text).toContain('> 周五前要交报告')
     expect(trigger.text).toContain(`[附件]\n- 收据 1.png（image/png，4B）：${join(rt.uploadsDir, upload.id, '收据 1.png')}`)
     // Sent once: a second send and deleting it are refused.
-    expect((await call(`/api/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: 'again', attachments: [upload.id] }) })).status).toBe(400)
-    expect((await call(`/api/uploads/${upload.id}`, { method: 'DELETE' })).status).toBe(409)
+    expect((await call(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', body: JSON.stringify({ content: 'again', attachments: [upload.id] }) })).status).toBe(400)
+    expect((await call(`/v1/uploads/${upload.id}`, { method: 'DELETE' })).status).toBe(409)
     await rt.agents.idle()
   })
 
   it('saves folder and app permissions, keeping the locked never-touch folders', async () => {
-    const got = await (await call('/api/settings/access')).json() as any
+    const got = await (await call('/v1/settings/access')).json() as any
     expect(got.settings.locked).toContain('~/.ssh')
-    const put = await call('/api/settings/access', { method: 'PUT', body: JSON.stringify({ folders: [{ path: '~/Documents', write: true }], never: ['~/.ssh', '~/Taxes'], apps: { calendar: 'auto' } }) })
+    const put = await call('/v1/settings/access', { method: 'PUT', body: JSON.stringify({ folders: [{ path: '~/Documents', write: true }], never: ['~/.ssh', '~/Taxes'], apps: { calendar: 'auto' } }) })
     const { settings } = await put.json() as any
     expect(settings).toMatchObject({ folders: [{ path: '~/Documents', write: true }], never: ['~/Taxes'], apps: { calendar: 'auto', photos: 'off' } })
-    expect((await call('/api/settings/access', { method: 'PUT', body: JSON.stringify({ apps: { mail: 'auto' } }) })).status).toBe(400)
+    expect((await call('/v1/settings/access', { method: 'PUT', body: JSON.stringify({ apps: { mail: 'auto' } }) })).status).toBe(400)
   })
 })
 
 describe('Muse features (backend)', () => {
   const withModel = async () => {
-    const { provider } = await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
-    await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
+    const { provider } = await (await call('/v1/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
+    await call('/v1/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
   }
   const json = (method: string, b: unknown) => ({ method, body: JSON.stringify(b) })
 
   it('keeps 👍/👎/收藏 on 动态 and tells the agent the taste', async () => {
     const item = rt.feed.post({ title: 'XM6 降价了' })
-    const up = await (await call(`/api/feed/${item.id}/react`, json('POST', { reaction: 'up' }))).json() as any
+    const up = await (await call(`/v1/feed/${item.id}/react`, json('POST', { reaction: 'up' }))).json() as any
     expect(up.item.reaction).toBe('up')
-    expect((await (await call(`/api/feed/${item.id}/save`, json('POST', { saved: true }))).json() as any).item.saved).toBe(true)
+    expect((await (await call(`/v1/feed/${item.id}/save`, json('POST', { saved: true }))).json() as any).item.saved).toBe(true)
     expect(rt.feed.taste()).toContain('👍 XM6 降价了')
     const other = rt.feed.post({ title: '天气' })
-    await call(`/api/feed/${other.id}/react`, json('POST', { reaction: 'down' }))
+    await call(`/v1/feed/${other.id}/react`, json('POST', { reaction: 'down' }))
     expect(rt.feed.list().map(i => i.id)).toEqual([item.id])
     // 撤销 a 👎 brings the item back.
-    await call(`/api/feed/${other.id}/react`, json('POST', { reaction: null }))
+    await call(`/v1/feed/${other.id}/react`, json('POST', { reaction: null }))
     expect(rt.feed.list().map(i => i.id).sort()).toEqual([item.id, other.id].sort())
   })
 
   it('adds steps under a goal and keeps the dragged order', async () => {
     const a = rt.goals.create({ title: '攒钱买相机', target: 12000, unit: '元' })
     const b = rt.goals.create({ title: '睡得更早', style: 'days', target: 21 })
-    const step = await call('/api/goals', json('POST', { title: '每月存 2000', target: 6, unit: '次', parentId: a.id }))
+    const step = await call('/v1/goals', json('POST', { title: '每月存 2000', target: 6, unit: '次', parentId: a.id }))
     expect(step.status).toBe(201)
     const { goal } = await step.json() as any
-    expect((await call('/api/goals', json('POST', { title: 'x', target: 1, parentId: goal.id }))).status).toBe(400)
-    const order = await (await call('/api/goals/order', json('PUT', { ids: [b.id, a.id] }))).json() as any
+    expect((await call('/v1/goals', json('POST', { title: 'x', target: 1, parentId: goal.id }))).status).toBe(400)
+    const order = await (await call('/v1/goals/order', json('PUT', { ids: [b.id, a.id] }))).json() as any
     expect(order.goals.map((g: any) => g.title)).toEqual(['睡得更早', '攒钱买相机', '每月存 2000'])
     expect(rt.goals.describe()).toMatch(/攒钱买相机.*\n  └ .*每月存 2000/)
     rt.goals.remove(a.id)
@@ -243,16 +255,16 @@ describe('Muse features (backend)', () => {
 
   it('takes back, edits and regenerates messages', async () => {
     await withModel()
-    const { conversation } = await (await call('/api/conversations', { method: 'POST', body: '{}' })).json() as any
-    const { message } = await (await call(`/api/conversations/${conversation.id}/messages`, json('POST', { content: '订明天的票' }))).json() as any
-    const edited = await call(`/api/messages/${message.id}/edit`, json('POST', { content: '订后天的票' }))
+    const { conversation } = await (await call('/v1/conversations', { method: 'POST', body: '{}' })).json() as any
+    const { message } = await (await call(`/v1/conversations/${conversation.id}/messages`, json('POST', { content: '订明天的票' }))).json() as any
+    const edited = await call(`/v1/messages/${message.id}/edit`, json('POST', { content: '订后天的票' }))
     expect(edited.status).toBe(201)
     const old = rt.store.db.select().from(schema.messages).all().find(m => m.id === message.id)!
     expect(old).toMatchObject({ content: '', meta: { recalled: true, edited: true } })
-    expect((await call(`/api/messages/${message.id}/recall`, { method: 'POST' })).status).toBe(409)
+    expect((await call(`/v1/messages/${message.id}/recall`, { method: 'POST' })).status).toBe(409)
     for (let i = 0; i < 5; i++) { await new Promise(r => setTimeout(r, 40)); await rt.agents.idle() }
     const reply = rt.store.db.select().from(schema.messages).all().find(m => m.role === 'assistant')!
-    expect((await call(`/api/messages/${reply.id}/regenerate`, { method: 'POST' })).status).toBe(200)
+    expect((await call(`/v1/messages/${reply.id}/regenerate`, { method: 'POST' })).status).toBe(200)
     expect(rt.store.db.select().from(schema.messages).all().find(m => m.id === reply.id)!.meta).toMatchObject({ superseded: true })
     await rt.agents.idle()
   })
@@ -265,72 +277,72 @@ describe('Muse features (backend)', () => {
 
   it('lists a routine\'s runs', async () => {
     const routine = rt.routines.create({ name: '早报', schedule: '0 8 * * *', prompt: '说说今天' })
-    await call(`/api/routines/${routine.id}/run`, { method: 'POST' })
-    const { runs } = await (await call(`/api/routines/${routine.id}/runs`)).json() as any
+    await call(`/v1/routines/${routine.id}/run`, { method: 'POST' })
+    const { runs } = await (await call(`/v1/routines/${routine.id}/runs`)).json() as any
     expect(runs).toHaveLength(1)
     expect(runs[0]).toMatchObject({ ok: true })
     await rt.agents.idle()
   })
 
   it('keeps 会做的事: the owner\'s are on, the assistant\'s wait to be switched on', async () => {
-    const res = await call('/api/skills', json('POST', { name: '整理周报', when: '主人说写周报', steps: '- 看日历\n- 看提交' }))
+    const res = await call('/v1/skills', json('POST', { name: '整理周报', when: '主人说写周报', steps: '- 看日历\n- 看提交' }))
     expect(res.status).toBe(201)
     const { skill } = await res.json() as any
     expect(skill).toMatchObject({ enabled: true, by: 'owner' })
     const proposed = rt.skills.create({ name: '订餐', when: '订外卖', steps: '- 先问忌口' }, 'assistant')
     expect(proposed.enabled).toBe(false)
-    expect((await (await call(`/api/skills/${proposed.id}`, json('PATCH', { enabled: true }))).json() as any).skill.enabled).toBe(true)
-    expect((await call('/api/skills', json('POST', { name: '整理周报', when: 'x', steps: 'y' }))).status).toBe(400)
+    expect((await (await call(`/v1/skills/${proposed.id}`, json('PATCH', { enabled: true }))).json() as any).skill.enabled).toBe(true)
+    expect((await call('/v1/skills', json('POST', { name: '整理周报', when: 'x', steps: 'y' }))).status).toBe(400)
   })
 
   it('imports memories from another assistant after a preview', async () => {
     const text = '以下是我记得的关于你的内容：\n- 住在杭州\n- 喜欢简短的回答\n\n## 工作方式\n1. 先给结论'
-    const { items } = await (await call('/api/memories/import/preview', json('POST', { text }))).json() as any
+    const { items } = await (await call('/v1/memories/import/preview', json('POST', { text }))).json() as any
     expect(items).toEqual([{ kind: 'profile', text: '住在杭州' }, { kind: 'profile', text: '喜欢简短的回答' }, { kind: 'lesson', text: '先给结论' }])
-    const done = await (await call('/api/memories/import', json('POST', { items: items.slice(0, 2) }))).json() as any
+    const done = await (await call('/v1/memories/import', json('POST', { items: items.slice(0, 2) }))).json() as any
     expect(done).toEqual({ added: 2, existing: 0, skipped: 0 })
   })
 
   it('has mood on by default, records stopping a task as a faint mood signal, and stays quiet when switched off', async () => {
-    const before = ((await (await call('/api/mood')).json()) as any).mood
+    const before = ((await (await call('/v1/mood')).json()) as any).mood
     expect(before.enabled).toBe(true)
     const cnv = rt.engine.mainConversation()
     const trig = rt.engine.receiveMessage(cnv, '帮我查一下')
     const ticket = rt.engine.startTask({ conversationId: cnv, triggerIds: [trig.triggerId], title: '查机票' })
-    const stopRes = await call(`/api/tickets/${ticket.id}/stop`, { method: 'POST' })
+    const stopRes = await call(`/v1/tickets/${ticket.id}/stop`, { method: 'POST' })
     expect(stopRes.status).toBe(200)
-    const after = ((await (await call('/api/mood')).json()) as any).mood
+    const after = ((await (await call('/v1/mood')).json()) as any).mood
     expect(after.patience).toBe(before.patience - 2)
     expect(after.mood).toBeLessThan(before.mood)
     expect(after.history.at(-1)).toMatchObject({ attitude: 'stopped', note: '停下「查机票」' })
 
-    await call('/api/mood', json('PUT', { enabled: false }))
-    expect(((await (await call('/api/mood')).json()) as any).mood.enabled).toBe(false)
+    await call('/v1/mood', json('PUT', { enabled: false }))
+    expect(((await (await call('/v1/mood')).json()) as any).mood.enabled).toBe(false)
     const trig2 = rt.engine.receiveMessage(cnv, '再查一下')
     const ticket2 = rt.engine.startTask({ conversationId: cnv, triggerIds: [trig2.triggerId], title: '订酒店' })
-    await call(`/api/tickets/${ticket2.id}/stop`, { method: 'POST' })
-    expect(((await (await call('/api/mood')).json()) as any).mood.history).toHaveLength(after.history.length)
+    await call(`/v1/tickets/${ticket2.id}/stop`, { method: 'POST' })
+    expect(((await (await call('/v1/mood')).json()) as any).mood.history).toHaveLength(after.history.length)
   })
 
-  it('persists 2D voice tone via PUT /api/mood with origin snapping and exposes cleaned multi-bubble replies on /api/conversations/:id/messages', async () => {
-    const initial = ((await (await call('/api/mood')).json()) as any).mood
+  it('persists 2D voice tone via PUT /v1/mood with origin snapping and exposes cleaned multi-bubble replies on /v1/conversations/:id/messages', async () => {
+    const initial = ((await (await call('/v1/mood')).json()) as any).mood
     expect(initial.tone).toEqual({ x: 0, y: 0, id: 'natural', label: '自然', strength: 0 })
 
     // Four corners: 温和 (-1, +1), 风趣 (+1, +1), 沉静 (-1, -1), 犀利 (+1, -1)
-    const warm = ((await (await call('/api/mood', json('PUT', { tone: { x: -0.8, y: 0.6 } }))).json()) as any).mood
+    const warm = ((await (await call('/v1/mood', json('PUT', { tone: { x: -0.8, y: 0.6 } }))).json()) as any).mood
     expect(warm.tone).toEqual({ x: -0.8, y: 0.6, id: 'warm', label: '温和', strength: 100 })
 
-    const witty = ((await (await call('/api/mood', json('PUT', { tone: { x: 0.6, y: 0.8 } }))).json()) as any).mood
+    const witty = ((await (await call('/v1/mood', json('PUT', { tone: { x: 0.6, y: 0.8 } }))).json()) as any).mood
     expect(witty.tone).toEqual({ x: 0.6, y: 0.8, id: 'witty', label: '风趣', strength: 100 })
 
-    const calm = ((await (await call('/api/mood', json('PUT', { tone: { x: -0.6, y: -0.8 } }))).json()) as any).mood
+    const calm = ((await (await call('/v1/mood', json('PUT', { tone: { x: -0.6, y: -0.8 } }))).json()) as any).mood
     expect(calm.tone).toEqual({ x: -0.6, y: -0.8, id: 'calm', label: '沉静', strength: 100 })
 
-    const sharp = ((await (await call('/api/mood', json('PUT', { tone: { x: 0.8, y: -0.6 } }))).json()) as any).mood
+    const sharp = ((await (await call('/v1/mood', json('PUT', { tone: { x: 0.8, y: -0.6 } }))).json()) as any).mood
     expect(sharp.tone).toEqual({ x: 0.8, y: -0.6, id: 'sharp', label: '犀利', strength: 100 })
 
     // Snap near origin (< 0.06) to (0, 0) 自然
-    const snapped = ((await (await call('/api/mood', json('PUT', { tone: { x: 0.03, y: -0.04 } }))).json()) as any).mood
+    const snapped = ((await (await call('/v1/mood', json('PUT', { tone: { x: 0.03, y: -0.04 } }))).json()) as any).mood
     expect(snapped.tone).toEqual({ x: 0, y: 0, id: 'natural', label: '自然', strength: 0 })
 
     // Multi-bubble reply is cleaned and exposed in Message.meta.bubbles
@@ -338,7 +350,7 @@ describe('Muse features (backend)', () => {
     const msgId = rt.engine.reply({ conversationId: cnv, bubbles: ['搞定了。', '（微笑）测试也全过了。'] })
     const codeSnippet = '```ts\nconst status = 200;\n```'
     const codeMsgId = rt.engine.reply({ conversationId: cnv, bubbles: ['（叹气）配置漏了一行。', codeSnippet] })
-    const { messages } = await (await call(`/api/conversations/${cnv}/messages`)).json() as any
+    const { messages } = await (await call(`/v1/conversations/${cnv}/messages`)).json() as any
     const bubbleMsg = messages.find((m: any) => m.id === msgId)
     expect(bubbleMsg).toMatchObject({
       content: '搞定了\n测试也全过了',
@@ -380,7 +392,7 @@ describe('non-streaming complete replies', () => {
     const id3 = rt.engine.reply({ conversationId: cnv, text: finalText, callId: 'chatcmpl-tool-another' })
     expect(id2).toBe(id1)
     expect(id3).toBe(id1)
-    const { messages } = await (await call(`/api/conversations/${cnv}/messages`)).json() as any
+    const { messages } = await (await call(`/v1/conversations/${cnv}/messages`)).json() as any
     expect(messages.filter((m: any) => m.role === 'assistant' && m.content === finalText)).toHaveLength(1)
   })
 })
@@ -464,15 +476,15 @@ describe('unified browsers & cloud desktop endpoints', () => {
     }
 
     // 1. Desktop stream & desktop screenshot
-    const deskStream = await (await call('/api/computers/instabox/desktop', json('POST', { viewOnly: true }))).json() as any
+    const deskStream = await (await call('/v1/computers/instabox/desktop', json('POST', { viewOnly: true }))).json() as any
     expect(deskStream).toEqual({ ok: true, url: 'https://stream.instabox.test/s1?ro=true', expiresAt: '2099-01-01T00:00:00Z' })
-    const deskShot = await call('/api/computers/instabox/desktop/screenshot')
+    const deskShot = await call('/v1/computers/instabox/desktop/screenshot')
     expect(deskShot.status).toBe(200)
     expect(deskShot.headers.get('content-type')).toBe('image/png')
     expect(Buffer.from(await deskShot.arrayBuffer()).equals(fakePng)).toBe(true)
 
     // 2. List browsers (via native desktopBrowserStatus, never calling browserd)
-    const listed = await (await call('/api/browsers')).json() as any
+    const listed = await (await call('/v1/browsers')).json() as any
     const tabKey = 'cloud:instabox:desktop:browser'
     expect(listed).toEqual({
       available: true,
@@ -489,7 +501,7 @@ describe('unified browsers & cloud desktop endpoints', () => {
         hasDesktop: true,
       }],
     })
-    const compBrowsers = await (await call('/api/computers/instabox/browsers')).json() as any
+    const compBrowsers = await (await call('/v1/computers/instabox/browsers')).json() as any
     expect(compBrowsers).toEqual({
       asleep: false,
       browsers: [{ name: 'desktop', idleSeconds: 0, tabs: [{ name: 'browser', title: '登录页', url: 'https://example.com/login', handoff: false }] }],
@@ -497,7 +509,7 @@ describe('unified browsers & cloud desktop endpoints', () => {
     expect(browserCalls).toEqual([])
 
     // 3. Open URL (auto-prepending https://) and blank default browser activation
-    const openedBlank = await (await call('/api/browsers/open', json('POST', {}))).json() as any
+    const openedBlank = await (await call('/v1/browsers/open', json('POST', {}))).json() as any
     expect(openedBlank).toEqual({
       key: tabKey,
       url: '',
@@ -506,7 +518,7 @@ describe('unified browsers & cloud desktop endpoints', () => {
     })
     expect(openDesktopCalls.at(-1)).toEqual({ owner: true })
 
-    const opened = await (await call('/api/browsers/open', json('POST', { url: 'example.org/path' }))).json() as any
+    const opened = await (await call('/v1/browsers/open', json('POST', { url: 'example.org/path' }))).json() as any
     expect(opened).toEqual({
       key: tabKey,
       url: 'https://example.org/path',
@@ -516,39 +528,39 @@ describe('unified browsers & cloud desktop endpoints', () => {
     expect(openDesktopCalls.at(-1)).toEqual({ url: 'https://example.org/path', owner: true })
 
     // 4. Page screenshot returns desktop PNG screenshot
-    const pageShot = await call(`/api/browsers/screenshot?key=${encodeURIComponent(tabKey)}`)
+    const pageShot = await call(`/v1/browsers/screenshot?key=${encodeURIComponent(tabKey)}`)
     expect(pageShot.status).toBe(200)
     expect(pageShot.headers.get('content-type')).toBe('image/png')
     expect(Buffer.from(await pageShot.arrayBuffer()).equals(fakePng)).toBe(true)
 
     // 5. Handoff -> page input & desktop input -> return (resumes ticket!)
-    const ho = await (await call('/api/browsers/handoff', json('POST', { key: tabKey }))).json() as any
+    const ho = await (await call('/v1/browsers/handoff', json('POST', { key: tabKey }))).json() as any
     expect(ho).toEqual({ ok: true, url: 'https://example.org/path', title: 'Opened', hasDesktop: true, computerId: 'instabox' })
     expect(handoffActive).toBe(true)
     expect(controls).toEqual(['takeover'])
 
-    const inpPage = await (await call('/api/browsers/input', json('POST', {
+    const inpPage = await (await call('/v1/browsers/input', json('POST', {
       key: tabKey, mode: 'page', action: { type: 'goto', url: 'example.com/dashboard' },
     }))).json() as any
     expect(inpPage).toEqual({ ok: true, url: 'https://example.com/dashboard', title: 'Opened', key: tabKey })
 
     // desktop:root handoff, goto (opens native desktop browser), and return
-    const hoRoot = await (await call('/api/browsers/handoff', json('POST', { key: 'cloud:instabox:desktop:root' }))).json() as any
+    const hoRoot = await (await call('/v1/browsers/handoff', json('POST', { key: 'cloud:instabox:desktop:root' }))).json() as any
     expect(hoRoot).toEqual({ ok: true, url: '', title: 'Instabox 云电脑', hasDesktop: true, computerId: 'instabox' })
-    const gotoRoot = await (await call('/api/browsers/input', json('POST', {
+    const gotoRoot = await (await call('/v1/browsers/input', json('POST', {
       key: 'cloud:instabox:desktop:root', mode: 'desktop', action: { type: 'goto', url: 'baidu.com' },
     }))).json() as any
     expect(gotoRoot).toEqual({ ok: true, url: 'https://baidu.com/', title: 'Opened', key: tabKey })
-    const retRoot = await (await call('/api/browsers/return', json('POST', { key: 'cloud:instabox:desktop:root' }))).json() as any
+    const retRoot = await (await call('/v1/browsers/return', json('POST', { key: 'cloud:instabox:desktop:root' }))).json() as any
     expect(retRoot).toEqual({ ok: true })
 
-    const inpDesk = await (await call('/api/browsers/input', json('POST', {
+    const inpDesk = await (await call('/v1/browsers/input', json('POST', {
       key: tabKey, mode: 'desktop', action: { type: 'key', key: 'Control+a' },
     }))).json() as any
     expect(inpDesk).toEqual({ ok: true })
     expect(desktopInputs).toEqual([{ type: 'key', key: 'Control+a' }])
 
-    const ret = await (await call('/api/browsers/return', json('POST', { key: tabKey, note: '已登录完成' }))).json() as any
+    const ret = await (await call('/v1/browsers/return', json('POST', { key: tabKey, note: '已登录完成' }))).json() as any
     expect(ret).toEqual({ ok: true })
     expect(handoffActive).toBe(false)
     expect(controls).toEqual(['takeover', 'takeover', 'handback', 'handback'])
@@ -556,7 +568,7 @@ describe('unified browsers & cloud desktop endpoints', () => {
     expect(msgs.at(-1)?.content).toBe('已登录完成')
 
     // 6. Close native desktop browser
-    expect(await (await call('/api/browsers/close', json('POST', { key: tabKey }))).json()).toEqual({ ok: true })
+    expect(await (await call('/v1/browsers/close', json('POST', { key: tabKey }))).json()).toEqual({ ok: true })
     expect(desktopRunning).toBe(false)
     expect(browserCalls).toEqual([])
   })
@@ -571,25 +583,25 @@ describe('unified browsers & cloud desktop endpoints', () => {
     let closedId = ''
     ;(rt.browser as any).closePage = async (id: string) => { closedId = id; rt.browser.handoffs.delete(id) }
 
-    const listed = await (await call('/api/browsers')).json() as any
+    const listed = await (await call('/v1/browsers')).json() as any
     expect(listed.pages).toEqual([{
       key: 'local:web_1', kind: 'local', browser: 'local', tab: 'web_1', title: '本地页', url: 'https://local.example/', handoff: false, hasDesktop: false,
     }])
-    const ho = await (await call('/api/browsers/handoff', json('POST', { key: 'local:web_1' }))).json() as any
+    const ho = await (await call('/v1/browsers/handoff', json('POST', { key: 'local:web_1' }))).json() as any
     expect(ho).toEqual({ ok: true, url: 'https://local.example/', title: '本地页', hasDesktop: false })
     expect(rt.browser.handoffs.has('web_1')).toBe(true)
 
-    const shot = await call('/api/browsers/screenshot?key=local%3Aweb_1')
+    const shot = await call('/v1/browsers/screenshot?key=local%3Aweb_1')
     expect(shot.status).toBe(200)
     expect(shot.headers.get('content-type')).toBe('image/png')
 
-    const inp = await (await call('/api/browsers/input', json('POST', { key: 'local:web_1', action: { type: 'reload' } }))).json() as any
+    const inp = await (await call('/v1/browsers/input', json('POST', { key: 'local:web_1', action: { type: 'reload' } }))).json() as any
     expect(inp).toEqual({ ok: true, url: 'https://local.example/', title: '本地页2' })
 
-    await call('/api/browsers/return', json('POST', { key: 'local:web_1' }))
+    await call('/v1/browsers/return', json('POST', { key: 'local:web_1' }))
     expect(rt.browser.handoffs.has('web_1')).toBe(false)
 
-    await call('/api/browsers/close', json('POST', { key: 'local:web_1' }))
+    await call('/v1/browsers/close', json('POST', { key: 'local:web_1' }))
     expect(closedId).toBe('web_1')
 
     ;(rt.computers as any).list = () => [{
@@ -599,12 +611,12 @@ describe('unified browsers & cloud desktop endpoints', () => {
       wake: async () => ({ state: 'ready' as const }),
       exec: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
     }]
-    expect((await call('/api/computers/headlessbox/desktop', { method: 'POST' })).status).toBe(400)
+    expect((await call('/v1/computers/headlessbox/desktop', { method: 'POST' })).status).toBe(400)
   })
 })
 
 describe('Section 38 activity stream & step inspector (backend)', () => {
-  it('1) returns real-time stepCount, currentStep, iconKind, and runningJobs for a running and completed Worker ticket on GET /api/tickets', async () => {
+  it('1) returns real-time stepCount, currentStep, iconKind, and runningJobs for a running and completed Worker ticket on GET /v1/tickets', async () => {
     const cnv = rt.engine.mainConversation()
     const trig = rt.engine.receiveMessage(cnv, '帮我编辑角色设计池并排查登录接口超时')
     rt.agents.discardPending('router')
@@ -642,7 +654,7 @@ describe('Section 38 activity stream & step inspector (backend)', () => {
     })
 
     // Check failed step state
-    const afterStep1 = await (await call('/api/tickets')).json() as any
+    const afterStep1 = await (await call('/v1/tickets')).json() as any
     const t1 = afterStep1.tickets.find((x: any) => x.id === ticket.id)
     expect(t1).toMatchObject({
       id: ticket.id,
@@ -690,7 +702,7 @@ describe('Section 38 activity stream & step inspector (backend)', () => {
       input: JSON.stringify({ command: 'curl -I https://api.nuonuo.dev/v1/auth/login' }),
     })
 
-    const duringStep3 = await (await call('/api/tickets')).json() as any
+    const duringStep3 = await (await call('/v1/tickets')).json() as any
     const t3 = duringStep3.tickets.find((x: any) => x.id === ticket.id)
     expect(t3).toMatchObject({
       id: ticket.id,
@@ -707,7 +719,7 @@ describe('Section 38 activity stream & step inspector (backend)', () => {
     })
 
     // Detail endpoint also exposes the in-flight tool-call in transcript
-    const detailDuring = await (await call(`/api/tickets/${ticket.id}`)).json() as any
+    const detailDuring = await (await call(`/v1/tickets/${ticket.id}`)).json() as any
     const duringToolCalls = detailDuring.transcript.filter((i: any) => i.kind === 'tool-call')
     expect(duringToolCalls).toHaveLength(3)
     expect(duringToolCalls.at(-1)).toMatchObject({
@@ -744,7 +756,7 @@ describe('Section 38 activity stream & step inspector (backend)', () => {
     rt.engine.report(ticket.id, { status: 'ready', summary: 'Updated ninth draw entry in character design pool' })
     rt.store.db.update(schema.sessions).set({ state: 'idle', updatedAt: Date.now() }).where(schema.sessions.id as any).run()
 
-    const afterDone = await (await call('/api/tickets')).json() as any
+    const afterDone = await (await call('/v1/tickets')).json() as any
     const tDone = afterDone.tickets.find((x: any) => x.id === ticket.id)
     expect(tDone).toMatchObject({
       id: ticket.id,
@@ -761,7 +773,7 @@ describe('Section 38 activity stream & step inspector (backend)', () => {
     })
   })
 
-  it('2) exposes Router update_my_settings action as「修改助理名字与语调」in GET /api/tickets and returns full TicketDetail transcript on GET /api/tickets/act_...', async () => {
+  it('2) exposes Router update_my_settings action as「修改助理名字与语调」in GET /v1/tickets and returns full TicketDetail transcript on GET /v1/tickets/act_...', async () => {
     let routerStep = 0
     const scriptedRouter = new MockLanguageModelV4({
       doStream: async o => {
@@ -805,8 +817,8 @@ describe('Section 38 activity stream & step inspector (backend)', () => {
     })
     ;(rt.agents as any).hub = rt.hub
     ;(rt.engine as any).runtime = rt.agents
-    const { provider } = await (await call('/api/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
-    await call('/api/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
+    const { provider } = await (await call('/v1/providers', { method: 'POST', body: JSON.stringify({ kind: 'openai', name: 'O', apiKey: 'k' }) })).json() as any
+    await call('/v1/roles/router', { method: 'PUT', body: JSON.stringify({ chain: [{ providerId: provider.id, model: 'm' }] }) })
 
     const mapper = new EventMapper()
     const sseEvents: any[] = []
@@ -816,7 +828,7 @@ describe('Section 38 activity stream & step inspector (backend)', () => {
 
     try {
       const cnv = rt.engine.mainConversation()
-      const sendRes = await call(`/api/conversations/${cnv}/messages`, {
+      const sendRes = await call(`/v1/conversations/${cnv}/messages`, {
         method: 'POST',
         body: JSON.stringify({ content: '把你的名字改成千绪，语调切成温和' }),
       })
@@ -826,8 +838,8 @@ describe('Section 38 activity stream & step inspector (backend)', () => {
         await rt.agents.idle()
       }
 
-      // Check GET /api/tickets includes the virtual ActionRun
-      const listRes = await (await call('/api/tickets')).json() as any
+      // Check GET /v1/tickets includes the virtual ActionRun
+      const listRes = await (await call('/v1/tickets')).json() as any
       const actionItem = listRes.tickets.find((t: any) => t.kind === 'action')
       expect(actionItem).toBeDefined()
       expect(actionItem.id).toMatch(/^act_/)
@@ -859,8 +871,8 @@ describe('Section 38 activity stream & step inspector (backend)', () => {
         expect.arrayContaining([expect.objectContaining({ id: actionItem.id, title: '修改助理名字与语调' })]),
       )
 
-      // Check GET /api/tickets/:id for act_... returns full TicketDetail with transcript
-      const detailRes = await call(`/api/tickets/${actionItem.id}`)
+      // Check GET /v1/tickets/:id for act_... returns full TicketDetail with transcript
+      const detailRes = await call(`/v1/tickets/${actionItem.id}`)
       expect(detailRes.status).toBe(200)
       const detail = await detailRes.json() as any
       expect(detail).toMatchObject({
@@ -906,7 +918,7 @@ describe('Section 38 activity stream & step inspector (backend)', () => {
       )
 
       // Unknown act_ id returns 404
-      expect((await call('/api/tickets/act_nope')).status).toBe(404)
+      expect((await call('/v1/tickets/act_nope')).status).toBe(404)
     } finally {
       off()
     }

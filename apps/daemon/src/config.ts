@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { isIP } from 'node:net'
 import { networkInterfaces } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 
 import pkg from '../package.json' with { type: 'json' }
 import { resolveHome } from './legacy'
@@ -9,7 +9,6 @@ import { resolveHome } from './legacy'
 /** From apps/daemon/package.json; a release tag must match it (the release workflow checks). */
 export const VERSION: string = pkg.version
 export const DEFAULT_PORT = 7420
-
 export const DEFAULT_HOST = '127.0.0.1'
 
 export type ConfigSource = 'flag' | 'env' | 'file' | 'default'
@@ -19,21 +18,19 @@ export interface DaemonConfig {
   port: number
   /**
    * The address the service listens on. Loopback (the default) keeps it on this machine; another address (0.0.0.0 for
-   * every interface) opens the web UI to the network, still behind the login token.
+   * every interface) exposes the authenticated `/v1/*` API to the network.
    */
   host: string
-  /** Started by the desktop app: the window is the main client, and browser access is a setting (`web`). */
-  desktop: boolean
-  /** Whether browsers may open the web UI. Always true for the headless service; off by default for the desktop app. */
+  /** Whether the daemon also serves the built-in WebUI static files. Off by default; enable via `--web` or `NUONUO_WEB=1`. */
   web: boolean
-  /** Where host and port came from, so the settings page can say when a flag or variable overrides its saved value. */
-  sources: { host: ConfigSource; port: ConfigSource }
+  /** Where host, port, and web came from, so settings can show when a flag or env var overrides the saved config. */
+  sources: { host: ConfigSource; port: ConfigSource; web: ConfigSource }
   dev: boolean
-  /** Extra origins allowed to call the API (the Vite dev server in --dev). */
+  /** Extra origins allowed in dev mode (Vite dev server). */
   devOrigins: string[]
 }
 
-/** What the settings page (or `nuonuo config`) saves in `<home>/config.json`; applied on the next start. */
+/** What settings (or `nuonuo config`) saves in `<home>/config.json`; applied on the next start. */
 export interface SavedConfig { host?: string; port?: number; web?: boolean }
 
 /** NUONUO_HOME, else ~/.nuonuo (or ~/.super-assistant until `start` moves it; see legacy.ts). */
@@ -81,25 +78,38 @@ export function networkUrls(host: string, port: number): string[] {
     .map(a => `http://${a!.family === 'IPv6' ? `[${a!.address}]` : a!.address}:${port}`)
 }
 
-export function resolveConfig(opts: { port?: number; host?: string; dev?: boolean; desktop?: boolean } = {}): DaemonConfig {
+function parseEnvBool(raw: string | undefined): boolean | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined
+  const v = raw.trim().toLowerCase()
+  if (v === '1' || v === 'true' || v === 'yes' || v === 'on') return true
+  if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false
+  return undefined
+}
+
+export function resolveConfig(opts: { port?: number; host?: string; web?: boolean; dev?: boolean } = {}): DaemonConfig {
   const home = homeDir()
   const saved = readSavedConfig(home)
   const envPort = Number(process.env.NUONUO_PORT)
   const envHost = process.env.NUONUO_HOST?.trim()
+  const envWeb = parseEnvBool(process.env.NUONUO_WEB)
   const [port, portSource]: [number, ConfigSource] = opts.port !== undefined ? [opts.port, 'flag']
     : validPort(envPort) && process.env.NUONUO_PORT ? [envPort, 'env']
     : saved.port !== undefined ? [saved.port, 'file'] : [DEFAULT_PORT, 'default']
-  let [host, hostSource]: [string, ConfigSource] = opts.host ? [opts.host, 'flag']
+  const [host, hostSource]: [string, ConfigSource] = opts.host ? [opts.host, 'flag']
     : envHost ? [envHost, 'env'] : saved.host ? [saved.host, 'file'] : [DEFAULT_HOST, 'default']
+  const [web, webSource]: [boolean, ConfigSource] = opts.web !== undefined ? [opts.web, 'flag']
+    : envWeb !== undefined ? [envWeb, 'env']
+    : saved.web !== undefined ? [saved.web, 'file'] : [false, 'default']
   if (!validPort(port)) throw new Error(`无效的端口：${port}（1–65535）`)
   if (!validHost(host)) throw new Error(`无效的监听地址：${host}`)
-  const desktop = Boolean(opts.desktop)
-  const web = desktop ? saved.web ?? false : true
-  // The desktop app without browser access keeps the service on this machine whatever address was saved.
-  if (desktop && !web && hostSource !== 'flag') host = DEFAULT_HOST
   const dev = Boolean(opts.dev)
   return {
-    home, port, host, desktop, web, sources: { host: hostSource, port: portSource }, dev,
+    home,
+    port,
+    host,
+    web,
+    sources: { host: hostSource, port: portSource, web: webSource },
+    dev,
     devOrigins: dev ? ['http://localhost:5173', 'http://127.0.0.1:5173'] : [],
   }
 }

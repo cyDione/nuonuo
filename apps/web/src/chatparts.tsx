@@ -6,6 +6,7 @@
 import { ArrowUpRight, Bell, CalendarDays, ChevronDown, ChevronUp, FileSpreadsheet, FileText, Layers, MapPin, Search, Settings2, Shield, X, File as FileIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LocalApp, Message, Upload } from './api'
+import { AuthedImage, openAuthedLink } from './AuthedMedia'
 import { setPaneTab, type PaneTab } from './RightPane'
 import { go } from './route'
 import { openPane } from './Sidebar'
@@ -43,15 +44,15 @@ function FileChip({ name, mime, size, dim, href }: { name: string; mime: string;
     </span>
   </>
   const cls = cx('flex h-14 w-[190px] items-center gap-2.5 rounded-xl border border-line bg-card px-2.5 text-left', dim && 'opacity-60')
-  return href ? <a href={href} target="_blank" rel="noreferrer" className={cx(cls, 'press hover:border-faint')}>{body}</a> : <div className={cls}>{body}</div>
+  return href ? <button type="button" onClick={() => void openAuthedLink(href)} className={cx(cls, 'press hover:border-faint')}>{body}</button> : <div className={cls}>{body}</div>
 }
 
 /** Files on a sent message, above its bubble: pictures as thumbnails, other files as cards that open or download. */
 export function SentFiles({ files }: { files: Upload[] }) {
   return <div className="mb-1.5 flex flex-col items-end gap-1.5">
     {files.map(f => isImage(f.mime)
-      ? <a key={f.id} href={`/api/uploads/${f.id}`} target="_blank" rel="noreferrer" className="press block overflow-hidden rounded-2xl"><img src={`/api/uploads/${f.id}`} alt={f.name} loading="lazy" className="max-h-56 max-w-[260px] object-cover" /></a>
-      : <FileChip key={f.id} name={f.name} mime={f.mime} size={f.size} href={`/api/uploads/${f.id}`} />)}
+      ? <button type="button" key={f.id} onClick={() => void openAuthedLink(`/uploads/${f.id}`)} className="press block overflow-hidden rounded-2xl"><AuthedImage src={`/uploads/${f.id}`} alt={f.name} loading="lazy" className="max-h-56 max-w-[260px] object-cover" /></button>
+      : <FileChip key={f.id} name={f.name} mime={f.mime} size={f.size} href={`/uploads/${f.id}`} />)}
   </div>
 }
 

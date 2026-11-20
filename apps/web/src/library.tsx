@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowDownUp, FolderOpen, Image as ImageIcon } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Artifact, type Conversation } from './api'
+import { AuthedImage } from './AuthedMedia'
 import { ArtifactModal, previewKind } from './preview'
 import { go } from './route'
 import { Button, cx, Empty, Seg } from './ui'
@@ -81,7 +82,7 @@ function Thumb({ a, kind }: { a: Artifact; kind: Kind }) {
   const [broken, setBroken] = useState(false)
   if (kind === 'image') return <div className={frame}>
     {broken ? <ImageIcon size={28} className="absolute inset-0 m-auto text-faint" />
-      : <img src={`/api/artifacts/${a.id}`} alt="" loading="lazy" onError={() => setBroken(true)} className="size-full object-cover" />}
+      : <AuthedImage src={`/artifacts/${a.id}`} alt="" loading="lazy" onError={() => setBroken(true)} className="size-full object-cover" />}
   </div>
   return <div className={frame}>
     <div className="absolute inset-x-[12%] top-5 bottom-0 rounded-t-lg bg-panel px-4 pt-4 shadow-[0_1px_2px_rgb(0_0_0/0.05)]">

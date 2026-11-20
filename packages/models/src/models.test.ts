@@ -227,6 +227,31 @@ describe('macOS secrets', () => {
     expect(defaultStore.get('provider:missing')).toBeUndefined()
   })
 
+  it('never touches Keychain on macOS by default even when state.db exists without secrets.enc, unless migrate-keychain is requested', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'sa-home-existing-db-'))
+    writeFileSync(join(home, 'state.db'), '')
+    let keyringCalls = 0
+    const { store } = await openSecretStore(home, undefined, 'darwin', async () => {
+      keyringCalls++
+      throw new Error('keyring must not be imported by default on macOS')
+    })
+    expect(store).toBeInstanceOf(FileSecrets)
+    expect(store).not.toBeInstanceOf(KeychainMigratingSecrets)
+    expect(keyringCalls).toBe(0)
+
+    class StubEntry {
+      getPassword() { return null }
+      setPassword() {}
+      deletePassword() {}
+    }
+    const { store: migrating } = await openSecretStore(home, 'migrate-keychain', 'darwin', async () => {
+      keyringCalls++
+      return { Entry: StubEntry }
+    })
+    expect(migrating).toBeInstanceOf(KeychainMigratingSecrets)
+    expect(keyringCalls).toBe(1)
+  })
+
   it('persists tried refs in migrated.json across restarts and trips the circuit breaker immediately on Keychain denial', async () => {
     const home = mkdtempSync(join(tmpdir(), 'sa-home-migrate-'))
     writeFileSync(join(home, 'state.db'), '')

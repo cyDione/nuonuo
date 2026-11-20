@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { playChime } from './sounds'
 import { useEffect, useSyncExternalStore } from 'react'
 import type { Notice, ServerEvent } from './api'
+import { authedFetch, streamAuthedSSE } from './connection'
 import { setUiLanguage, uiLanguage, type UiLanguage } from './i18n'
 import { ACCENTS, getPrefs, setPrefs, type AccentId, type Prefs } from './prefs'
 import { desktop, type DesktopPrefs } from './shell'
@@ -52,22 +53,22 @@ function reloadOnce(target: string) {
     .finally(() => location.reload())
 }
 
-/** Reloads the tab once when the daemon upgraded or the built JS bundle hash changed across a reconnect or stale HTML load. */
+/** Checks daemon version across reconnects; in `--web` mode reloads once when the served JS bundle hash changed. */
 async function checkFreshUi() {
   if (checkingFresh) return
   checkingFresh = true
   try {
-    const res = await fetch('/api/health', { cache: 'no-store', credentials: 'same-origin' })
+    const res = await authedFetch('/health', { cache: 'no-store' })
     if (res.ok) {
-      const health = await res.json() as { version?: string }
+      const health = await res.json() as { version?: string; webUi?: boolean }
       if (health.version) {
         if (bootVersion === undefined) bootVersion = health.version
-        else if (bootVersion !== health.version) { reloadOnce(health.version); return }
+        else if (bootVersion !== health.version && health.webUi && !desktop) { reloadOnce(health.version); return }
       }
     }
-    const asset = currentAsset()
+    const asset = !desktop ? currentAsset() : undefined
     if (asset) {
-      const html = await fetch('/', { cache: 'no-store', credentials: 'same-origin', headers: { pragma: 'no-cache' } })
+      const html = await fetch('/', { cache: 'no-store', headers: { pragma: 'no-cache' } })
       if (html.ok) {
         const nextAsset = (await html.text()).match(/\/assets\/index-[^"']+\.js/)?.[0]
         if (nextAsset && nextAsset !== asset) reloadOnce(nextAsset)
@@ -81,7 +82,8 @@ async function checkFreshUi() {
 export function useLiveEvents() {
   const qc = useQueryClient()
   useEffect(() => {
-    let source: EventSource | undefined
+    let active = true
+    let ctrl: AbortController | undefined
     let retry: ReturnType<typeof setTimeout> | undefined
     const timers = new Map<string, ReturnType<typeof setTimeout>>()
     const soon = (key: string, fn: () => void, ms = 300) => {
@@ -89,39 +91,46 @@ export function useLiveEvents() {
       timers.set(key, setTimeout(() => { timers.delete(key); fn() }, ms))
     }
     const connect = () => {
-      source = new EventSource('/api/events')
-      source.addEventListener('ready', () => {
-        set({ connected: true })
-        void checkFreshUi()
-        const p = getPrefs()
-        void fetch('/api/settings/client-prefs', {
-          method: 'PUT',
-          credentials: 'same-origin',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            theme: p.theme,
-            accent: p.accent,
-            uiLanguage,
-            text: p.text,
-            reduceMotion: p.reduceMotion,
-            voiceInput: p.voiceInput,
-            voiceLang: p.voiceLang,
-            autoSend: p.autoSend,
-            readAloud: p.readAloud,
-            voiceRate: p.voiceRate,
-            showRaw: p.showRaw,
-            broadcast: false,
-          }),
-        }).catch(() => {})
-        // Anything may have changed while disconnected.
-        qc.invalidateQueries()
-      })
-      source.addEventListener('message', ev => handle(JSON.parse((ev as MessageEvent).data) as ServerEvent))
-      source.onerror = () => {
+      if (!active) return
+      ctrl = new AbortController()
+      void streamAuthedSSE('/events', (event, data) => {
+        if (event === 'ready') {
+          set({ connected: true })
+          void checkFreshUi()
+          const p = getPrefs()
+          void authedFetch('/settings/client-prefs', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              theme: p.theme,
+              accent: p.accent,
+              uiLanguage,
+              text: p.text,
+              reduceMotion: p.reduceMotion,
+              voiceInput: p.voiceInput,
+              voiceLang: p.voiceLang,
+              autoSend: p.autoSend,
+              readAloud: p.readAloud,
+              voiceRate: p.voiceRate,
+              showRaw: p.showRaw,
+              broadcast: false,
+            }),
+          }).catch(() => {})
+          qc.invalidateQueries()
+          return
+        }
+        if (event === 'message' && data) {
+          try { handle(JSON.parse(data) as ServerEvent) } catch { /* ignore */ }
+        }
+      }, ctrl.signal).then(() => {
+        if (!active) return
         set({ connected: false })
-        source?.close()
         retry = setTimeout(connect, 2_000)
-      }
+      }).catch(() => {
+        if (!active) return
+        set({ connected: false })
+        retry = setTimeout(connect, 2_000)
+      })
     }
     const handle = (e: ServerEvent) => {
       switch (e.type) {
@@ -229,7 +238,7 @@ export function useLiveEvents() {
       }
     }
     connect()
-    return () => { source?.close(); clearTimeout(retry); for (const t of timers.values()) clearTimeout(t) }
+    return () => { active = false; ctrl?.abort(); clearTimeout(retry); for (const t of timers.values()) clearTimeout(t) }
   }, [qc])
 }
 
@@ -278,10 +287,10 @@ async function readAloud(conversationId: string, messageId: string) {
   if (!here && hash !== '') return
   try {
     if (here && here !== conversationId) return
-    const res = await fetch(`/api/messages/${messageId}`, { credentials: 'same-origin' })
+    const res = await authedFetch(`/messages/${messageId}`)
     const { message } = await res.json() as { message: { role: string; content: string; conversationId: string; meta: Record<string, any> } }
     if (message.role !== 'assistant' || message.meta.delivery) return
-    if (!here) { const main = await fetch('/api/conversations/main', { credentials: 'same-origin' }).then(r => r.json()) as { id: string }; if (main.id !== conversationId) return }
+    if (!here) { const main = await authedFetch('/conversations/main').then(r => r.json()) as { id: string }; if (main.id !== conversationId) return }
     speak(message.content)
   } catch { /* best effort */ }
 }

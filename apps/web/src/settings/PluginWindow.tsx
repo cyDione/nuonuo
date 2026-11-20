@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Power, Puzzle, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api, type FieldSpec, type PluginInfo, type PluginWindow as WindowInfo } from '../api'
+import { getConnection } from '../connection'
 import { tx } from '../i18n'
 import { cx, Seg } from '../ui'
 import { SaveBar } from './kit'
@@ -94,7 +95,13 @@ function PluginPage({ plugin, win, hidden, onClose }: { plugin: PluginInfo; win:
   const theme = useTheme()
   const url = useQuery({ queryKey: ['plugin-window', plugin.id], queryFn: () => api.get<{ window: WindowInfo & { url: string } }>(`/plugins/${plugin.id}/window`), staleTime: Infinity }).data?.window.url
   const [src, setSrc] = useState<string>()
-  useEffect(() => { if (url && !src) setSrc(`${url}?theme=${theme}`) }, [url])
+  useEffect(() => {
+    if (url && !src) {
+      const base = getConnection().baseUrl
+      const full = /^https?:\/\//i.test(url) ? url : `${base}${url}`
+      setSrc(`${full}?theme=${theme}`)
+    }
+  }, [url])
   useEffect(() => { frame.current?.contentWindow?.postMessage({ nuonuo: 'answer', type: 'theme', theme }, '*') }, [theme])
   const closeRef = useRef(onClose)
   closeRef.current = onClose

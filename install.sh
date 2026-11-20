@@ -3,13 +3,13 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/cyDione/nuonuo/main/install.sh | bash
 #
-# Linux: the headless build (service + web UI).
+# Linux (or macOS with NUONUO_COMPONENT=server / --server): the standalone server (service + optional --web UI).
 #   Installs to  ~/.local/share/nuonuo   (NUONUO_PREFIX to change)
 #   Command      ~/.local/bin/nuonuo     (NUONUO_BIN_DIR to change)
 #   CPU          x86_64 (amd64) and aarch64 (arm64)
-# macOS: the desktop app, into /Applications (~/Applications when that is not writable; NUONUO_APP_DIR to
-#   change), for Apple silicon and Intel. curl does not mark what it downloads as "from the internet", so Gatekeeper
-#   does not stop the first open even while the app has no Developer ID signature.
+# macOS (default): the thin desktop client app, into /Applications (~/Applications when that is not writable;
+#   NUONUO_APP_DIR to change), for Apple silicon and Intel. Pass `--server` or `NUONUO_COMPONENT=server` to install
+#   the standalone background server CLI on macOS instead (also invoked by the desktop app's one-click Local Deploy).
 # Both: latest release, or NUONUO_VERSION=v0.2.0 to pin.
 #
 # The repository is public, so nothing needs signing in. GITHUB_TOKEN, if set, is only used to raise the API rate limit.
@@ -21,6 +21,10 @@ set -euo pipefail
 repo="cyDione/nuonuo"
 # SUPER_ASSISTANT_VERSION: an older version's updater runs this script with it.
 version="${NUONUO_VERSION:-${SUPER_ASSISTANT_VERSION:-}}"
+component="${NUONUO_COMPONENT:-}"
+for arg in "$@"; do
+  [ "$arg" = "--server" ] && component="server"
+done
 prefix="${NUONUO_PREFIX:-$HOME/.local/share/nuonuo}"
 bin_dir="${NUONUO_BIN_DIR:-$HOME/.local/bin}"
 legacy_prefix="$HOME/.local/share/super-assistant"
@@ -43,7 +47,9 @@ esac
 # A shell running under Rosetta reports x86_64 on Apple silicon; install the native app anyway.
 if [ "$os" = Darwin ] && [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = 1 ]; then arch=arm64; fi
 command -v curl >/dev/null || die "curl is required"
-[ "$os" = Darwin ] || command -v tar >/dev/null || die "tar is required"
+if [ "$os" != Darwin ] || [ "$component" = "server" ]; then
+  command -v tar >/dev/null || die "tar is required"
+fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -58,7 +64,7 @@ curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$ap
   || die "could not read the release from GitHub (${version:-latest}); check your network, or try again later if the API rate limit was hit"
 asset() { grep -o '"browser_download_url": *"[^"]*/nuonuo-[^"]*-'"$1"'"' "$tmp/release.json" | head -n1 | sed 's/^"browser_download_url": *"\([^"]*\)"$/\1/'; }
 
-if [ "$os" = Darwin ]; then
+if [ "$os" = Darwin ] && [ "$component" != "server" ]; then
   app_name="Nuonuo.app"
   legacy_app="Super-assistant.app"
   asset_url="$(asset "mac-$arch\\.zip")"
@@ -86,17 +92,20 @@ if [ "$os" = Darwin ]; then
   done
   say ""
   say "Nuonuo ${version:-$(basename "$asset_url" | sed 's/^nuonuo-\(.*\)-mac-.*$/v\1/')} installed to $dest/$app_name"
-  say "open it:  open \"$dest/$app_name\"   (or from Launchpad)"
+  say "open it:  open \"$dest/$app_name\"   (connect to a server or click Local Deploy inside the app)"
+  say "headless server CLI on macOS: NUONUO_COMPONENT=server curl -fsSL https://raw.githubusercontent.com/$repo/main/install.sh | bash"
   say "update later: run this command again"
   exit 0
 fi
 
-asset_url="$(asset "linux-$arch\\.tar\\.gz")"
-[ -n "$asset_url" ] || die "the release has no linux-$arch package"
+pkg_os="linux"
+[ "$os" = Darwin ] && pkg_os="darwin"
+asset_url="$(asset "$pkg_os-$arch\\.tar\\.gz")"
+[ -n "$asset_url" ] || die "the release has no $pkg_os-$arch server package"
 say "downloading $(basename "$asset_url")…"
-curl -fSL --progress-bar "$asset_url" -o "$tmp/nuonuo-linux-$arch.tar.gz" || die "download failed: $asset_url"
+curl -fSL --progress-bar "$asset_url" -o "$tmp/nuonuo-$pkg_os-$arch.tar.gz" || die "download failed: $asset_url"
 
-archive="$(ls "$tmp"/nuonuo-*linux-"$arch".tar.gz | head -n1)"
+archive="$(ls "$tmp"/nuonuo-*"$pkg_os"-"$arch".tar.gz | head -n1)"
 mkdir -p "$tmp/x"
 tar -xzf "$archive" -C "$tmp/x"
 pkg="$(ls -d "$tmp"/x/nuonuo-*/ | head -n1)"
@@ -135,12 +144,14 @@ case ":$PATH:" in
   *) say "note: $bin_dir is not on your PATH; add  export PATH=\"$bin_dir:\$PATH\"  to your shell profile" ;;
 esac
 say ""
-say "start in background:   nuonuo start -d          (prints the login link; web UI on 127.0.0.1:7420)"
-say "  on the network:      nuonuo start -d --host 0.0.0.0 --port 7420"
-say "  save the address:    nuonuo config --host 0.0.0.0 --port 7420   (or Settings → System)"
-say "stop / restart:         nuonuo stop | restart | status"
-say "start at login:         nuonuo service install"
-say "update later:           nuonuo update   (or Settings → System in the web UI)"
+say "start headless API:    nuonuo start -d               (127.0.0.1:7420/v1)"
+say "start with WebUI:      nuonuo start -d --web         (127.0.0.1:7420)"
+say "pair a client / QR:    nuonuo pair --admin --qr"
+say "on the network:        nuonuo start -d --host 0.0.0.0 --port 7420"
+say "save the address:      nuonuo config --host 0.0.0.0 --port 7420   (or Settings → System)"
+say "stop / restart:        nuonuo stop | restart | status"
+say "start at login:        nuonuo service install"
+say "update later:          nuonuo update   (or Settings → System in the web UI)"
 
 # Restart last, without waiting: when the service itself runs this script (the web UI's update button), stopping the
 # service stops this script too, so everything else has to be done by then.

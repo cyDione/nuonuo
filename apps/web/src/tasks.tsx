@@ -14,10 +14,11 @@ import { go } from './route'
 import { Button, cx } from './ui'
 import { HandoffModal } from './handoff'
 import { ArtifactModal, previewKind } from './preview'
+import { AuthedImage } from './AuthedMedia'
 import { usePresence } from './shell'
 import { locale, tx } from './i18n'
 
-export const useTickets = () => useQuery({ queryKey: ['tickets'], queryFn: () => api.get<{ tickets: Ticket[] }>('/tickets') })
+export const useTickets = (enabled = true) => useQuery({ queryKey: ['tickets'], queryFn: () => api.get<{ tickets: Ticket[] }>('/tickets'), enabled })
 
 /** What a stage means to the owner, in plain words. */
 export const STATE_TEXT: Record<Stage, string> = {
@@ -1092,7 +1093,7 @@ export function FileChip({ id, name, size }: { id: string; name: string; size: n
   const Icon = kind === 'html' ? AppWindow : kind === 'csv' ? Table2 : kind === 'image' ? ImageIcon : FileText
   return <>
     {kind === 'image' ? <button onClick={() => setOpen(true)} className="press block overflow-hidden rounded-2xl border border-line hover:border-accent" title={name}>
-      <img src={`/api/artifacts/${id}`} alt={name} className="max-h-48 max-w-72 object-cover" />
+      <AuthedImage src={`/artifacts/${id}`} alt={name} className="max-h-48 max-w-72 object-cover" />
     </button> : <button onClick={() => setOpen(true)}
       className="press flex max-w-full min-w-0 items-center gap-2.5 rounded-2xl border border-line bg-panel py-2 pr-3 pl-2 text-left text-sm hover:border-accent">
       <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent"><Icon size={16} /></span>

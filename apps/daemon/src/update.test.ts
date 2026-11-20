@@ -35,7 +35,8 @@ describe('detectInstall', () => {
 })
 
 describe('Updater', () => {
-  const release = (tag: string, assets = [`nuonuo-${tag.slice(1)}-linux-${process.arch}.tar.gz`]) =>
+  const serverOs = process.platform === 'darwin' ? 'darwin' : 'linux'
+  const release = (tag: string, assets = [`nuonuo-${tag.slice(1)}-${serverOs}-${process.arch}.tar.gz`]) =>
     ({ tag_name: tag, html_url: `https://github.com/x/releases/${tag}`, body: 'notes', published_at: '2026-11-05T00:00:00Z', assets: assets.map(name => ({ name })) })
   const make = (body: unknown, status = 200, env: NodeJS.ProcessEnv = { GITHUB_TOKEN: 't' }) => {
     const calls: string[] = []
@@ -71,7 +72,9 @@ describe('Updater', () => {
 
   it('only counts the package for this machine, and the desktop app only reports', async () => {
     const other = process.arch === 'arm64' ? 'x64' : 'arm64'
-    expect((await make(release('v99.0.0', [`nuonuo-99.0.0-linux-${other}.tar.gz`])).updater.check()).available).toBe(false)
+    expect((await make(release('v99.0.0', [`nuonuo-99.0.0-${serverOs}-${other}.tar.gz`])).updater.check()).available).toBe(false)
+    expect(assetPattern(false, 'darwin', 'arm64').test('nuonuo-1.0.0-darwin-arm64.tar.gz')).toBe(true)
+    expect(assetPattern(false, 'linux', 'x64').test('nuonuo-1.0.0-linux-x64.tar.gz')).toBe(true)
     expect(assetPattern(true, 'darwin', 'arm64').test('nuonuo-1.0.0-mac-arm64.dmg')).toBe(true)
     expect(assetPattern(true, 'win32', 'x64').test('nuonuo-1.0.0-win-x64-setup.exe')).toBe(true)
     expect(assetPattern(true, 'win32', 'x64').test('nuonuo-1.0.0-win-arm64-setup.exe')).toBe(false)
@@ -83,10 +86,10 @@ describe('Updater', () => {
 
   it('prepares install.sh from the release tag with the prefix, version and token', async () => {
     const { updater } = make(release('v99.0.0'))
-    if (process.platform !== 'linux') return
+    if (process.platform !== 'linux' && process.platform !== 'darwin') return
     const p = await updater.prepare()
     expect(p.script).toBe('echo hi')
-    expect(p.env).toMatchObject({ GITHUB_TOKEN: 't', NUONUO_VERSION: 'v99.0.0', NUONUO_PREFIX: updater.install.kind === 'package' ? updater.install.prefix : '' })
+    expect(p.env).toMatchObject({ GITHUB_TOKEN: 't', NUONUO_COMPONENT: 'server', NUONUO_VERSION: 'v99.0.0', NUONUO_PREFIX: updater.install.kind === 'package' ? updater.install.prefix : '' })
     await expect(make(release(`v${VERSION}`)).updater.prepare()).rejects.toThrow(/已是最新/)
   })
 })

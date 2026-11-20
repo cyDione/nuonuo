@@ -1,20 +1,37 @@
-// Tells the web UI it runs inside the desktop app (which shows native notifications itself).
+// Preload bridge for the thin Nuonuo desktop client: OS-encrypted vault, on-demand local deploy,
+// native window/tray/shortcuts, and `nuonuo://` deep-link forwarding.
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('nuonuoDesktop', {
   isDesktop: true,
   platform: process.platform,
   setBadge: count => ipcRenderer.send('badge', count),
-  // Window state the page draws itself around: 'focus' (true/false) and 'fullscreen' (true/false).
-  on: (event, fn) => { if (event === 'focus' || event === 'fullscreen') ipcRenderer.on(`sa:${event}`, (_e, value) => fn(value)) },
-  // The quick-ask box: 'hide' tucks it away, 'open' shows the main window at a page (#/c/…).
+  on: (event, fn) => {
+    if (event === 'focus' || event === 'fullscreen' || event === 'pair-uri' || event === 'need-refresh') {
+      ipcRenderer.on(`sa:${event}`, (_e, value) => fn(value))
+    }
+  },
   quick: (action, hash) => ipcRenderer.send('quick', action, hash),
-  // 设置 → 通用 / 快捷键: start at login, the menu-bar icon, what closing the window does, the global shortcuts.
   prefs: { get: () => ipcRenderer.invoke('prefs:get'), set: patch => ipcRenderer.invoke('prefs:set', patch) },
-  // 在访达中显示 a folder.
   reveal: target => ipcRenderer.invoke('reveal', target),
-  // 设置 → 插件: pick a folder to install a plugin from.
   pickFolder: () => ipcRenderer.invoke('pick-folder'),
-  // 系统和更新 → 重启并更新: installs the version the service downloaded; resolves 'ok' (the app quits) or why not.
-  update: { install: () => ipcRenderer.invoke('update:install') },
+  vault: {
+    list: () => ipcRenderer.invoke('vault:list'),
+    save: (profile, refreshToken) => ipcRenderer.invoke('vault:save', profile, refreshToken),
+    getRefreshToken: profileId => ipcRenderer.invoke('vault:get-refresh', profileId),
+    setActive: profileId => ipcRenderer.invoke('vault:set-active', profileId),
+    remove: profileId => ipcRenderer.invoke('vault:remove', profileId),
+    setActiveSession: session => ipcRenderer.invoke('vault:active-session', session),
+  },
+  deploy: {
+    detect: () => ipcRenderer.invoke('deploy:detect'),
+    startLocal: opts => ipcRenderer.invoke('deploy:start-local', opts),
+    startDocker: opts => ipcRenderer.invoke('deploy:start-docker', opts),
+    stopLocal: () => ipcRenderer.invoke('deploy:stop-local'),
+    onLog: fn => {
+      const handler = (_e, line) => fn(line)
+      ipcRenderer.on('deploy:log', handler)
+      return () => ipcRenderer.removeListener('deploy:log', handler)
+    },
+  },
 })

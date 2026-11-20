@@ -1,22 +1,22 @@
-/** HTTP surface of the daemon: the JSON API under /api, the login link under /auth, and the web UI's static files. */
+/** Unified HTTP surface of the daemon: public `/v1/*` REST + SSE API, plugin callbacks, and optional `--web` static UI. */
 import { serveStatic } from '@hono/node-server/serve-static'
 import { defaultReasoningOf, describeError, KINDS, ModelError, PROVIDER_KINDS, PROVIDER_PRESETS, REASONING_LEVELS, ROLE_IDS, ROLES, type RoleId } from '@nuonuo/models'
 import { Hono, type Context } from 'hono'
-import { setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import { randomBytes } from 'node:crypto'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, relative } from 'node:path'
 import { Readable } from 'node:stream'
 import { z } from 'zod'
-import { COOKIE, hostGuard, requireToken, webGate } from './auth'
-import { CLIENT_BASE, ClientError, clientApi, Devices, DISPLAYS, SCOPES } from './clients'
-import { connectHost, isLoopback, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, resolveConfig, validHost, VERSION, writeSavedConfig } from './config'
-import { Conversations } from './conversations'
+import { authenticateRequest, v1Cors, webUiGate, type AuthEnv } from './auth'
+import { mountAuthRoutes } from './auth-routes'
+import { AuthError, hasScope, PROTOCOL_VERSION } from './auth-service'
+import { connectHost, DEFAULT_HOST, DEFAULT_PORT, networkUrls, readSavedConfig, resolveConfig, validHost, VERSION, writeSavedConfig } from './config'
+import { Conversations, type Message } from './conversations'
 import { EventMapper } from './events'
 import { extractRouterActionRuns } from './activity-runs'
 import { dispositionText, reportsOf, ticketView, transcript } from './views'
-import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION } from '@nuonuo/core'
+import { PERSONA_LANGUAGES, PERSONA_ROLES, DEFAULT_PERSONA, DEFAULT_PROACTIVE, DomainError, StructuredCallError, DEFAULT_ACCESS, LOCAL_APPS, suggestSteps, parseMemoryExport, type AccessSettings, KIND_LABEL, persona, savePersona, MEMORY_KINDS, type MemoryStatus, DEFAULT_EXECUTION, DEFAULT_REVIEW, proactiveHistory, proactiveSettings, ROUTER_SESSION, saveProactiveSettings, INSTRUCTIONS_MAX, WATCHDOG_SESSION, type SendingDevice } from '@nuonuo/core'
 import { kvGet, kvSet, newId, schema } from '@nuonuo/db'
 import { findBrowser } from '@nuonuo/agent-runtime'
 import { BRIDGE_JS, ComputerError, fireRoutine, WINDOW_HEADERS, type BrowserInfo } from '@nuonuo/sources'
@@ -29,6 +29,7 @@ import { DEFAULT_NOTIFY, NotifySettingsSchema, notifySettings, saveNotifySetting
 import type { Runtime } from './runtime'
 import { clientPrefs, saveClientPrefs } from './settings-tools'
 import type { Updater } from './update'
+import { allowsResourceTicket, eventAllowedForScopes, requiredScopeFor } from './v1-rbac'
 
 const PricesSchema = z.record(z.string(), z.object({ input: z.number().min(0).optional(), output: z.number().min(0).optional(),
   cacheRead: z.number().min(0).optional(), cacheWrite: z.number().min(0).optional() }).strict())
@@ -56,46 +57,86 @@ export interface AppControl {
 }
 
 /** `closing` aborts on shutdown so long-lived event streams end instead of holding the HTTP server open. */
-export function createApp(rt: Runtime, token: string, webRoot?: string, updater?: Updater, closing?: AbortSignal, control: AppControl = {}): Hono {
+export function createApp(rt: Runtime, localAdminKey?: string, webRoot?: string, updater?: Updater, closing?: AbortSignal, control: AppControl = {}): Hono {
   const windowNonce = randomBytes(12).toString('hex')
   const app = new Hono()
   const conversations = new Conversations(rt.store, rt.hub)
   const uploads = new Uploads(rt.store, rt.uploadsDir)
-  const devices = rt.devices
+  const getPort = () => control.port?.() ?? rt.config.port
 
-  app.use('*', hostGuard(rt.config))
-  app.use('*', webGate(rt.config))
+  app.use('*', webUiGate(rt.config))
 
   app.onError((error, c) => {
-    if (error instanceof ClientError) return c.json({ error: { code: error.code, message: error.message } }, error.status)
+    if (error instanceof AuthError) return c.json({ error: { code: error.code, message: error.message } }, error.status)
     if (error instanceof HttpError) return c.json({ error: { code: error.code, message: error.message } }, error.status)
     if (error instanceof DomainError) {
       return c.json({ error: { code: error.code, message: error.message } }, error.code === 'missing' ? 404 : error.code === 'conflict' ? 409 : 400)
     }
     if (error instanceof ModelError) {
-      return c.json({ error: { code: error.code, message: error.message } }, error.code === 'unknown_provider' ? 404 : 400)
+      return c.json({ error: { code: error.code, message: error.message } }, error.code === 'unknown_provider' ? 404 : error.code === 'no_model' ? 409 : 400)
     }
     if (error instanceof ComputerError) return c.json({ error: { code: 'computer', message: error.message } }, 400)
     console.error(error)
     return c.json({ error: { code: 'internal', message: describeError(error) } }, 500)
   })
 
-  /** The link `nuonuo start` prints: it trades the token for an HttpOnly cookie and goes to the app. */
-  app.get('/auth', c => {
-    if (c.req.query('token') !== token) return c.text('令牌无效。运行 nuonuo token 获取新的登录链接。', 401)
-    setCookie(c, COOKIE, token, { httpOnly: true, sameSite: 'Strict', path: '/', maxAge: 60 * 60 * 24 * 400 })
-    c.header('cache-control', 'no-store')
-    return c.redirect('/')
+  const api = new Hono<AuthEnv>()
+  api.use('*', v1Cors(rt.config))
+  mountAuthRoutes(api, rt, localAdminKey, getPort)
+
+  // Default-deny RBAC guard for every `/v1/*` endpoint outside `/v1/auth/*` (which handles its own public/admin guards).
+  api.use('*', async (c, next) => {
+    const subPath = c.req.path.startsWith('/v1') ? (c.req.path.slice(3) || '/') : c.req.path
+    if (subPath.startsWith('/auth/') || subPath === '/auth') return next()
+    const allowResourceTicket = allowsResourceTicket(subPath, c.req.method)
+    const principal = authenticateRequest(c, rt.auth, localAdminKey, { allowResourceTicket })
+    if (!principal) throw new AuthError(401, 'unauthorized', '未认证或令牌已过期，请刷新会话或重新登录')
+    const needed = requiredScopeFor(subPath, c.req.method)
+    if (needed && !hasScope(principal.scopes, needed)) {
+      throw new AuthError(403, 'forbidden', `当前设备没有「${needed}」权限`)
+    }
+    c.set('principal', principal)
+    await next()
   })
 
-  const api = new Hono()
-  api.use('*', requireToken(token))
-  const guard = <T>(fn: () => T): T => { try { return fn() } catch (error) { throw error instanceof HttpError ? error : new HttpError(400, 'invalid', (error as Error).message) } }
+  const guard = <T>(fn: () => T): T => { try { return fn() } catch (error) { throw error instanceof HttpError || error instanceof AuthError ? error : new HttpError(400, 'invalid', (error as Error).message) } }
 
-  api.get('/health', c => c.json({
-    ok: true, version: VERSION, home: rt.config.home, pid: process.pid, uptimeMs: Date.now() - rt.startedAt,
-    secrets: rt.secrets.backend, effects: rt.effects.health(),
-  }))
+  const V1_FEATURES = ['messages', 'events.sse', 'reply.delta', 'uploads', 'notices', 'approvals', 'tasks', 'settings', 'idempotency', 'speech', 'transcribe'] as const
+
+  api.get('/hello', c => {
+    const p = persona(rt.store)
+    const principal = c.get('principal')
+    const scopes = principal.scopes
+    return c.json({
+      protocol: PROTOCOL_VERSION,
+      server: { name: 'nuonuo', version: VERSION, webUi: rt.config.web },
+      assistant: { name: p.name, avatar: p.avatar, color: p.color, language: p.language },
+      device: principal.device,
+      sessionId: principal.sessionId,
+      mainConversationId: rt.engine.mainConversation(),
+      features: V1_FEATURES.filter(f =>
+        f === 'notices' ? hasScope(scopes, 'notices')
+        : f === 'approvals' ? hasScope(scopes, 'approvals')
+        : f === 'tasks' ? hasScope(scopes, 'tasks:read')
+        : f === 'settings' ? hasScope(scopes, 'admin')
+        : f === 'speech' || f === 'transcribe' ? Boolean(rt.hub.resolve(f))
+        : true),
+      limits: { maxUpload: MAX_UPLOAD, maxText: 100_000 },
+    })
+  })
+
+  api.get('/health', c => {
+    const principal = c.get('principal')
+    const isAdmin = hasScope(principal.scopes, 'admin')
+    return c.json({
+      ok: true,
+      version: VERSION,
+      protocol: PROTOCOL_VERSION,
+      webUi: rt.config.web,
+      uptimeMs: Date.now() - rt.startedAt,
+      ...(isAdmin ? { home: rt.config.home, pid: process.pid, secrets: rt.secrets.backend, effects: rt.effects.health() } : {}),
+    })
+  })
   // Updates (packaged Linux build): GET is the cached status, POST /check asks GitHub now, POST runs install.sh.
   const updates = () => { if (!updater) throw new HttpError(404, 'not_found', '更新不可用'); return updater }
   api.get('/update', c => c.json(updates().status()))
@@ -105,20 +146,22 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     try { return c.json(await updates().update()) } catch (error) { throw error instanceof HttpError ? error : new HttpError(409, 'update_failed', (error as Error).message) }
   })
 
-  // Network access: where the service listens and whether browsers may open it. Saved to <home>/config.json and applied
-  // when the service starts again; a --host/--port flag or NUONUO_HOST/PORT overrides the saved value.
+  // Network access & WebUI toggle: saved to <home>/config.json and applied on the next start.
   const access = () => {
     const cfg = rt.config
     const saved = readSavedConfig(cfg.home)
-    const port = control.port?.() ?? cfg.port
-    const next = resolveConfig({ desktop: cfg.desktop, host: cfg.sources.host === 'flag' ? cfg.host : undefined, port: cfg.sources.port === 'flag' ? cfg.port : undefined })
+    const port = getPort()
+    const next = resolveConfig({
+      host: cfg.sources.host === 'flag' ? cfg.host : undefined,
+      port: cfg.sources.port === 'flag' ? cfg.port : undefined,
+      web: cfg.sources.web === 'flag' ? cfg.web : undefined,
+    })
     return {
-      desktop: cfg.desktop,
       running: { host: cfg.host, port, web: cfg.web },
-      saved: { host: saved.host ?? DEFAULT_HOST, port: saved.port ?? DEFAULT_PORT, web: saved.web ?? !cfg.desktop },
+      saved: { host: saved.host ?? DEFAULT_HOST, port: saved.port ?? DEFAULT_PORT, web: saved.web ?? false },
       sources: cfg.sources,
-      localUrl: `http://${connectHost(cfg.host)}:${port}/auth?token=${token}`,
-      networkUrls: cfg.web ? networkUrls(cfg.host, port).map(u => `${u}/auth?token=${token}`) : [],
+      localUrl: `http://${connectHost(cfg.host)}:${port}`,
+      networkUrls: networkUrls(cfg.host, port),
       restartNeeded: next.host !== cfg.host || (next.port !== cfg.port && cfg.port !== 0) || next.web !== cfg.web,
       canRestart: Boolean(control.restart),
     }
@@ -210,14 +253,41 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json({ since: start.getTime(), rows: rt.hub.usageSince(start.getTime()), daily })
   })
 
-  // Conversations (M0 direct-chat preview)
-  api.get('/conversations', c => c.json({ conversations: conversations.list(c.req.query('archived') === '1') }))
+  const resolveConversationId = (raw: string) => raw === 'main' ? rt.engine.mainConversation() : raw
+  const taskOf = (id: string) => { try { return rt.engine.ticket(id) } catch { return undefined } }
+  const enrichMessage = (m: Message) => {
+    const meta = (m.meta ?? {}) as { attachments?: { id: string; name: string; mime: string; size: number }[]; device?: SendingDevice; recalled?: boolean; result?: unknown }
+    const t = m.ticketId ? taskOf(m.ticketId) : undefined
+    const task = m.ticketId ? { id: m.ticketId, title: t?.title ?? '', state: (!t || t.ended ? 'done' : t.attention ? 'waiting' : 'working') as 'working' | 'waiting' | 'done' } : null
+    return {
+      ...m,
+      text: m.content,
+      attachments: (meta.attachments ?? []).map(({ id, name, mime, size }) => ({ id, name, mime, size })),
+      taskId: m.ticketId ?? null,
+      task,
+      final: m.role === 'assistant' && (!task || task.state !== 'working' || meta.result !== undefined),
+      device: meta.device ? { id: meta.device.id, name: meta.device.name, kind: meta.device.kind } : null,
+      recalled: Boolean(meta.recalled),
+    }
+  }
+  const sentByClientId = new Map<string, string>()
+
+  // Conversations & messages (unified for full clients + lightweight SDK clients)
+  api.get('/conversations', c => {
+    const mainId = rt.engine.mainConversation()
+    const isAdmin = hasScope(c.get('principal').scopes, 'admin')
+    const list = conversations.list(isAdmin && c.req.query('archived') === '1')
+      .filter(x => isAdmin || x.source !== 'watchdog')
+      .map(x => ({ ...x, main: x.id === mainId }))
+    return c.json({ conversations: list })
+  })
   api.post('/conversations', async c => {
     const input = await body(c, z.object({ title: z.string().trim().min(1).max(80).optional() }).optional().default({}))
-    return c.json({ conversation: conversations.create(input.title) }, 201)
+    const created = conversations.create(input.title)
+    return c.json({ conversation: { ...created, main: false } }, 201)
   })
   api.patch('/conversations/:id', async c => {
-    const updated = conversations.update(c.req.param('id'), await body(c, ConversationPatch))
+    const updated = conversations.update(resolveConversationId(c.req.param('id')), await body(c, ConversationPatch))
     if (!updated) throw new HttpError(404, 'missing', 'no such conversation')
     return c.json({ conversation: updated })
   })
@@ -265,31 +335,93 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json({ mood: moodView(mood()) })
   })
   api.delete('/conversations/:id', c => {
-    const id = c.req.param('id')
+    const id = resolveConversationId(c.req.param('id'))
     if (id === rt.engine.mainConversation()) throw new HttpError(409, 'conflict', '主对话不能删除')
     if (conversations.get(id)) for (const t of rt.engine.tickets({ threadId: rt.engine.threadOf(id), open: true })) rt.engine.stopTask(t.id, 'person', '对话已删除')
     conversations.delete(id)
     return c.body(null, 204)
   })
   api.get('/conversations/:id/messages', c => {
-    const conversation = conversations.get(c.req.param('id'))
+    const id = resolveConversationId(c.req.param('id'))
+    const conversation = conversations.get(id)
     if (!conversation) throw new HttpError(404, 'missing', 'no such conversation')
-    return c.json({ conversation, messages: conversations.messages(conversation.id) })
+    const isAdmin = hasScope(c.get('principal').scopes, 'admin')
+    if (!isAdmin && conversation.source === 'watchdog') throw new HttpError(404, 'missing', 'no such conversation')
+    let list = conversations.messages(conversation.id)
+    const after = c.req.query('after')
+    const rawLimit = c.req.query('limit')
+    if (after) {
+      const i = list.findIndex(m => m.id === after)
+      if (i < 0) throw new HttpError(404, 'missing', '`after` 不是这个对话里的消息')
+      const limit = Math.min(Math.max(Number(rawLimit) || 50, 1), 200)
+      list = list.slice(i + 1, i + 1 + limit)
+    } else if (rawLimit) {
+      const limit = Math.min(Math.max(Number(rawLimit) || 50, 1), 200)
+      list = list.slice(-limit)
+    }
+    return c.json({ conversationId: conversation.id, conversation, messages: list.map(enrichMessage) })
   })
-  /** The owner's message becomes a trigger; the router or the task's worker picks it up and answers over /api/events. */
+  /** The owner's message becomes a trigger; the router or the task's worker picks it up and answers over /v1/events. */
   api.post('/conversations/:id/messages', async c => {
-    const id = c.req.param('id')
-    if (!conversations.get(id)) throw new HttpError(404, 'missing', 'no such conversation')
-    const { content, replyTo, attachments = [], quote } = await body(c, z.object({ content: z.string().trim().max(100_000), replyTo: z.string().optional(),
-      attachments: z.array(z.string()).max(20).optional(), quote: z.string().optional() }).refine(b => b.content.length > 0 || (b.attachments?.length ?? 0) > 0, '消息不能为空'))
+    const id = resolveConversationId(c.req.param('id'))
+    const conv = conversations.get(id)
+    if (!conv) throw new HttpError(404, 'missing', 'no such conversation')
+    const principal = c.get('principal')
+    if (!hasScope(principal.scopes, 'admin') && conv.source === 'watchdog') throw new HttpError(404, 'missing', 'no such conversation')
+    const parsed = await body(
+      c,
+      z.object({
+        content: z.string().trim().max(100_000).optional(),
+        text: z.string().trim().max(100_000).optional(),
+        replyTo: z.string().optional(),
+        attachments: z.array(z.string()).max(20).optional(),
+        quote: z.string().optional(),
+        clientId: z.string().trim().min(1).max(100).optional(),
+      }).refine(b => ((b.content ?? b.text ?? '').length > 0) || (b.attachments?.length ?? 0) > 0, '消息不能为空'),
+    )
+    const content = parsed.content ?? parsed.text ?? ''
+    const idemKey = parsed.clientId ? `${principal.deviceId}:${parsed.clientId}` : undefined
+    const earlier = idemKey ? sentByClientId.get(idemKey) : undefined
+    if (earlier) {
+      const m = conversations.message(earlier)
+      if (m) return c.json({ message: enrichMessage(m), duplicate: true }, 200)
+    }
     if (!rt.hub.resolve('router')) throw new ModelError('no_model', '主 Agent 还没有配置模型：请到 设置 → 分层模型 选择')
-    const files = guard(() => uploads.take(attachments))
-    const quoted = quote ? conversations.message(quote) : undefined
-    if (quote && (!quoted || quoted.conversationId !== id)) throw new HttpError(400, 'invalid', '引用的消息不在这个对话里')
-    const result = rt.engine.receiveMessage(id, content, { ...(replyTo ? { replyTo } : {}), ...(files.length ? { attachments: files } : {}),
-      ...(quoted ? { quote: { messageId: quoted.id, text: quoted.content } } : {}) })
+    const files = guard(() => uploads.take(parsed.attachments ?? []))
+    const quoted = parsed.quote ? conversations.message(parsed.quote) : undefined
+    if (parsed.quote && (!quoted || quoted.conversationId !== id)) throw new HttpError(400, 'invalid', '引用的消息不在这个对话里')
+    const sendingDevice: SendingDevice | undefined = !principal.isLocalAdmin
+      ? { id: principal.device.id, name: principal.device.name, kind: principal.device.kind, display: principal.device.display }
+      : undefined
+    const result = rt.engine.receiveMessage(id, content, {
+      ...(parsed.replyTo ? { replyTo: parsed.replyTo } : {}),
+      ...(files.length ? { attachments: files } : {}),
+      ...(quoted ? { quote: { messageId: quoted.id, text: quoted.content } } : {}),
+      ...(sendingDevice ? { device: sendingDevice } : {}),
+    })
     void conversations.autoTitle(id).then(named => { if (named) rt.bus.emit({ type: 'conversation.updated', conversationId: id }) })
-    return c.json({ message: conversations.message(result.messageId), deliveredTo: result.deliveredTo }, 201)
+    if (idemKey) {
+      sentByClientId.set(idemKey, result.messageId)
+      if (sentByClientId.size > 1_000) sentByClientId.delete(sentByClientId.keys().next().value!)
+    }
+    const created = conversations.message(result.messageId)!
+    return c.json({ message: enrichMessage(created), deliveredTo: result.deliveredTo }, 201)
+  })
+  // Voice (TTS & STT for any client with `chat` scope)
+  api.post('/speech', async c => {
+    const input = await body(c, z.object({ text: z.string().trim().min(1).max(4000), voice: z.string().max(64).optional(), format: z.enum(['mp3', 'wav', 'opus', 'aac', 'flac']).optional() }))
+    const audio = await rt.hub.speak(input.text, { ...(input.voice ? { voice: input.voice } : {}), ...(input.format ? { format: input.format } : {}) }, { ref: c.get('principal').deviceId })
+    if (!audio) throw new HttpError(409, 'unavailable', '还没有设置朗读模型（设置 → 模型 → 朗读）')
+    return new Response(Buffer.from(audio.bytes), { headers: { 'content-type': audio.mime, 'cache-control': 'no-store' } })
+  })
+  api.post('/transcribe', async c => {
+    const form = await c.req.parseBody()
+    const file = form.file
+    if (!(file instanceof File)) throw new HttpError(400, 'invalid', '缺少录音（multipart 字段 file）')
+    if (file.size > 25 * 1024 * 1024) throw new HttpError(400, 'too_large', '录音超过 25MB')
+    const heard = await rt.hub.transcribe(new Uint8Array(await file.arrayBuffer()), { ref: c.get('principal').deviceId })
+    if (!heard) throw new HttpError(409, 'unavailable', '还没有设置听写模型（设置 → 模型 → 听写）')
+    return c.json(heard)
   })
   // Attachments: uploaded first (a chip in the composer), then sent with the message by id.
   api.post('/uploads', async c => {
@@ -314,7 +446,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
   api.delete('/uploads/:id', c => { if (!uploads.discard(c.req.param('id'))) throw new HttpError(409, 'conflict', '已发送的附件不能删除'); return c.body(null, 204) })
   /** 「整理一下前面的」: the assistant's working memory of the chat is summarised now, and the chat shows where. */
   api.post('/conversations/:id/compact', async c => {
-    const id = c.req.param('id')
+    const id = resolveConversationId(c.req.param('id'))
     if (!conversations.get(id)) throw new HttpError(404, 'missing', 'no such conversation')
     if (!rt.hub.resolve('summarizer') && !rt.hub.resolve('router')) throw new ModelError('no_model', '还没有配置模型')
     if (rt.agents.isRunning(ROUTER_SESSION)) throw new HttpError(409, 'conflict', '它正在回你，等它说完再整理')
@@ -329,7 +461,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     rt.bus.emit({ type: 'message.created', conversationId: id, messageId })
     return c.json({ compacted: true, messageId })
   })
-  api.post('/conversations/:id/read', c => { conversations.markRead(c.req.param('id')); return c.json({ ok: true }) })
+  api.post('/conversations/:id/read', c => { conversations.markRead(resolveConversationId(c.req.param('id'))); return c.json({ ok: true }) })
   // Message actions: 撤回, 编辑 (take back and send the corrected text), 重新回答.
   api.post('/messages/:id/recall', c => { rt.engine.recallMessage(c.req.param('id')); return c.json({ ok: true }) })
   api.post('/messages/:id/edit', async c => {
@@ -556,10 +688,26 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     rt.bus.emit({ type: 'settings.updated', keys: ['review'] })
     return c.json({ settings: rt.reviewer.settings() })
   })
-  api.get('/approvals', c => c.json({ approvals: rt.reviewer.pending() }))
+  const approvalView = (a: ReturnType<typeof rt.reviewer.pending>[number]) => {
+    let task: string | null = null
+    try { task = rt.engine.ticket(a.ticketId).title } catch { /* gone */ }
+    const input = a.input as { command?: string; summary?: string }
+    return {
+      ...a,
+      taskId: a.ticketId,
+      task,
+      action: String(input.summary ?? input.command ?? a.tool).slice(0, 500),
+    }
+  }
+  api.get('/approvals', c => c.json({ approvals: rt.reviewer.pending().map(approvalView) }))
   api.post('/approvals/:id', async c => {
+    const principal = c.get('principal')
     const { approve, note, scope } = await body(c, z.object({ approve: z.boolean(), note: z.string().max(500).optional(), scope: z.enum(['once', 'task', 'always']).optional() }))
-    return c.json({ approval: guard(() => rt.reviewer.decide(c.req.param('id'), approve, note, scope)) })
+    const effectiveScope = scope === 'always' && !hasScope(principal.scopes, 'admin') ? 'once' : scope
+    const byNote = !principal.isLocalAdmin && !hasScope(principal.scopes, 'admin')
+      ? (note ? `${note}（来自 ${principal.device.name}）` : `来自 ${principal.device.name}`)
+      : note
+    return c.json({ approval: guard(() => rt.reviewer.decide(c.req.param('id'), approve, byNote, effectiveScope)) })
   })
   api.get('/grants', c => c.json({ grants: rt.reviewer.grants() }))
   api.delete('/grants/:id', c => { rt.reviewer.revokeGrant(c.req.param('id')); rt.bus.emit({ type: 'activity.updated' }); return c.body(null, 204) })
@@ -1225,52 +1373,63 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return c.json({ settings: rt.engine.execution() })
   })
 
-  // Paired devices (client protocol, docs/11-client-protocol.md): the owner makes a pairing code and manages devices here.
-  api.get('/devices', c => c.json({ devices: devices.list() }))
-  api.post('/devices/pair', async c => {
-    const input = await body(c, z.object({ scopes: z.array(z.enum(SCOPES)).optional(), name: z.string().trim().min(1).max(60).optional() }).optional().default({}))
-    const port = control.port?.() ?? rt.config.port
-    const urls = rt.config.web || rt.config.desktop ? networkUrls(rt.config.host, port) : []
-    return c.json({ ...devices.createCode(input), urls: [`http://${connectHost(rt.config.host)}:${port}`, ...urls], base: CLIENT_BASE,
-      reachable: !isLoopback(rt.config.host) }, 201)
-  })
-  api.patch('/devices/:id', async c => c.json({ device: devices.update(c.req.param('id'),
-    await body(c, z.object({ name: z.string().trim().min(1).max(60).optional(), scopes: z.array(z.enum(SCOPES)).optional(), display: z.enum(DISPLAYS).optional() }).strict())) }))
-  api.delete('/devices/:id', c => {
-    if (!devices.revoke(c.req.param('id'))) throw new HttpError(404, 'missing', '没有这个设备')
-    rt.bus.emit({ type: 'activity.updated' })
-    return c.body(null, 204)
+  /** Unified scope-filtered SSE stream for all clients (`/v1/events`). `?conversation=<id|main>` narrows chat events. */
+  api.get('/events', c => {
+    const principal = c.get('principal')
+    const scopes = principal.scopes
+    const isAdmin = hasScope(scopes, 'admin')
+    const onlyRaw = c.req.query('conversation')
+    const only = onlyRaw ? resolveConversationId(onlyRaw) : undefined
+    return streamSSE(c, async sse => {
+      const mapper = new EventMapper()
+      const queue: { event: string; data: unknown }[] = []
+      let wake: (() => void) | undefined
+      let seq = 0
+      const wantConv = (cnv: string) => (!only || cnv === only) && (isAdmin || conversations.get(cnv)?.source !== 'watchdog')
+      const off = rt.bus.on(event => {
+        for (const e of mapper.map(event)) {
+          if (!eventAllowedForScopes(e, scopes)) continue
+          if ((e.type === 'message.created' || e.type === 'message.updated') && !wantConv(e.conversationId)) continue
+          if ((e.type === 'reply.delta' || e.type === 'conversation.updated') && !wantConv(e.conversationId)) continue
+          if (e.type === 'message.created' || e.type === 'message.updated') {
+            const m = conversations.message(e.messageId)
+            queue.push({ event: 'message', data: m ? { ...e, message: enrichMessage(m) } : e })
+          } else {
+            queue.push({ event: 'message', data: e })
+          }
+        }
+        if (event.type === 'approval.updated' && hasScope(scopes, 'approvals')) {
+          const id = String((event as { approvalId?: string }).approvalId)
+          const pending = rt.reviewer.pending().find(a => a.id === id)
+          queue.push({ event: 'approval', data: pending ? { op: 'requested', approval: approvalView(pending) } : { op: 'resolved', id } })
+        }
+        if (queue.length) wake?.()
+      })
+      const closed = new Promise<void>(resolve => {
+        const done = () => resolve()
+        c.req.raw.signal.addEventListener('abort', done, { once: true })
+        closing?.addEventListener('abort', done, { once: true })
+      })
+      try {
+        await sse.writeSSE({ event: 'ready', id: String(seq++), data: JSON.stringify({ protocol: PROTOCOL_VERSION, device: principal.deviceId, sessionId: principal.sessionId }) })
+        for (;;) {
+          while (queue.length) {
+            const next = queue.shift()!
+            await sse.writeSSE({ event: next.event, id: String(seq++), data: JSON.stringify(next.data) })
+          }
+          const ping = new Promise<'ping'>(r => setTimeout(() => r('ping'), 20_000))
+          const next = await Promise.race([new Promise<'event'>(r => { wake = () => r('event') }), ping, closed.then(() => 'closed' as const)])
+          wake = undefined
+          if (next === 'closed') break
+          if (next === 'ping') await sse.writeSSE({ event: 'ping', data: '{}' })
+          if (!principal.isLocalAdmin && !rt.auth.isSessionActive(principal.sessionId)) break
+        }
+      } finally { off() }
+    })
   })
 
-  /** One SSE stream per browser tab: messages, streaming replies, task and session state. */
-  api.get('/events', c => streamSSE(c, async sse => {
-    const mapper = new EventMapper()
-    const queue: string[] = []
-    let wake: (() => void) | undefined
-    const off = rt.bus.on(event => {
-      for (const e of mapper.map(event)) queue.push(JSON.stringify(e))
-      wake?.()
-    })
-    const closed = new Promise<void>(resolve => {
-      const done = () => resolve()
-      c.req.raw.signal.addEventListener('abort', done, { once: true })
-      closing?.addEventListener('abort', done, { once: true })
-    })
-    try {
-      await sse.writeSSE({ event: 'ready', data: '{}' })
-      for (;;) {
-        while (queue.length) await sse.writeSSE({ event: 'message', data: queue.shift()! })
-        const ping = new Promise<'ping'>(r => setTimeout(() => r('ping'), 20_000))
-        const next = await Promise.race([new Promise<'event'>(r => { wake = () => r('event') }), ping, closed.then(() => 'closed' as const)])
-        wake = undefined
-        if (next === 'closed') break
-        if (next === 'ping') await sse.writeSSE({ event: 'ping', data: '{}' })
-      }
-    } finally { off() }
-  }))
-
-  app.route('/api', api)
-  app.route(CLIENT_BASE, clientApi(rt, devices, conversations, uploads, closing))
+  api.all('*', c => c.json({ error: { code: 'not_found', message: `没有这个接口：${c.req.method} ${c.req.path}` } }, 404))
+  app.route('/v1', api)
 
   /**
    * Plugin window files. The page runs in a sandboxed frame with an opaque origin, which carries no login cookie, so these
@@ -1285,14 +1444,14 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     return file ? c.body(new Uint8Array(file.body), 200, { ...WINDOW_HEADERS, 'content-type': file.type }) : c.text('not found', 404)
   })
 
-  /** Public endpoints of sources (OAuth callbacks): no owner token, so each source checks its own state parameter. */
+  /** Public endpoints of sources (OAuth callbacks): no session token, so each source checks its own state parameter. */
   app.all('/plugin/:id/*', async c => {
     const path = c.req.path.replace(new RegExp(`^/plugin/${c.req.param('id')}/`), '')
     const res = await rt.sources.http(c.req.param('id'), c.req.raw, path, { public: true, origin: new URL(c.req.url).origin })
     return res ?? c.text('not found', 404)
   })
 
-  if (webRoot && existsSync(webRoot)) {
+  if (rt.config.web && webRoot && existsSync(webRoot)) {
     const root = relative(process.cwd(), webRoot) || '.'
     // Hashed bundles under /assets/ never change; index.html must revalidate on every load so an app upgrade
     // never stays stuck on the previous version's heuristically cached HTML.
@@ -1309,7 +1468,7 @@ export function createApp(rt: Runtime, token: string, webRoot?: string, updater?
     })
     app.use('/*', serveStatic({ root }))
     app.get('*', serveStatic({ root, path: 'index.html' }))
-  } else {
+  } else if (rt.config.web) {
     app.get('/', c => c.html('<p>Web UI 未构建：运行 <code>pnpm build</code>，或在开发时使用 <code>pnpm dev</code>（http://localhost:5173）。</p>'))
   }
   return app

@@ -23,28 +23,40 @@ describe('resolveConfig', () => {
     process.env.NUONUO_HOME = home
     delete process.env.NUONUO_HOST
     delete process.env.NUONUO_PORT
+    delete process.env.NUONUO_WEB
     return home
   }
 
-  it('takes host and port from a flag, then the environment, then config.json, then the defaults', () => {
+  it('defaults to headless API-only (web: false) and resolves host, port, and web by precedence flag > env > file > default', () => {
     withHome()
-    expect(resolveConfig()).toMatchObject({ host: '127.0.0.1', port: 7420, web: true, desktop: false, sources: { host: 'default', port: 'default' } })
-    withHome({ host: '0.0.0.0', port: 8080 })
-    expect(resolveConfig()).toMatchObject({ host: '0.0.0.0', port: 8080, sources: { host: 'file', port: 'file' } })
-    process.env.NUONUO_PORT = '9000'
-    expect(resolveConfig()).toMatchObject({ port: 9000, sources: { port: 'env' } })
-    expect(resolveConfig({ host: '192.168.1.5', port: 9100 })).toMatchObject({ host: '192.168.1.5', port: 9100, sources: { host: 'flag', port: 'flag' } })
-    delete process.env.NUONUO_PORT
-    expect(() => resolveConfig({ host: 'bad host!' })).toThrow(/监听地址/)
-  })
+    expect(resolveConfig()).toMatchObject({
+      host: '127.0.0.1',
+      port: 7420,
+      web: false,
+      sources: { host: 'default', port: 'default', web: 'default' },
+    })
 
-  it('keeps the desktop app on this machine until browser access is turned on', () => {
-    withHome({ host: '0.0.0.0' })
-    expect(resolveConfig({ desktop: true })).toMatchObject({ host: '127.0.0.1', web: false })
-    const home = withHome({ host: '0.0.0.0' })
+    const home = withHome({ host: '0.0.0.0', port: 8080 })
+    expect(resolveConfig()).toMatchObject({ host: '0.0.0.0', port: 8080, web: false, sources: { host: 'file', port: 'file', web: 'default' } })
+
     writeSavedConfig(home, { web: true })
-    expect(readSavedConfig(home)).toEqual({ host: '0.0.0.0', web: true })
-    expect(resolveConfig({ desktop: true })).toMatchObject({ host: '0.0.0.0', web: true })
+    expect(readSavedConfig(home)).toEqual({ host: '0.0.0.0', port: 8080, web: true })
+    expect(resolveConfig()).toMatchObject({ web: true, sources: { web: 'file' } })
+
+    process.env.NUONUO_PORT = '9000'
+    process.env.NUONUO_WEB = '0'
+    expect(resolveConfig()).toMatchObject({ port: 9000, web: false, sources: { port: 'env', web: 'env' } })
+
+    expect(resolveConfig({ host: '192.168.1.5', port: 9100, web: true })).toMatchObject({
+      host: '192.168.1.5',
+      port: 9100,
+      web: true,
+      sources: { host: 'flag', port: 'flag', web: 'flag' },
+    })
+
+    delete process.env.NUONUO_PORT
+    delete process.env.NUONUO_WEB
+    expect(() => resolveConfig({ host: 'bad host!' })).toThrow(/监听地址/)
     expect(() => writeSavedConfig(home, { port: 70000 })).toThrow(/端口/)
   })
 
