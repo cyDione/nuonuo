@@ -316,12 +316,14 @@ jobs:
           SHA: ${{ needs.prepare.outputs.sha }}
           NOTES: ${{ inputs.notes }}
         run: |
-          ls -l dist
+          mkdir -p release-files
+          find dist -type f -exec mv -t release-files {} +
+          ls -lh release-files
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber
+            gh release upload "$TAG" release-files/* --clobber
           elif [ -n "$NOTES" ]; then
             # A manual run: the tag does not exist yet, so the Release creates it on the built commit.
-            gh release create "$TAG" dist/* --target "$SHA" --title "$TAG" --notes "$NOTES"
+            gh release create "$TAG" release-files/* --target "$SHA" --title "$TAG" --notes "$NOTES"
           else
-            gh release create "$TAG" dist/* --target "$SHA" --title "$TAG" --generate-notes
+            gh release create "$TAG" release-files/* --target "$SHA" --title "$TAG" --generate-notes
           fi
