@@ -4,8 +4,10 @@
 @custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
 
 /*
- * Visual language (Figma v6): a pure white / pure black window, grey for the assistant's bubbles and inset surfaces, and one
- * theme colour the owner picks (莓红 by default) for their own bubbles, the selected item and small dots. 糯糯 keeps its pink.
+ * Visual language (Figma v15 · 天光雾玻璃与实体白瓷 / Frosted Daylight Ceramic):
+ * Plane 0: open warm-peach-to-cool-sky atmospheric canvas (light) / deep obsidian midnight sky (dark).
+ * Plane 1: translucent frosted porcelain rails and collapsible right companion pane.
+ * Plane 2: crisp solid porcelain white cards and tactile ticket confirmations, with surgical Berry Crimson accents.
  */
 @theme {
   --font-sans: "Geist Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
@@ -50,77 +52,104 @@
   --color-sky: var(--sky);
   --color-grape: var(--grape);
   --color-mochi: var(--mochi);
+  --color-mochi-eye: var(--mochi-eye);
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 :root {
-  /* Neutral chrome, colour in the cards (Figma "v4 · 主题色" → 学 Muse): pure white / pure black base, untinted greys only for inset surfaces; one coral accent for actions. */
-  --bg: #ffffff; --panel: #ffffff; --card: #ffffff; --bubble: #f4f4f4; --hero: #f5f5f5; --hero-2: #ebebeb; --sunken: #f4f4f4; --line: #ebebeb;
-  --fg: #141414; --muted: #636363; --faint: #9a9a9a;
-  --ink: #141414; --ink-fg: #ffffff;
-  --accent: var(--a-l); --accent-fg: var(--a-fg-l); --accent-soft: color-mix(in oklab, var(--accent) 10%, var(--bg));
-  --mochi: var(--m-l);
-  --thumb: rgb(20 20 20 / 0.2); --thumb-hover: rgb(20 20 20 / 0.36);
-  --ok: #2f7a55; --ok-soft: #e4f3eb; --warn: #a8611a; --warn-soft: #f8ecd9; --danger: #c23b33; --danger-soft: #fdeaea;
-  --surface-running: #edf2fe; --border-running: rgb(38 86 199 / 0.3); --pill-running: #dbe6fd; --fg-running: #2656c7;
-  --inspector-rail: #fafafa; --inspector-active: #ebebeb;
-  --code-bg: #f4f5f7; --code-border: #e5e7eb; --code-fg: #3f3470; --terminal-fg: #1e3a5f;
-  --avatar-well: #f6ebe6;
-  --lime: #2f9e6e; --coral: #d2535a; --sun: #f6c04e; --sky: #3d86e0; --grape: #8a7fc0;
+  /* Frosted Daylight Ceramic (Figma v15): open peach-to-sky horizon, frosted porcelain glass chrome, crisp ceramic cards. */
+  --bg: #f5f4f6; --panel: #ffffff; --card: #ffffff; --bubble: #ffffff; --hero: #f4f5f8; --hero-2: #eaecf2; --sunken: #f3f4f8; --line: #e7e9f0;
+  --fg: #14151b; --muted: #5c6070; --faint: #8e93a4;
+  --ink: #14151b; --ink-fg: #ffffff;
+  --accent: var(--a-l); --accent-fg: var(--a-fg-l); --accent-soft: color-mix(in oklab, var(--accent) 10%, #ffffff);
+  --mochi: var(--m-l); --mochi-eye: var(--me-l);
+  --sky-bg: radial-gradient(76% 78% at 10% 14%, #fbe9df 0%, transparent 62%), radial-gradient(74% 82% at 92% 84%, #dce8f7 0%, transparent 64%), linear-gradient(135deg, #f8f2ee 0%, #f4f6fa 52%, #eaf0f8 100%);
+  --glass: rgb(255 255 255 / 0.82);
+  --glass-strong: rgb(255 255 255 / 0.92);
+  --glass-border: rgb(255 255 255 / 0.88);
+  --ceramic-border: rgb(20 21 27 / 0.06);
+  --shadow-pill: 0 12px 32px -12px rgb(15 17 26 / 0.12), 0 2px 8px -2px rgb(15 17 26 / 0.06), inset 0 1px 0 rgb(255 255 255 / 0.9);
+  --shadow-ceramic: 0 14px 36px -18px rgb(15 17 26 / 0.14), 0 2px 10px -4px rgb(15 17 26 / 0.06);
+  --shadow-bubble: 0 4px 16px -8px rgb(15 17 26 / 0.08), 0 1px 2px rgb(15 17 26 / 0.03);
+  --shadow-composer: 0 14px 34px -16px rgb(15 17 26 / 0.16), 0 2px 8px -3px rgb(15 17 26 / 0.06);
+  --thumb: rgb(20 21 27 / 0.18); --thumb-hover: rgb(20 21 27 / 0.34);
+  --ok: #15803d; --ok-soft: #e6f6ec; --warn: #b45309; --warn-soft: #fef6e4; --danger: #be123c; --danger-soft: #fef0f3;
+  --surface-running: #ffffff; --border-running: rgb(225 29 72 / 0.22); --pill-running: #fde8ee; --fg-running: #be123c;
+  --inspector-rail: #f7f8fb; --inspector-active: #eceef4;
+  --code-bg: #f4f5f8; --code-border: #e5e7ef; --code-fg: #3f3470; --terminal-fg: #1e3a5f;
+  --avatar-well: #f5f6fa;
+  --lime: #15803d; --coral: #e11d48; --sun: #f59e0b; --sky: #2563eb; --grape: #7c3aed;
   --glow: color-mix(in oklab, var(--accent) 12%, transparent);
-  --scrim: rgb(10 10 10 / 0.3);
-  --shadow-sheet: 0 0 0 1px var(--line), 0 10px 30px -14px rgb(0 0 0 / 0.1);
+  --scrim: rgb(15 17 26 / 0.26);
+  --shadow-sheet: 0 0 0 1px rgb(20 21 27 / 0.06), 0 18px 44px -18px rgb(15 17 26 / 0.18);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #000000; --panel: #000000; --card: #111111; --bubble: #1a1a1a; --hero: #111111; --hero-2: #1f1f1f; --sunken: #141414; --line: #232323;
-    --fg: #f2f2f2; --muted: #9a9a9a; --faint: #666666;
-    --ink: #f2f2f2; --ink-fg: #141414;
-    --accent: var(--a-d); --accent-fg: var(--a-fg-d); --accent-soft: color-mix(in oklab, var(--accent) 22%, var(--bg));
-    --mochi: var(--m-d);
-    --thumb: rgb(255 255 255 / 0.2); --thumb-hover: rgb(255 255 255 / 0.36);
-    --ok: #6fcf9c; --ok-soft: #162b21; --warn: #f2c06b; --warn-soft: #2e2414; --danger: #f2877d; --danger-soft: #2d1818;
-    --surface-running: #141e2e; --border-running: rgb(120 174 242 / 0.32); --pill-running: #1f314d; --fg-running: #78aef2;
-    --inspector-rail: #111114; --inspector-active: #25262c;
-    --code-bg: #18191e; --code-border: #282a32; --code-fg: #c4b8f7; --terminal-fg: #9ec5fe;
-    --avatar-well: #221c1f;
-    --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #6fa8ef; --grape: #b1a8dc;
-    --glow: color-mix(in oklab, var(--accent) 10%, transparent);
-    --scrim: rgb(0 0 0 / 0.6);
-    --shadow-sheet: 0 0 0 1px var(--line);
+    --bg: #0d1017; --panel: #141722; --card: #161925; --bubble: #1b1f2d; --hero: #151822; --hero-2: #222636; --sunken: #1c202e; --line: #272c3d;
+    --fg: #f3f5f9; --muted: #9aa0b4; --faint: #676d82;
+    --ink: #f4f6fa; --ink-fg: #12141c;
+    --accent: var(--a-d); --accent-fg: var(--a-fg-d); --accent-soft: color-mix(in oklab, var(--accent) 20%, #141722);
+    --mochi: var(--m-d); --mochi-eye: var(--me-d);
+    --sky-bg: radial-gradient(70% 70% at 14% 12%, rgb(68 32 48 / 0.28) 0%, transparent 62%), radial-gradient(75% 75% at 88% 84%, rgb(29 52 88 / 0.34) 0%, transparent 64%), linear-gradient(145deg, #0d1017 0%, #111520 55%, #0f1420 100%);
+    --glass: rgb(20 24 34 / 0.78);
+    --glass-strong: rgb(22 26 37 / 0.90);
+    --glass-border: rgb(255 255 255 / 0.09);
+    --ceramic-border: rgb(255 255 255 / 0.08);
+    --shadow-pill: 0 16px 38px -12px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.08);
+    --shadow-ceramic: 0 18px 44px -18px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.05);
+    --shadow-bubble: 0 6px 20px -10px rgb(0 0 0 / 0.45);
+    --shadow-composer: 0 18px 40px -16px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.07);
+    --thumb: rgb(255 255 255 / 0.18); --thumb-hover: rgb(255 255 255 / 0.34);
+    --ok: #4ade80; --ok-soft: #132a1e; --warn: #fbbf24; --warn-soft: #2e2412; --danger: #fb7185; --danger-soft: #2f1620;
+    --surface-running: #181c28; --border-running: rgb(251 113 133 / 0.28); --pill-running: #2f1722; --fg-running: #fda4af;
+    --inspector-rail: #12151f; --inspector-active: #252a3b;
+    --code-bg: #171a25; --code-border: #282d3e; --code-fg: #c4b8f7; --terminal-fg: #9ec5fe;
+    --avatar-well: #1d2130;
+    --lime: #4ade80; --coral: #fb7185; --sun: #fbbf24; --sky: #60a5fa; --grape: #a78bfa;
+    --glow: color-mix(in oklab, var(--accent) 12%, transparent);
+    --scrim: rgb(0 0 0 / 0.62);
+    --shadow-sheet: 0 0 0 1px rgb(255 255 255 / 0.09), 0 24px 60px -20px rgb(0 0 0 / 0.65);
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #000000; --panel: #000000; --card: #111111; --bubble: #1a1a1a; --hero: #111111; --hero-2: #1f1f1f; --sunken: #141414; --line: #232323;
-  --fg: #f2f2f2; --muted: #9a9a9a; --faint: #666666;
-  --ink: #f2f2f2; --ink-fg: #141414;
-  --accent: var(--a-d); --accent-fg: var(--a-fg-d); --accent-soft: color-mix(in oklab, var(--accent) 22%, var(--bg));
-  --mochi: var(--m-d);
-  --thumb: rgb(255 255 255 / 0.2); --thumb-hover: rgb(255 255 255 / 0.36);
-  --ok: #6fcf9c; --ok-soft: #162b21; --warn: #f2c06b; --warn-soft: #2e2414; --danger: #f2877d; --danger-soft: #2d1818;
-  --surface-running: #141e2e; --border-running: rgb(120 174 242 / 0.32); --pill-running: #1f314d; --fg-running: #78aef2;
-  --inspector-rail: #111114; --inspector-active: #25262c;
-  --code-bg: #18191e; --code-border: #282a32; --code-fg: #c4b8f7; --terminal-fg: #9ec5fe;
-  --avatar-well: #221c1f;
-  --lime: #5fc994; --coral: #e27a7f; --sun: #f6c04e; --sky: #6fa8ef; --grape: #b1a8dc;
-  --glow: color-mix(in oklab, var(--accent) 10%, transparent);
-  --scrim: rgb(0 0 0 / 0.6);
-  --shadow-sheet: 0 0 0 1px var(--line);
+  --bg: #0d1017; --panel: #141722; --card: #161925; --bubble: #1b1f2d; --hero: #151822; --hero-2: #222636; --sunken: #1c202e; --line: #272c3d;
+  --fg: #f3f5f9; --muted: #9aa0b4; --faint: #676d82;
+  --ink: #f4f6fa; --ink-fg: #12141c;
+  --accent: var(--a-d); --accent-fg: var(--a-fg-d); --accent-soft: color-mix(in oklab, var(--accent) 20%, #141722);
+  --mochi: var(--m-d); --mochi-eye: var(--me-d);
+  --sky-bg: radial-gradient(70% 70% at 14% 12%, rgb(68 32 48 / 0.28) 0%, transparent 62%), radial-gradient(75% 75% at 88% 84%, rgb(29 52 88 / 0.34) 0%, transparent 64%), linear-gradient(145deg, #0d1017 0%, #111520 55%, #0f1420 100%);
+  --glass: rgb(20 24 34 / 0.78);
+  --glass-strong: rgb(22 26 37 / 0.90);
+  --glass-border: rgb(255 255 255 / 0.09);
+  --ceramic-border: rgb(255 255 255 / 0.08);
+  --shadow-pill: 0 16px 38px -12px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.08);
+  --shadow-ceramic: 0 18px 44px -18px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  --shadow-bubble: 0 6px 20px -10px rgb(0 0 0 / 0.45);
+  --shadow-composer: 0 18px 40px -16px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.07);
+  --thumb: rgb(255 255 255 / 0.18); --thumb-hover: rgb(255 255 255 / 0.34);
+  --ok: #4ade80; --ok-soft: #132a1e; --warn: #fbbf24; --warn-soft: #2e2412; --danger: #fb7185; --danger-soft: #2f1620;
+  --surface-running: #181c28; --border-running: rgb(251 113 133 / 0.28); --pill-running: #2f1722; --fg-running: #fda4af;
+  --inspector-rail: #12151f; --inspector-active: #252a3b;
+  --code-bg: #171a25; --code-border: #282d3e; --code-fg: #c4b8f7; --terminal-fg: #9ec5fe;
+  --avatar-well: #1d2130;
+  --lime: #4ade80; --coral: #fb7185; --sun: #fbbf24; --sky: #60a5fa; --grape: #a78bfa;
+  --glow: color-mix(in oklab, var(--accent) 12%, transparent);
+  --scrim: rgb(0 0 0 / 0.62);
+  --shadow-sheet: 0 0 0 1px rgb(255 255 255 / 0.09), 0 24px 60px -20px rgb(0 0 0 / 0.65);
   color-scheme: dark;
 }
 
-/* The theme colour (prefs.ts): -l on the white window, -d on the black one. --m-* is 糯糯 in the same colour family, a softer step
-   so it still reads as the mascot (莓红 gives its own pink). */
-:root, :root[data-accent="berry"] { --a-l: #d43d6d; --a-d: #dc4a78; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #ff7a9a; --m-d: #ff7a9a; }
-:root[data-accent="ink"] { --a-l: #141414; --a-d: #f2f2f2; --a-fg-l: #ffffff; --a-fg-d: #141414; --m-l: #3a3a3a; --m-d: #e6e6e6; }
-:root[data-accent="mint"] { --a-l: #13857a; --a-d: #179384; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #4fb39c; --m-d: #5cc2aa; }
-:root[data-accent="sea"] { --a-l: #3d6fe0; --a-d: #4b7be6; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #6f9bf2; --m-d: #7ea7f5; }
-:root[data-accent="grape"] { --a-l: #7a5cc8; --a-d: #8869d6; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #a38be6; --m-d: #b09aeb; }
-:root[data-accent="slate"] { --a-l: #5b6b80; --a-d: #6a7b91; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #8696ab; --m-d: #97a6ba; }
+/* Theme colour (prefs.ts): Berry Crimson default (Resting Mochi is Berry Crimson on daylight porcelain and crisp White Porcelain on midnight dark). */
+:root, :root[data-accent="berry"] { --a-l: #e11d48; --a-d: #fb3b68; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #e11d48; --m-d: #ffffff; --me-l: #ffffff; --me-d: #141822; }
+:root[data-accent="ink"] { --a-l: #16161b; --a-d: #f4f5f8; --a-fg-l: #ffffff; --a-fg-d: #14151b; --m-l: #16161b; --m-d: #f4f5f8; --me-l: #ffffff; --me-d: #141822; }
+:root[data-accent="mint"] { --a-l: #0f766e; --a-d: #14b8a6; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #0f766e; --m-d: #2dd4bf; --me-l: #ffffff; --me-d: #0d1017; }
+:root[data-accent="sea"] { --a-l: #2563eb; --a-d: #60a5fa; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #2563eb; --m-d: #60a5fa; --me-l: #ffffff; --me-d: #0d1017; }
+:root[data-accent="grape"] { --a-l: #6d28d9; --a-d: #a78bfa; --a-fg-l: #ffffff; --a-fg-d: #ffffff; --m-l: #6d28d9; --m-d: #a78bfa; --me-l: #ffffff; --me-d: #0d1017; }
+:root[data-accent="slate"] { --a-l: #475569; --a-d: #94a3b8; --a-fg-l: #ffffff; --a-fg-d: #0d1017; --m-l: #475569; --m-d: #cbd5e1; --me-l: #ffffff; --me-d: #0d1017; }
 
 @layer base {
   html, body, #root { height: 100%; }
@@ -129,6 +158,21 @@
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
+/* Ensure custom-chevron <select> controls never paint a duplicate native macOS/Blink dropdown arrow alongside the Lucide chevron. */
+select.appearance-none {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: none;
+}
+select.appearance-none::picker-icon {
+  display: none;
+}
+
+.sky-stage { background: var(--sky-bg); }
+.glass-surface { background: var(--glass); backdrop-filter: blur(24px) saturate(1.25); -webkit-backdrop-filter: blur(24px) saturate(1.25); border: 1px solid var(--glass-border); }
+.glass-strong { background: var(--glass-strong); backdrop-filter: blur(28px) saturate(1.3); -webkit-backdrop-filter: blur(28px) saturate(1.3); border: 1px solid var(--glass-border); }
+.ceramic-card { background: var(--card); border: 1px solid var(--ceramic-border); box-shadow: var(--shadow-ceramic); }
 .sheet { background: var(--panel); box-shadow: var(--shadow-sheet); }
 
 .eyebrow { font-family: var(--font-display); font-size: 11px; font-weight: 500; text-transform: uppercase; color: var(--faint); }
@@ -180,39 +224,31 @@
 @keyframes ping-soft { 0% { transform: scale(1); opacity: 0.55 } 80%, 100% { transform: scale(2.4); opacity: 0 } }
 .ping-soft { animation: ping-soft 1.6s var(--ease-out-strong) infinite; }
 
-/* ── The assistant (the mochi) ─────────────────────────────────────────── */
-@keyframes m-breathe { 0%, 100% { transform: translateY(0) scale(1, 1) } 50% { transform: translateY(-1.5%) scale(1.015, 0.985) } }
-@keyframes m-bob { 0%, 100% { transform: translateY(0) rotate(0) scale(1, 1) } 25% { transform: translateY(-4%) rotate(-3deg) scale(0.98, 1.02) } 50% { transform: translateY(0) scale(1.03, 0.97) } 75% { transform: translateY(-2%) rotate(3deg) } }
-@keyframes m-hop { 0%, 60%, 100% { transform: translateY(0) scale(1, 1) } 66% { transform: translateY(0) scale(1.06, 0.92) } 74% { transform: translateY(-10%) scale(0.96, 1.05) } 84% { transform: translateY(0) scale(1.04, 0.95) } 90% { transform: translateY(-2%) } }
-@keyframes m-blink { 0%, 92%, 100% { transform: scaleY(1) } 95% { transform: scaleY(0.1) } }
-@keyframes m-look { 0%, 100% { transform: translateX(0) } 30% { transform: translateX(-16%) } 65% { transform: translateX(16%) } }
-@keyframes m-spin { from { transform: rotate(0) scale(1) } 50% { transform: rotate(180deg) scale(0.8) } to { transform: rotate(360deg) scale(1) } }
-@keyframes m-twinkle { 0%, 70%, 100% { transform: scale(1) rotate(0) } 80% { transform: scale(1.3) rotate(20deg) } 90% { transform: scale(0.9) rotate(-8deg) } }
-@keyframes m-dots { 0%, 100% { opacity: 0.25 } 50% { opacity: 1 } }
-@keyframes m-float { 0%, 100% { transform: translate(0, 0); opacity: 0.35 } 50% { transform: translate(3px, -4px); opacity: 0.7 } }
+/* ── The assistant (卧糯眸影 · Resting Mochi) ──────────────────────────── */
+@keyframes m-breathe { 0%, 100% { transform: translateY(0) scale(1, 1) } 50% { transform: translateY(-1%) scale(1.014, 0.986) } }
+@keyframes m-bob { 0%, 100% { transform: translateY(0) scale(1, 1) } 50% { transform: translateY(-2.5%) scale(0.99, 1.018) } }
+@keyframes m-hop { 0%, 64%, 100% { transform: translateY(0) scale(1, 1) } 70% { transform: translateY(0) scale(1.045, 0.94) } 78% { transform: translateY(-7%) scale(0.97, 1.035) } 88% { transform: translateY(0) scale(1.02, 0.98) } }
+@keyframes m-blink { 0%, 92%, 100% { transform: scaleY(1) } 95% { transform: scaleY(0.12) } }
+@keyframes m-beacon { 0%, 100% { opacity: 0.9; transform: scale(1) } 50% { opacity: 1; transform: scale(1.14) } }
+@keyframes m-dots { 0%, 100% { opacity: 0.35 } 50% { opacity: 0.95 } }
 
 .mascot { transform-box: fill-box; }
-.mascot .m-body { transform-origin: 50% 100%; transform-box: fill-box; }
-.mascot .m-shadow { transform-origin: 50% 50%; transform-box: fill-box; }
+.mascot .m-body { transform-origin: 50% 80%; transform-box: fill-box; }
 .mascot .m-eye { transform-origin: center; transform-box: fill-box; }
-.mascot .m-pupils { transition: transform 260ms var(--ease-out-strong); }
-.mascot .m-star { transform-origin: center; transform-box: fill-box; animation: m-twinkle 5s ease-in-out infinite; }
-.mascot[data-mood="working"] .m-star { animation: m-spin 1.6s var(--ease-in-out-strong) infinite; }
-.mascot[data-blink] .m-eye { transform: scaleY(0.1) !important; animation: none !important; }
-.mascot .m-z { animation: m-float 2.4s ease-in-out infinite; }
+.mascot .m-pupils { transition: transform 240ms var(--ease-out-strong); }
+.mascot .m-beacon { transform-origin: center; transform-box: fill-box; animation: m-beacon 2.2s ease-in-out infinite; }
+.mascot[data-blink] .m-eye { transform: scaleY(0.12) !important; animation: none !important; }
 
-.mascot[data-mood="idle"] .m-body, .mascot[data-mood="happy"] .m-body { animation: m-breathe 4.2s ease-in-out infinite; }
-.mascot[data-mood="idle"] .m-eye, .mascot[data-mood="listening"] .m-eye { animation: m-blink 5s ease-in-out infinite; }
-.mascot[data-mood="working"] .m-body { animation: m-bob 1.4s ease-in-out infinite; }
-.mascot[data-mood="working"] .m-look { animation: m-look 2.8s ease-in-out infinite; }
-.mascot[data-mood="thinking"] .m-body { animation: m-breathe 2.4s ease-in-out infinite; }
-.mascot[data-mood="thinking"] .m-dot { animation: m-dots 1.2s ease-in-out infinite; }
-.mascot[data-mood="thinking"] .m-dot:nth-child(2) { animation-delay: 0.2s } .mascot[data-mood="thinking"] .m-dot:nth-child(3) { animation-delay: 0.4s }
-.mascot[data-mood="waiting"] .m-body { animation: m-hop 2.6s var(--ease-out-strong) infinite; }
-.mascot[data-mood="waiting"] .m-eye { animation: m-blink 3.5s ease-in-out infinite; }
-.mascot[data-mood="sleepy"] .m-body { animation: m-breathe 6s ease-in-out infinite; }
-/* Hovering the assistant makes it squish a little. */
-.squish:hover .mascot .m-body { animation: none; transform: scale(1.06, 0.94); transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+.mascot[data-mood="idle"] .m-body, .mascot[data-mood="happy"] .m-body { animation: m-breathe 4.4s ease-in-out infinite; }
+.mascot[data-mood="idle"] .m-eye, .mascot[data-mood="listening"] .m-eye { animation: m-blink 5.2s ease-in-out infinite; }
+.mascot[data-mood="working"] .m-body { animation: m-bob 1.6s ease-in-out infinite; }
+.mascot[data-mood="thinking"] .m-body { animation: m-breathe 2.6s ease-in-out infinite; }
+.mascot[data-mood="thinking"] .m-dot { animation: m-dots 1.4s ease-in-out infinite; }
+.mascot[data-mood="waiting"] .m-body { animation: m-hop 2.8s var(--ease-out-strong) infinite; }
+.mascot[data-mood="waiting"] .m-eye { animation: m-blink 3.6s ease-in-out infinite; }
+.mascot[data-mood="sleepy"] .m-body { animation: m-breathe 6.2s ease-in-out infinite; }
+/* Hovering the assistant makes it settle softly like handmade porcelain mochi. */
+.squish:hover .mascot .m-body { animation: none; transform: scale(1.045, 0.955); transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1); }
 
 /* ── Motion for the redesign (see the Figma "组件与动效" page) ───────────── */
 .nav-indicator { transition: transform 240ms var(--ease-in-out-strong), opacity 150ms ease; }

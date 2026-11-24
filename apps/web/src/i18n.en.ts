@@ -1547,4 +1547,8 @@ export const EN: Record<string, string> = {
   "监听范围": "Listen address",
   "本机地址": "Local address",
   "局域网地址": "LAN address",
+  "切换对话 ({0}\\)": "Switch conversations ({0}\\)",
+  "主导航": "Main navigation",
+  "对话列表": "Conversations",
+  "收起对话列表": "Hide conversations",
 }

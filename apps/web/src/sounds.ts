@@ -37,4 +37,4 @@ export function playChime(kind: Notice['kind'] = 'message') {
   } catch { /* no audio here */ }
 }
 
-;(window as { __saChime?: typeof playChime }).__saChime = playChime
+if (typeof window !== 'undefined') (window as { __saChime?: typeof playChime }).__saChime = playChime

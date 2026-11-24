@@ -397,4 +397,109 @@ describe('Split-Phase VoiceRenderer unit suites', () => {
     for (let i = 0; i < 6; i++) { await new Promise(r => setTimeout(r, 30)); await runtime.idle() }
     expect(voiceCalls).toHaveLength(1)
   })
+
+  it('syncs actual Voice-delivered text back into Router session (skipping redundant 2nd Router step) and separates few-shot exemplars from real conversation history', async () => {
+    store = openStore(':memory:')
+    savePersona(store, { name: '糯糯', personality: '温和自然' })
+
+    const routerCalls: LanguageModelV4CallOptions[] = []
+    const voiceCalls: LanguageModelV4CallOptions[] = []
+    let voiceTurn = 0
+
+    const routerModel = new MockLanguageModelV4({
+      doStream: async o => {
+        routerCalls.push(o)
+        const last = lastUserText(o)
+        const cnv = /conversation_id="([a-z]+_[a-z0-9]+)"/.exec(last)?.[1]
+        if (last.includes('text:\n呵呵')) {
+          return streamOf({
+            calls: [{
+              name: 'reply',
+              input: {
+                conversation_id: cnv,
+                bubbles: ['行啊，就剩这一个音了', '想说啥直说'],
+              },
+            }],
+          })
+        }
+        return streamOf({
+          calls: [{
+            name: 'reply',
+            input: {
+              conversation_id: cnv,
+              bubbles: ['卖安眠药呀，那你倒是早点睡嘛'],
+            },
+          }],
+        })
+      },
+      doGenerate: async o => generateOf({ text: systemText(o) }),
+    })
+
+    const voiceModel = new MockLanguageModelV4({
+      doGenerate: async o => {
+        voiceCalls.push(o)
+        voiceTurn++
+        return generateOf({
+          text: voiceTurn === 1 ? '光呵呵一声，葫芦里卖什么药呀' : '原来葫芦里装的是安眠药呀，那赶紧闭眼睡嘛',
+        })
+      },
+    })
+
+    const hub = new ModelHub(store, new MemorySecrets(), {
+      language: (_p, _k, model) => (model === 'voice-vivid' ? voiceModel : routerModel),
+      embedding: () => { throw new Error('unused') },
+    })
+    const p = hub.createProvider({ kind: 'openai', name: 'mock', apiKey: 'k' })
+    hub.saveRole('router', { chain: [{ providerId: p.id, model: 'router-fast' }] })
+    hub.saveRole('voice', { chain: [{ providerId: p.id, model: 'voice-vivid' }] })
+
+    const bus = new Bus()
+    runtime = new AgentRuntime(store, hub, bus)
+    const engine = new Engine(store, runtime, bus, { home: mkdtempSync(join(tmpdir(), 'nn-voice-sync-')) })
+    registerAgents(store, runtime, engine)
+
+    const cnv = engine.mainConversation()
+
+    // Turn 1: Router drafts "想说啥直说", Voice delivers "光呵呵一声，葫芦里卖什么药呀"
+    engine.receiveMessage(cnv, '呵呵')
+    for (let i = 0; i < 6; i++) { await new Promise(r => setTimeout(r, 30)); await runtime.idle() }
+
+    // Router stops right after successful reply (1 call instead of 2) and records delivered text as closing assistant turn!
+    expect(routerCalls).toHaveLength(1)
+    expect(voiceCalls).toHaveLength(1)
+
+    const eventsAfterTurn1 = runtime.events('ses_router').filter(e => e.kind === 'message').map(e => e.payload)
+    const lastAssistant = eventsAfterTurn1.at(-1)
+    expect(lastAssistant?.role).toBe('assistant')
+    expect(lastAssistant?.content).toEqual([{ type: 'text', text: '光呵呵一声，葫芦里卖什么药呀' }])
+    const toolResultMsg = eventsAfterTurn1.at(-2)
+    expect(toolResultMsg?.role).toBe('tool')
+    expect(JSON.stringify(toolResultMsg?.content)).toContain('光呵呵一声，葫芦里卖什么药呀')
+
+    // Turn 2: User answers the Voice-delivered idiom with "安眠药"
+    engine.receiveMessage(cnv, '安眠药')
+    for (let i = 0; i < 6; i++) { await new Promise(r => setTimeout(r, 30)); await runtime.idle() }
+
+    expect(routerCalls).toHaveLength(2)
+    expect(voiceCalls).toHaveLength(2)
+
+    // Verify Router Turn 2 prompt maintains strict role sequence ending in: tool -> assistant(delivered) -> user
+    const r2Prompt = routerCalls[1]!.prompt
+    expect(r2Prompt.at(-1)?.role).toBe('user')
+    expect(r2Prompt.at(-2)?.role).toBe('assistant')
+    expect(JSON.stringify(r2Prompt.at(-2)?.content)).toContain('光呵呵一声，葫芦里卖什么药呀')
+    expect(r2Prompt.at(-3)?.role).toBe('tool')
+
+    // Verify Voice Turn 2 prompt places the few-shot/real-history boundary BEFORE real history (not after!)
+    const v2Prompt = voiceCalls[1]!.prompt
+    const textOf = (m: any) => typeof m.content === 'string' ? m.content : (m.content as any[]).map(c => c.text ?? '').join('')
+    const userTexts = v2Prompt.filter(m => m.role === 'user').map(textOf)
+    const realHistoryUser = userTexts.at(-2)!
+    const finalTurnUser = userTexts.at(-1)!
+    expect(realHistoryUser).toContain('以下开始是你和主人正在进行的真实对话历史')
+    expect(realHistoryUser).toContain('主人说：呵呵')
+    expect(finalTurnUser).toContain('请紧承上方正在进行的真实对话上下文')
+    expect(finalTurnUser).not.toContain('上方前几组对话仅为语气风格示范')
+    expect(finalTurnUser).not.toContain('请仅针对下方主人的新消息直接回复')
+  })
 })

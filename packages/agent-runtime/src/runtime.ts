@@ -33,6 +33,13 @@ export interface TurnContext {
   runtime: AgentRuntime
 }
 
+export interface StepEndInfo {
+  finishReason: string
+  text: string
+  inputTokens: number
+  messages: ModelMessage[]
+}
+
 export interface AgentDefinition {
   role: string
   /** System prompt, rebuilt for every step so settings and live state are current. */
@@ -43,6 +50,11 @@ export interface AgentDefinition {
   /** Workers queue behind `maxWorkers`; the router never waits for a slot. */
   pool: 'router' | 'worker'
   maxSteps?: number
+  /**
+   * Optional hook after a model step finishes. Returning `{ stop: true, assistantText? }` ends the turn right away
+   * (avoiding a redundant post-tool step while keeping strict `tool -> assistant -> user` alternation for providers).
+   */
+  afterStep?(session: SessionRecord, info: StepEndInfo): { stop: boolean; assistantText?: string } | void
   onTurnEnd?(session: SessionRecord, info: TurnEndInfo): void
   onTurnError?(session: SessionRecord, error: unknown): void
 }
@@ -302,6 +314,17 @@ export class AgentRuntime {
         steps++
         if (step.text) lastText = step.text
         if (step.inputTokens > this.compactAt(session)) await this.compact(session).catch(() => { /* retried next step */ })
+        const after = def.afterStep?.(session, step)
+        if (after?.stop) {
+          if (after.assistantText?.trim()) {
+            const closing = after.assistantText.trim()
+            lastText = closing
+            this.appendEvent(session.id, 'message', { role: 'assistant', content: [{ type: 'text', text: closing }] })
+            this.emit(session, { type: 'session.message' })
+          }
+          if (this.pending(session.id).length > 0 && !controller.signal.aborted) continue
+          break
+        }
         if (step.finishReason === 'tool-calls' && !controller.signal.aborted) continue
         if (this.pending(session.id).length > 0 && !controller.signal.aborted) continue
         break
@@ -441,7 +464,7 @@ export class AgentRuntime {
     this.store.atomic(() => { for (const m of messages) this.appendEvent(session.id, 'message', m) })
     this.emit(session, { type: 'session.message' })
     const usage = await result.totalUsage
-    return { finishReason: await result.finishReason, text, inputTokens: usage.inputTokens ?? 0 }
+    return { finishReason: await result.finishReason, text, inputTokens: usage.inputTokens ?? 0, messages }
   }
 
   /** Summarizes all but the most recent messages with the summarizer layer; cut points fall on user messages so tool calls stay paired. */

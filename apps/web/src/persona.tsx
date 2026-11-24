@@ -1,6 +1,6 @@
 /** The assistant's name, face and status line. */
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { api, type Persona, type Ticket } from './api'
 import { cx } from './ui'
 import { tx } from './i18n'
@@ -40,17 +40,18 @@ export function Avatar({ persona, size = 28, className, mood = 'idle', track }: 
   </span>
 }
 
-const INK = '#14152B'
-const SUN = '#FFC23D'
-/** The eyes are cut out of the body, so they show the page behind: white on the light window, black on the dark one. */
-const CUT = 'var(--bg)'
-/** The mound: a circle on a rounded block (Figma 53:999). */
-const BODY = 'M16 52 A34 34 0 0 1 84 52 V73 A12 12 0 0 1 72 85 H28 A12 12 0 0 1 16 73 Z'
-const STAR = 'M74 9 C75.6 16.4 75.6 16.4 83 18 C75.6 19.6 75.6 19.6 74 27 C72.4 19.6 72.4 19.6 65 18 C72.4 16.4 72.4 16.4 74 9 Z'
+const AMBER = '#F59E0B'
+/** Eye fill contrasts against the ceramic body: porcelain white on berry daylight, deep midnight slate on dark porcelain. */
+const EYE = 'var(--mochi-eye, #ffffff)'
+/** Wide, low-slung hand-formed ceramic mochi silhouette (86x56, Figma v17 · 方向 2 卧糯眸影). */
+const WIDE_BODY = 'M 24 80 C 11 80 7 70 7 56 C 7 35 22 24 50 24 C 78 24 93 35 93 56 C 93 70 89 80 76 80 Z'
+/** Softly melted flat resting silhouette for sleepy / quiet night-guard state. */
+const FLAT_BODY = 'M 22 82 C 10 82 6 74 6 62 C 6 45 21 36 50 36 C 79 36 94 45 94 62 C 94 74 90 82 78 82 Z'
 
 /**
- * The assistant: a soft mochi with a star tucked on its head (Figma "v4 · 标志与角色", option A). Its face follows its mood;
- * with `track` its eyes follow the pointer. A mood change blinks first, so the new face never just snaps in.
+ * 卧糯眸影 · Resting Mochi (Figma v17 方向 2 & v15): a wide, serene ceramic mochi whose eyes rest at optical center
+ * and gaze gently rightward toward the conversation. With `track`, its gaze follows the pointer softly; mood changes
+ * blink first so expressions transition naturally.
  */
 export function Mascot({ color, size = 28, mood = 'idle', className, track }: { color: string; size?: number; mood?: Mood; className?: string; track?: boolean }) {
   const eyes = useRef<SVGGElement>(null)
@@ -74,10 +75,10 @@ export function Mascot({ color, size = 28, mood = 'idle', className, track }: { 
         frame = 0
         const box = root.current?.getBoundingClientRect()
         if (!box || !eyes.current) return
-        const dx = e.clientX - (box.left + box.width / 2), dy = e.clientY - (box.top + box.height * 0.55)
+        const dx = e.clientX - (box.left + box.width / 2), dy = e.clientY - (box.top + box.height * 0.52)
         const d = Math.hypot(dx, dy) || 1
-        const k = Math.min(1, d / 260)
-        eyes.current.style.transform = `translate(${(dx / d) * 3.4 * k}px, ${(dy / d) * 2.6 * k}px)`
+        const k = Math.min(1, d / 280)
+        eyes.current.style.transform = `translate(${(dx / d) * 3.2 * k}px, ${(dy / d) * 2.2 * k}px)`
       })
     }
     addEventListener('pointermove', onMove)
@@ -85,28 +86,62 @@ export function Mascot({ color, size = 28, mood = 'idle', className, track }: { 
   }, [track])
 
   const m = shown
-  const closed = m === 'happy' || m === 'sleepy'
-  const line = { stroke: CUT, strokeWidth: 2.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' }
-  const look = m === 'thinking' ? 'translate(2.2px, -2.4px)' : m === 'listening' ? 'translate(-1px, 1.5px)' : undefined
   return <svg ref={root} viewBox="0 0 100 100" width={size} height={size} className={cx('mascot shrink-0 overflow-visible', className)} data-mood={m} data-blink={blink || undefined} aria-hidden>
-    <ellipse className="m-shadow" cx="50" cy="93" rx="28" ry="3.4" fill="currentColor" opacity="0.08" />
     <g className="m-body">
-      <path d={BODY} style={{ fill: color }} />
-      {closed ? <g {...line} strokeWidth={3.3}>
-        {m === 'happy' ? <><path d="M35 56 Q39.5 49.4 44 56" /><path d="M56 56 Q60.5 49.4 65 56" /></>
-          : <><path d="M35 55 Q39.5 59.5 44 55" /><path d="M56 55 Q60.5 59.5 65 55" /></>}
-      </g> : <g className="m-look"><g ref={eyes} className="m-pupils"><g style={look ? { transform: look } : undefined} className="m-pupils">
-        <g className="m-eye"><rect x="35.5" y="48" width="8" height="15" rx="4" fill={CUT} /></g>
-        <g className="m-eye"><rect x="56.5" y="48" width="8" height="15" rx="4" fill={CUT} /></g>
-      </g></g></g>}
+      <path d={m === 'sleepy' ? FLAT_BODY : WIDE_BODY} style={{ fill: color }} opacity={m === 'sleepy' ? 0.92 : 1} />
+      {m === 'happy' ? (
+        <g stroke={EYE} strokeWidth="4.4" strokeLinecap="round" fill="none" transform="translate(0, -1)">
+          <path d="M 39 52 Q 45 43.5 51 52" />
+          <path d="M 59 52 Q 65 43.5 71 52" />
+        </g>
+      ) : m === 'sleepy' ? (
+        <g stroke={EYE} strokeWidth="4.2" strokeLinecap="round" fill="none">
+          <line x1="38" y1="60" x2="48" y2="60" />
+          <line x1="58" y1="60" x2="68" y2="60" />
+        </g>
+      ) : m === 'working' ? (
+        <g ref={eyes} className="m-pupils">
+          <g className="m-eye"><circle cx="46" cy="51" r="4.3" fill={EYE} /></g>
+          <g className="m-eye"><line x1="61" y1="51" x2="71" y2="51" stroke={EYE} strokeWidth="4.6" strokeLinecap="round" /></g>
+        </g>
+      ) : m === 'thinking' ? (
+        <g ref={eyes} className="m-pupils">
+          <g className="m-eye"><circle cx="38" cy="46" r="4.2" fill={EYE} /></g>
+          <g className="m-eye"><circle cx="57" cy="46" r="4.2" fill={EYE} /></g>
+          <circle className="m-dot" cx="71" cy="42" r="2.6" fill={EYE} opacity="0.65" />
+        </g>
+      ) : m === 'waiting' ? (
+        <g ref={eyes} className="m-pupils">
+          <g className="m-eye"><circle cx="44" cy="47" r="4.6" fill={EYE} /></g>
+          <g className="m-eye"><circle cx="64" cy="47" r="4.6" fill={EYE} /></g>
+        </g>
+      ) : (
+        <g ref={eyes} className="m-pupils">
+          <g className="m-eye"><circle cx={m === 'listening' ? 46 : 45} cy={m === 'listening' ? 50.5 : 51} r={m === 'listening' ? 4.6 : 4.4} fill={EYE} /></g>
+          <g className="m-eye"><circle cx={m === 'listening' ? 66 : 65} cy={m === 'listening' ? 50.5 : 51} r={m === 'listening' ? 4.6 : 4.4} fill={EYE} /></g>
+        </g>
+      )}
     </g>
-    {(m === 'idle' || m === 'happy' || m === 'working') && <path className="m-star" d={STAR} fill={SUN} />}
-    {m === 'waiting' && <g className="anim-pop">
-      <circle cx="82" cy="22" r="8.5" fill={SUN} />
-      <path d="M82 17.5 L82 23" stroke={INK} strokeWidth="2.6" strokeLinecap="round" /><circle cx="82" cy="26.4" r="1.5" fill={INK} />
-    </g>}
-    {m === 'thinking' && <g fill="currentColor"><circle className="m-dot" cx="76" cy="28" r="2.2" /><circle className="m-dot" cx="82" cy="22" r="3" /><circle className="m-dot" cx="89" cy="15" r="3.8" /></g>}
-    {m === 'sleepy' && <path className="m-z" d="M78 14 H86 L78 22 H86" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.5" />}
+    {m === 'waiting' && <circle className="m-beacon" cx="86" cy="22" r="6.5" fill={AMBER} />}
+  </svg>
+}
+
+/** Official Nuonuo App Icon (Figma v17 Icon 2 · 东方卧糯白瓷): deep berry-crimson matte ceramic squircle + serene white Resting Mochi. */
+export function BrandIcon({ size = 52, className }: { size?: number; className?: string }) {
+  const gid = useId()
+  return <svg viewBox="0 0 100 100" width={size} height={size} className={cx('shrink-0', className)} aria-hidden>
+    <defs>
+      <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stopColor="#E32450" />
+        <stop offset="100%" stopColor="#B9143C" />
+      </linearGradient>
+    </defs>
+    <rect x="0.75" y="0.75" width="98.5" height="98.5" rx="22.8" fill={`url(#${gid})`} stroke="rgba(255,255,255,0.22)" strokeWidth="1.5" />
+    <g transform="translate(13, 13) scale(0.74)">
+      <path d={WIDE_BODY} fill="#FFFFFF" />
+      <circle cx="45" cy="51" r="4.5" fill="#C81742" />
+      <circle cx="65" cy="51" r="4.5" fill="#C81742" />
+    </g>
   </svg>
 }
 

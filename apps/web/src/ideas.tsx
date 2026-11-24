@@ -48,7 +48,7 @@ export function IdeasPage() {
         </div>
       </div>}
 
-      {data && (!batch || !left) && <div className="mt-8 flex flex-col items-start gap-3 rounded-[22px] bg-sunken px-6 py-6">
+      {data && (!batch || !left) && <div className="ceramic-card mt-8 flex flex-col items-start gap-3 rounded-[24px] px-6 py-6">
         <p className="text-sm text-muted">{!batch ? tx('{0}还没想过点子。聊得越多，它想得越准。', persona.name) : tx('这一批都处理完了。')}</p>
         <button onClick={() => refresh.mutate()} disabled={refresh.isPending}
           className="press flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-medium text-ink-fg disabled:opacity-60">
@@ -58,7 +58,7 @@ export function IdeasPage() {
       </div>}
 
       {batch && left > 0 && <div className="mt-8 flex items-center gap-3 text-sm text-muted">
-        <Avatar persona={persona} size={28} mood="happy" />
+        <Avatar persona={persona} size={28} mood="idle" />
         {settings?.cadence === 'weekly' ? tx('这周就这些。') : tx('今天就这些。')}{tx('点子太多会吵的话，在「设置 → 助理」里可以调成每周一次。')} </div>}
     </div>
   </div>
@@ -92,7 +92,7 @@ function Card({ idea, wide, index }: { idea: Idea; wide?: boolean; index: number
 
 function More({ items }: { items: IdeaBatch['more'] }) {
   const start = useGo()
-  return <div className="feed-in rounded-[22px] bg-sunken px-5 pt-5 pb-3" style={{ animationDelay: '350ms' }}>
+  return <div className="ceramic-card feed-in rounded-[22px] px-5 pt-5 pb-3" style={{ animationDelay: '350ms' }}>
     <div className="text-xs text-muted">{tx('你可能还想')}</div>
     <div className="mt-2">{items.map(m => <button key={m.id} onClick={() => start.mutate(m.id)} disabled={start.isPending}
       className="group flex w-full items-center gap-2 py-2.5 text-left text-sm">

@@ -5,11 +5,12 @@ export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const res = await authedFetch(path, {
     method,
     headers: body === undefined ? {} : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   })
   if (res.status === 204) return undefined as T
   const data = await res.json().catch(() => ({}))
@@ -18,7 +19,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>('GET', path),
+  get: <T>(path: string, opts?: { signal?: AbortSignal }) => request<T>('GET', path, undefined, opts?.signal),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
@@ -165,7 +166,7 @@ export interface UpdatePrefs { auto: boolean; channel: 'stable' | 'beta'; instal
 export interface Notice { type: 'notice'; id: string; kind: 'message' | 'price' | 'feed' | 'ideas' | 'approval' | 'test'; title: string; body: string; hash: string; silent: boolean; chime: boolean }
 
 export type ServerEvent =
-  | { type: 'message.created'; conversationId: string; messageId: string }
+  | { type: 'message.created'; conversationId: string; messageId: string; message?: Message }
   | { type: 'reply.delta'; conversationId: string; callId: string; text: string }
   | { type: 'ticket.updated'; ticketId: string }
   | { type: 'session.state'; role: string; sessionId: string; ticketId?: string | null; state: string }
@@ -177,7 +178,7 @@ export type ServerEvent =
   | { type: 'skills.updated' }
   | { type: 'feed.updated' }
   | Notice
-  | { type: 'message.updated'; conversationId: string; messageId: string }
+  | { type: 'message.updated'; conversationId: string; messageId: string; message?: Message }
   | { type: 'ideas.updated' }
   | { type: 'settings.updated'; keys: string[] }
   | { type: 'prefs.updated'; patch: Record<string, unknown> }

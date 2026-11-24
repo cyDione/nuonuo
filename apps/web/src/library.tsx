@@ -78,7 +78,7 @@ export function Library() {
 
 /** The card's top half: the shape of what is inside. */
 function Thumb({ a, kind }: { a: Artifact; kind: Kind }) {
-  const frame = 'relative h-40 overflow-hidden rounded-2xl bg-sunken transition-colors duration-150 group-hover:bg-hero-2'
+  const frame = 'relative h-40 overflow-hidden rounded-[20px] border border-[var(--ceramic-border)] bg-card/85 shadow-[var(--shadow-bubble)] transition-colors duration-150 group-hover:bg-card'
   const [broken, setBroken] = useState(false)
   if (kind === 'image') return <div className={frame}>
     {broken ? <ImageIcon size={28} className="absolute inset-0 m-auto text-faint" />

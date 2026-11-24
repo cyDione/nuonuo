@@ -1,7 +1,9 @@
 // Nuonuo thin desktop client: zero bundled Node.js or daemon.
 // Serves the bundled web UI via secure `app://nuonuo` protocol (or Vite dev server in dev),
-// stores server profiles + refresh tokens encrypted via Electron `safeStorage`, handles `nuonuo://pair` deep links,
-// supports on-demand Local Deploy (install script or Docker), and drives native tray/notifications from the active server.
+// stores server profiles + refresh tokens encrypted on disk (AES-256-GCM + mode-0600 key file on macOS to avoid
+// recurring ad-hoc-signed Keychain prompts; Electron `safeStorage` on Windows/Linux, or macOS with NUONUO_MAC_KEYCHAIN=1),
+// handles `nuonuo://pair` deep links, supports on-demand Local Deploy (install script or Docker),
+// and drives native tray/notifications from the active server.
 const { app, BrowserWindow, Menu, Notification, Tray, globalShortcut, nativeImage, nativeTheme, screen, shell, ipcMain, protocol, net, safeStorage } = require('electron')
 const { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } = require('node:fs')
 const path = require('node:path')
@@ -9,13 +11,21 @@ const { pathToFileURL } = require('node:url')
 const { createVault } = require('./lib/vault.cjs')
 const deployer = require('./lib/deployer.cjs')
 
+const mac = process.platform === 'darwin'
+const useMacKeychain = process.env.NUONUO_MAC_KEYCHAIN === '1'
+if (mac && !useMacKeychain) {
+  // Ad-hoc signed macOS builds change CDHash on every rebuild; disabling Chromium's OSCrypt Keychain lookup
+  // prevents recurring "Nuonuo Safe Storage" login password prompts. Refresh tokens are encrypted independently
+  // via AES-256-GCM + a mode-0600 32-byte key file in `lib/vault.cjs`.
+  app.commandLine.appendSwitch('use-mock-keychain')
+}
+
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
 ])
 
 const SHORTCUT = 'CommandOrControl+Shift+Space'
-const DEFAULT_PREFS = { tray: true, close: 'hide', summon: process.platform === 'darwin' ? 'Alt+Space' : '', quick: SHORTCUT }
-const mac = process.platform === 'darwin'
+const DEFAULT_PREFS = { tray: true, close: 'hide', summon: mac ? 'Alt+Space' : '', quick: SHORTCUT }
 
 let win, quick, tray, vault
 let prefs = { ...DEFAULT_PREFS }
@@ -30,7 +40,7 @@ let pendingDeepLink = null
 const prefsFile = () => path.join(app.getPath('userData'), 'desktop-prefs.json')
 const vaultFile = () => path.join(app.getPath('userData'), 'vault.json')
 const asset = name => path.join(__dirname, 'assets', name)
-const windowColor = () => (nativeTheme.shouldUseDarkColors ? '#000000' : '#ffffff')
+const windowColor = () => (nativeTheme.shouldUseDarkColors ? '#0d1017' : '#f5f4f6')
 
 function findWebDir() {
   const candidates = [
@@ -323,7 +333,7 @@ ipcMain.handle('deploy:stop-local', () => deployer.stopLocal())
 // ── Boot ─────────────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
-  vault = createVault(vaultFile(), safeStorage)
+  vault = createVault(vaultFile(), !mac || useMacKeychain ? safeStorage : null)
   try { app.setAsDefaultProtocolClient('nuonuo') } catch { /* dev */ }
 
   const webDir = findWebDir()

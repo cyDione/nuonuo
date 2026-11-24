@@ -290,7 +290,7 @@ function MainModel({ config, providers }: { config: RoleConfig; providers: Provi
   const change = (next: ModelRef) => { setRef(next); test.reset() }
   return <Block>
     <div className="flex flex-wrap items-center gap-2">
-      <SelectInput value={ref.providerId} onChange={e => change({ providerId: e.target.value, model: '' })} className="w-[150px]" aria-label={tx('供应商')}>
+      <SelectInput value={ref.providerId} onChange={e => change({ providerId: e.target.value, model: '' })} className="w-[180px]" aria-label={tx('供应商')}>
         {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </SelectInput>
       <ModelPicker className="min-w-48 flex-1" value={ref.model} onChange={model => change({ ...ref, model })} models={options.models} loading={options.loading}
@@ -401,7 +401,7 @@ function ChainRow({ index, value, role, kind, providers, onChange, onRemove }: {
   return <Block>
     <div className="flex flex-wrap items-center gap-2">
       <span className="w-12 shrink-0 text-xs text-muted">{index === 0 ? tx('主模型') : tx('备用 {0}', index)}</span>
-      <SelectInput value={value.providerId} onChange={e => onChange({ providerId: e.target.value, model: '' })} className="w-[150px]">
+      <SelectInput value={value.providerId} onChange={e => onChange({ providerId: e.target.value, model: '' })} className="w-[180px]">
         {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </SelectInput>
       <ModelPicker className="min-w-48 flex-1" value={value.model} onChange={model => onChange({ ...value, model })} models={options.models} loading={options.loading}
