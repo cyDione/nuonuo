@@ -2,160 +2,158 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/hero-en-dark.svg" />
-  <img src="docs/assets/readme/hero-en-light.svg" width="100%" alt="Nuonuo — A local-first personal assistant that runs tasks quietly in the background, asks before spending or sending, and brings results back to chat." />
+  <img src="docs/assets/readme/hero-en-light.svg" width="100%" alt="Nuonuo v0.4 — A calm, self-hosted personal assistant. One headless /v1 server, thin apps anywhere, parallel Workers, and code-enforced safety." />
 </picture>
 
 <br />
 
 [![CI](https://github.com/cyDione/nuonuo/actions/workflows/ci.yml/badge.svg)](https://github.com/cyDione/nuonuo/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/cyDione/nuonuo?color=d43d6d)](https://github.com/cyDione/nuonuo/releases)
-![Node version](https://img.shields.io/badge/node-%3E%3D22.12-141414)
-[![License](https://img.shields.io/badge/license-MIT-141414.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/cyDione/nuonuo?color=e11d48)](https://github.com/cyDione/nuonuo/releases)
+![Node](https://img.shields.io/badge/node-%3E%3D22.12-14151b)
+[![License](https://img.shields.io/badge/license-MIT-14151b.svg)](LICENSE)
 
-**English** · [简体中文](README.zh-CN.md) &nbsp;|&nbsp; [Install Guide (EN)](docs/INSTALL.md) · [中文安装教程](docs/INSTALL.zh-CN.md)
+**English** · [简体中文](README.zh-CN.md) &nbsp;&nbsp;|&nbsp;&nbsp; [Install Guide](docs/INSTALL.md) · [中文安装教程](docs/INSTALL.zh-CN.md)
 
-[Features & Screenshots](#features--screenshots) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Acknowledgments](#acknowledgments) · [License](#license) · [Friendly Links](#friendly-links)
+[Inside v0.4](#inside-v04) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Acknowledgments](#acknowledgments) · [License](#license) · [Friendly Links](#friendly-links)
 
 <br />
 
-<img src="docs/assets/demo.gif" width="100%" alt="Live screen recording: asking Nuonuo in one sentence to plan a weekend trip to Hangzhou, check the weather, build an interactive webpage, and preview it inline inside chat" />
+<img src="docs/assets/demo.gif" width="100%" alt="Live v0.4 screen recording: asking Nuonuo to plan a weekend Hangzhou trip — instant spoken bubbles in chat, 3-step background Worker in the right Activity pane, Split-Pane Step Inspector, and interactive HTML webpage preview inline." />
 
-<sub>Real screen recording (wait intervals sped up): one message asks Nuonuo to plan a weekend Hangzhou trip — it checks the weather, builds a webpage in the background, and opens the finished preview right inside chat.</sub>
+<sub>Live v0.4 walkthrough: ask once in Main chat → instant reply while a Worker checks weather and builds an interactive webpage in the background → inspect steps and preview the finished page inline.</sub>
 
 </div>
 
 <br />
 
-**Nuonuo (糯糯)** is a **local-first, proactive personal assistant** that runs on your own machine. Hand off a task in plain conversation — research a topic, watch a product price, triage repository issues, organize local files, or build a weekend itinerary webpage — and Nuonuo replies right away while parallel Workers finish the job in the background and return clean deliverables to your chat.
+**Nuonuo (糯糯)** is a self-hosted personal assistant built to feel calm rather than noisy. Run one lightweight **headless `/v1` server** on your machine or VPS, connect from a thin macOS app, web browser, or your existing chat tools, and delegate work in plain language. Your data, SQLite state, local Markdown memory, and API keys stay completely on hardware you own.
 
-The daemon, SQLite state, local Markdown memory, and execution all live on your hardware using your own API keys (Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter, Ollama, LM Studio, or any OpenAI-compatible gateway). When you aren't messaging it, Nuonuo watches your connected sources at the proactivity level you choose, filters out noise silently, and speaks up only when something actually changes.
+| Principle | How Nuonuo works |
+| --- | --- |
+| **Chat stays human** | Always-on **Main chat** for conversation, isolated **Side chats** for tasks. Tool logs stay in the right **Activity** pane; results come back clean. |
+| **Server & clients decoupled** | One Node.js `/v1/*` server (headless by default, `--web` or Docker optional). Thin clients pair via QR, `scrypt` password, or Passkeys with rotating tokens. |
+| **Boundaries in code, not prompts** | The Router mounts **zero shell tools**. Realpath folder limits, secret scrubbing, and spend/delete confirmations are enforced at runtime. |
+| **Memory you can read** | `SOUL.md` and `MEMORY.md` live as local Markdown with version rollback, vector recall, and a trust gate that holds external or heated remarks in *Pending*. |
 
 ---
 
-## Features & Screenshots
+## Inside v0.4
 
-<sub>All screenshots below are captured directly from the live Nuonuo web interface with sample data. Light and true-black dark themes follow your system or preference.</sub>
-
-### 1. Clean Chat, Parallel Workers & Split-Pane Step Inspector
+### Workspace & Approvals
 
 <p align="center">
-  <img src="docs/assets/readme/shot-workspace-en.png" width="100%" alt="Nuonuo desktop workspace in light and dark mode: Main Chat and Side Chats on the left, clean multi-bubble conversation with a plain-language payment confirmation card in the center, and live Activity stream with step badges on the right." />
+  <img src="docs/assets/readme/shot-workspace-en.png" width="100%" alt="Nuonuo v0.4 Spatial UI v15 in Frosted Daylight Ceramic light mode and Obsidian Midnight dark mode, showing the floating pill rail, collapsible conversation drawer, natural multi-bubble chat, plain-language purchase confirmation card, and ceramic Activity pane." />
 </p>
 
-- **Human conversation stays clean**: Your **Main chat** stays always-on while self-contained tasks live in **Side chats**. Tool logs never spam the chat thread — running progress, step badges, elapsed timers, and a **split-pane Step Inspector** stay tucked in the right **Activity** pane, and you can chime in mid-task anytime.
-- **Natural messaging UX**: Drag, paste, or attach files; quote-reply, edit, recall, or regenerate answers; search all chats, results, and memories with `⌘K` / `Ctrl+K` (or `⌘F` in-chat); preview generated HTML pages, tables, and documents inline.
-- **Plain-language approval cards**: Anything that spends money, sends messages externally, or performs destructive edits stops and surfaces a clear confirmation card — never buried in raw shell flags.
+A floating pill rail, collapsible in-flow conversation drawer, and ceramic right pane keep multiple background Workers visible without cluttering the thread. Whenever an action spends money, sends messages externally, or performs destructive edits, execution pauses on a plain-language confirmation card. Multi-tab `BroadcastChannel` sync with `navigator.locks` and hardened `/v1/events` SSE keep every open window coherent and instantaneous.
 
-### 2. Proactive Intelligence: Feed, Daily Ideas & Long-Running Goals
+### Decoupled Auth, Guardrails & Cloud Browser
 
 <p align="center">
-  <img src="docs/assets/readme/shot-proactive-en.png" width="100%" alt="Proactive features: colorful gradient Ideas card wall, a Feed hero price-drop card showing $399 down to $329, and a pinned Sleep Goal progress card tracking 6.8 hours on Day 9 of 21." />
+  <img src="docs/assets/readme/shot-control-en.png" width="100%" alt="Three v0.4 surfaces side by side: the Decoupled Connect & Auth Center with saved servers, QR/Password/Passkey, and Local Deploy; the code-enforced Permissions pane with locked Spend money and folder rules; and the live 16:10 Cloud Chromium Browser pane with 1-click Take over." />
 </p>
 
-- **Two-stage event filtering**: Incoming external events pass deterministic **Fast Path** rules first, then a lightweight **Slow Path** model guided by your natural-language strategy. Noise is dropped silently; real changes surface in **Feed** (with 👍 / 👎 / bookmark controls).
-- **Daily Ideas**: Each morning (or week), Nuonuo proposes concrete follow-ups drawn from recent chats, goals, and watched changes — one tap opens a Side chat and gets to work.
-- **Background Goals**: Hand off a long-term goal in chat (e.g., *"I want to sleep earlier"*); Nuonuo tracks progress, suggests small milestones, and checks in on your cadence.
+- **Unified `/v1/*` Protocol 2.0**: Default-deny 6-scope RBAC (`chat`, `notices`, `approvals`, `tasks:read`, `tasks:write`, `admin`), single-use rotating refresh tokens with full family revocation on replay, and one-click local or Docker deployment right from the thin desktop app. On macOS, desktop tokens encrypt via `AES-256-GCM` + a mode-`0600` key file (`vault.key`) with zero Keychain password prompts.
+- **Hard-coded limits & live takeover**: Folder permissions resolve symlinks before checking (`~/.ssh`, `~/.gnupg`, and OS keychains stay locked out). Run Workers locally, inside Docker, or on a [Cloud Computer](docs/13-computers.md) (such as [Instabox](plugins/instabox)) — watch live headed Chromium in the **Browser** pane and click **Take over** for 60fps control during login or 2FA.
+- **One assistant everywhere**: Web, macOS desktop (`⌘⇧Space` Quick Ask), Telegram, Feishu/Lark, Discord, WeCom, DingTalk, Slack, GitHub (`@` in Issues/PRs), Gmail, Google Calendar, macOS native Reminders/Notes/Calendar, and custom [`@nuonuo/client`](packages/client) apps.
 
-### 3. Transparent Markdown Memory, Soul & 2D Voice Tone
+### Proactive Rhythm, 2D Voice Tone & Local Memory
 
 <p align="center">
-  <img src="docs/assets/readme/shot-mind-en.png" width="100%" alt="Identity, Memory, and Voice Tone: right pane with Soul and Memory Markdown buttons and 4D live mood gauges alongside the Personality & Mood modal featuring the 2D dot-matrix Voice Tone Pad (Warm, Witty, Calm, Sharp)." />
+  <img src="docs/assets/readme/shot-companion-en.png" width="100%" alt="Proactive and companion surfaces in v0.4: colorful Daily Ideas card wall, XM6 price-drop Feed card, Sleep Goal tracker, interactive 2D dot-matrix Voice Tone Pad (Warm, Witty, Calm, Sharp), and local Markdown Soul and Memory cards." />
 </p>
 
-- **Readable, editable Markdown**: Persona instructions (`SOUL.md`, with version history & rollback) and long-term memory (`MEMORY.md`, with original quote provenance and on-demand vector recall) are plain local files. On first launch, you can import memories from other AI tools.
-- **Split-Phase Voice & 2D Tone Pad**: A dedicated, tool-free **Voice** layer turns replies into crisp, staggered spoken bubbles shaped by an interactive **2D dot-matrix Tone Pad** (*Warm · Witty · Calm · Sharp*) — drag anywhere and hear the shift on the very next turn.
-- **Two-layer Mood with firm boundaries**: Four live dimensions (**Mood · Energy · Patience · Trust**), a slow-moving undertone, and a first-person diary shape *how* Nuonuo talks without ever compromising work quality. Heated offhand remarks enter *Pending confirmation* instead of polluting long-term memory.
-- **Live self-configuration**: Ask Nuonuo in chat to tweak its theme, tone, model layers, quiet hours, or persona — changes sync across open windows immediately via SSE while security settings remain strictly owner-only.
-
-### 4. Multi-Channel Reach, Hard-Coded Guardrails & Cloud Browser Takeover
-
-<p align="center">
-  <img src="docs/assets/readme/shot-control-en.png" width="100%" alt="Permissions and Cloud Browser Takeover: Permissions pane showing locked Spend money rule and folder access controls next to the Browser pane displaying a live 16:10 cloud Chromium preview with Take over and Open desktop controls." />
-</p>
-
-- **One assistant across every channel**: Web, macOS / Windows desktop apps (`⌘⇧Space` Quick Ask), **Telegram**, **Feishu / Lark**, **Discord**, **WeCom**, **DingTalk**, **Slack**, **GitHub** (`@` directly in Issues / PRs), **Gmail**, **Google Calendar**, macOS native **Reminders / Notes / Calendar**, plus custom paired devices over `/client/v1`. Replies always return where you messaged from.
-- **Guardrails enforced in code, not prompts**: The always-on Router has **zero shell tools**. Folders are enforced after symlink resolution (**Read only / Can edit / Never touch**), with `~/.ssh`, `~/.gnupg`, and OS keychains locked out by default. Spending and deletion always ask you first; API keys are encrypted and stripped from Worker environments.
-- **Docker sandbox & Cloud Linux Desktop**: Run tasks locally, inside a mounted Docker container, or on an isolated [Cloud Computer](docs/13-computers.md) (such as [Instabox](plugins/instabox)) with an X11 GUI desktop and persistent headed Chromium browsers. Inspect live pages in the right **Browser** pane and click **Take over** for 60fps interactive control whenever login, 2FA, or checkout needs you.
+- **Two-stage filtering**: External sources pass deterministic rules first and a fast filter model second — noise drops silently, while real changes surface in **Feed**, morning **Ideas**, and long-running **Goals**.
+- **Split-Phase Voice & 2D Tone Pad**: A tool-free Voice layer turns replies into coherent spoken bubbles shaped by a draggable 2D tone matrix (*Warm · Witty · Calm · Sharp*) and four live mood gauges (**Mood · Energy · Patience · Trust**).
+- **Live self-configuration**: Ask Nuonuo in chat to adjust its theme, tone, quiet hours, or 12-layer model routing; updates sync live over SSE while security rules remain strictly owner-only.
 
 ---
 
 ## Quick Start
 
-> Looking for full setup, LAN / SSH access, Docker sandbox, source builds, upgrades, or CLI flags? Read the **[Full Installation & Deployment Guide](docs/INSTALL.md)** ([中文安装教程](docs/INSTALL.zh-CN.md)).
+> Full deployment options, HTTPS reverse proxy / SSH tunnels, Docker sandbox, and troubleshooting live in **[docs/INSTALL.md](docs/INSTALL.md)** ([中文教程](docs/INSTALL.zh-CN.md)).
 
-### macOS Desktop App
+### 1. Start a Standalone Server
 
-Auto-detects Apple Silicon / Intel, installs `Nuonuo.app` into `/Applications`, and upgrades cleanly when re-run:
+```sh
+# Linux (x64 / arm64)
+curl -fsSL https://raw.githubusercontent.com/cyDione/nuonuo/main/install.sh | bash
+
+# macOS standalone server CLI (arm64 / x64)
+curl -fsSL https://raw.githubusercontent.com/cyDione/nuonuo/main/install.sh | bash -s -- --server
+
+# Start headless /v1 API (add --web to also serve the built-in WebUI) & issue a QR pairing code
+nuonuo start -d --web
+nuonuo pair --admin --qr
+```
+
+Or run with **Docker**:
+
+```sh
+NUONUO_WEB=1 docker compose up -d
+docker exec -it nuonuo-server nuonuo pair --admin --qr
+```
+
+### 2. Install the Thin macOS Desktop App
+
+Auto-detects Apple Silicon / Intel and installs `Nuonuo.app` into `/Applications` (manual `.dmg` packages are on **[GitHub Releases](https://github.com/cyDione/nuonuo/releases)**):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cyDione/nuonuo/main/install.sh | bash
 ```
 
-### Windows Desktop App
-
-Download the `x64` or `arm64` `setup.exe` (or portable `.zip`) from **[GitHub Releases](https://github.com/cyDione/nuonuo/releases)** — Node.js and the local daemon are bundled inside. (Manual macOS `.dmg` packages are also published on Releases.)
-
-### Linux / Headless Server
-
-Auto-detects `x64` / `arm64`, installs to `~/.local/share/nuonuo`, and starts in the background:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/cyDione/nuonuo/main/install.sh | bash
-nuonuo start -d
-```
-
-Open the printed login link (`http://127.0.0.1:7420/auth?token=...`) in your browser. On first launch, Nuonuo walks you through adding an API key, connecting sources, and choosing a proactivity level right inside chat.
+Open `Nuonuo.app`, scan the QR code or paste your pairing code — or click **Deploy locally in one click** to spin up a server on demand. On first sign-in, Nuonuo walks you through adding an API key (Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter, Ollama, LM Studio, or any OpenAI-compatible gateway) right in chat.
 
 > [!IMPORTANT]
-> Do not run Nuonuo as `root`. For stronger isolation, switch Docker sandbox to **All tasks** under **Settings → Security & execution** (or connect a Cloud Computer).
+> Do not run the server as `root`. `v0.4.0` publishes Linux/macOS servers and macOS desktop packages; other desktop targets can be built from source (`pnpm --filter @nuonuo/desktop dist:win`).
 
-### Everyday Examples & Essential CLI
-
-Talk to Nuonuo the way you message a teammate:
-- *"Plan a 2-day Hangzhou trip for this weekend, check the weather, and turn it into a webpage."*
-- *"Watch the Sony WH-1000XM6 and ping me if it drops under $350."*
-- *"Triage new Issues in this repo and let me know only when something actually needs my input."*
-- Drag a long PDF into chat: *"Pull out every clause I need to sign off on."*
-- *"Every morning at 9 AM, pick the top technical posts from Hacker News worth reading."*
+<details>
+<summary><strong>Essential CLI Reference</strong></summary>
 
 ```sh
-nuonuo start -d              # start daemon in background (stop / restart / status)
-nuonuo token [--rotate]      # print or rotate the authenticated login URL
-nuonuo doctor                # inspect Node.js, secrets store, models, git/gh, Docker
-nuonuo update [--check]      # check or install the latest Linux release
-nuonuo service install       # enable login autostart (launchd / systemd --user)
-nuonuo pair                  # generate a 10-min pairing code for /client/v1 devices
-nuonuo channel new <name>    # scaffold a custom chat-channel plugin adapter
+nuonuo start -d [--web]                  # start server (headless default; --web enables WebUI)
+nuonuo pair --admin --qr                 # generate a 10-min one-time pairing code & QR
+nuonuo auth set-password <pass>          # set an Owner password (scrypt)
+nuonuo config --host 0.0.0.0 --web on    # persist host, port, and WebUI switch
+nuonuo devices [list | revoke <id>]      # manage paired devices
+nuonuo sessions [list | revoke <id>]     # inspect or terminate active sessions
+nuonuo doctor | update | service install # diagnose, upgrade, or register autostart
 ```
 
-Extend Nuonuo with custom devices via [`/client/v1`](docs/11-client-protocol.md) + [`@nuonuo/client`](packages/client) ([examples](examples/clients)), or build sources, tools, skills, and cloud providers with the [Plugin SDK](docs/04-plugin-sdk.md) and [Channel Layer](docs/12-channels.md).
+</details>
+
+Any device can connect via `nuonuo pair` over the unified [`/v1/*` Protocol 2.0](docs/11-client-protocol.md) and the standalone [`@nuonuo/client`](packages/client) TypeScript SDK ([examples](examples/clients)); build custom sources, chat channels, tools, skills, or cloud computers using the [Plugin SDK](docs/04-plugin-sdk.md) and [Channels Guide](docs/12-channels.md).
 
 ---
 
 ## Architecture
 
-Nuonuo runs as a single local process — **one Node.js daemon, one SQLite database, and one human-readable data folder (`~/.nuonuo`)**.
+Nuonuo runs as a single decoupled daemon process — **one Node.js server, one SQLite database, and one human-readable data folder (`~/.nuonuo`)** — serving every thin client over unified `/v1/*`.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/arch-en-dark.svg" />
-    <img src="docs/assets/readme/arch-en-light.svg" width="100%" alt="Nuonuo system architecture: Direct Input and 2-Stage Filtered External Sources feed the shell-free Router, Split-Phase Voice layer, and Sideband Memory; parallel Workers execute tasks through a code-enforced Policy & Reviewer gate into Local/Docker, Playwright/MCP, macOS Apps, or Cloud Linux Desktop, backed by single-process Node.js, SQLite, external Watchdog, and a process-isolated Plugin Sandbox." />
+    <img src="docs/assets/readme/arch-en-light.svg" width="100%" alt="Nuonuo v0.4 architecture diagram: Thin Clients and 2-Stage Filtered External Sources connect into the shell-free Router, Split-Phase Voice, and Sideband Memory; parallel Workers pass through code-enforced Policy and Reviewer gates into Local/Docker, Playwright/MCP, macOS Apps, or Cloud Linux Desktop, backed by single-process Node.js, SQLite, external Watchdog, AES-256-GCM vault, and Plugin Sandbox." />
   </picture>
 </p>
 
-- **Router / Worker Split**: An always-on **Router** uses a fast model and structurally mounts **zero shell tools** — it replies immediately, dispatches work, and summarizes outcomes. Heavy execution spawns isolated parallel **Workers** (and nested Subagents) on stronger models. Up to **12 specialized model layers** (`router`, `voice`, `worker`, `subagent`, `filter`, `reviewer`, `watchdog`, `summarizer`, `embedding`, `vision`, `transcribe`, `speech`) can be configured individually with fallbacks and daily budgets.
-- **Split-Phase Voice & Sideband Memory**: Phase A (Router brain) handles tool calls, routing, and mood updates; Phase B (Voice layer) renders tool-free conversational bubbles. Memory extraction runs asynchronously when chat goes idle so replies never block.
-- **Unified Triggers & Subscription Bypass**: Chat messages, GitHub activity, Gmail, routines, and plugins all normalize into `Trigger`s. Once a Worker claims a thread, subsequent events on that thread route straight to the subscribed Worker without waking the Router.
-- **Stateless Loop & Crash Recovery**: Every turn rebuilds context from SQLite's event stream; oversized tool outputs spill to disk blobs and are fetched on demand via `recall()`. On restart, in-flight sessions recover, orphaned child processes are cleaned up, and a persistent outbox prevents duplicate notifications or external comments.
-- **Full-Duplex Execution & External Watchdog**: New owner messages inject between reasoning steps, long commands move automatically to background jobs, and an independent **Watchdog** probes every minute to nudge, restart, or escalate stalled tasks — and self-heal an unresponsive Router.
+- **Decoupled Server & Unified `/v1/*` Protocol 2.0**: The daemon runs headless by default (`--web` or Docker optional), while `apps/web`, `apps/desktop`, and `@nuonuo/client` carry zero internal backend dependencies. The auth kernel enforces default-deny **6-scope RBAC** (`chat`, `notices`, `approvals`, `tasks:read`, `tasks:write`, `admin`), QR pairing, `scrypt` passwords, WebAuthn Passkeys, and single-use rotating refresh tokens with full family revocation on replay.
+- **Router / Worker Split & 12 Model Layers**: An always-on **Router** runs on a fast model and structurally mounts **zero shell or file execution tools** — it replies immediately, dispatches work, summarizes outcomes, and handles safe self-configuration. Heavy execution spawns isolated parallel **Workers** (and nested Subagents) on stronger models across up to **12 configurable layers** (`router`, `voice`, `worker`, `subagent`, `filter`, `reviewer`, `watchdog`, `summarizer`, `embedding`, `vision`, `transcribe`, `speech`), each with independent fallbacks and daily budgets.
+- **Split-Phase Voice & Sideband Memory**: Phase A (Router brain) handles tool calls, routing, and mood updates; Phase B (Voice layer) renders tool-free conversational bubbles. Memory extraction runs asynchronously when chat goes idle, and non-owner sources or heated turns are gated into *Pending* so replies never block and long-term memory stays trustworthy.
+- **Unified Triggers, Two-Stage Filtering & Subscription Bypass**: Chat messages, GitHub activity, Gmail, routines, and plugins all normalize into `Trigger`s; external noise is filtered by deterministic **Fast Path** rules followed by a lightweight **Slow Path** model. Once a Worker claims a thread, follow-up events route straight to it without waking the Router.
+- **Stateless Loop, Inline & Spill & Crash Recovery**: Every turn rebuilds context from SQLite's event stream while oversized tool outputs spill to disk blobs fetched on demand via `recall()`. On restart, in-flight sessions recover, orphaned background jobs are cleaned up, and a persistent outbox prevents duplicate notifications or external comments.
+- **Full-Duplex Execution, External Watchdog & Plugin Sandbox**: New owner messages inject cleanly between reasoning steps and long commands move automatically to background jobs. An independent **Watchdog** probes every minute to nudge, restart, or escalate stalled tasks — and self-heal an unresponsive Router. Third-party plugins run in isolated sandbox processes via the [Plugin SDK](docs/04-plugin-sdk.md) and can never shadow built-in tools.
 
 <details>
-<summary><strong>Repository Layout &amp; Local Development</strong></summary>
+<summary><strong>Monorepo Layout &amp; Local Development</strong></summary>
+
+Dependencies flow strictly downward (guarded automatically by `apps/daemon/src/harness.test.ts`):
 
 ```text
-apps/daemon             Local service: Hono HTTP API, SSE event stream, CLI
-apps/web                Frontend: React 19 + Vite + Tailwind CSS 4 (bilingual ZH/EN i18n)
-apps/desktop            Electron desktop app: tray, notifications, global Quick Ask
+apps/daemon             Headless-first server: /v1/* Hono API, RBAC + multi-auth, SSE, CLI
+apps/web                Decoupled React 19 + Vite + Tailwind CSS 4 UI (zero @nuonuo/* deps, ZH/EN i18n)
+apps/desktop            Thin Electron client: bundled web UI, AES-256-GCM/safeStorage vault, Local Deploy
+packages/client         Standalone TypeScript SDK for /v1/* Protocol 2.0
 packages/core           Domain engine: Trigger / Thread / Ticket / Subscriptions, Router & Worker,
                         Split-Phase Voice, Reviewer, Memory, Goals, Ideas, Watchdog
 packages/agent-runtime  Agent loop: SQLite event log, mid-step injection, background jobs,
@@ -164,19 +162,20 @@ packages/sources        Source & Channel protocols, GitHub, Cron routines, Plugi
                         Cloud Computer shared layer & headed browser daemon
 packages/plugins        Built-in plugins: Telegram, Feishu, Discord, WeCom, DingTalk, Slack, Gmail, Mood
 packages/plugin-sdk     Third-party Plugin SDK
-packages/models         Model providers, encrypted secret storage, 12-layer routing, usage ledger
+packages/models         Providers, encrypted secret store, 12-layer routing, usage ledger
 packages/db             SQLite + Drizzle ORM, migrations, persistent side-effect outbox
-packages/client         TypeScript client SDK for /client/v1 paired devices
-plugins/instabox        Reference third-party plugin: Instabox Cloud Linux Desktop
+plugins/instabox        Reference third-party Cloud Linux Desktop plugin
+evals/                  Zero-token offline prompt, voice, and guardrail eval suite
 examples/               Client & plugin examples (Python, Node.js, curl, RSS watch, Notes UI)
 ```
 
 ```sh
-pnpm install && pnpm dev    # run daemon + Vite HMR together
-pnpm check                  # typecheck + tests + production build
+pnpm install && pnpm dev    # daemon + Vite HMR
+pnpm check                  # 11-workspace typecheck + Vitest guardrails/unit tests + builds
+pnpm eval                   # zero-token offline prompt & voice regression suite
 ```
 
-Wrap any new UI copy with `tx()` and add its English entry in `apps/web/src/i18n.en.ts`. Full design and architecture logs live in [`docs/`](docs/).
+Wrap any new UI copy with `tx()` and add its English entry in `apps/web/src/i18n.en.ts`. Architecture guardrails live in [`AGENTS.md`](AGENTS.md); design history lives in [`docs/`](docs/).
 
 </details>
 
@@ -184,7 +183,7 @@ Wrap any new UI copy with `tx()` and add its English entry in `apps/web/src/i18n
 
 ## Acknowledgments
 
-- **DeepSeek — *"Super-agent Design Exploration"* & [dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype) (MIT)**: Inspired Nuonuo's two-tier Router/Worker architecture, two-stage event filtering, subscription bypass, Inline & Spill with `recall()`, full-duplex mid-step injection, stateless crash recovery, and external Watchdog. Core domain concepts (`Source` / `Trigger` / `Thread` / `Ticket` / `Policy`) were adapted from the MIT prototype; the agent runtime, model hub, plugin sandbox, voice/mood engine, cloud desktop layer, and web/desktop UI are independent implementations. See [Architecture Comparison](docs/07-architecture.md) and [Initial Research](docs/00-research.md).
+- **DeepSeek — *"Super-agent Design Exploration"* & [dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype) (MIT)**: Inspired Nuonuo's two-tier Router/Worker architecture, two-stage event filtering, subscription bypass, Inline & Spill with `recall()`, full-duplex mid-step injection, stateless crash recovery, and external Watchdog. Core domain concepts (`Source` / `Trigger` / `Thread` / `Ticket` / `Policy`) were adapted from the MIT prototype; the agent runtime, auth/protocol kernel, model hub, plugin sandbox, voice/mood engine, cloud desktop layer, and decoupled web/desktop clients are independent implementations. See [Architecture Comparison](docs/07-architecture.md) and [Initial Research](docs/00-research.md).
 - **[Muse](https://muse.ai/blog/how-we-designed-muse) & Grok Bot**: Inspired the main-chat + side-chat interaction model, background goal tracking, named assistant identity and mood, plain-language approval cards, and inline result previews. See [Design Notes](docs/09-m6-muse-and-memory.md).
 - **Open-Source Ecosystem**: Built with Node.js 22, [Hono](https://hono.dev), SQLite & [Drizzle ORM](https://orm.drizzle.team), React 19, Vite, Tailwind CSS 4, [Vercel AI SDK](https://ai-sdk.dev), [Model Context Protocol (MCP)](https://modelcontextprotocol.io), Playwright, and Electron.
 
