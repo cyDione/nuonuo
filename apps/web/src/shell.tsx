@@ -3,9 +3,8 @@
  * title bar area, scrollbars that show while scrolling, and the pointer-following tilt used by cards.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { PanelLeft } from 'lucide-react'
-import { getPrefs, matchesKey, MOD } from './prefs'
-import { cx, IconButton } from './ui'
+import { getPrefs, matchesKey } from './prefs'
+import { cx } from './ui'
 import { tx } from './i18n'
 
 /** The desktop app's own settings (设置 → 通用 · 快捷键). */
@@ -37,7 +36,7 @@ interface DesktopBridge {
   pickFolder?(): Promise<string | undefined>
   update?: { install(): Promise<string> }
   vault?: {
-    list(): Promise<{ profiles: any[]; activeId: string | null; encryptionAvailable: boolean }>
+    list(): Promise<{ profiles: any[]; activeId: string | null; encryptionAvailable: boolean; backend?: 'safeStorage' | 'aes-256-gcm' }>
     save(profile: any, refreshToken?: string): Promise<void>
     getRefreshToken(profileId: string): Promise<string | undefined>
     setActive(profileId: string | null): Promise<void>
@@ -57,15 +56,15 @@ export const isMacDesktop = desktop?.platform === 'darwin'
 
 // ── Pane sizes, remembered per device ───────────────────────────────────────
 export type PaneSide = 'left' | 'right'
-const LIMITS = { left: { min: 200, max: 360, initial: 252 }, right: { min: 320, max: 460, initial: 360 } }
+const LIMITS = { left: { min: 240, max: 360, initial: 280 }, right: { min: 330, max: 460, initial: 376 } }
 interface Panes { left: number; right: number; leftOpen: boolean; rightOpen: boolean }
 const load = (): Panes => {
-  // The right pane opens from 糯糯 in the sidebar; the chat has the window to itself until then.
-  const base = { left: LIMITS.left.initial, right: LIMITS.right.initial, leftOpen: true, rightOpen: false }
+  // v15 Spatial Architecture C: floating pill rail is always present on the left, the thread drawer (leftOpen)
+  // tucks away by default, and the collapsible right companion pane starts open on wide desktop viewports.
+  const wide = typeof window !== 'undefined' ? window.innerWidth >= 1280 : true
+  const base = { left: LIMITS.left.initial, right: LIMITS.right.initial, leftOpen: false, rightOpen: wide }
   try {
-    const saved = JSON.parse(localStorage.getItem('sa-panes') ?? '{}') as Partial<Panes>
-    // The right pane used to be remembered on its own.
-    if (localStorage.getItem('sa-today') === 'hidden' && saved.rightOpen === undefined) saved.rightOpen = false
+    const saved = JSON.parse(localStorage.getItem('sa-panes-v15') ?? '{}') as Partial<Panes>
     return { ...base, ...saved }
   } catch { return base }
 }
@@ -73,7 +72,7 @@ let panes = load()
 const paneListeners = new Set<() => void>()
 function setPanes(patch: Partial<Panes>) {
   panes = { ...panes, ...patch }
-  try { localStorage.setItem('sa-panes', JSON.stringify(panes)) } catch { /* private mode */ }
+  try { localStorage.setItem('sa-panes-v15', JSON.stringify(panes)) } catch { /* private mode */ }
   for (const l of paneListeners) l()
 }
 export const usePanes = () => useSyncExternalStore(l => { paneListeners.add(l); return () => paneListeners.delete(l) }, () => panes)
@@ -125,7 +124,7 @@ export function Resizer({ side }: { side: PaneSide }) {
   const tip = useRef<HTMLSpanElement>(null)
   const p = usePanes()
   const open = side === 'left' ? p.leftOpen : p.rightOpen
-  if (!open) return side === 'left' ? <div className="w-2 shrink-0" /> : null
+  if (!open) return null
   const limits = LIMITS[side]
   const onDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return
@@ -171,15 +170,10 @@ export function Resizer({ side }: { side: PaneSide }) {
 }
 
 /**
- * The top of the main sheet: part of the window's title bar on the desktop app (drag it to move the window). When the
- * sidebar is folded, it holds the button that brings it back, clear of the traffic lights.
+ * The top drag strip of the main window on desktop (drag it to move the window, clear of macOS traffic lights).
  */
 export function TopBar({ children, right, className }: { children?: React.ReactNode; right?: React.ReactNode; className?: string }) {
-  const { leftOpen } = usePanes()
-  return <div className={cx('drag flex h-12 shrink-0 items-center gap-2 px-3', className)}>
-    {!leftOpen && <span className={cx('anim-fade flex items-center max-md:hidden', isMacDesktop && 'lights-room pl-[64px]')}>
-      <IconButton label={tx('展开侧栏 ({0}\\)', MOD)} onClick={() => togglePane('left', true)} className="size-8"><PanelLeft size={17} /></IconButton>
-    </span>}
+  return <div className={cx('drag flex h-11 shrink-0 items-center gap-2 px-4', isMacDesktop && 'lights-room pl-[84px]', className)}>
     <div className="flex min-w-0 flex-1 items-center gap-2.5">{children}</div>
     {right}
   </div>

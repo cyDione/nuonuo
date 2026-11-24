@@ -62,7 +62,7 @@ export function NeedsYou({ t, onAnswer, onEdit, onLearned }: { t: Ticket; onAnsw
   const [handoff, setHandoff] = useState<string | null>(null)
   const [detail, setDetail] = useState(false)
 
-  const shell = (children: React.ReactNode) => <div className="max-w-xl rounded-[20px] border border-warn/25 bg-card px-4 py-3.5 shadow-[var(--shadow-sheet)]">{children}</div>
+  const shell = (children: React.ReactNode) => <div className="ceramic-card max-w-xl rounded-[22px] px-5 py-4">{children}</div>
 
   if (t.approvals[0]?.card) return <ApprovalCardView t={t} onEdit={onEdit} onLearned={onLearned} />
   if (t.approvals.length) {
@@ -122,25 +122,25 @@ function ApprovalCardView({ t, onEdit, onLearned }: { t: Ticket; onEdit?: ((text
     },
   })
   const [detail, setDetail] = useState(false)
-  return <div className="max-w-[440px] overflow-hidden rounded-[18px] border border-line bg-card">
-    <div className="flex items-center gap-2 px-4 py-3">
-      <ShieldAlert size={16} className="shrink-0" />
-      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{card.title}</span>
-      {card.note && <span className="shrink-0 text-xs text-faint">{card.note}</span>}
+  return <div className="ceramic-card max-w-[460px] overflow-hidden rounded-[24px]">
+    <div className="flex items-center gap-2.5 px-5 pt-4 pb-3">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent"><ShieldAlert size={15} /></span>
+      <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-fg">{card.title}</span>
+      {card.note && <span className="shrink-0 text-xs font-medium text-accent">{card.note}</span>}
     </div>
-    <div className="border-t border-line px-4 pt-3 pb-3.5">
+    <div className="px-5 pt-1 pb-4">
       <dl className="grid grid-cols-[4.5em_1fr] gap-x-3 gap-y-2 text-sm">
-        {card.rows.map(r => <div key={r.label} className="contents"><dt className="text-faint">{r.label}</dt><dd className="min-w-0 break-words">{r.value}</dd></div>)}
+        {card.rows.map(r => <div key={r.label} className="contents"><dt className="text-faint">{r.label}</dt><dd className="min-w-0 break-words font-medium text-fg">{r.value}</dd></div>)}
       </dl>
-      <button onClick={() => setDetail(v => !v)} className="mt-2 flex items-center gap-0.5 text-xs text-faint hover:text-muted">{detail ? <ChevronDown size={12} /> : <ChevronRight size={12} />}{tx('具体操作')}</button>
-      {detail && <pre className="anim-fade mt-1 overflow-x-auto rounded-xl bg-sunken px-3 py-2 font-mono text-xs whitespace-pre-wrap">{a.command}</pre>}
-      <div className="mt-3 flex items-center gap-2">
+      <button onClick={() => setDetail(v => !v)} className="mt-2.5 flex items-center gap-0.5 text-xs text-faint hover:text-muted">{detail ? <ChevronDown size={12} /> : <ChevronRight size={12} />}{tx('具体操作')}</button>
+      {detail && <pre className="anim-fade mt-1.5 overflow-x-auto rounded-xl bg-sunken px-3 py-2 font-mono text-xs whitespace-pre-wrap">{a.command}</pre>}
+      <div className="mt-4 flex items-center gap-2 border-t border-dashed border-line pt-3.5">
         <button onClick={() => decide.mutate({ approve: true })} disabled={decide.isPending || done}
-          className="press flex h-8 items-center gap-1.5 rounded-full bg-ink px-4 text-[13px] font-medium text-ink-fg disabled:cursor-default">
+          className="press flex h-9 items-center gap-1.5 rounded-full bg-accent px-5 text-[13px] font-semibold text-accent-fg shadow-xs hover:opacity-95 disabled:cursor-default">
           {done && <svg viewBox="0 0 16 16" className="size-3.5" aria-hidden><path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" pathLength={1} className="check-draw" /></svg>}
           {done ? tx('好了') : card.confirm}
         </button>
-        {!done && <button onClick={() => decide.mutate({ approve: false })} disabled={decide.isPending} className="press h-8 rounded-full border border-line px-4 text-[13px] hover:border-faint">{tx('先不要')}</button>}
+        {!done && <button onClick={() => decide.mutate({ approve: false })} disabled={decide.isPending} className="press h-9 rounded-full bg-sunken px-4 text-[13px] font-medium text-muted hover:text-fg">{tx('先不要')}</button>}
         {!done && onEdit && <button onClick={() => onEdit(tx('这一步改一下：'))} className="ml-auto text-xs text-muted hover:text-fg">{tx('改一下')}</button>}
       </div>
       {!done && a.standing && <button onClick={() => decide.mutate({ approve: true, scope: 'always' })} disabled={decide.isPending}

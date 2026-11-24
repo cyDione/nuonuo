@@ -12,6 +12,7 @@ import { BookOpen, ChevronRight, Pin, Plus, RotateCcw, Trash2, X } from 'lucide-
 import { useEffect, useId, useRef, useState } from 'react'
 import { api, type Persona } from './api'
 import { locale, tx } from './i18n'
+import { Avatar, usePersona } from './persona'
 import { usePrefs } from './prefs'
 import { Switch } from './skills'
 import { cx, Seg } from './ui'
@@ -614,6 +615,7 @@ export function MoodSection({ Head }: { Head: React.ComponentType<{ title: strin
 // ── The window ──────────────────────────────────────────────────────────────
 
 function MindWindow({ initialTab = 'now', onClose }: { initialTab?: Tab; onClose(): void }) {
+  const persona = usePersona()
   const [tab, setTab] = useState<Tab>(initialTab)
   const [leaving, setLeaving] = useState(false)
   const dirty = useRef(false)
@@ -639,7 +641,10 @@ function MindWindow({ initialTab = 'now', onClose }: { initialTab?: Tab; onClose
     onMouseDown={e => { if (e.target === e.currentTarget) close() }}>
     <div ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-label={tx('个性与心境')}
       className={cx('anim-pop flex h-[min(720px,88dvh)] w-[min(640px,calc(100vw-32px))] flex-col overflow-hidden rounded-[20px] border border-line bg-panel shadow-2xl outline-none max-sm:h-dvh max-sm:w-full max-sm:rounded-none max-sm:border-0', leaving && 'out-pop')}>
-      <header className="flex h-[60px] shrink-0 items-center gap-3 border-b border-line pr-3 pl-6">
+      <header className="flex h-[64px] shrink-0 items-center gap-3 border-b border-line pr-3 pl-5">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-line bg-avatar-well">
+          <Avatar persona={persona} size={24} mood="idle" />
+        </span>
         <h2 className="text-[17px] font-semibold whitespace-nowrap">{tx('个性与心境')}</h2>
         <Seg label={tx('个性与心境')} value={tab} onChange={v => switchTab(v as Tab)} options={[{ id: 'now', label: tx('此刻') }, { id: 'persona', label: tx('性格') }, { id: 'diary', label: tx('日记') }]} className="w-[190px]" />
         <span className="flex-1" />

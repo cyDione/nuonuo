@@ -7,7 +7,7 @@ import { Connect } from './Connect'
 import { bootstrapConnection, isInsecureRemoteUrl, openConnectionCenter, useConnection } from './connection'
 import { go, useRoute } from './route'
 import { Settings } from './settings/Settings'
-import { Sidebar, StatusDot } from './Sidebar'
+import { Sidebar, StatusDot, ThreadPanel } from './Sidebar'
 import { openActivity, openTask, useLive, useLiveEvents } from './live'
 import { needsOwner, TaskDrawer, useTickets } from './tasks'
 import { Activity } from './Activity'
@@ -17,7 +17,7 @@ import { IdeasPage } from './ideas'
 import { PaneDrawer, RightPane, setPaneTab } from './RightPane'
 import { openPane } from './Sidebar'
 import { QuickAsk } from './QuickAsk'
-import { Pane, Resizer, togglePane, TopBar, useDesktopChrome, usePanes, usePaneShortcuts, useScrollingClass } from './shell'
+import { Pane, Resizer, togglePane, TopBar, useDesktopChrome, usePaneShortcuts, useScrollingClass } from './shell'
 import { Avatar, BRAND, Mascot, statusLine, usePersona } from './persona'
 import { cx, IconButton } from './ui'
 import { useSettingsShortcut } from './More'
@@ -64,29 +64,31 @@ function Layout({ route, nav, setNav }: { route: ReturnType<typeof useRoute>; na
   usePaneShortcuts()
   useScrollingClass()
   useSettingsShortcut()
-  const { leftOpen } = usePanes()
-  // 设置 has the window to itself, with its own sidebar and 返回聊天 (Figma v6, 21).
+  // 设置 has the window to itself, with its own sidebar and 返回聊天.
   if (route.page === 'settings') return <><Settings tab={route.tab} {...(route.item ? { item: route.item } : {})} /><SearchDialog /></>
   const chat = route.page === 'chat'
-  const tabbed = chat || route.page === 'activity' || route.page === 'library' || route.page === 'goals' || route.page === 'ideas'
-  return <div className="flex h-dvh bg-bg">
+  return <div className="sky-stage relative flex h-dvh overflow-hidden">
     <Sidebar route={route} open={nav} onClose={() => setNav(false)} />
-    <main className={cx('flex min-w-0 flex-1', leftOpen && 'md:border-l md:border-line')}>
+    <main className="flex min-w-0 flex-1 md:pl-[88px]">
+      <div className="contents max-xl:hidden">
+        <Pane side="left"><div className="h-full w-full py-3 pl-2"><ThreadPanel route={route} onClose={() => togglePane('left', false)} /></div></Pane>
+        <Resizer side="left" />
+      </div>
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <MobileBar onMenu={() => setNav(true)} />
-        {tabbed ? <TopBar className="max-md:hidden" right={<SearchButton className="no-drag mr-1" />} /> : !chat && <TopBar className="max-md:hidden" />}
+        <TopBar className="max-md:hidden" />
         <div key={route.page === 'chat' ? `c${route.id ?? (route.main ? 'main' : 'new')}` : route.page} className="min-h-0 flex-1">
           {chat ? (route.main ? <MainChat /> : <Chat key={route.id ?? 'new'} id={route.id} />)
             : route.page === 'activity' ? <Activity /> : route.page === 'library' ? <Library /> : route.page === 'goals' ? <GoalsPage /> : route.page === 'ideas' ? <IdeasPage />
             : null}
         </div>
       </div>
-      {chat && <div className="contents max-xl:hidden">
+      <div className="contents max-xl:hidden">
         <Resizer side="right" />
-        <Pane side="right"><aside className="h-full w-full overflow-hidden border-l border-line bg-panel">
+        <Pane side="right"><div className="h-full w-full py-3 pr-3"><aside className="glass-strong h-full w-full overflow-hidden rounded-[26px] shadow-[var(--shadow-ceramic)]">
           <RightPane onClose={() => togglePane('right', false)} />
-        </aside></Pane>
-      </div>}
+        </aside></div></Pane>
+      </div>
     </main>
     <TaskDrawer />
     <PaneDrawer />
@@ -115,17 +117,17 @@ function MobileBar({ onMenu }: { onMenu(): void }) {
   const tickets = (useTickets().data?.tickets ?? []).filter(t => t.stage !== 'ended')
   const status = statusLine(tickets)
   const waiting = tickets.filter(needsOwner).length
-  return <div className="flex h-14 shrink-0 items-center gap-1 px-2 pt-[env(safe-area-inset-top)] md:hidden">
-    <IconButton label={tx('打开菜单')} onClick={onMenu} className="size-10 text-fg"><Menu size={20} /></IconButton>
+  return <div className="glass-surface mx-2 mt-[max(8px,env(safe-area-inset-top))] flex h-13 shrink-0 items-center gap-1 rounded-2xl px-1.5 shadow-[var(--shadow-bubble)] md:hidden">
+    <IconButton label={tx('打开菜单')} onClick={onMenu} className="size-9 text-fg"><Menu size={19} /></IconButton>
     <button onClick={() => openActivity(true)} className="press flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1 py-1 text-left">
       <Avatar persona={persona} size={30} mood={connected ? status.tone : 'sleepy'} />
       <span className="min-w-0">
         <span className="block truncate font-display text-[15px] leading-tight font-semibold">{persona.name}</span>
-        <span className="flex items-center gap-1.5 truncate text-[11px] text-faint"><StatusDot tone={connected ? status.tone : 'offline'} /><span className="truncate">{connected ? status.text : tx('重连中…')}</span></span>
+        <span className="flex items-center gap-1.5 truncate text-[11px] text-muted"><StatusDot tone={connected ? status.tone : 'offline'} /><span className="truncate">{connected ? status.text : tx('重连中…')}</span></span>
       </span>
     </button>
-    <SearchButton />
-    <button onClick={() => openActivity(true)} aria-label={tx('今天')} className={cx('press mr-1 flex h-9 items-center gap-1 rounded-full px-3 text-[13px] font-semibold tabular-nums', waiting ? 'bg-warn-soft text-warn' : 'text-muted')}>
+    <SearchButton className="size-9" />
+    <button onClick={() => openActivity(true)} aria-label={tx('今天')} className={cx('press flex shrink-0 items-center justify-center gap-1 rounded-full text-[12px] font-semibold tabular-nums', waiting ? 'h-9 bg-warn-soft px-3 text-warn' : 'size-9 text-muted hover:bg-sunken hover:text-fg')}>
       <Inbox size={16} />{waiting > 0 && <span key={waiting} className="bump">{waiting}</span>}
     </button>
   </div>
@@ -145,16 +147,16 @@ function Shell({ authed, children }: { authed: boolean; children: React.ReactNod
 
 
 function Splash() {
-  return <div className="flex h-dvh flex-col items-center justify-center gap-4 text-sm text-muted">
-    <Mascot color={BRAND} size={72} mood="thinking" />
+  return <div className="sky-stage flex h-dvh flex-col items-center justify-center gap-4 text-sm text-muted">
+    <Mascot color={BRAND} size={68} mood="thinking" />
     <span className="anim-fade">{tx('正在连接服务…')}</span>
   </div>
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
-  return <div className="relative flex h-dvh items-center justify-center p-6">
-    <div className="dot-grid pointer-events-none absolute inset-0" aria-hidden />
-    <div className="anim-pop relative w-full max-w-md space-y-4 rounded-[28px] border border-line bg-panel p-8 text-center shadow-[var(--shadow-sheet)]">{children}</div>
+  return <div className="sky-stage relative flex h-dvh items-center justify-center p-6">
+    <div className="dot-grid pointer-events-none absolute inset-0 opacity-60" aria-hidden />
+    <div className="anim-pop glass-strong relative w-full max-w-md space-y-4 rounded-[28px] p-8 text-center shadow-[var(--shadow-ceramic)]">{children}</div>
   </div>
 }
 

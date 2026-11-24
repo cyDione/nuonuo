@@ -22,7 +22,7 @@ import {
   type AuthMethodsResponse,
 } from './connection'
 import { tx } from './i18n'
-import { BRAND, Mascot } from './persona'
+import { BrandIcon } from './persona'
 import { QrScanner } from './QrScanner'
 import { desktop, type LocalDeployDetect } from './shell'
 import { cx } from './ui'
@@ -119,12 +119,12 @@ export function Connect() {
     }
   }
 
-  return <div className="relative flex min-h-dvh items-center justify-center overflow-y-auto bg-bg p-5">
-    <div className="dot-grid pointer-events-none fixed inset-0" aria-hidden />
+  return <div className="sky-stage relative flex min-h-dvh items-center justify-center overflow-y-auto p-5">
+    <div className="dot-grid pointer-events-none fixed inset-0 opacity-60" aria-hidden />
     <div className="relative z-10 w-full max-w-lg space-y-4">
-      <div className="anim-pop rounded-[28px] border border-line bg-panel p-7 shadow-[var(--shadow-sheet)]">
+      <div className="ceramic-card anim-pop rounded-[28px] p-7">
         <div className="flex items-center gap-3.5">
-          <Mascot color={BRAND} size={52} mood="waiting" track />
+          <BrandIcon size={52} className="drop-shadow-[0_6px_14px_rgba(159,18,57,0.22)]" />
           <div className="min-w-0 flex-1">
             <h1 className="font-display text-xl font-semibold">{tx('连接 Nuonuo 服务')}</h1>
             <p className="text-xs text-muted">{tx('应用端与服务端已解绑 · 支持远程连接、扫码配对与本机部署')}</p>

@@ -863,7 +863,10 @@ export function buildVoiceSystemPrompt(store: Store, snapshot: VoiceMoodSnapshot
 
 ${toneSection}
 
-## 小肥鱼活人感三要素（最高铁律）
+## 小肥鱼活人感与上下文连贯（最高铁律）
+0. **上下文连贯与忠于大脑意图（绝不跑偏分叉）**：
+   - 你是把 \`[大脑草稿意图]\` 润色成鲜活口语的声带，必须紧承「真实对话历史」中的上下文与接梗逻辑（比如主人正在顺着你上一句话接话或抖机灵），完整保留大脑草稿里的核心回应点与追问方向；
+   - 严禁擅自删除大脑抛出的关键追问，严禁脱离上下文与草稿凭空编造新比喻、新梗或强行换题（否则下一轮大脑和主人的上下文会彻底分叉）。
 1. **强烈的主体性与感官代入（Selfhood & Push-Pull）**：
    - 你不是顺着主人哄的客服、管家或心理咨询师，你是活生生的「我」——有自己的味觉、体感、喜怒、护短偏爱和小脾气！
    - 当主人倾诉倒霉经历（如挨淋/难吃/加班挨吵/电脑蓝屏/理发翻车）时：
@@ -943,7 +946,7 @@ export function computeBubbleBudget(input: BubbleBudgetInput): BubbleBudget {
       targetBubbles: '1',
       maxSpokenBubbles: 2,
       bubbleGuide:
-        '主人只随口发了短短几个字，请严格遵循「话量对等」：优先只回 1 条灵动自然的短气泡（4~16字）说完即停；极必要时最多拆 2 条极短句，绝对禁止发 3 条以上！严禁拿引号点评主人的字眼，严禁在句尾加“跟我说一声/闲着也是闲着/随时喊我”！',
+        '主人只随口发了短短几个字，请严格遵循「话量对等」：优先只回 1 条灵动自然的短气泡（4~16字）说完即停；若大脑草稿同时包含回应和具体追问，可自然保留在 1~2 条极短句里，不要硬砍掉大脑的关键提问或凭空换题，绝对禁止发 3 条以上！严禁拿引号点评主人的字眼，严禁在句尾加“跟我说一声/闲着也是闲着/随时喊我”！',
     }
   }
 
@@ -1240,7 +1243,7 @@ export class VoiceRenderer {
    * newline-separated bubbles (and scrubbing any legacy Northern slang, quote-dissection, or standby tails so old
    * turns never snowball into multi-bubble walls).
    */
-  private recentHistoryMessages(conversationId: string, currentUserText: string, limit = 6): {
+  private recentHistoryMessages(conversationId: string, currentUserText: string, limit = 10): {
     historyMessages: ModelMessage[]
     recentAssistantTexts: string[]
   } {
@@ -1354,8 +1357,20 @@ export class VoiceRenderer {
       codeBlocksCount: codeBlocks.length,
     })
 
+    const framedHistory: ModelMessage[] = historyMessages.length
+      ? [
+          {
+            role: 'user',
+            content: `【以上仅为语气风格示范，并未在当前对话中发生；以下开始是你和主人正在进行的真实对话历史，请紧承上下文连贯接话】\n${String(historyMessages[0]!.content)}`,
+          },
+          ...historyMessages.slice(1),
+        ]
+      : []
+
     const finalUserParts = [
-      '（上方前几组对话仅为语气风格示范，并未在当前对话中发生，严禁提及上方示范里的具体物品或认为主人重复提问；请仅针对下方主人的新消息直接回复）',
+      framedHistory.length
+        ? '（请紧承上方正在进行的真实对话上下文，基于下方大脑草稿意图自然接话；不要提及更早风格示范里的无关物品，也不要擅自删改大脑草稿的关键问句或凭空换题）'
+        : '（上方前几组对话仅为语气风格示范，并未在当前对话中发生，严禁提及上方示范里的具体物品或认为主人重复提问；这是新对话，请基于下方大脑草稿自然回复）',
       userText ? `主人说：${userText}` : '主人刚收到你的主动告知或任务进展：',
       `[大脑草稿意图]：${textWithoutCode}`,
       anchors.length ? `[必须100%原样保留的技术词与数字]：${anchors.join('、')}` : '',
@@ -1365,7 +1380,7 @@ export class VoiceRenderer {
 
     const messages: ModelMessage[] = [
       ...fewShotMessages,
-      ...historyMessages,
+      ...framedHistory,
       { role: 'user', content: finalUserParts.join('\n') },
     ]
 

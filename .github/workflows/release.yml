@@ -18,9 +18,17 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release, e.g. 0.2.2 (empty: build only, publish nothing)'
+        description: 'Version to release, e.g. 0.4.0 (empty: build only, publish nothing)'
         required: false
         default: ''
+      targets:
+        description: 'Build targets: all | server-mac (Linux/macOS server + macOS desktop only)'
+        required: false
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - server-mac
       rebuild:
         description: 'Rebuild an existing release from its tag and upload the packages to it'
         type: boolean
@@ -51,6 +59,7 @@ jobs:
     outputs:
       tag: ${{ steps.what.outputs.tag }}
       sha: ${{ steps.what.outputs.sha }}
+      desktop_matrix: ${{ steps.what.outputs.desktop_matrix }}
     steps:
       - id: what
         env:
@@ -58,6 +67,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
           REBUILD: ${{ inputs.rebuild }}
+          TARGETS: ${{ inputs.targets }}
         run: |
           tag=""
           sha="$GITHUB_SHA"
@@ -77,9 +87,19 @@ jobs:
               if gh release view "$tag" >/dev/null 2>&1; then echo "::error::release $tag already exists"; exit 1; fi
             fi
           fi
+          targets="${TARGETS:-all}"
+          if [ "$targets" = "server-mac" ]; then
+            desktop_matrix='{"include":[{"runner":"macos-15","os":"mac","arch":"arm64"},{"runner":"macos-15-intel","os":"mac","arch":"x64"}]}'
+          elif [ "$targets" = "all" ]; then
+            desktop_matrix='{"include":[{"runner":"macos-15","os":"mac","arch":"arm64"},{"runner":"macos-15-intel","os":"mac","arch":"x64"},{"runner":"windows-2025","os":"win","arch":"x64"},{"runner":"windows-11-arm","os":"win","arch":"arm64"}]}'
+          else
+            echo "::error::unsupported targets: $targets (expected all or server-mac)"
+            exit 1
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "release: ${tag:-none}, commit $sha"
+          echo "desktop_matrix=$desktop_matrix" >> "$GITHUB_OUTPUT"
+          echo "release: ${tag:-none}, targets: $targets, commit $sha"
 
   linux:
     name: linux-${{ matrix.arch }}
@@ -141,12 +161,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { runner: macos-15, os: mac, arch: arm64 }  # macos-14 jobs are cancelled before they start (image retired)
-          - { runner: macos-15-intel, os: mac, arch: x64 }
-          - { runner: windows-2025, os: win, arch: x64 }
-          - { runner: windows-11-arm, os: win, arch: arm64 }
+      matrix: ${{ fromJSON(needs.prepare.outputs.desktop_matrix) }}
     defaults:
       run:
         shell: bash

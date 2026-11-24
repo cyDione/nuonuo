@@ -8,16 +8,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { MotionGrid, MotionGridCells } from '@animate-ui/react/primitives/motion-grid'
 import { Particles, ParticlesEffect } from '@animate-ui/react/primitives/effects/particles'
 import { SplittingText } from '@animate-ui/react/primitives/texts/splitting'
-import { AlarmClock, AlertTriangle, ArrowDown, ArrowUp, ArrowUpRight, Bell, Check, ChevronLeft, Copy, ExternalLink, FileText, Layers, Mic, Paperclip, Pencil, Plane, Plus, Reply, RotateCcw, Scale, Square, Tag, Undo2, Upload as UploadIcon, type LucideIcon } from 'lucide-react'
+import { AlarmClock, AlertTriangle, ArrowDown, ArrowUp, ArrowUpRight, Bell, Check, ChevronDown, ChevronLeft, Copy, ExternalLink, FileText, Layers, Mic, Paperclip, Pencil, Plane, Plus, Reply, RotateCcw, Scale, Square, Tag, Undo2, Upload as UploadIcon, type LucideIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getPrefs, usePrefs } from './prefs'
 import { api, ApiError, upload, type Artifact, type Conversation, type Message, type RolesResponse } from './api'
 import { ChatCard, Compacted, FindBar, OpenChip, PendingFiles, QuoteBar, QuoteInBubble, SentFiles, type Pending } from './chatparts'
-import { useLive } from './live'
+import { getLiveState, pendingReplyPollInterval, useLive } from './live'
 import { Avatar, usePersona } from './persona'
 import { go } from './route'
+import { togglePane, usePanes } from './shell'
 import { Onboarding, useOnboarding } from './onboarding'
 import { LearnedNote, NeedsYou, needsOwner, useTickets, type Learned } from './tasks'
 import { SourceIcon, SourceName } from './icons'
@@ -37,9 +38,23 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const qc = useQueryClient()
   const persona = usePersona()
   const roles = useQuery({ queryKey: ['roles'], queryFn: () => api.get<RolesResponse>('/roles') })
+  const [lastSentAt, setLastSentAt] = useState(0)
+  const workingRef = useRef(false)
+  const awaitingDeliveryRef = useRef(false)
   const thread = useQuery({
     queryKey: ['messages', id], enabled: Boolean(id),
-    queryFn: () => api.get<{ conversation: Conversation; messages: Message[] }>(`/conversations/${id}/messages`),
+    queryFn: ({ signal }) => api.get<{ conversation: Conversation; messages: Message[] }>(`/conversations/${id}/messages`, { signal }),
+    refetchInterval: query => {
+      const live = getLiveState()
+      return pendingReplyPollInterval({
+        messages: query.state.data?.messages,
+        routerBusy: live.routerState === 'running',
+        working: workingRef.current,
+        awaitingDelivery: awaitingDeliveryRef.current,
+        connected: live.connected,
+        lastSentAt,
+      })
+    },
   })
   const list = useQuery({ queryKey: ['conversations'], queryFn: () => api.get<{ conversations: Conversation[] }>('/conversations') })
   const tickets = useTickets()
@@ -90,6 +105,8 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const working = mine.filter(t => t.stage === 'working' || t.stage === 'queued')
   const last = said.at(-1)
   const awaitingDelivery = all.some(t => t.ended && Date.now() - t.ended.at < 60_000 && !messages.some(m => (m.ticketId === t.id && m.meta?.result) || m.meta?.result?.ticketId === t.id))
+  workingRef.current = working.length > 0
+  awaitingDeliveryRef.current = awaitingDelivery
   const thinking = routerBusy && (last?.role === 'user' || awaitingDelivery)
   // While it works, only the typing bubble shows (never a status line or partial streaming bubble).
   const busy = thinking || working.length > 0
@@ -97,8 +114,8 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   // Follows new messages while you are at the bottom; if you scrolled up to read, a 新消息 button appears instead.
   const atBottom = useRef(true)
   const [behind, setBehind] = useState(false)
-  const toBottom = (smooth?: boolean) => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' }); setBehind(false) }
-  useLayoutEffect(() => { if (atBottom.current || last?.role === 'user') toBottom(); else setBehind(true) }, [messages.length, busy, asks.length])
+  const toBottom = (smooth?: boolean) => { atBottom.current = true; const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' }); setBehind(false) }
+  useLayoutEffect(() => { if (atBottom.current || last?.role === 'user') toBottom(); else setBehind(true) }, [messages.length, last?.id, last?.content.length, busy, asks.length])
   useEffect(() => { atBottom.current = true; toBottom() }, [id])
   const onScroll = () => { const el = scrollRef.current; if (!el) return; atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; if (atBottom.current) setBehind(false) }
 
@@ -120,8 +137,17 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
         ...(attachments.length ? { attachments } : {}), ...(quote ? { quote: quote.id } : {}) })
       for (const f of files) if (f.preview) URL.revokeObjectURL(f.preview)
       setFiles([]); setQuote(null)
-      qc.setQueryData<{ conversation: Conversation; messages: Message[] }>(['messages', id], old =>
-        old && !old.messages.some(m => m.id === message.id) ? { ...old, messages: [...old.messages, message] } : old)
+      atBottom.current = true
+      setLastSentAt(Date.now())
+      const key = ['messages', id] as const
+      const existing = qc.getQueryData<{ conversation: Conversation; messages: Message[] }>(key)
+      if (existing) {
+        if (!existing.messages.some(m => m.id === message.id)) {
+          qc.setQueryData<{ conversation: Conversation; messages: Message[] }>(key, { ...existing, messages: [...existing.messages, message] })
+        }
+      } else {
+        void qc.cancelQueries({ queryKey: key }).finally(() => qc.invalidateQueries({ queryKey: key }))
+      }
       qc.invalidateQueries({ queryKey: ['conversations'] })
     } catch (e) {
       setError(e instanceof ApiError ? e.message : tx('发送失败：{0}', (e as Error).message))
@@ -204,6 +230,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
   const external = current && current.source !== 'webchat'
 
   const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes('Files')
+  const { leftOpen } = usePanes()
   return <div className="relative flex h-full flex-col"
     onDragEnter={e => { if (hasFiles(e) && !noRouter) { e.preventDefault(); setDragging(true) } }}
     onDragOver={e => { if (hasFiles(e) && !noRouter) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }}
@@ -211,13 +238,34 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
     onDrop={e => { if (!hasFiles(e)) return; e.preventDefault(); setDragging(false); if (!noRouter) addFiles(e.dataTransfer.files) }}>
     {dragging && <div className="anim-fade pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-2 rounded-[28px] border-2 border-dashed border-accent bg-accent-soft/80 text-sm font-medium text-accent">
       <UploadIcon size={22} />{tx('松手就发给{0}看', persona.name)}</div>}
-    {!main && thread.data && <div className="border-b border-line">
-      <div className="mx-auto flex h-11 w-full max-w-[680px] items-center gap-2 px-3 md:px-8">
-        <button onClick={() => go('/')} aria-label={tx('回主聊')} title={tx('回主聊')} className="press -ml-1.5 flex size-7 shrink-0 items-center justify-center rounded-full text-muted hover:bg-sunken hover:text-fg"><ChevronLeft size={18} /></button>
-        {external && <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-sunken text-muted"><SourceIcon source={current!.source} size={13} /></span>}
+    {main && <div className="mx-auto w-full max-w-[700px] px-4 pt-1 pb-2 md:px-8 max-md:hidden">
+      <div className="flex h-11 items-center gap-3 border-b border-line/70 pb-2">
+        <button
+          type="button"
+          onClick={() => togglePane('left')}
+          aria-expanded={leftOpen}
+          className="press flex h-8 items-center gap-1.5 rounded-full border border-[var(--ceramic-border)] bg-card/90 px-3.5 text-[14px] font-semibold text-fg shadow-2xs transition-colors hover:bg-card"
+        >
+          <span>{tx('主聊')}</span>
+          <ChevronDown size={14} className={cx('text-muted transition-transform duration-150', leftOpen && 'rotate-180')} />
+        </button>
+        <span className="min-w-0 flex-1 truncate text-xs text-muted">{tx('一直在这儿的那段对话')}</span>
+        <button
+          type="button"
+          onClick={() => go('/new')}
+          className="press flex h-8 shrink-0 items-center gap-1 rounded-full border border-[var(--ceramic-border)] bg-card/90 px-3.5 text-xs font-medium text-fg shadow-2xs transition-colors hover:bg-card"
+        >
+          <Plus size={13} />{tx('新侧聊')}
+        </button>
+      </div>
+    </div>}
+    {!main && thread.data && <div className="mx-auto w-full max-w-[700px] px-4 pt-1 pb-2 md:px-8">
+      <div className="flex h-11 items-center gap-2 border-b border-line/70 pb-2">
+        <button onClick={() => go('/')} aria-label={tx('回主聊')} title={tx('回主聊')} className="press flex size-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-card/80 hover:text-fg md:-ml-1.5"><ChevronLeft size={18} /></button>
+        {external && <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-card text-muted shadow-2xs"><SourceIcon source={current!.source} size={13} /></span>}
         <h1 className="min-w-0 shrink truncate font-display text-[15px] font-semibold">{title}</h1>
         <span className="min-w-0 flex-1 truncate text-xs text-faint">{external ? <SourceName source={current!.source} /> : [tx('侧聊'), sideStatus].filter(Boolean).join(' · ')}</span>
-        {current?.meta.url ? <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg"> {tx('在')} <SourceName source={current.source} /> {tx('打开')} <ExternalLink size={12} /></a>
+        {current?.meta.url ? <a href={current.meta.url} target="_blank" rel="noreferrer" className="press flex shrink-0 items-center gap-1 rounded-full border border-line bg-card/90 px-3 py-1 text-xs text-muted hover:text-fg"> {tx('在')} <SourceName source={current.source} /> {tx('打开')} <ExternalLink size={12} /></a>
           : !external && (made ? <a href="#/library" className="shrink-0 text-xs text-muted hover:text-fg">{tx('{0} 个成果 ›', made)}</a> : <span className="shrink-0 text-xs text-faint max-sm:hidden">{tx('做完了就收进成果')}</span>)}
       </div>
     </div>}
@@ -230,7 +278,7 @@ export function Chat({ id, main }: { id?: string; main?: boolean }) {
     {finding && <FindBar root={scrollRef} deps={messages.length} onClose={() => setFinding(false)} />}
     <div ref={scrollRef} data-chat-scroll onScroll={onScroll} className="h-full overflow-y-auto">
       {main && empty && onboarding.step ? <Onboarding step={onboarding.step} next={onboarding.next} /> : empty ? <Welcome onSend={t => void send(t)} disabled={Boolean(noRouter)} main={Boolean(main)} /> :
-        <div className="mx-auto max-w-[680px] px-4 pt-4 pb-4 md:px-8">
+        <div className="mx-auto max-w-[700px] px-4 pt-4 pb-4 md:px-8">
           {messages.map((m, i) => m.role === 'system' ? <Compacted key={m.id} m={m} /> : <div key={m.id} className={cx(i > 0 && (messages[i - 1]!.role === m.role ? 'mt-1.5' : 'mt-4'))}>
             <When m={m} prev={messages[i - 1]} name={persona.name} />
             {editing === m.id ? <EditBox m={m} onCancel={() => setEditing(null)} onSave={content => { setEditing(null); void act(`/messages/${m.id}/edit`, { content }) }} />
@@ -291,7 +339,7 @@ const SIDE: [LucideIcon, string][] = [[Plane, tx('规划一次旅行')], [FileTe
 function Welcome({ onSend, disabled, main }: { onSend(text: string): void; disabled: boolean; main: boolean }) {
   const persona = usePersona()
   return <div className="flex min-h-full flex-col items-center justify-center px-4 py-10 text-center md:px-6">
-    <Avatar persona={persona} size={main ? 104 : 80} mood="happy" track className="welcome-hop text-fg" />
+    <Avatar persona={persona} size={main ? 96 : 76} mood="idle" track className="welcome-hop text-fg" />
     <h2 className="mt-5 font-display text-[clamp(26px,4vw,32px)] leading-tight font-semibold">
       <SplittingText type="chars" text={main ? tx('你好，我是{0}', persona.name) : tx('新侧聊')} stagger={0.06} delay={250}
         initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }} />
@@ -301,7 +349,7 @@ function Welcome({ onSend, disabled, main }: { onSend(text: string): void; disab
     </p>
     <div className="mt-7 flex max-w-xl flex-wrap justify-center gap-2.5">
       {(main ? FIRST : SIDE).map(([Icon, t], i) => <button key={t} disabled={disabled} onClick={() => onSend(t)} style={{ animationDelay: `${800 + i * 90}ms` }}
-        className="feed-in press flex items-center gap-2 rounded-full border border-line bg-panel px-4 py-2 text-sm hover:border-faint disabled:opacity-50">
+        className="feed-in press flex items-center gap-2 rounded-full border border-[var(--ceramic-border)] bg-card/92 px-4 py-2 text-sm shadow-[var(--shadow-bubble)] hover:bg-card disabled:opacity-50">
         <Icon size={15} className="text-muted" />{t}</button>)}
     </div>
     {main && <p className="feed-in mt-8 text-xs text-faint" style={{ animationDelay: '1100ms' }}>{tx('你说的都只存在这台电脑上。花钱、发消息、改日程，我都会先问你。')}</p>}
@@ -309,10 +357,10 @@ function Welcome({ onSend, disabled, main }: { onSend(text: string): void; disab
 }
 
 
-/** 糯糯's messages: grey bubbles, no face beside them. */
+/** 糯糯's messages: crisp porcelain pillows floating directly on the daylight sky. */
 function Bubble({ fresh, aside, children }: { fresh?: boolean; aside?: React.ReactNode; children: React.ReactNode }) {
   return <div className={cx('flex items-center gap-2', fresh && 'anim-rise')}>
-    <div className="selectable min-w-0 max-w-[85%] rounded-[20px] bg-bubble px-4 py-2.5">{children}</div>
+    <div className="selectable min-w-0 max-w-[85%] rounded-[22px] border border-[var(--ceramic-border)] bg-bubble px-4 py-2.5 shadow-[var(--shadow-bubble)]">{children}</div>
     {aside}
   </div>
 }
@@ -385,7 +433,7 @@ function Item({ m, fresh, tapback, name, actions, onBubbleStep }: { m: Message; 
     {(m.content || m.meta.quote) && <div className="flex items-center justify-end gap-2 self-stretch">
       <MsgActions m={m} actions={actions} />
       <div className="relative max-w-[85%]">
-        <div className="selectable rounded-[20px] bg-accent px-4 py-2.5 text-[15px] whitespace-pre-wrap text-accent-fg">
+        <div className="selectable rounded-[22px] bg-ink px-4 py-2.5 text-[15px] whitespace-pre-wrap text-ink-fg shadow-xs">
           {m.meta.quote && <QuoteInBubble quote={m.meta.quote} name={name} />}{m.content}</div>
         {tapback && <Tapback key={tapback} emoji={tapback} />}
       </div>
@@ -493,28 +541,28 @@ function Composer({ text, setText, inputRef, onSend, disabled, placeholder, file
   const ready = (Boolean(text.trim()) || sendable) && !disabled
   const picker = useRef<HTMLInputElement>(null)
   const prefill = (t: string) => { setText(t); requestAnimationFrame(() => { const el = inputRef.current; if (el) { el.focus(); el.setSelectionRange(t.length, t.length) } }) }
-  return <div className="mx-auto w-full max-w-[680px] px-3 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] md:px-8 md:pb-5">
+  return <div className="mx-auto w-full max-w-[700px] px-3 pt-2 pb-[max(14px,env(safe-area-inset-bottom))] md:px-8 md:pb-6">
     <input ref={picker} type="file" multiple hidden onChange={e => { if (e.target.files?.length) onFiles(e.target.files); e.target.value = '' }} />
-    <div className={cx('rounded-[26px] border bg-panel p-1.5 shadow-[0_6px_24px_-12px_rgb(0_0_0/0.14)] transition-[border-color] duration-200',
-      voice.listening ? 'border-accent' : 'border-line focus-within:border-faint')}>
+    <div className={cx('rounded-[28px] border bg-card/95 p-1.5 shadow-[var(--shadow-composer)] backdrop-blur-xl transition-[border-color] duration-200',
+      voice.listening ? 'border-accent' : 'border-[var(--ceramic-border)] focus-within:border-faint/60')}>
       {top}
       <PendingFiles files={files} onRemove={onRemoveFile} />
-    <div className="flex items-end gap-1">
+    <div className="flex items-end gap-1.5">
       {voice.listening ? <Wave /> : <PlusMenu onPick={prefill} onFile={() => picker.current?.click()} onCompact={onCompact} />}
       <textarea ref={inputRef} value={text} rows={1} autoFocus placeholder={disabled ? tx('先接上一个模型，才能聊') : voice.listening ? tx('在听…') : placeholder}
         disabled={disabled} onChange={e => setText(e.target.value)} aria-label={tx('消息')}
         onPaste={e => { const pasted = Array.from(e.clipboardData.files); if (pasted.length) { e.preventDefault(); onFiles(pasted) } }}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
-        className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] outline-none placeholder:text-faint focus-visible:outline-none" />
+        className="max-h-[200px] min-h-[36px] flex-1 resize-none bg-transparent px-1 py-[7px] text-[15px] leading-[22px] outline-none placeholder:text-faint focus-visible:outline-none" />
       {voice.listening && <Elapsed />}
       {voice.listening ? <button onClick={voice.stop} aria-label={tx('停止')} title={tx('停止')} className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><Square size={13} fill="currentColor" /></button>
-        : ready ? <button onClick={submit} aria-label={tx('发送')} className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"><ArrowUp size={18} /></button>
-        : !prefs.voiceInput ? <button disabled aria-label={tx('发送')} className="flex size-9 shrink-0 items-center justify-center rounded-full text-faint opacity-60"><ArrowUp size={18} /></button>
+        : ready ? <button onClick={submit} aria-label={tx('发送')} className="anim-pop press flex size-9 shrink-0 items-center justify-center rounded-full bg-ink text-ink-fg shadow-xs"><ArrowUp size={18} /></button>
+        : !prefs.voiceInput ? <button disabled aria-label={tx('发送')} className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sunken text-faint opacity-70"><ArrowUp size={18} /></button>
         : <button onClick={voice.toggle} disabled={disabled || !voice.supported} aria-label={voice.listening ? tx('停止') : tx('说话')} aria-pressed={voice.listening}
           title={voice.supported ? (voice.listening ? tx('停止') : tx('说话')) : tx('这里用不了语音输入')}
-          className={cx('press relative flex size-9 shrink-0 items-center justify-center rounded-full disabled:opacity-40', voice.listening ? 'bg-accent text-accent-fg' : 'text-muted hover:bg-sunken hover:text-fg')}>
+          className={cx('press relative flex h-9 shrink-0 items-center justify-center gap-1 rounded-full px-3 text-xs font-medium disabled:opacity-40', voice.listening ? 'bg-accent text-accent-fg' : 'bg-sunken text-muted hover:text-fg')}>
           {voice.listening && <span className="ping-soft absolute inset-0 rounded-full bg-accent" aria-hidden />}
-          <Mic size={18} className="relative" /></button>}
+          <Mic size={15} className="relative" /><span className="relative max-sm:hidden">{tx('语音')}</span></button>}
     </div>
     </div>
   </div>

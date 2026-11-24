@@ -72,7 +72,7 @@ export function GoalsPage() {
             aria-label={tx('拖动「{0}」排序', g.title)} title={tx('拖动排序')} className="absolute top-5 -left-7 hidden cursor-grab text-faint hover:text-fg active:cursor-grabbing md:block"><GripVertical size={16} /></span>}
           {g === featured ? <Featured g={g} steps={steps(g)} /> : <GoalCard g={g} steps={steps(g)} />}
         </div>)}
-        <button onClick={newGoal} className="press flex w-full items-center gap-3 rounded-2xl border border-dashed border-line px-5 py-4 text-left text-sm text-muted hover:border-faint hover:text-fg">
+        <button onClick={newGoal} className="press flex w-full items-center gap-3 rounded-2xl border border-dashed border-line bg-card/70 px-5 py-4 text-left text-sm text-muted hover:border-faint hover:bg-card hover:text-fg">
           <Plus size={17} />{tx('新目标：跟{0}说一句就行，比如「我想每周跑三次」', persona.name)} </button>
       </div>
       {data && data.week.length > 0 && <section className="mt-10">
@@ -88,7 +88,7 @@ export function GoalsPage() {
         </div>)}</div>
       </section>}
       <div className="mt-10 flex items-center gap-3 text-sm text-muted">
-        <Avatar persona={persona} size={28} mood="happy" />{tx('想让它每周跟你对一次进度？在聊天里说一声就行。')} </div>
+        <Avatar persona={persona} size={28} mood="idle" />{tx('想让它每周跟你对一次进度？在聊天里说一声就行。')} </div>
     </div>
   </div>
 }
@@ -127,9 +127,9 @@ function Featured({ g, steps }: { g: Goal; steps: Goal[] }) {
 
 function GoalCard({ g, steps }: { g: Goal; steps: Goal[] }) {
   const Icon = ICONS[g.icon] ?? Target
-  return <div className="anim-rise group rounded-2xl bg-sunken px-5 pt-4 pb-5">
+  return <div className="ceramic-card anim-rise group rounded-[22px] px-5 pt-4 pb-5">
     <div className="flex items-start gap-3">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-panel"><Icon size={17} /></span>
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-sunken"><Icon size={17} /></span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-semibold">{g.title}</span>
         {g.note && <span className="mt-0.5 block truncate text-xs text-muted">{g.note}</span>}

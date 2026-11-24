@@ -18,7 +18,7 @@ import { sandboxApplies, sandboxCommand, type SandboxMount } from './sandbox'
 import type { Reviewer } from './review'
 import { shouldBypassVoice, VoiceRenderer } from './voice'
 
-const CONTEXT_MESSAGES = 6
+const CONTEXT_MESSAGES = 10
 /** Retries of a failed router turn, the first after routerRetryMs(), then doubling. */
 const ROUTER_RETRIES = 3
 const routerRetryMs = () => Number(process.env.NUONUO_ROUTER_RETRY_MS) || 5_000
@@ -195,11 +195,36 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
   // after the last attempt the owner is told in each conversation whose message went unanswered — never silence.
   let failures = 0
   let unanswered: string[] = []
+  const TERMINAL_CHAT_TOOLS = new Set(['reply', 'mood_sync', 'react', 'remember', 'update_instructions', 'update_proactive'])
   const router: AgentDefinition = {
     role: 'router',
     pool: 'router',
     maxSteps: 30,
     system: () => `${ROUTER_PROMPT}${ext.routerPrompt ? `\n\n${ext.routerPrompt()}` : ''}${ext.sharedPrompt ? `\n\n${ext.sharedPrompt('router')}` : ''}\n\nToday: ${today()}`,
+    afterStep: (_session, info) => {
+      if (info.finishReason !== 'tool-calls') return
+      const calls: { name: string }[] = []
+      const results: { name: string; ok: boolean; delivered?: string }[] = []
+      for (const m of info.messages) {
+        if (!Array.isArray(m.content)) continue
+        for (const p of m.content as any[]) {
+          if (m.role === 'assistant' && p.type === 'tool-call') {
+            calls.push({ name: String(p.toolName ?? '') })
+          } else if (m.role === 'tool' && p.type === 'tool-result') {
+            const val = p.output?.type === 'json' ? p.output.value : undefined
+            const ok = Boolean(val && typeof val === 'object' && val.ok === true)
+            const delivered = typeof val?.delivered === 'string' ? val.delivered.trim() : undefined
+            results.push({ name: String(p.toolName ?? ''), ok, ...(delivered ? { delivered } : {}) })
+          }
+        }
+      }
+      if (!calls.length || calls.length !== results.length) return
+      if (!calls.every(c => TERMINAL_CHAT_TOOLS.has(c.name))) return
+      if (!results.every(r => r.ok)) return
+      const deliveredTexts = results.filter(r => r.name === 'reply' && r.delivered).map(r => r.delivered!)
+      if (!deliveredTexts.length) return
+      return { stop: true, assistantText: deliveredTexts.join('\n') }
+    },
     formatInbox: async items => {
       const routerContext = routerContextOf(engine)
       if (items.some(i => ANSWERABLE.has(i.payload.type) && (i.payload.type !== 'report' || ['ready', 'blocked', 'failed'].includes(i.payload.status) || i.payload.humanAction))) answerable = true
@@ -288,8 +313,14 @@ export function registerAgents(store: Store, runtime: AgentRuntime, engine: Engi
           if (forceSingleBubble) {
             finalBubbles = undefined
           }
-          return { ok: true, message_id: engine.reply({ conversationId, text: finalText, ...(finalBubbles ? { bubbles: finalBubbles } : {}), callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}),
-            ...(open || card ? { extra: { ...(open ? { open } : {}), ...(card ? { card } : {}) } } : {}) }) }
+          const messageId = engine.reply({ conversationId, text: finalText, ...(finalBubbles ? { bubbles: finalBubbles } : {}), callId: toolCallId, ...(ticket_id ? { ticketId: ticket_id } : {}), ...(reply_to ? { replyTo: reply_to } : {}),
+            ...(open || card ? { extra: { ...(open ? { open } : {}), ...(card ? { card } : {}) } } : {}) })
+          return {
+            ok: true,
+            message_id: messageId,
+            delivered: finalText,
+            ...(finalBubbles ? { delivered_bubbles: finalBubbles } : {}),
+          }
         },
       }),
       start_silent_task: tool({

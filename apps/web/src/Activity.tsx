@@ -70,7 +70,7 @@ export function Activity() {
           <p className="mt-1.5 text-sm text-muted">{onlySaved ? tx('你收藏的，不会过期') : tx('它替你盯着的事，有变化才出现在这里')}</p>
         </div>
         {(savedCount > 0 || onlySaved) && <button onClick={() => setOnlySaved(v => !v)} aria-pressed={onlySaved}
-          className={cx('press mt-1.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px]', onlySaved ? 'border-ink bg-ink text-ink-fg' : 'border-line text-muted hover:border-faint hover:text-fg')}>
+          className={cx('press mt-1.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] shadow-2xs', onlySaved ? 'border-ink bg-ink text-ink-fg' : 'border-[var(--ceramic-border)] bg-card text-muted hover:text-fg')}>
           <Bookmark size={13} fill={onlySaved ? 'currentColor' : 'none'} />{tx('收藏 {0}', savedCount)}</button>}
       </header>
 
@@ -85,7 +85,7 @@ export function Activity() {
       </section>)}
 
       {loaded && <div className="mt-8 flex items-center gap-3 text-sm text-muted">
-        <Avatar persona={persona} size={28} mood="happy" />
+        <Avatar persona={persona} size={28} mood="idle" />
         {empty && onlySaved ? tx('还没收藏过。把鼠标放到一条上，点书签就能留下它。') : empty ? tx('还没有变化。想让{0}帮你盯着什么，在聊天里说一声，比如「XM6 降到 2000 以下告诉我」。', persona.name) : tx('就这些。有新的我再叫你，不会一直推。')}
       </div>}
 
@@ -115,7 +115,7 @@ function Hero({ item }: { item: FeedItem }) {
   const down = card.was !== undefined && card.value < card.was
   const Trend = down ? TrendingDown : TrendingUp
   const decimals = String(card.value).split('.')[1]?.length ?? 0
-  return <div data-tone="sky" className="flow feed-in relative rounded-[22px] px-6 pt-5 pb-5">
+  return <div className="feed-in relative overflow-hidden rounded-[24px] bg-gradient-to-br from-[#0e1e38] via-[#102646] to-[#0b334e] px-6 pt-5 pb-5 text-white shadow-[var(--shadow-ceramic)]">
     <div className="relative flex items-start gap-4">
       <div className="min-w-0 flex-1">
         <div className="truncate text-xs opacity-85">{[card.label ?? item.title, hm(item.at)].join(' · ')}</div>
@@ -160,8 +160,8 @@ function Row({ item, onDown }: { item: FeedItem; onDown(item: FeedItem): void })
   const react = useMutation({ mutationFn: (reaction: 'up' | 'down' | null) => api.post(`/feed/${item.id}/react`, { reaction }), onMutate: reaction => { set({ reaction }); if (reaction === 'down') onDown(item) }, onSettled: done })
   const save = useMutation({ mutationFn: (saved: boolean) => api.post(`/feed/${item.id}/save`, { saved }), onMutate: saved => set({ saved }), onSettled: done })
   const tool = 'press flex size-7 items-center justify-center rounded-full hover:bg-sunken'
-  return <div className="group flex items-center gap-3.5 rounded-2xl bg-sunken px-4 py-3.5">
-    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-panel"><Icon size={17} /></span>
+  return <div className="group flex items-center gap-3.5 rounded-[20px] border border-[var(--ceramic-border)] bg-card px-4 py-3.5 shadow-[var(--shadow-bubble)]">
+    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sunken"><Icon size={17} /></span>
     <button onClick={open} disabled={!open} className="min-w-0 flex-1 text-left">
       <span className="block truncate text-[15px] font-medium">{item.title}</span>
       {item.text && <span className="mt-0.5 block truncate text-[13px] text-muted">{item.text}</span>}
@@ -201,8 +201,8 @@ function Noticed({ e }: { e: ActivityEvent }) {
   const refresh = () => { qc.invalidateQueries({ queryKey: ['activity'] }); qc.invalidateQueries({ queryKey: ['tickets'] }) }
   const act = useMutation({ mutationFn: () => api.post(`/triggers/${e.id}/act`), onSuccess: refresh })
   const ignore = useMutation({ mutationFn: () => api.post(`/triggers/${e.id}/feedback`, { useful: false }), onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ['proactive'] }) } })
-  return <div className="group flex items-center gap-3.5 rounded-2xl bg-sunken px-4 py-3.5">
-    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-panel"><SourceIcon source={e.source} size={16} /></span>
+  return <div className="group flex items-center gap-3.5 rounded-[20px] border border-[var(--ceramic-border)] bg-card px-4 py-3.5 shadow-[var(--shadow-bubble)]">
+    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sunken"><SourceIcon source={e.source} size={16} /></span>
     <div className="min-w-0 flex-1">
       <div className="truncate text-[15px] font-medium">{e.proactive?.title ?? e.text.slice(0, 60)}</div>
       <div className="mt-0.5 truncate text-[13px] text-muted">{e.proactive?.reason || <><SourceName source={e.source} /> · {e.actor}</>}</div>

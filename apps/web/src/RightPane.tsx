@@ -6,7 +6,7 @@
  * On narrower windows the same pane opens as a drawer, and on phones as a sheet from the bottom.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Ban, Brain, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, Cloud, CreditCard, FileText, Folder, GitBranch, Globe, Image, ListChecks, Loader2, Lock, Mail, Pencil, Plus, ScrollText, Send, Shield, ShieldCheck, Smile, SquareTerminal, Trash2, Upload, Users, X, XCircle } from 'lucide-react'
+import { Ban, Brain, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, Cloud, CreditCard, FileText, Folder, GitBranch, Globe, Image, ListChecks, Loader2, Lock, Mail, Pencil, Plus, ScrollText, Send, ShieldCheck, SquareTerminal, Trash2, Upload, Users, X, XCircle } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { api, type AccessSettings, type AppLevel, type AuditEntry, type ExecutionSettings, type InstructionsState, type Level, type LocalApp, type Persona, type ReviewSettings, type Routine, type SourceInfo, type Ticket } from './api'
 import { BrowserPaneTab } from './browser'
@@ -18,7 +18,7 @@ import { Avatar, isImageAvatar, isMascot, Mascot, MASCOT, statusLine, usePersona
 import { go } from './route'
 import { LiquidButton, MemorySheet, pickHues, SoulSheet } from './soul'
 import { endedText, needsOwner, STATE_TEXT, useTickets } from './tasks'
-import { cx, IconButton, Seg } from './ui'
+import { cx, Seg } from './ui'
 import { usePresence } from './shell'
 import { locale, tx } from './i18n'
 
@@ -28,10 +28,10 @@ const tabListeners = new Set<() => void>()
 export function setPaneTab(next: PaneTab) { tab = next; for (const l of tabListeners) l() }
 const usePaneTab = () => useSyncExternalStore(l => { tabListeners.add(l); return () => tabListeners.delete(l) }, () => tab)
 
-const ACTIVITY_TAB = { id: 'activity' as PaneTab, label: <span className="flex items-center" title={tx('活动')}><ListChecks size={17} aria-label={tx('活动')} /></span> }
-const BROWSER_TAB = { id: 'browser' as PaneTab, label: <span className="flex items-center" title={tx('浏览器')}><Globe size={17} aria-label={tx('浏览器')} /></span> }
-const WHO_TAB = { id: 'who' as PaneTab, label: <span className="flex items-center" title={tx('它是谁')}><Smile size={17} aria-label={tx('它是谁')} /></span> }
-const PERMISSIONS_TAB = { id: 'permissions' as PaneTab, label: <span className="flex items-center" title={tx('权限')}><Shield size={17} aria-label={tx('权限')} /></span> }
+const ACTIVITY_TAB = { id: 'activity' as PaneTab, label: tx('活动') }
+const BROWSER_TAB = { id: 'browser' as PaneTab, label: tx('浏览器') }
+const WHO_TAB = { id: 'who' as PaneTab, label: tx('它是谁') }
+const PERMISSIONS_TAB = { id: 'permissions' as PaneTab, label: tx('权限') }
 const BROWSER_TABS = [ACTIVITY_TAB, BROWSER_TAB, WHO_TAB, PERMISSIONS_TAB]
 
 const hm = (at: number) => new Date(at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -81,13 +81,13 @@ export function RightPane({ onClose }: { onClose(): void }) {
   const going = live.filter(t => !needsOwner(t))
   const status = statusLine(live)
   const activeTab = usePaneTab()
-  const mood = !connected ? 'sleepy' : status.tone === 'working' ? 'thinking' : status.tone
+  const mood = !connected ? 'sleepy' : status.tone === 'working' ? 'working' : status.tone
   const statusDotCls = !connected
     ? 'bg-faint'
     : waiting.length > 0
       ? 'bg-warn'
       : going.length > 0
-        ? 'bg-fg-running'
+        ? 'bg-accent'
         : 'bg-ok'
   const statusText = !connected
     ? tx('重连中…')
@@ -98,13 +98,12 @@ export function RightPane({ onClose }: { onClose(): void }) {
         : tx('已连接')
 
   return <div className="flex h-full flex-col">
-    <div className="flex h-11 shrink-0 items-center justify-end px-3"><IconButton label={tx('关闭')} onClick={onClose}><X size={17} /></IconButton></div>
-    <div className="flex flex-col items-center px-6 pt-0.5 pb-2 text-center">
-      <div className="relative">
-        <div className={cx('flex size-[68px] items-center justify-center overflow-hidden rounded-full ring-2 ring-line', isMascot(persona) ? 'bg-avatar-well' : 'bg-sunken')}>
-          {isMascot(persona) ? <Mascot color={persona.color} size={46} mood={mood} track />
+    <div className="flex shrink-0 items-center gap-3 px-5 pt-4 pb-2.5">
+      <div className="relative shrink-0">
+        <div className={cx('flex size-[44px] items-center justify-center overflow-hidden rounded-full border border-line', isMascot(persona) ? 'bg-avatar-well' : 'bg-sunken')}>
+          {isMascot(persona) ? <Mascot color={persona.color} size={28} mood={mood} track />
             : isImageAvatar(persona.avatar) ? <img src={persona.avatar} alt={persona.name} className="size-full rounded-full object-cover" />
-            : <Avatar persona={persona} size={68} mood={mood} className="rounded-full!" />}
+            : <Avatar persona={persona} size={44} mood={mood} className="rounded-full!" />}
         </div>
         <button
           type="button"
@@ -118,18 +117,28 @@ export function RightPane({ onClose }: { onClose(): void }) {
               el?.select()
             })
           }}
-          className="press absolute right-0 bottom-0 flex size-[21px] items-center justify-center rounded-full border border-line bg-card text-muted shadow-xs hover:text-fg"
+          className="press absolute -right-1 -bottom-1 flex size-[20px] items-center justify-center rounded-full border border-line bg-panel text-muted shadow-2xs ring-2 ring-panel hover:text-fg"
         >
           <Pencil size={10} />
         </button>
       </div>
-      <div className="mt-2.5 max-w-full truncate text-[16.5px] font-bold tracking-tight text-fg">{persona.name}</div>
-      <div className="mt-1 flex items-center justify-center gap-1.5 text-[11.5px] text-muted tabular-nums">
-        <span className={cx('size-[7px] shrink-0 rounded-full', statusDotCls)} />
-        <span className="truncate">{statusText}</span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[15px] leading-tight font-semibold tracking-tight text-fg">{persona.name}</div>
+        <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted tabular-nums">
+          <span className={cx('size-[7px] shrink-0 rounded-full', statusDotCls)} />
+          <span className="truncate">{statusText}</span>
+        </div>
       </div>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={tx('收起')}
+        className="press flex h-7 shrink-0 items-center gap-0.5 rounded-full border border-line bg-sunken/80 pr-2 pl-2.5 text-[11.5px] font-medium text-muted transition-colors hover:border-faint hover:text-fg"
+      >
+        {tx('收起')}<ChevronRight size={13} />
+      </button>
     </div>
-    <div className="px-5 pt-3 pb-1"><Seg label={tx('右侧栏')} value={activeTab} options={BROWSER_TABS} onChange={setPaneTab} className="[&_button]:h-8" /></div>
+    <div className="px-5 pt-1.5 pb-1"><Seg label={tx('右侧栏')} value={activeTab} options={BROWSER_TABS} onChange={setPaneTab} className="bg-sunken/80 [&_button]:h-8 [&_button]:px-2 [&_button]:text-[12.5px]" /></div>
     <div key={activeTab} className={cx('anim-fade min-h-0 flex-1 px-5 pt-3.5', activeTab === 'activity' ? 'flex flex-col overflow-hidden pb-3.5' : 'overflow-y-auto pb-5')}>
       {activeTab === 'activity' ? <ActivityTab /> : activeTab === 'browser' ? <BrowserPaneTab /> : activeTab === 'who' ? <WhoTab /> : <PermissionsTab />}
     </div>
@@ -161,7 +170,7 @@ function ActivityRowIcon({ t, isFailed }: { t: Ticket; isFailed: boolean }) {
   if (isFailed) return <XCircle size={17} className="mt-0.5 shrink-0 text-danger" />
   if (t.iconKind === 'file') return <FileText size={17} className="mt-0.5 shrink-0 text-muted" />
   if (t.iconKind === 'terminal') return <SquareTerminal size={17} className="mt-0.5 shrink-0 text-muted" />
-  return <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-muted" />
+  return <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-ok" />
 }
 
 function ActivityTab() {
@@ -216,10 +225,10 @@ function ActivityTab() {
             <button
               type="button"
               onClick={() => openTask(t.id)}
-              className="press block w-full rounded-[14px] border border-border-running bg-surface-running px-3 py-2.5 text-left transition-colors"
+              className="press block w-full rounded-[16px] border border-border-running bg-surface-running px-3.5 py-3 text-left shadow-[var(--shadow-bubble)] transition-colors"
             >
               <div className="flex items-start gap-2.5">
-                <Loader2 size={17} className="mt-0.5 shrink-0 animate-spin text-fg-running" />
+                <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin text-accent" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-[13.5px] font-semibold text-fg">{t.title}</span>
@@ -227,15 +236,15 @@ function ActivityTab() {
                       {tx('第 {0} 步', stepNum)}
                     </span>
                   </div>
-                  <div className="mt-0.5 line-clamp-2 break-all text-[12px] leading-[17px] text-fg">{stepText}</div>
-                  <div className="mt-1 text-[11px] text-muted tabular-nums">
+                  <div className="mt-1 line-clamp-2 break-all text-[12px] leading-[17px] text-muted">{stepText}</div>
+                  <div className="mt-1.5 text-[11px] text-faint tabular-nums">
                     {tx('刚刚 · 已用时 {0}（点击查看实时输出）', mmss)}
                     {t.runningJobs ? tx(' · {0} 个后台命令', t.runningJobs) : ''}
                   </div>
                 </div>
               </div>
-              <div className="mt-2 h-[3px] w-full overflow-hidden rounded-full bg-pill-running">
-                <div className="h-full w-2/3 rounded-full bg-fg-running" />
+              <div className="mt-2.5 h-[3px] w-full overflow-hidden rounded-full bg-pill-running">
+                <div className="h-full w-2/3 rounded-full bg-accent" />
               </div>
             </button>
             <BrowserWatch t={t} />
@@ -252,7 +261,7 @@ function ActivityTab() {
             key={t.id}
             type="button"
             onClick={() => openTask(t.id)}
-            className="group flex w-full items-start gap-2.5 rounded-[14px] px-2.5 py-2 text-left transition-colors hover:bg-sunken"
+            className={cx('group flex w-full items-start gap-2.5 rounded-[14px] px-2.5 py-2 text-left transition-colors', isFailed ? 'bg-danger-soft/75 hover:bg-danger-soft' : 'hover:bg-card/85')}
           >
             <ActivityRowIcon t={t} isFailed={isFailed} />
             <div className="min-w-0 flex-1">
@@ -281,7 +290,7 @@ function ActivityTab() {
 
     {next.length > 0 && <a
       href={next[0]!.conversationId ? `#/c/${next[0]!.conversationId}` : '#/settings/routines'}
-      className="flex shrink-0 items-center justify-between gap-2 rounded-[12px] bg-sunken px-3 py-2 text-[11.5px] text-muted transition-colors hover:text-fg"
+      className="flex shrink-0 items-center justify-between gap-2 rounded-[14px] border border-[var(--ceramic-border)] bg-card px-3.5 py-2.5 text-[11.5px] text-muted shadow-2xs transition-colors hover:text-fg"
     >
       <span className="flex min-w-0 items-center gap-2 truncate">
         <CalendarDays size={13} className="shrink-0 text-muted" />
@@ -699,8 +708,8 @@ export function PaneDrawer() {
   const close = () => openActivity(false)
   return <div className={cx('anim-fade fixed inset-0 z-30 flex bg-[var(--scrim)]', phone ? 'items-end' : 'justify-end', leaving && 'out-fade pointer-events-none')} onMouseDown={e => { if (e.target === e.currentTarget) close() }}>
     <div role="dialog" aria-modal="true" aria-label={tx('糯糯')} className={phone
-      ? cx('anim-sheet flex h-[86dvh] w-full flex-col overflow-hidden rounded-t-[28px] bg-panel pb-[env(safe-area-inset-bottom)] shadow-2xl', leaving && 'out-sheet')
-      : cx('anim-drawer-r flex h-full w-[360px] flex-col overflow-hidden border-l border-line bg-panel shadow-2xl', leaving && 'out-r')}>
+      ? cx('anim-sheet glass-strong flex h-[86dvh] w-full flex-col overflow-hidden rounded-t-[28px] pb-[env(safe-area-inset-bottom)] shadow-2xl', leaving && 'out-sheet')
+      : cx('anim-drawer-r glass-strong flex h-full w-[376px] flex-col overflow-hidden rounded-l-[26px] shadow-2xl', leaving && 'out-r')}>
       <RightPane onClose={close} />
     </div>
   </div>

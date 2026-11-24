@@ -5,7 +5,8 @@
  * - Keeps short-lived `accessToken` (`nna_…`) in memory ONLY.
  * - Stores rotating `refreshToken` (`nnr_…`) in Electron's OS-encrypted `safeStorage` vault on desktop,
  *   in an `HttpOnly; SameSite=Strict` cookie when same-origin (`--web`), or in `sessionStorage` for cross-origin web.
- * - Provides single-flight automatic refresh on 401, fetch-based SSE (`fetchSSE`), blob-backed image loading,
+ * - Provides single-flight automatic refresh on 401, cross-tab/multi-window in-memory token sync (`BroadcastChannel`)
+ *   and refresh serialization (`navigator.locks`), fetch-based SSE (`fetchSSE`), blob-backed image loading,
  *   ephemeral single-path resource tickets, and native WebAuthn Passkey helpers.
  */
 import { useEffect, useState, useSyncExternalStore } from 'react'
@@ -60,6 +61,56 @@ export interface ConnectionState {
 const PROFILES_KEY = 'nuonuo:profiles:v1'
 const ACTIVE_KEY = 'nuonuo:active-profile:v1'
 const REFRESH_SS_PREFIX = 'nuonuo:refresh:'
+const AUTH_CHANNEL_NAME = 'nuonuo:auth-sync:v1'
+const AUTH_META_PREFIX = 'nuonuo:auth-meta:v1:'
+const TAB_ID = `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+const PEER_BOOT_TIMEOUT_MS = 180
+const PEER_LOCK_TIMEOUT_MS = 350
+const LOCK_RELEASE_YIELD_MS = 30
+
+export interface RefreshOptions {
+  /** Token that just failed with 401 (or triggered proactive refresh); if a peer already synced a newer token, reuse it. */
+  staleToken?: string
+  /** Proactive timer refresh: skip network rotation if current token still has ample lifetime left. */
+  proactive?: boolean
+}
+
+interface AuthSyncMeta {
+  sessionId: string | null
+  rotatedAt: number
+  expiresAt: number
+  tabId: string
+}
+
+type AuthSyncMessage =
+  | {
+      type: 'auth-request'
+      fromTabId: string
+      requestId: string
+      serverKey: string
+    }
+  | {
+      type: 'auth-sync'
+      fromTabId: string
+      targetTabId?: string
+      requestId?: string
+      serverKey: string
+      baseUrl: string
+      profile?: ServerProfile
+      accessToken: string
+      expiresAt: number
+      rotatedAt: number
+      deviceId: string | null
+      sessionId: string | null
+      scopes: string[]
+    }
+  | {
+      type: 'auth-logout'
+      fromTabId: string
+      serverKey: string
+      sessionId: string | null
+      reason?: string | null
+    }
 
 export function normalizeServerUrl(raw: string): string {
   const s = raw.trim().replace(/\/+$/, '').replace(/\/v1$/, '')
@@ -118,6 +169,17 @@ function isSameOriginUrl(baseUrl: string): boolean {
   }
 }
 
+/** Canonical cross-tab key for a server (`''` and `location.origin` unify to `'same-origin'`). */
+export function canonicalServerKey(baseUrl: string): string {
+  if (isSameOriginUrl(baseUrl)) return 'same-origin'
+  return normalizeServerUrl(baseUrl)
+}
+
+/** True when all tabs/windows share a single rotating refresh credential (same-origin HttpOnly cookie or Electron vault). */
+function isSharedRefreshStore(baseUrl: string): boolean {
+  return Boolean(desktop) || isSameOriginUrl(baseUrl)
+}
+
 let conn: ConnectionState = {
   status: 'booting',
   profiles: [],
@@ -130,6 +192,8 @@ let conn: ConnectionState = {
   error: null,
   pendingPairUri: null,
 }
+let accessExpiresAt = 0
+let lastRotatedAt = 0
 
 const listeners = new Set<() => void>()
 function update(patch: Partial<ConnectionState>) {
@@ -140,6 +204,220 @@ export function useConnection(): ConnectionState {
   return useSyncExternalStore(l => { listeners.add(l); return () => listeners.delete(l) }, () => conn)
 }
 export function getConnection(): ConnectionState { return conn }
+
+// ── Cross-tab auth sync (BroadcastChannel + Web Locks; accessToken stays in-memory only) ──
+
+interface PeerWaiter {
+  serverKey: string
+  excludeToken?: string
+  resolve: (token: string | null) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+let syncChannel: BroadcastChannel | null = null
+const peerWaiters = new Set<PeerWaiter>()
+
+function hasBroadcastChannel(): boolean {
+  return typeof BroadcastChannel !== 'undefined'
+}
+
+function hasWebLocks(): boolean {
+  return typeof navigator !== 'undefined' && Boolean(navigator.locks && typeof navigator.locks.request === 'function')
+}
+
+function readSyncMeta(serverKey: string): AuthSyncMeta | null {
+  try {
+    const raw = localStorage.getItem(`${AUTH_META_PREFIX}${serverKey}`)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as AuthSyncMeta
+    if (typeof parsed?.rotatedAt !== 'number' || typeof parsed?.expiresAt !== 'number') return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeSyncMeta(serverKey: string, meta: AuthSyncMeta): void {
+  try {
+    localStorage.setItem(`${AUTH_META_PREFIX}${serverKey}`, JSON.stringify(meta))
+  } catch { /* private mode */ }
+}
+
+function clearSyncMeta(serverKey: string): void {
+  try {
+    localStorage.removeItem(`${AUTH_META_PREFIX}${serverKey}`)
+  } catch { /* private mode */ }
+}
+
+function postSyncMessage(msg: AuthSyncMessage): void {
+  const ch = ensureSyncChannel()
+  if (!ch) return
+  try {
+    ch.postMessage(msg)
+  } catch { /* closed or unsupported */ }
+}
+
+function broadcastAuthSync(
+  baseUrl: string,
+  profile: ServerProfile | undefined,
+  opts: { targetTabId?: string; requestId?: string; rotatedAt: number } = { rotatedAt: Date.now() },
+): void {
+  if (!conn.accessToken || conn.status !== 'ready') return
+  postSyncMessage({
+    type: 'auth-sync',
+    fromTabId: TAB_ID,
+    ...(opts.targetTabId ? { targetTabId: opts.targetTabId } : {}),
+    ...(opts.requestId ? { requestId: opts.requestId } : {}),
+    serverKey: canonicalServerKey(baseUrl),
+    baseUrl: normalizeServerUrl(baseUrl),
+    ...(profile ? { profile } : {}),
+    accessToken: conn.accessToken,
+    expiresAt: accessExpiresAt,
+    rotatedAt: opts.rotatedAt,
+    deviceId: conn.deviceId,
+    sessionId: conn.sessionId,
+    scopes: conn.scopes,
+  })
+}
+
+function broadcastAuthLogout(baseUrl: string, sessionId: string | null, reason?: string | null): void {
+  postSyncMessage({
+    type: 'auth-logout',
+    fromTabId: TAB_ID,
+    serverKey: canonicalServerKey(baseUrl),
+    sessionId,
+    reason: reason ?? null,
+  })
+}
+
+function resolveMatchingWaiters(serverKey: string, token: string): void {
+  for (const w of [...peerWaiters]) {
+    if (w.serverKey !== serverKey) continue
+    if (w.excludeToken && token === w.excludeToken) continue
+    clearTimeout(w.timer)
+    peerWaiters.delete(w)
+    w.resolve(token)
+  }
+}
+
+function handleSyncMessage(raw: unknown): void {
+  if (!raw || typeof raw !== 'object') return
+  const msg = raw as AuthSyncMessage
+  if (!msg.fromTabId || msg.fromTabId === TAB_ID) return
+
+  if (msg.type === 'auth-request') {
+    if (refreshing) return
+    if (conn.status !== 'ready' || !conn.accessToken) return
+    if (!isSharedRefreshStore(conn.baseUrl)) return
+    if (canonicalServerKey(conn.baseUrl) !== msg.serverKey) return
+    if (accessExpiresAt > 0 && accessExpiresAt - Date.now() <= 60_000) return
+    const activeProfile = conn.profiles.find(p => p.id === conn.activeProfileId)
+    broadcastAuthSync(conn.baseUrl, activeProfile, {
+      targetTabId: msg.fromTabId,
+      requestId: msg.requestId,
+      rotatedAt: lastRotatedAt || Date.now(),
+    })
+    return
+  }
+
+  if (msg.type === 'auth-sync') {
+    if (msg.targetTabId && msg.targetTabId !== TAB_ID) return
+    if (!msg.accessToken) return
+    const shared = isSharedRefreshStore(msg.baseUrl)
+    const sameServer = canonicalServerKey(conn.baseUrl) === msg.serverKey
+    const sameSession = Boolean(conn.sessionId && msg.sessionId && conn.sessionId === msg.sessionId)
+    const canAdopt = shared
+      ? (sameServer || conn.status === 'booting' || conn.status === 'unauthenticated' || conn.status === 'offline')
+      : sameSession
+    if (!canAdopt) return
+
+    // Ignore stale out-of-order broadcasts when we already hold a fresher, live token.
+    if (msg.rotatedAt < lastRotatedAt && conn.status === 'ready' && conn.accessToken && accessExpiresAt > Date.now() + 30_000) {
+      return
+    }
+
+    const incomingProfile = msg.profile
+    const profiles = incomingProfile
+      ? [incomingProfile, ...conn.profiles.filter(p => p.id !== incomingProfile.id)]
+      : conn.profiles
+    const activeProfileId = incomingProfile?.id ?? conn.activeProfileId
+    const nextBaseUrl = incomingProfile?.baseUrl ?? msg.baseUrl
+
+    accessExpiresAt = msg.expiresAt || accessExpiresAt
+    lastRotatedAt = Math.max(lastRotatedAt, msg.rotatedAt || Date.now())
+    update({
+      status: 'ready',
+      profiles,
+      activeProfileId,
+      baseUrl: nextBaseUrl,
+      accessToken: msg.accessToken,
+      deviceId: msg.deviceId,
+      sessionId: msg.sessionId,
+      scopes: msg.scopes,
+      error: null,
+      pendingPairUri: null,
+    })
+    if (accessExpiresAt) scheduleProactiveRefresh(accessExpiresAt)
+    resolveMatchingWaiters(msg.serverKey, msg.accessToken)
+    return
+  }
+
+  if (msg.type === 'auth-logout') {
+    if (canonicalServerKey(conn.baseUrl) !== msg.serverKey) return
+    if (msg.sessionId && conn.sessionId && msg.sessionId !== conn.sessionId) return
+    clearProactiveRefresh()
+    accessExpiresAt = 0
+    update({
+      status: 'unauthenticated',
+      accessToken: '',
+      deviceId: null,
+      sessionId: null,
+      scopes: [],
+      error: msg.reason ?? null,
+    })
+  }
+}
+
+function ensureSyncChannel(): BroadcastChannel | null {
+  if (syncChannel) return syncChannel
+  if (!hasBroadcastChannel()) return null
+  try {
+    syncChannel = new BroadcastChannel(AUTH_CHANNEL_NAME)
+    syncChannel.onmessage = ev => handleSyncMessage(ev.data)
+    return syncChannel
+  } catch {
+    return null
+  }
+}
+
+function requestTokenFromPeers(
+  serverKey: string,
+  opts: { timeoutMs?: number; excludeToken?: string } = {},
+): Promise<string | null> {
+  const ch = ensureSyncChannel()
+  if (!ch) return Promise.resolve(null)
+  const timeoutMs = opts.timeoutMs ?? PEER_BOOT_TIMEOUT_MS
+  return new Promise(resolve => {
+    const waiter: PeerWaiter = {
+      serverKey,
+      ...(opts.excludeToken ? { excludeToken: opts.excludeToken } : {}),
+      resolve,
+      timer: setTimeout(() => {
+        peerWaiters.delete(waiter)
+        resolve(null)
+      }, timeoutMs),
+    }
+    peerWaiters.add(waiter)
+    const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+    postSyncMessage({ type: 'auth-request', fromTabId: TAB_ID, requestId, serverKey })
+  })
+}
+
+async function withCrossTabRefreshLock<T>(serverKey: string, fn: (lockWaitMs: number) => Promise<T>): Promise<T> {
+  const enteredAt = Date.now()
+  if (!hasWebLocks()) return fn(0)
+  return navigator.locks.request(`nuonuo:auth-refresh:${serverKey}`, () => fn(Date.now() - enteredAt))
+}
 
 // ── Profile & Refresh Token storage (Electron safeStorage vault vs Browser) ──
 
@@ -205,9 +483,17 @@ function clearProactiveRefresh() {
 function scheduleProactiveRefresh(expiresAt: number) {
   clearProactiveRefresh()
   if (typeof window === 'undefined' || !expiresAt) return
-  const delayMs = Math.max(15_000, expiresAt - Date.now() - 120_000)
+  // Visible tabs refresh slightly earlier (~120s before expiry + 0–5s jitter);
+  // background tabs wait slightly longer (~95–110s before expiry) so they adopt the visible tab's BroadcastChannel sync instead of racing.
+  const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+  const leadMs = isHidden ? 100_000 : 120_000
+  const jitterMs = Math.floor(Math.random() * (isHidden ? 15_000 : 5_000))
+  const delayMs = Math.max(15_000, expiresAt - Date.now() - leadMs + jitterMs)
+  const scheduledForToken = conn.accessToken
   refreshTimer = setTimeout(() => {
-    if (conn.status === 'ready') void refreshSession()
+    if (conn.status === 'ready') {
+      void refreshSession(undefined, { proactive: true, staleToken: scheduledForToken })
+    }
   }, delayMs)
 }
 
@@ -244,12 +530,14 @@ function defaultClientDevice(): { name: string; kind: 'desktop' | 'web'; platfor
 }
 
 async function applyAuthBundle(baseUrl: string, bundle: AuthBundle, opts: { profileName?: string; insecureAllowed?: boolean; existingId?: string } = {}): Promise<void> {
+  ensureSyncChannel()
   const normalized = normalizeServerUrl(baseUrl)
   const existing = opts.existingId
     ? conn.profiles.find(p => p.id === opts.existingId)
-    : conn.profiles.find(p => p.baseUrl === normalized)
+    : conn.profiles.find(p => canonicalServerKey(p.baseUrl) === canonicalServerKey(normalized))
   const now = Date.now()
-  const label = opts.profileName?.trim() || existing?.name || (normalized ? new URL(normalized).host : location.host)
+  const fallbackHost = typeof location !== 'undefined' && location.host ? location.host : 'localhost'
+  const label = opts.profileName?.trim() || existing?.name || (normalized ? new URL(normalized).host : fallbackHost)
   const profile: ServerProfile = {
     id: existing?.id ?? `srv_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     name: label,
@@ -263,6 +551,8 @@ async function applyAuthBundle(baseUrl: string, bundle: AuthBundle, opts: { prof
   }
   await saveProfileToStorage(profile, bundle.refreshToken)
   const profiles = [profile, ...conn.profiles.filter(p => p.id !== profile.id)]
+  accessExpiresAt = bundle.expiresAt
+  lastRotatedAt = now
   update({
     status: 'ready',
     profiles,
@@ -275,6 +565,17 @@ async function applyAuthBundle(baseUrl: string, bundle: AuthBundle, opts: { prof
     error: null,
     pendingPairUri: null,
   })
+  const serverKey = canonicalServerKey(normalized)
+  if (isSharedRefreshStore(normalized)) {
+    writeSyncMeta(serverKey, {
+      sessionId: bundle.session.id,
+      rotatedAt: now,
+      expiresAt: bundle.expiresAt,
+      tabId: TAB_ID,
+    })
+  }
+  broadcastAuthSync(normalized, profile, { rotatedAt: now })
+  resolveMatchingWaiters(serverKey, bundle.accessToken)
   scheduleProactiveRefresh(bundle.expiresAt)
   await notifyDesktopActive(profile, bundle.accessToken)
 }
@@ -435,35 +736,108 @@ export async function registerPasskey(name: string): Promise<{ id: string; name:
 
 let refreshing: Promise<string | null> | null = null
 
-export async function refreshSession(profileOverride?: ServerProfile): Promise<string | null> {
+function canReuseLiveToken(serverKey: string, opts: RefreshOptions): boolean {
+  if (conn.status !== 'ready' || !conn.accessToken) return false
+  if (canonicalServerKey(conn.baseUrl) !== serverKey) return false
+  const now = Date.now()
+  if (opts.staleToken) {
+    // Another tab already synced a newer token replacing `staleToken`.
+    return conn.accessToken !== opts.staleToken && (accessExpiresAt === 0 || accessExpiresAt > now + 30_000)
+  }
+  if (opts.proactive) {
+    // Another tab already refreshed proactively; plenty of TTL left.
+    return accessExpiresAt > now + 180_000
+  }
+  // Boot/reconnect call: another tab already pushed a fresh live token.
+  return accessExpiresAt === 0 || accessExpiresAt > now + 60_000
+}
+
+export async function refreshSession(profileOverride?: ServerProfile, opts: RefreshOptions = {}): Promise<string | null> {
   if (refreshing) return refreshing
+  ensureSyncChannel()
+  const profile = profileOverride ?? conn.profiles.find(p => p.id === conn.activeProfileId)
+  const baseUrl = profile ? profile.baseUrl : conn.baseUrl
+  const serverKey = canonicalServerKey(baseUrl)
+
+  // Fast path before waiting on any lock: a peer tab already pushed a newer valid token.
+  if (canReuseLiveToken(serverKey, opts)) {
+    if (opts.proactive && accessExpiresAt) scheduleProactiveRefresh(accessExpiresAt)
+    return conn.accessToken
+  }
+
   const run = (async () => {
-    const profile = profileOverride ?? conn.profiles.find(p => p.id === conn.activeProfileId)
-    const baseUrl = profile ? profile.baseUrl : conn.baseUrl
     const useCookie = isSameOriginUrl(baseUrl)
-    const storedRefresh = profile ? await getStoredRefreshToken(profile.id) : undefined
-    if (!storedRefresh && !useCookie) {
-      update({ status: 'unauthenticated', accessToken: '', error: null })
-      return null
-    }
+    const sharedStore = isSharedRefreshStore(baseUrl)
     try {
-      const res = await fetch(apiUrl('/auth/refresh', baseUrl), {
-        method: 'POST',
-        credentials: useCookie ? 'include' : 'omit',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...(storedRefresh ? { refreshToken: storedRefresh } : {}), cookie: useCookie }),
+      return await withCrossTabRefreshLock(serverKey, async lockWaitMs => {
+        // Re-check after acquiring the cross-tab lock: a peer may have broadcast a fresh token while we waited.
+        if (canReuseLiveToken(serverKey, opts)) {
+          if (opts.proactive && accessExpiresAt) scheduleProactiveRefresh(accessExpiresAt)
+          return conn.accessToken
+        }
+
+        // If we waited behind another lock holder OR localStorage shows another tab rotated more recently than our in-memory state,
+        // wait briefly for the peer's BroadcastChannel sync before rotating the single-use refresh token again.
+        if (sharedStore && hasBroadcastChannel()) {
+          const meta = readSyncMeta(serverKey)
+          const peerRecentlyRotated = Boolean(
+            meta
+            && meta.tabId !== TAB_ID
+            && meta.rotatedAt > lastRotatedAt
+            && meta.expiresAt > Date.now() + 60_000,
+          )
+          if (lockWaitMs >= 5 || peerRecentlyRotated) {
+            const peerToken = await requestTokenFromPeers(serverKey, {
+              timeoutMs: PEER_LOCK_TIMEOUT_MS,
+              ...(opts.staleToken ? { excludeToken: opts.staleToken } : {}),
+            })
+            if (peerToken) return peerToken
+          }
+        }
+
+        // Read refresh token INSIDE the cross-tab lock (critical for Electron vault shared between win & quick).
+        const storedRefresh = profile ? await getStoredRefreshToken(profile.id) : undefined
+        if (!storedRefresh && !useCookie) {
+          update({ status: 'unauthenticated', accessToken: '', error: null })
+          return null
+        }
+
+        const hadSession = Boolean(conn.sessionId || conn.accessToken)
+        const prevSessionId = conn.sessionId
+        const res = await fetch(apiUrl('/auth/refresh', baseUrl), {
+          method: 'POST',
+          credentials: useCookie ? 'include' : 'omit',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...(storedRefresh ? { refreshToken: storedRefresh } : {}), cookie: useCookie }),
+        })
+        if (res.status === 401 || res.status === 403) {
+          // On non-secure origins without navigator.locks, a peer may have just rotated; check peers once before logging out.
+          if (!hasWebLocks() && sharedStore && hasBroadcastChannel()) {
+            const peerToken = await requestTokenFromPeers(serverKey, {
+              timeoutMs: PEER_LOCK_TIMEOUT_MS,
+              ...(opts.staleToken ? { excludeToken: opts.staleToken } : {}),
+            })
+            if (peerToken) return peerToken
+          }
+          clearProactiveRefresh()
+          accessExpiresAt = 0
+          const data = await res.json().catch(() => ({}))
+          const message = data?.error?.message ?? null
+          if (sharedStore) clearSyncMeta(serverKey)
+          update({ status: 'unauthenticated', accessToken: '', deviceId: null, sessionId: null, scopes: [], error: message })
+          if (hadSession && sharedStore) broadcastAuthLogout(baseUrl, prevSessionId, message)
+          await notifyDesktopActive(null, '')
+          return null
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const bundle = (await res.json()) as AuthBundle
+        await applyAuthBundle(baseUrl, bundle, { existingId: profile?.id })
+        // Briefly hold the cross-tab lock after posting `auth-sync` so queued peer tabs receive the BroadcastChannel message before entering.
+        if (sharedStore && hasBroadcastChannel() && hasWebLocks()) {
+          await new Promise(resolve => setTimeout(resolve, LOCK_RELEASE_YIELD_MS))
+        }
+        return bundle.accessToken
       })
-      if (res.status === 401 || res.status === 403) {
-        clearProactiveRefresh()
-        const data = await res.json().catch(() => ({}))
-        update({ status: 'unauthenticated', accessToken: '', error: data?.error?.message ?? null })
-        await notifyDesktopActive(null, '')
-        return null
-      }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const bundle = (await res.json()) as AuthBundle
-      await applyAuthBundle(baseUrl, bundle, { existingId: profile?.id })
-      return bundle.accessToken
     } catch (error) {
       update({ status: 'offline', error: (error as Error).message })
       return null
@@ -479,6 +853,7 @@ let booted = false
 export async function bootstrapConnection(): Promise<void> {
   if (booted) return
   booted = true
+  ensureSyncChannel()
 
   // Listen for `nuonuo://pair?...` deep links forwarded from Electron main process.
   desktop?.on?.('pair-uri', raw => {
@@ -487,7 +862,7 @@ export async function bootstrapConnection(): Promise<void> {
     if (parsed) update({ pendingPairUri: parsed, status: 'unauthenticated' })
   })
   desktop?.on?.('need-refresh', () => {
-    if (conn.status === 'ready') void refreshSession()
+    if (conn.status === 'ready') void refreshSession(undefined, { staleToken: conn.accessToken })
   })
 
   const { profiles, activeId } = await loadProfilesFromStorage()
@@ -495,12 +870,18 @@ export async function bootstrapConnection(): Promise<void> {
   update({ profiles, activeProfileId: active?.id ?? null, baseUrl: active?.baseUrl ?? '' })
 
   if (active) {
+    if (isSharedRefreshStore(active.baseUrl)) {
+      const peerToken = await requestTokenFromPeers(canonicalServerKey(active.baseUrl), { timeoutMs: PEER_BOOT_TIMEOUT_MS })
+      if (peerToken) return
+    }
     await refreshSession(active)
     return
   }
 
-  // Same-origin browser (`nuonuo start --web` or Vite dev): probe same-origin cookie session automatically.
+  // Same-origin browser (`nuonuo start --web` or Vite dev): adopt live peer token first, else probe same-origin cookie session.
   if (isHttpWebOrigin()) {
+    const peerToken = await requestTokenFromPeers('same-origin', { timeoutMs: PEER_BOOT_TIMEOUT_MS })
+    if (peerToken) return
     try {
       await discoverServer('')
       const token = await refreshSession()
@@ -521,14 +902,23 @@ export async function switchProfile(profileId: string): Promise<void> {
   if (!target) return
   if (desktop?.vault) await desktop.vault.setActive(profileId)
   else try { localStorage.setItem(ACTIVE_KEY, profileId) } catch { /* ignore */ }
+  accessExpiresAt = 0
+  lastRotatedAt = 0
   update({ status: 'booting', activeProfileId: target.id, baseUrl: target.baseUrl, accessToken: '', error: null })
+  if (isSharedRefreshStore(target.baseUrl)) {
+    const peerToken = await requestTokenFromPeers(canonicalServerKey(target.baseUrl), { timeoutMs: PEER_BOOT_TIMEOUT_MS })
+    if (peerToken) return
+  }
   await refreshSession(target)
 }
 
 export async function disconnectCurrent(revokeRemote = true): Promise<void> {
   clearProactiveRefresh()
+  const prevBaseUrl = conn.baseUrl
+  const prevSessionId = conn.sessionId
+  const prevShared = isSharedRefreshStore(prevBaseUrl)
   if (revokeRemote && conn.accessToken) {
-    const useCookie = isSameOriginUrl(conn.baseUrl)
+    const useCookie = isSameOriginUrl(prevBaseUrl)
     await fetch(apiUrl('/auth/logout'), {
       method: 'POST',
       credentials: useCookie ? 'include' : 'omit',
@@ -538,6 +928,9 @@ export async function disconnectCurrent(revokeRemote = true): Promise<void> {
   if (conn.activeProfileId) {
     await removeProfileFromStorage(conn.activeProfileId)
   }
+  if (prevShared) clearSyncMeta(canonicalServerKey(prevBaseUrl))
+  accessExpiresAt = 0
+  lastRotatedAt = 0
   const remaining = conn.profiles.filter(p => p.id !== conn.activeProfileId)
   update({
     status: 'unauthenticated',
@@ -550,6 +943,7 @@ export async function disconnectCurrent(revokeRemote = true): Promise<void> {
     scopes: [],
     error: null,
   })
+  if (prevShared) broadcastAuthLogout(prevBaseUrl, prevSessionId, null)
   await notifyDesktopActive(null, '')
 }
 
@@ -579,10 +973,28 @@ export async function authedFetch(path: string, init: RequestInit = {}): Promise
     if (token) headers.set('authorization', `Bearer ${token}`)
     return fetch(url, { ...init, headers })
   }
-  let res = await run(conn.accessToken)
-  if (res.status === 401) {
-    const nextToken = await refreshSession()
-    if (nextToken) res = await run(nextToken)
+  const tokenUsed = conn.accessToken
+  let res = await run(tokenUsed)
+  if (res.status === 401 && !init.signal?.aborted) {
+    // If another tab synced a fresher token while our request was in flight, retry with it immediately without refreshing.
+    let nextToken: string | null =
+      conn.status === 'ready' && conn.accessToken && conn.accessToken !== tokenUsed
+        ? conn.accessToken
+        : await refreshSession(undefined, { staleToken: tokenUsed })
+    if (nextToken && !init.signal?.aborted) {
+      const retryToken = nextToken
+      res = await run(retryToken)
+      // Safety net: if a peer still rotated mid-retry, adopt/refresh once more so transient 401 never drops a UI refetch.
+      if (res.status === 401 && !init.signal?.aborted) {
+        nextToken =
+          conn.status === 'ready' && conn.accessToken && conn.accessToken !== retryToken
+            ? conn.accessToken
+            : await refreshSession(undefined, { staleToken: retryToken })
+        if (nextToken && nextToken !== retryToken && !init.signal?.aborted) {
+          res = await run(nextToken)
+        }
+      }
+    }
   }
   return res
 }
@@ -647,6 +1059,10 @@ export async function streamAuthedSSE(
   const decoder = new TextDecoder()
   let buffer = ''
   const onAbort = () => { void reader.cancel().catch(() => {}) }
+  if (signal.aborted) {
+    onAbort()
+    return
+  }
   signal.addEventListener('abort', onAbort, { once: true })
   try {
     for (;;) {

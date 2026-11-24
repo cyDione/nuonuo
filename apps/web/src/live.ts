@@ -2,8 +2,8 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { playChime } from './sounds'
 import { useEffect, useSyncExternalStore } from 'react'
-import type { Notice, ServerEvent } from './api'
-import { authedFetch, streamAuthedSSE } from './connection'
+import type { Conversation, Message, Notice, ServerEvent } from './api'
+import { authedFetch, getConnection, streamAuthedSSE, useConnection } from './connection'
 import { setUiLanguage, uiLanguage, type UiLanguage } from './i18n'
 import { ACCENTS, getPrefs, setPrefs, type AccentId, type Prefs } from './prefs'
 import { desktop, type DesktopPrefs } from './shell'
@@ -29,6 +29,10 @@ const subscribe = (l: () => void) => { listeners.add(l); return () => listeners.
 
 export function useLive<T>(select: (s: LiveState) => T): T {
   return useSyncExternalStore(subscribe, () => select(state))
+}
+
+export function getLiveState(): LiveState {
+  return state
 }
 
 export function clearDraft(conversationId: string, callId?: string) {
@@ -79,22 +83,138 @@ async function checkFreshUi() {
   }
 }
 
+const MODULE_EPOCH = Symbol('live')
+const HEARTBEAT_TIMEOUT_MS = 45_000
+const HEARTBEAT_CHECK_MS = 10_000
+const CONNECT_TIMEOUT_MS = 15_000
+const VISIBLE_STALE_MS = 25_000
+const REPLY_POLL_CONNECTED_MS = 3_500
+const REPLY_POLL_OFFLINE_MS = 1_500
+const REPLY_WAIT_WINDOW_MS = 120_000
+
+/**
+ * Pure helper deciding whether a chat view should run a temporary safety-net poll for a pending reply.
+ * Returns `false` (zero polling) once the assistant has replied or the conversation is idle.
+ */
+export function pendingReplyPollInterval(input: {
+  messages: readonly Message[] | undefined
+  routerBusy: boolean
+  working: boolean
+  awaitingDelivery: boolean
+  connected: boolean
+  lastSentAt: number
+  now?: number
+}): number | false {
+  const now = input.now ?? Date.now()
+  const said = (input.messages ?? []).filter(m =>
+    (m.role === 'user' && !m.meta?.edited) || (m.role === 'assistant' && !m.meta?.superseded),
+  )
+  const last = said.at(-1)
+  const waitingOnUserMsg = Boolean(last?.role === 'user' && now - last.createdAt < REPLY_WAIT_WINDOW_MS)
+  const recentlySent = Boolean(input.lastSentAt > 0 && now - input.lastSentAt < REPLY_WAIT_WINDOW_MS && (!last || last.role === 'user' || last.createdAt < input.lastSentAt))
+  const pending = input.routerBusy || input.working || input.awaitingDelivery || waitingOnUserMsg || recentlySent
+  if (!pending) return false
+  return input.connected ? REPLY_POLL_CONNECTED_MS : REPLY_POLL_OFFLINE_MS
+}
+
+/** Upserts a message carried in an SSE event directly into the React Query thread cache for instant UI updates. */
+export function upsertConversationMessage(
+  old: { conversation: Conversation; messages: Message[] } | undefined,
+  message: Message | undefined,
+): { conversation: Conversation; messages: Message[] } | undefined {
+  if (!old || !message) return old
+  const idx = old.messages.findIndex(m => m.id === message.id)
+  if (idx >= 0) {
+    const next = old.messages.slice()
+    next[idx] = message
+    return { ...old, messages: next }
+  }
+  return { ...old, messages: [...old.messages, message] }
+}
+
 export function useLiveEvents() {
   const qc = useQueryClient()
+  const { status, baseUrl, activeProfileId, sessionId } = useConnection()
   useEffect(() => {
+    if (status !== 'ready') {
+      set({ connected: false })
+      return
+    }
     let active = true
     let ctrl: AbortController | undefined
     let retry: ReturnType<typeof setTimeout> | undefined
+    let attempt = 0
+    let lastEventAt = Date.now()
+    let connectStartedAt = Date.now()
+    let isConnected = false
+    let inFlight = false
+    let reconnectImmediately = false
     const timers = new Map<string, ReturnType<typeof setTimeout>>()
     const soon = (key: string, fn: () => void, ms = 300) => {
       if (timers.has(key)) return
       timers.set(key, setTimeout(() => { timers.delete(key); fn() }, ms))
     }
+    const refreshThread = (conversationId: string, message?: Message) => {
+      const key = ['messages', conversationId] as const
+      if (message) {
+        qc.setQueryData<{ conversation: Conversation; messages: Message[] }>(
+          key,
+          old => upsertConversationMessage(old, message),
+        )
+      }
+      const qState = qc.getQueryState(key)
+      if (qState?.fetchStatus === 'fetching' && qState.data === undefined) {
+        // TanStack Query v5 skips cancelRefetch when cached data is still undefined;
+        // cancel the stale initial fetch explicitly so it cannot overwrite the newly arrived message.
+        return qc.cancelQueries({ queryKey: key }).finally(() => qc.invalidateQueries({ queryKey: key }))
+      }
+      return qc.invalidateQueries({ queryKey: key })
+    }
+    const scheduleReconnect = () => {
+      if (!active || retry) return
+      if (getConnection().status !== 'ready') return
+      const delay = Math.min(10_000, 1_000 * 2 ** Math.min(attempt, 3))
+      attempt++
+      retry = setTimeout(() => {
+        retry = undefined
+        connect()
+      }, delay)
+    }
+    const reconnectNow = () => {
+      if (!active || getConnection().status !== 'ready') return
+      if (retry) { clearTimeout(retry); retry = undefined }
+      attempt = 0
+      if (inFlight) {
+        reconnectImmediately = true
+        ctrl?.abort()
+        return
+      }
+      connect()
+    }
     const connect = () => {
-      if (!active) return
-      ctrl = new AbortController()
+      if (!active || inFlight || getConnection().status !== 'ready') return
+      inFlight = true
+      connectStartedAt = Date.now()
+      lastEventAt = connectStartedAt
+      const currentCtrl = new AbortController()
+      ctrl = currentCtrl
+      const onDone = () => {
+        if (ctrl === currentCtrl) ctrl = undefined
+        const immediate = reconnectImmediately
+        reconnectImmediately = false
+        inFlight = false
+        isConnected = false
+        if (!active) return
+        set({ connected: false })
+        if (getConnection().status !== 'ready') return
+        if (immediate) { attempt = 0; connect() } else scheduleReconnect()
+      }
       void streamAuthedSSE('/events', (event, data) => {
+        if (!active) return
+        lastEventAt = Date.now()
         if (event === 'ready') {
+          attempt = 0
+          isConnected = true
           set({ connected: true })
           void checkFreshUi()
           const p = getPrefs()
@@ -122,26 +242,18 @@ export function useLiveEvents() {
         if (event === 'message' && data) {
           try { handle(JSON.parse(data) as ServerEvent) } catch { /* ignore */ }
         }
-      }, ctrl.signal).then(() => {
-        if (!active) return
-        set({ connected: false })
-        retry = setTimeout(connect, 2_000)
-      }).catch(() => {
-        if (!active) return
-        set({ connected: false })
-        retry = setTimeout(connect, 2_000)
-      })
+      }, currentCtrl.signal).then(onDone, onDone)
     }
     const handle = (e: ServerEvent) => {
       switch (e.type) {
         case 'message.created':
           clearDraft(e.conversationId)
           void readAloud(e.conversationId, e.messageId)
-          void qc.invalidateQueries({ queryKey: ['messages', e.conversationId] }).then(() => clearDraft(e.conversationId))
+          void refreshThread(e.conversationId, e.message).then(() => clearDraft(e.conversationId))
           soon('conversations', () => qc.invalidateQueries({ queryKey: ['conversations'] }))
           break
         case 'message.updated':
-          qc.invalidateQueries({ queryKey: ['messages', e.conversationId] })
+          void refreshThread(e.conversationId, e.message)
           break
         case 'conversation.updated':
           qc.invalidateQueries({ queryKey: ['conversations'] })
@@ -222,8 +334,17 @@ export function useLiveEvents() {
           }, 150)
           break
         case 'session.state':
-          if (e.role === 'router') set({ routerState: e.state, ...(e.state !== 'running' ? { drafts: {} } : {}) })
-          else if (e.ticketId) {
+          if (e.role === 'router') {
+            const wasRunning = state.routerState === 'running'
+            set({ routerState: e.state, ...(e.state !== 'running' ? { drafts: {} } : {}) })
+            // When the router finishes a turn, ensure any active chat thread reconciles with persisted replies.
+            if (wasRunning && e.state !== 'running') {
+              soon('router-idle-sync', () => {
+                qc.invalidateQueries({ queryKey: ['messages'] })
+                qc.invalidateQueries({ queryKey: ['conversations'] })
+              }, 120)
+            }
+          } else if (e.ticketId) {
             set(s => ({ workerState: { ...s.workerState, [e.ticketId!]: e.state }, ...(e.state !== 'running' ? { workerText: { ...s.workerText, [e.ticketId!]: '' } } : {}) }))
             soon(`ticket:${e.ticketId}`, () => { qc.invalidateQueries({ queryKey: ['tickets'] }); qc.invalidateQueries({ queryKey: ['ticket', e.ticketId] }) }, 150)
           }
@@ -237,9 +358,44 @@ export function useLiveEvents() {
         }
       }
     }
+    const watchdog = setInterval(() => {
+      if (!active || getConnection().status !== 'ready') return
+      const now = Date.now()
+      if (isConnected && now - lastEventAt > HEARTBEAT_TIMEOUT_MS) {
+        reconnectNow()
+      } else if (inFlight && !isConnected && now - connectStartedAt > CONNECT_TIMEOUT_MS) {
+        // Recover wedged pre-`ready` SSE connections (e.g., half-open socket after sleep or proxy drop).
+        reconnectNow()
+      } else if (!inFlight && !retry) {
+        connect()
+      }
+    }, HEARTBEAT_CHECK_MS)
+    const onOnline = () => {
+      if (!isConnected) reconnectNow()
+    }
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (!isConnected || Date.now() - lastEventAt > VISIBLE_STALE_MS) {
+        reconnectNow()
+      } else {
+        qc.invalidateQueries({ queryKey: ['messages'] })
+        qc.invalidateQueries({ queryKey: ['conversations'] })
+      }
+    }
+    window.addEventListener('online', onOnline)
+    document.addEventListener('visibilitychange', onVisible)
     connect()
-    return () => { active = false; ctrl?.abort(); clearTimeout(retry); for (const t of timers.values()) clearTimeout(t) }
-  }, [qc])
+    return () => {
+      active = false
+      clearInterval(watchdog)
+      window.removeEventListener('online', onOnline)
+      document.removeEventListener('visibilitychange', onVisible)
+      ctrl?.abort()
+      if (retry) clearTimeout(retry)
+      for (const t of timers.values()) clearTimeout(t)
+      set({ connected: false })
+    }
+  }, [qc, status, baseUrl, activeProfileId, sessionId, MODULE_EPOCH])
 }
 
 // ── UI state shared across components ──────────────────────────────────────

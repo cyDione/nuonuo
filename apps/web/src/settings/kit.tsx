@@ -3,7 +3,7 @@
  * the left, the control on the right), small white inputs and buttons, and faint footnotes. Nothing here moves: the whole
  * settings window sits in `.settings-static`.
  */
-import { ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import { cx } from '../ui'
 import { tx } from '../i18n'
@@ -22,7 +22,7 @@ export function Page({ title, action, children }: { title: string; action?: Reac
 export function Section({ title, foot, children, className }: { title?: ReactNode; foot?: ReactNode; children: ReactNode; className?: string }) {
   return <section>
     {title && <h2 className="mb-2 text-[13px] text-muted">{title}</h2>}
-    <div className={cx('rounded-2xl bg-sunken px-4 [&>*+*]:border-t [&>*+*]:border-line', className)}>{children}</div>
+    <div className={cx('ceramic-card rounded-[20px] px-4 [&>*+*]:border-t [&>*+*]:border-line', className)}>{children}</div>
     {foot && <Foot>{foot}</Foot>}
   </section>
 }
@@ -72,12 +72,15 @@ export const NumberInput = ({ className, suffix, ...p }: InputHTMLAttributes<HTM
     {suffix && <span className="shrink-0 pr-2.5 text-[13px] text-muted">{suffix}</span>}
   </span>
 export const SelectInput = ({ className, children, ...p }: SelectHTMLAttributes<HTMLSelectElement>) =>
-  <select {...p} className={cx(field, 'h-[30px] w-[140px] pr-7', className)}>{children}</select>
+  <span className={cx('relative inline-flex shrink-0 items-center', className?.includes('w-') ? '' : 'w-[140px]', className)}>
+    <select {...p} className={cx(field, 'h-[30px] w-full cursor-pointer appearance-none truncate pr-7 whitespace-nowrap')}>{children}</select>
+    <ChevronDown size={13} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-muted" />
+  </span>
 export const Area = ({ className, ...p }: TextareaHTMLAttributes<HTMLTextAreaElement>) =>
-  <textarea {...p} className={cx(field, 'block min-h-[72px] w-full px-3 py-2 text-[13px] leading-6', className)} />
+  <textarea {...p} className={cx(field, 'block min-h-[84px] w-full px-3 py-2 text-[13px] leading-6', className)} />
 
 export function Btn({ tone = 'plain', className, ...p }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'plain' | 'ink' | 'danger' }) {
-  return <button type="button" {...p} className={cx('inline-flex h-[28px] shrink-0 items-center justify-center gap-1 rounded-[8px] px-3 text-[13px] font-medium whitespace-nowrap disabled:opacity-50',
+  return <button type="button" {...p} className={cx('inline-flex h-[30px] shrink-0 items-center justify-center gap-1 rounded-[8px] px-3 text-[13px] font-medium whitespace-nowrap disabled:opacity-50',
     tone === 'ink' ? 'bg-ink text-ink-fg hover:opacity-90' : 'border border-line bg-card hover:border-faint', tone === 'danger' && 'text-danger', className)} />
 }
 
@@ -109,5 +112,5 @@ export function SaveBar({ dirty, pending, error, onReset, onSave, label = tx('ä¿
 }
 
 export function Stat({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-2xl bg-sunken px-4 py-3.5"><div className="text-xs text-muted">{label}</div><div className="mt-1.5 text-[26px] leading-none font-semibold tabular-nums">{value}</div></div>
+  return <div className="ceramic-card rounded-[20px] px-4 py-3.5"><div className="text-xs text-muted">{label}</div><div className="mt-1.5 text-[26px] leading-none font-semibold tabular-nums">{value}</div></div>
 }

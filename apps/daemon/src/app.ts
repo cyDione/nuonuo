@@ -1380,13 +1380,16 @@ export function createApp(rt: Runtime, localAdminKey?: string, webRoot?: string,
     const isAdmin = hasScope(scopes, 'admin')
     const onlyRaw = c.req.query('conversation')
     const only = onlyRaw ? resolveConversationId(onlyRaw) : undefined
+    c.header('x-accel-buffering', 'no')
     return streamSSE(c, async sse => {
       const mapper = new EventMapper()
       const queue: { event: string; data: unknown }[] = []
       let wake: (() => void) | undefined
       let seq = 0
+      let isClosed = c.req.raw.signal.aborted || Boolean(closing?.aborted)
       const wantConv = (cnv: string) => (!only || cnv === only) && (isAdmin || conversations.get(cnv)?.source !== 'watchdog')
       const off = rt.bus.on(event => {
+        if (isClosed) return
         for (const e of mapper.map(event)) {
           if (!eventAllowedForScopes(e, scopes)) continue
           if ((e.type === 'message.created' || e.type === 'message.updated') && !wantConv(e.conversationId)) continue
@@ -1405,26 +1408,44 @@ export function createApp(rt: Runtime, localAdminKey?: string, webRoot?: string,
         }
         if (queue.length) wake?.()
       })
+      let onClose: (() => void) | undefined
       const closed = new Promise<void>(resolve => {
-        const done = () => resolve()
-        c.req.raw.signal.addEventListener('abort', done, { once: true })
-        closing?.addEventListener('abort', done, { once: true })
+        onClose = () => { isClosed = true; resolve() }
+        if (isClosed) { resolve(); return }
+        sse.onAbort(onClose)
+        c.req.raw.signal.addEventListener('abort', onClose, { once: true })
+        closing?.addEventListener('abort', onClose, { once: true })
       })
       try {
         await sse.writeSSE({ event: 'ready', id: String(seq++), data: JSON.stringify({ protocol: PROTOCOL_VERSION, device: principal.deviceId, sessionId: principal.sessionId }) })
         for (;;) {
           while (queue.length) {
+            if (isClosed) break
             const next = queue.shift()!
             await sse.writeSSE({ event: next.event, id: String(seq++), data: JSON.stringify(next.data) })
           }
-          const ping = new Promise<'ping'>(r => setTimeout(() => r('ping'), 20_000))
-          const next = await Promise.race([new Promise<'event'>(r => { wake = () => r('event') }), ping, closed.then(() => 'closed' as const)])
+          if (isClosed) break
+          let pingTimer: ReturnType<typeof setTimeout> | undefined
+          const ping = new Promise<'ping'>(r => { pingTimer = setTimeout(() => r('ping'), 20_000) })
+          const next = await Promise.race([
+            new Promise<'event'>(r => { wake = () => r('event') }),
+            ping,
+            closed.then(() => 'closed' as const),
+          ])
+          if (pingTimer) clearTimeout(pingTimer)
           wake = undefined
-          if (next === 'closed') break
+          if (next === 'closed' || isClosed) break
           if (next === 'ping') await sse.writeSSE({ event: 'ping', data: '{}' })
           if (!principal.isLocalAdmin && !rt.auth.isSessionActive(principal.sessionId)) break
         }
-      } finally { off() }
+      } finally {
+        isClosed = true
+        off()
+        if (onClose) {
+          c.req.raw.signal.removeEventListener('abort', onClose)
+          closing?.removeEventListener('abort', onClose)
+        }
+      }
     })
   })
 

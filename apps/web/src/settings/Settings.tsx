@@ -81,23 +81,23 @@ export function Settings({ tab, item }: { tab: SettingsTab; item?: string }) {
   }, [tab, item])
   useEffect(() => { document.getElementById('settings-main')?.scrollTo(0, 0) }, [tab, item])
 
-  return <div className="settings-static flex h-dvh bg-bg">
-    <nav aria-label={tx('设置')} className="flex w-[232px] shrink-0 flex-col border-r border-line bg-sunken max-md:hidden">
-      <div className={cx('drag flex h-[52px] shrink-0 items-center justify-end px-3', isMacDesktop && 'pl-[84px]')}>
-        <button type="button" onClick={leaveSettings} className="no-drag flex h-[28px] items-center gap-0.5 rounded-[8px] bg-hero-2 pr-2.5 pl-1.5 text-[13px] font-medium hover:opacity-80">
+  return <div className="settings-static sky-stage flex h-dvh">
+    <nav aria-label={tx('设置')} className="glass-surface flex w-[238px] shrink-0 flex-col border-y-0 border-l-0 border-r border-line/70 max-md:hidden">
+      <div className={cx('drag flex h-[52px] shrink-0 items-center px-3', isMacDesktop ? 'justify-end pl-[84px]' : 'justify-start')}>
+        <button type="button" onClick={leaveSettings} className="no-drag flex h-[30px] items-center gap-0.5 rounded-full border border-[var(--ceramic-border)] bg-card pr-3 pl-2 text-[13px] font-medium shadow-2xs hover:opacity-85">
           <ChevronLeft size={16} />{tx('返回聊天')} </button>
       </div>
       <div className="px-3 pb-2">
-        <label className="flex h-[32px] items-center gap-2 rounded-[10px] bg-hero-2 px-2.5 text-muted">
-          <Search size={15} className="shrink-0" />
+        <label className="flex h-[34px] items-center gap-2 rounded-full border border-[var(--ceramic-border)] bg-card/85 px-3 text-muted shadow-2xs">
+          <Search size={14} className="shrink-0" />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder={tx('搜索设置')} aria-label={tx('搜索设置')} className="min-w-0 flex-1 bg-transparent text-[13px] text-fg outline-none placeholder:text-faint" />
         </label>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
         {groups.map(g => <div key={g.title} className="mt-3 first:mt-1">
           <div className="px-2.5 pb-1 text-xs text-faint">{g.title}</div>
           {g.tabs.map(t => <a key={t.id} href={`#/settings/${t.id}`} aria-current={t.id === current.id ? 'page' : undefined}
-            className={cx('flex h-[30px] items-center gap-2.5 rounded-[8px] px-2.5 text-sm', t.id === current.id ? 'bg-hero-2 font-medium' : 'hover:bg-hero-2/60')}>
+            className={cx('flex h-[32px] items-center gap-2.5 rounded-xl px-2.5 text-sm', t.id === current.id ? 'bg-card font-medium text-fg shadow-2xs ring-1 ring-[var(--ceramic-border)]' : 'text-muted hover:bg-card/60 hover:text-fg')}>
             <span className="shrink-0 text-fg">{t.icon}</span>{t.label}</a>)}
         </div>)}
         {!groups.length && <p className="px-2.5 pt-3 text-xs text-faint">{tx('没有找到「{0}」', q.trim())}</p>}
