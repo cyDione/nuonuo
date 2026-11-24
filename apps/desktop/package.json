@@ -1,7 +1,7 @@
 {
   "name": "@nuonuo/desktop",
   "productName": "Nuonuo",
-  "version": "0.3.12",
+  "version": "0.4.0",
   "license": "MIT",
   "private": true,
   "description": "Nuonuo thin desktop client for macOS, Windows, and Linux: connects remotely or deploys locally on demand",
